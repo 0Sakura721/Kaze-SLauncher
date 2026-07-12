@@ -30,31 +30,37 @@ fun SettingsScreen(
     var showJreProgress by remember { mutableStateOf(false) }
     var jreProgress by remember { mutableFloatStateOf(0f) }
 
-    // 版本选择
+    // 版本选择状态
     var availableVersions by remember { mutableStateOf<List<String>>(emptyList()) }
     var selectedVersion by remember { mutableStateOf(serverManager.selectedJreVersion) }
     var selectedPackage by remember { mutableStateOf(serverManager.selectedJrePackage) }
-    var showVersionPicker by remember { mutableStateOf(false) }
     var loadingVersions by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf(false) }
 
-    // 首次加载：获取可选版本列表
-    LaunchedEffect(Unit) {
-        loadingVersions = true
-        loadError = false
-        serverManager.fetchAvailableVersions().fold(
-            onSuccess = { versions ->
-                availableVersions = versions
-                loadingVersions = false
-            },
-            onFailure = {
-                // 网络失败时用内置列表
-                availableVersions = listOf("21", "17", "11", "8")
-                loadError = true
-                loadingVersions = false
-            }
-        )
+    // 自定义下载源
+    var customUrl by remember { mutableStateOf(serverManager.customBaseUrl) }
+    var showCustomUrl by remember { mutableStateOf(false) }
+
+    // 加载版本列表
+    fun loadVersions() {
+        scope.launch {
+            loadingVersions = true
+            loadError = false
+            serverManager.fetchAvailableVersions().fold(
+                onSuccess = { versions ->
+                    availableVersions = versions
+                    loadingVersions = false
+                },
+                onFailure = {
+                    availableVersions = listOf("21", "17", "11", "8")
+                    loadError = true
+                    loadingVersions = false
+                }
+            )
+        }
     }
+
+    LaunchedEffect(Unit) { loadVersions() }
 
     Column(
         modifier = Modifier
@@ -69,77 +75,97 @@ fun SettingsScreen(
             fontWeight = FontWeight.Bold
         )
 
-        // 主题选择
-        ThemeSelectorCard(
-            currentTheme = currentTheme,
-            onThemeSelected = onThemeChange
-        )
+        // 主题
+        ThemeSelectorCard(currentTheme, onThemeChange)
 
-        // JRE 版本与安装管理
+        // Java 运行时管理
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = "Java 运行时管理",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // 状态行
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Text("Java 运行时管理", style = MaterialTheme.typography.titleMedium)
+                    IconButton(onClick = {
+                        loadVersions()
+                        serverManager.refreshJreStatus()
+                    }) {
+                        Icon(Icons.Filled.Refresh, "刷新")
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+
+                // 状态
+                Text(
+                    text = when (jreInfo.status) {
+                        JreStatus.INSTALLED -> "✅ Java $selectedVersion 已就绪"
+                        JreStatus.NOT_INSTALLED -> "⚠️ 未安装"
+                        JreStatus.DOWNLOADING -> "⬇️ 下载中 ${(jreInfo.downloadProgress * 100).toInt()}%"
+                        JreStatus.EXTRACTING -> "📦 解压中..."
+                        JreStatus.ERROR -> "❌ 安装失败"
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium
+                )
+                if (jreInfo.status == JreStatus.INSTALLED && jreInfo.installedVersions.size > 1) {
+                    Text(
+                        "已安装: ${jreInfo.installedVersions.joinToString(", ")}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                // 下载进度详情
+                if (jreInfo.status == JreStatus.DOWNLOADING && jreInfo.totalBytes > 0) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { jreInfo.downloadProgress },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(
-                            text = when (jreInfo.status) {
-                                JreStatus.INSTALLED -> "✅ Java $selectedVersion 已就绪"
-                                JreStatus.NOT_INSTALLED -> "⚠️ 未安装"
-                                JreStatus.DOWNLOADING -> "⬇️ 下载中..."
-                                JreStatus.EXTRACTING -> "📦 解压中..."
-                                JreStatus.ERROR -> "❌ 安装失败"
-                            },
-                            style = MaterialTheme.typography.bodyLarge,
+                            formatBytes(jreInfo.downloadedBytes),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            "${(jreInfo.downloadProgress * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium
                         )
-                        if (jreInfo.status == JreStatus.INSTALLED && jreInfo.installedVersions.size > 1) {
-                            Text(
-                                text = "已安装: ${jreInfo.installedVersions.joinToString(", ")}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Text(
+                            formatBytes(jreInfo.totalBytes),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
 
-                // 版本选择行
+                // 版本选择
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("版本:", style = MaterialTheme.typography.bodyMedium)
                     if (loadingVersions) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(modifier = Modifier.width(4.dp))
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(4.dp))
                         Text("获取中...", style = MaterialTheme.typography.bodySmall)
                     } else {
-                        // 版本下拉
                         var expanded by remember { mutableStateOf(false) }
                         Box {
                             OutlinedButton(onClick = { expanded = true }) {
                                 Text(selectedVersion)
                                 Icon(Icons.Filled.ArrowDropDown, null)
                             }
-                            DropdownMenu(
-                                expanded = expanded,
-                                onDismissRequest = { expanded = false }
-                            ) {
+                            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                                 availableVersions.forEach { v ->
                                     DropdownMenuItem(
                                         text = {
@@ -166,81 +192,101 @@ fun SettingsScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(Modifier.width(8.dp))
 
-                    // JDK / JRE 切换
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    FilterChip(
+                        selected = selectedPackage == "jdk",
+                        onClick = {
+                            selectedPackage = "jdk"
+                            serverManager.setJreVersion(selectedVersion, "jdk")
+                        },
+                        label = { Text("JDK", style = MaterialTheme.typography.labelSmall) }
+                    )
+                    FilterChip(
+                        selected = selectedPackage == "jre",
+                        onClick = {
+                            selectedPackage = "jre"
+                            serverManager.setJreVersion(selectedVersion, "jre")
+                        },
+                        label = { Text("JRE", style = MaterialTheme.typography.labelSmall) }
+                    )
+                }
+
+                // 自定义下载源
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { showCustomUrl = !showCustomUrl }) {
+                        Icon(Icons.Filled.Link, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("自定义下载源")
+                    }
+                    if (customUrl.isNotBlank()) {
+                        Spacer(Modifier.width(4.dp))
+                        Text("✓", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                if (showCustomUrl) {
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = customUrl,
+                        onValueChange = { customUrl = it },
+                        label = { Text("下载源 URL") },
+                        placeholder = { Text("留空使用默认 Adoptium 源") },
+                        supportingText = { Text("支持 {version} {arch} {package} 占位符") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        trailingIcon = {
+                            if (customUrl.isNotBlank()) {
+                                IconButton(onClick = {
+                                    customUrl = ""
+                                    serverManager.setCustomBaseUrl("")
+                                }) {
+                                    Icon(Icons.Filled.Clear, "清除")
+                                }
+                            }
+                        }
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Button(
+                        onClick = {
+                            serverManager.setCustomBaseUrl(customUrl.trim())
+                        },
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        FilterChip(
-                            selected = selectedPackage == "jre",
-                            onClick = {
-                                selectedPackage = "jre"
-                                serverManager.setJreVersion(selectedVersion, "jre")
-                            },
-                            label = { Text("JRE", style = MaterialTheme.typography.labelSmall) }
-                        )
-                        FilterChip(
-                            selected = selectedPackage == "jdk",
-                            onClick = {
-                                selectedPackage = "jdk"
-                                serverManager.setJreVersion(selectedVersion, "jdk")
-                            },
-                            label = { Text("JDK", style = MaterialTheme.typography.labelSmall) }
-                        )
+                        Text("应用自定义源")
                     }
                 }
 
                 if (loadError) {
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        "⚠ 无法连接网络，使用内置版本列表",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    Text("⚠ 无法连接网络，使用内置版本列表", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(Modifier.height(12.dp))
 
-                // 安装/重装按钮
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // 安装按钮
+                val needInstall = jreInfo.status != JreStatus.INSTALLED ||
+                        !jreInfo.installedVersions.contains(selectedVersion)
+                Button(
+                    onClick = {
+                        scope.launch {
+                            showJreProgress = true
+                            serverManager.installJre { progress, _, _ -> jreProgress = progress }
+                            showJreProgress = false
+                        }
+                    },
+                    enabled = !showJreProgress,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    val needInstall = jreInfo.status != JreStatus.INSTALLED ||
-                            !jreInfo.installedVersions.contains(selectedVersion)
-
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                showJreProgress = true
-                                serverManager.installJre { progress -> jreProgress = progress }
-                                showJreProgress = false
-                            }
-                        },
-                        enabled = !showJreProgress,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            if (showJreProgress) "安装中..."
-                            else if (needInstall) "安装 Java $selectedVersion (${selectedPackage.uppercase()})"
-                            else "重新安装"
-                        )
-                    }
+                    Text(if (showJreProgress) "安装中..." else if (needInstall) "安装 Java $selectedVersion (${selectedPackage.uppercase()})" else "重新安装")
                 }
 
-                if (showJreProgress) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    LinearProgressIndicator(
-                        progress = { jreProgress },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = "${(jreProgress * 100).toInt()}%",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
+                if (showJreProgress && jreInfo.totalBytes <= 0) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text("${(jreProgress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -265,16 +311,21 @@ fun SettingsScreen(
 @Composable
 private fun AboutRow(label: String, value: String) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium)
-        Text(
-            value,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+/** 格式化字节为人类可读 */
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "%.1f KB".format(kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return "%.1f MB".format(mb)
+    val gb = mb / 1024.0
+    return "%.2f GB".format(gb)
 }

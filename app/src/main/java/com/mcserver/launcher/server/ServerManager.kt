@@ -34,6 +34,8 @@ class ServerManager private constructor() {
     val selectedJreVersion: String get() = jreManager.selectedVersion
     /** 当前选择的包类型 (jre/jdk) */
     val selectedJrePackage: String get() = jreManager.selectedPackage
+    /** 自定义下载源 */
+    val customBaseUrl: String get() = jreManager.customBaseUrl
     /** 当前可用的 Java 路径 */
     val currentJavaPath: String? get() = jreManager.currentJavaPath
 
@@ -47,6 +49,11 @@ class ServerManager private constructor() {
     /** 设置版本和包类型 */
     fun setJreVersion(version: String, pkg: String) =
         jreManager.setVersionAndPackage(version, pkg)
+
+    /** 设置自定义下载源 */
+    fun setCustomBaseUrl(url: String) {
+        jreManager.customBaseUrl = url
+    }
 
     /** 刷新 JRE 状态 */
     fun refreshJreStatus() {
@@ -94,7 +101,7 @@ class ServerManager private constructor() {
         jarRunner.sendCommand(cmd)
     }
 
-    suspend fun installJre(onProgress: (Float) -> Unit = {}): Result<String> {
+    suspend fun installJre(onProgress: (Float, Long, Long) -> Unit = { _, _, _ -> }): Result<String> {
         return jreManager.downloadAndInstall(onProgress)
     }
 

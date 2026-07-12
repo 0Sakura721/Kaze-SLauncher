@@ -56,5 +56,7 @@ data class JreInfo(
     val version: String = "",
     val path: String = "",
     val downloadProgress: Float = 0f,
+    val downloadedBytes: Long = 0,
+    val totalBytes: Long = 0,
     val installedVersions: List<String> = emptyList()
 )

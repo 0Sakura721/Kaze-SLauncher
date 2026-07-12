@@ -19,7 +19,7 @@ import java.net.URL
 
 /**
  * JRE/JDK 管理器：检测、下载、管理 ARM 架构的 Java 运行时
- * 使用 Adoptium (Eclipse Temurin) 提供的 ARM 构建版本
+ * 默认使用 Adoptium (Eclipse Temurin)，支持自定义下载源
  */
 class JreManager(private val context: Context) {
 
@@ -28,8 +28,15 @@ class JreManager(private val context: Context) {
 
     /** 当前选择的 Java 主版本号，如 "21"、"17" 等 */
     var selectedVersion: String = "21"
-    /** JDK 或 JRE */
-    var selectedPackage: String = "jre"  // "jdk" or "jre"
+    /** JDK 或 JRE — 默认 JDK */
+    var selectedPackage: String = "jdk"
+
+    /** 自定义下载源 URL（空字符串 = 使用默认 Adoptium） */
+    var customBaseUrl: String = ""
+        set(value) {
+            field = value
+            savePrefs()
+        }
 
     private val prefsFile: File
         get() = File(context.filesDir, "jre_prefs.txt")
@@ -43,8 +50,7 @@ class JreManager(private val context: Context) {
 
     /** 当前激活的 java 路径 */
     val currentJavaPath: String? get() {
-        val v = selectedVersion
-        val exe = javaExecutableFor(v)
+        val exe = javaExecutableFor(selectedVersion)
         return if (exe.exists() && exe.canExecute()) exe.absolutePath else null
     }
 
@@ -52,7 +58,6 @@ class JreManager(private val context: Context) {
         private const val ADOPTIUM_API = "https://api.adoptium.net/v3"
         private const val AVAILABLE_RELEASES = "$ADOPTIUM_API/info/available_releases"
 
-        /** 获取设备架构字符串 */
         fun getDeviceArch(): String {
             if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() &&
                 Build.SUPPORTED_64_BIT_ABIS[0].contains("arm64")
@@ -60,8 +65,8 @@ class JreManager(private val context: Context) {
             return "arm"
         }
 
-        /** 构建下载 URL */
-        fun buildDownloadUrl(version: String, pkg: String, arch: String): String =
+        /** 构建 Adoptium 下载 URL */
+        fun buildAdoptiumUrl(version: String, pkg: String, arch: String): String =
             "$ADOPTIUM_API/binary/latest/$version/ga/linux/$arch/$pkg/hotspot/normal/eclipse?project=jdk"
     }
 
@@ -76,16 +81,22 @@ class JreManager(private val context: Context) {
         try {
             if (prefsFile.exists()) {
                 val lines = prefsFile.readLines()
-                if (lines.size >= 2) {
+                if (lines.size >= 3) {
                     selectedVersion = lines[0]
-                    selectedPackage = lines[1]
+                    selectedPackage = lines[1].ifEmpty { "jdk" }
+                    customBaseUrl = lines[2]
+                } else if (lines.size >= 2) {
+                    selectedVersion = lines[0]
+                    // 兼容旧数据：没有保存过 pkg 的默认改成 jdk
+                    selectedPackage = lines[1].ifEmpty { "jdk" }
+                    customBaseUrl = ""
                 }
             }
         } catch (_: Exception) {}
     }
 
     private fun savePrefs() {
-        try { prefsFile.writeText("$selectedVersion\n$selectedPackage") } catch (_: Exception) {}
+        try { prefsFile.writeText("$selectedVersion\n$selectedPackage\n$customBaseUrl") } catch (_: Exception) {}
     }
 
     fun setVersionAndPackage(version: String, pkg: String) {
@@ -97,10 +108,15 @@ class JreManager(private val context: Context) {
 
     // ─── 版本列表 ───
 
-    /** 获取 Adoptium 可用版本列表 */
+    /** 获取可用版本列表（从 Adoptium 或自定义源） */
     suspend fun fetchAvailableVersions(): Result<List<String>> = withContext(Dispatchers.IO) {
         try {
-            val connection = URL(AVAILABLE_RELEASES).openConnection() as HttpURLConnection
+            val apiUrl = if (customBaseUrl.isNotBlank()) {
+                "$customBaseUrl/info/available_releases"
+            } else {
+                AVAILABLE_RELEASES
+            }
+            val connection = URL(apiUrl).openConnection() as HttpURLConnection
             connection.connectTimeout = 15000
             connection.readTimeout = 15000
             connection.connect()
@@ -113,7 +129,6 @@ class JreManager(private val context: Context) {
             for (i in 0 until array.length()) {
                 versions.add(array.getInt(i).toString())
             }
-            // 倒序，最新在前；只保留 Minecraft 常用的 LTS 和最新
             Result.success(versions.sortedByDescending { it.toInt() })
         } catch (e: Exception) {
             Result.failure(e)
@@ -125,7 +140,6 @@ class JreManager(private val context: Context) {
     fun checkJre(): JreInfo {
         val exe = javaExecutableFor(selectedVersion)
         val installed = exe.exists() && exe.canExecute()
-        // 同时检查是否为多版本环境
         val installedVersions = mutableListOf<String>()
         context.filesDir.listFiles()?.forEach { dir ->
             if (dir.name.startsWith("java_")) {
@@ -149,26 +163,43 @@ class JreManager(private val context: Context) {
         }
     }
 
+    /** 构建实际的下载 URL（自定义源或 Adoptium） */
+    private fun buildDownloadUrl(): String {
+        if (customBaseUrl.isNotBlank()) {
+            // 自定义源：假定用户提供了完整 URL 模版，替换占位符
+            return customBaseUrl
+                .replace("{version}", selectedVersion)
+                .replace("{arch}", getDeviceArch())
+                .replace("{package}", selectedPackage)
+        }
+        return buildAdoptiumUrl(selectedVersion, selectedPackage, getDeviceArch())
+    }
+
     suspend fun downloadAndInstall(
-        onProgress: (Float) -> Unit = {}
+        onProgress: (Float, Long, Long) -> Unit = { _, _, _ -> }
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             _jreInfo.value = _jreInfo.value.copy(
-                status = JreStatus.DOWNLOADING, downloadProgress = 0f
+                status = JreStatus.DOWNLOADING, downloadProgress = 0f,
+                downloadedBytes = 0, totalBytes = 0
             )
-            onProgress(0f)
+            onProgress(0f, 0, 0)
 
-            val url = buildDownloadUrl(selectedVersion, selectedPackage, getDeviceArch())
-            val ext = if (selectedPackage == "jdk") "jdk" else "jre"
-            val tempFile = File(context.cacheDir, "java_download_$ext.tar.gz")
+            val url = buildDownloadUrl()
+            val tempFile = File(context.cacheDir, "java_download.tar.gz")
 
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.connectTimeout = 30000
             connection.readTimeout = 300000
             connection.connect()
 
-            val contentLength = connection.contentLengthLong
+            val contentLength = if (connection.contentLength > 0) connection.contentLength.toLong() else -1L
             var downloaded = 0L
+
+            // 更新总量到 UI
+            if (contentLength > 0) {
+                _jreInfo.value = _jreInfo.value.copy(totalBytes = contentLength)
+            }
 
             connection.inputStream.use { input ->
                 FileOutputStream(tempFile).use { output ->
@@ -177,18 +208,25 @@ class JreManager(private val context: Context) {
                     while (input.read(buffer).also { bytesRead = it } != -1) {
                         output.write(buffer, 0, bytesRead)
                         downloaded += bytesRead
-                        if (contentLength > 0) {
-                            val progress = (downloaded.toFloat() / contentLength).coerceIn(0f, 1f)
-                            _jreInfo.value = _jreInfo.value.copy(downloadProgress = progress)
-                            onProgress(progress)
-                        }
+
+                        val totalKnown: Long = if (contentLength > 0) contentLength else downloaded * 2L
+                        val progress = if (totalKnown > 0) {
+                            (downloaded.toFloat() / totalKnown).coerceIn(0f, 1f)
+                        } else 0f
+
+                        _jreInfo.value = _jreInfo.value.copy(
+                            downloadProgress = progress,
+                            downloadedBytes = downloaded,
+                            totalBytes = totalKnown
+                        )
+                        onProgress(progress, downloaded, totalKnown)
                     }
                 }
             }
             connection.disconnect()
 
             _jreInfo.value = _jreInfo.value.copy(status = JreStatus.EXTRACTING)
-            onProgress(1f)
+            onProgress(1f, downloaded, downloaded)
 
             val targetDir = jreDirFor(selectedVersion)
             if (targetDir.exists()) targetDir.deleteRecursively()

@@ -31,7 +31,6 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
 
     var showJreProgress by remember { mutableStateOf(false) }
-    var jreProgress by remember { mutableFloatStateOf(0f) }
 
     Column(
         modifier = Modifier
@@ -52,74 +51,105 @@ fun HomeScreen(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.IntegrationInstructions,
-                    contentDescription = null,
-                    tint = when (jreInfo.status) {
-                        JreStatus.INSTALLED -> MaterialTheme.colorScheme.primary
-                        JreStatus.DOWNLOADING, JreStatus.EXTRACTING -> MaterialTheme.colorScheme.tertiary
-                        JreStatus.ERROR -> MaterialTheme.colorScheme.error
-                        JreStatus.NOT_INSTALLED -> MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    modifier = Modifier.size(32.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Java 运行时",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Text(
-                        text = when (jreInfo.status) {
-                            JreStatus.NOT_INSTALLED -> "未安装"
-                            JreStatus.DOWNLOADING -> "下载中 ${(jreProgress * 100).toInt()}%"
-                            JreStatus.EXTRACTING -> "解压中..."
-                            JreStatus.INSTALLED -> "已就绪"
-                            JreStatus.ERROR -> "安装失败"
+            Column {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.IntegrationInstructions,
+                        contentDescription = null,
+                        tint = when (jreInfo.status) {
+                            JreStatus.INSTALLED -> MaterialTheme.colorScheme.primary
+                            JreStatus.DOWNLOADING, JreStatus.EXTRACTING -> MaterialTheme.colorScheme.tertiary
+                            JreStatus.ERROR -> MaterialTheme.colorScheme.error
+                            JreStatus.NOT_INSTALLED -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        modifier = Modifier.size(32.dp)
                     )
-                }
-                when (jreInfo.status) {
-                    JreStatus.NOT_INSTALLED, JreStatus.ERROR -> {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    showJreProgress = true
-                                    serverManager.installJre { progress ->
-                                        jreProgress = progress
-                                    }
-                                    showJreProgress = false
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Java 运行时",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            text = when (jreInfo.status) {
+                                JreStatus.NOT_INSTALLED -> "未安装"
+                                JreStatus.DOWNLOADING -> {
+                                    if (jreInfo.totalBytes > 0)
+                                        "下载中：${formatSize(jreInfo.downloadedBytes)} / ${formatSize(jreInfo.totalBytes)}"
+                                    else "下载中 ${(jreInfo.downloadProgress * 100).toInt()}%"
                                 }
+                                JreStatus.EXTRACTING -> "解压中..."
+                                JreStatus.INSTALLED -> "已就绪"
+                                JreStatus.ERROR -> "安装失败"
                             },
-                            enabled = !showJreProgress
-                        ) {
-                            Text("安装")
-                        }
-                    }
-                    JreStatus.INSTALLED -> {
-                        Icon(
-                            Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    else -> {}
+                    when (jreInfo.status) {
+                        JreStatus.NOT_INSTALLED, JreStatus.ERROR -> {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        showJreProgress = true
+                                        serverManager.installJre()
+                                        showJreProgress = false
+                                    }
+                                },
+                                enabled = !showJreProgress && jreInfo.status != JreStatus.DOWNLOADING
+                            ) {
+                                Text("安装")
+                            }
+                        }
+                        JreStatus.INSTALLED -> {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        else -> {}
+                    }
                 }
-            }
-            if (showJreProgress) {
-                LinearProgressIndicator(
-                    progress = { jreProgress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = 12.dp)
-                )
+                // 下载进度条
+                if (jreInfo.status == JreStatus.DOWNLOADING) {
+                    LinearProgressIndicator(
+                        progress = { jreInfo.downloadProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    )
+                    if (jreInfo.totalBytes > 0) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "${formatSize(jreInfo.downloadedBytes)} / ${formatSize(jreInfo.totalBytes)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "${(jreInfo.downloadProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else {
+                        Spacer(
+                            modifier = Modifier
+                                .padding(bottom = 8.dp)
+                                .height(2.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -224,4 +254,14 @@ private fun InfoRow(label: String, value: String) {
             fontWeight = FontWeight.Medium
         )
     }
+}
+
+private fun formatSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return "%.1f KB".format(kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return "%.1f MB".format(mb)
+    val gb = mb / 1024.0
+    return "%.2f GB".format(gb)
 }
