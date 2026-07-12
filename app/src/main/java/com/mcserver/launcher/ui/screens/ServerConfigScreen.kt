@@ -21,7 +21,10 @@ import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.data.ServerConfig
 import com.mcserver.launcher.utils.MemoryInfo
 import com.mcserver.launcher.utils.getDeviceMemoryInfo
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,7 +41,7 @@ fun ServerConfigScreen(
     var nogui by remember { mutableStateOf(config.nogui) }
 
     val context = LocalContext.current
-    // 每 500ms 刷新一次实际内存使用
+    val scope = rememberCoroutineScope()
     var memoryInfo by remember { mutableStateOf(context.getDeviceMemoryInfo()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -50,7 +53,27 @@ fun ServerConfigScreen(
     val jarPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
-        uri?.let { jarPath = it.toString() }
+        uri?.let { selectedUri ->
+            scope.launch {
+                val localPath = withContext(Dispatchers.IO) {
+                    // 从 content:// URI 复制 JAR 到内部存储
+                    var name = "server.jar"
+                    context.contentResolver.query(selectedUri, null, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0) name = cursor.getString(idx)
+                        }
+                    }
+                    val target = java.io.File(context.filesDir, "servers/$name")
+                    target.parentFile?.mkdirs()
+                    context.contentResolver.openInputStream(selectedUri)?.use { input ->
+                        java.io.FileOutputStream(target).use { output -> input.copyTo(output) }
+                    }
+                    target.absolutePath
+                }
+                jarPath = localPath
+            }
+        }
     }
 
     Column(

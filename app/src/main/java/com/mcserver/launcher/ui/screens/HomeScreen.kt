@@ -161,17 +161,28 @@ fun HomeScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Text(
-                                formatSpeed(jreInfo.downloadSpeedBytesPerSec),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                "${(jreInfo.downloadProgress * 100).toInt()}%",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                if (jreInfo.downloadSpeedBytesPerSec > 0) {
+                                    Text(
+                                        formatSpeed(jreInfo.downloadSpeedBytesPerSec),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                }
+                                if (jreInfo.remainingSeconds > 0) {
+                                    Text(
+                                        formatRemaining(jreInfo.remainingSeconds),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                }
+                                Text(
+                                    "${(jreInfo.downloadProgress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.padding(bottom = 8.dp).height(2.dp))
                     } else {
@@ -304,4 +315,11 @@ private fun formatSpeed(bytesPerSec: Long): String {
     if (mbps >= 1.0) return "%.1f MB/s".format(mbps)
     val kbps = bytesPerSec / 1024.0
     return "%.0f KB/s".format(kbps)
+}
+
+private fun formatRemaining(seconds: Long): String {
+    if (seconds < 60) return "${seconds}s"
+    val m = seconds / 60; if (m < 60) return "${m}min"
+    val h = m / 60; val rm = m % 60
+    return if (rm > 0) "${h}h${rm}min" else "${h}h"
 }

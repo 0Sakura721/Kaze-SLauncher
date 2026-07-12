@@ -55,6 +55,10 @@ class ServerManager private constructor() {
         jreManager.customBaseUrl = url
     }
 
+    /** 镜像源 */
+    val mirror: String get() = jreManager.mirror
+    fun setMirror(m: String) { jreManager.mirror = m }
+
     /** 刷新 JRE 状态 */
     fun refreshJreStatus() {
         jreManager.checkJre().let { /* MutableStateFlow already updated inside */ }
@@ -66,6 +70,9 @@ class ServerManager private constructor() {
     fun resumeDownload() = jreManager.resumeDownload()
     /** 取消下载 */
     fun cancelDownload() = jreManager.cancelDownload()
+
+    /** 删除已安装的 Java 版本 */
+    fun deleteInstalledVersion(version: String): Result<Unit> = jreManager.deleteInstalledVersion(version)
 
     /**
      * 启动服务器
