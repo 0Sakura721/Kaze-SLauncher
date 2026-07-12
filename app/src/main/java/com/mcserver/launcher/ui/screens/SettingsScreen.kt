@@ -1,5 +1,6 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -197,7 +198,7 @@ fun SettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     JreManager.MIRROR_OPTIONS.take(4).forEach { (key, label) ->
                         val latency = mirrorLatencyTest.firstOrNull { it.key == key }
                         FilterChip(
