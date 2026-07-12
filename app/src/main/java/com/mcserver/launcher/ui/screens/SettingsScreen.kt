@@ -253,7 +253,7 @@ fun SettingsScreen(
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("关于", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
-                AboutRow("版本", "1.0.0")
+                AboutRow("版本", "0.1.0")
                 AboutRow("目标架构", "ARM64 (v7a / v8a)")
                 AboutRow("平台", "Android 8.0+ (API 26+)")
                 AboutRow("Java 运行时", "Eclipse Temurin (Adoptium)")
