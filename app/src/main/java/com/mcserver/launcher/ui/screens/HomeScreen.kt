@@ -15,6 +15,8 @@ import com.mcserver.launcher.data.JreStatus
 import com.mcserver.launcher.data.ServerConfig
 import com.mcserver.launcher.data.ServerState
 import com.mcserver.launcher.server.ServerManager
+import com.mcserver.launcher.server.TermuxManager
+import com.mcserver.launcher.server.TermuxState
 import com.mcserver.launcher.ui.components.ServerStatusCard
 import kotlinx.coroutines.launch
 
@@ -29,8 +31,12 @@ fun HomeScreen(
     val serverStatus by serverManager.serverStatus.collectAsState()
     val jreInfo by serverManager.jreInfo.collectAsState()
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     var showJreProgress by remember { mutableStateOf(false) }
+    var termuxState by remember { mutableStateOf(TermuxState.NOT_INSTALLED) }
+
+    LaunchedEffect(Unit) { termuxState = serverManager.termuxState }
 
     Column(
         modifier = Modifier
@@ -192,6 +198,58 @@ fun HomeScreen(
                                 .height(2.dp)
                         )
                     }
+                }
+            }
+        }
+
+        // Termux 环境状态
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Filled.Terminal, null,
+                    tint = when (termuxState) {
+                        TermuxState.READY -> MaterialTheme.colorScheme.primary
+                        TermuxState.JAVA_MISSING -> MaterialTheme.colorScheme.tertiary
+                        TermuxState.NOT_INSTALLED -> MaterialTheme.colorScheme.error
+                        TermuxState.INSTALLED -> MaterialTheme.colorScheme.tertiary
+                    },
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Termux 环境", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        when (termuxState) {
+                            TermuxState.NOT_INSTALLED -> "未安装 — 需要 Termux 提供 Linux 环境"
+                            TermuxState.INSTALLED -> "已安装"
+                            TermuxState.JAVA_MISSING -> "Java 未安装"
+                            TermuxState.READY -> "已就绪"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                when (termuxState) {
+                    TermuxState.NOT_INSTALLED -> {
+                        Button(onClick = { serverManager.openTermuxDownload() }) {
+                            Text("安装 Termux")
+                        }
+                    }
+                    TermuxState.JAVA_MISSING -> {
+                        Button(onClick = { serverManager.installJavaInTermux() }) {
+                            Text("安装 Java")
+                        }
+                    }
+                    TermuxState.READY -> {
+                        Icon(Icons.Filled.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                    else -> {}
                 }
             }
         }

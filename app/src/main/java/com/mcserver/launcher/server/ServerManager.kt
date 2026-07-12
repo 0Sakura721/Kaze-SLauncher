@@ -16,15 +16,15 @@ class ServerManager private constructor() {
 
     private val context: Context get() = McApplication.instance
     private val jreManager = JreManager(context)
-    private val jarRunner = JarRunner()
+    private val termuxManager = TermuxManager()
     private val serverScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _serverStatus = MutableStateFlow(ServerStatus())
     val serverStatus: StateFlow<ServerStatus> = _serverStatus.asStateFlow()
 
     val jreInfo: StateFlow<JreInfo> = jreManager.jreInfo
-    val consoleOutput: SharedFlow<String> = jarRunner.consoleOutput
-    val isRunning: Boolean get() = jarRunner.running
+    val consoleOutput: SharedFlow<String> = termuxManager.consoleOutput
+    val isRunning: Boolean get() = termuxManager.running
 
     val selectedJreVersion: String get() = jreManager.selectedVersion
     val selectedJrePackage: String get() = jreManager.selectedPackage
@@ -47,11 +47,16 @@ class ServerManager private constructor() {
     fun deleteInstalledVersion(version: String) = jreManager.deleteInstalledVersion(version)
     suspend fun testMirrorLatency() = testAllMirrors()
 
-    fun startServer(config: ServerConfig) {
-        if (jarRunner.running) return
+    /** Termux 状态 */
+    val termuxState: TermuxState get() = termuxManager.checkState()
+    fun openTermuxDownload() = TermuxManager.openTermuxDownload(context)
+    fun installJavaInTermux() = termuxManager.installJavaInTermux()
 
-        val jre = jreManager.checkJre()
-        if (jre.status != JreStatus.INSTALLED) {
+    fun startServer(config: ServerConfig) {
+        if (termuxManager.running) return
+
+        // 检查 Termux
+        if (!TermuxManager.isTermuxInstalled(context)) {
             _serverStatus.value = ServerStatus(state = ServerState.ERROR)
             return
         }
@@ -59,20 +64,18 @@ class ServerManager private constructor() {
         serverJob?.cancel()
         _serverStatus.value = ServerStatus(state = ServerState.STARTING)
 
-        // 启动前台服务（try-catch 防止权限不足崩溃）
+        // 启动前台服务
         try {
             val si = Intent(context, ServerForegroundService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(si)
             else context.startService(si)
-        } catch (e: Exception) {
-            // 前台服务启动失败不阻断
-        }
+        } catch (_: Exception) {}
 
         serverJob = serverScope.launch {
             try {
                 _serverStatus.value = _serverStatus.value.copy(state = ServerState.RUNNING)
                 startUptime()
-                jarRunner.start(config, jre.path)
+                termuxManager.startServer(config)
                 stopUptime()
                 _serverStatus.value = ServerStatus(state = ServerState.STOPPED)
                 try { context.stopService(Intent(context, ServerForegroundService::class.java)) } catch (_: Exception) {}
@@ -88,10 +91,12 @@ class ServerManager private constructor() {
 
     fun stopServer() {
         _serverStatus.value = _serverStatus.value.copy(state = ServerState.STOPPING)
-        jarRunner.stop()
+        termuxManager.stopServer()
     }
 
-    fun sendCommand(cmd: String) = jarRunner.sendCommand(cmd)
+    fun sendCommand(cmd: String) {
+        // 通过 Termux 发送命令到服务器 stdin 较复杂，暂不支持
+    }
 
     suspend fun installJre(onProgress: (Float, Long, Long) -> Unit = { _, _, _ -> }) =
         jreManager.downloadAndInstall(onProgress)
