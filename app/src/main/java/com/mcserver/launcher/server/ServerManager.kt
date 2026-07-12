@@ -2,17 +2,12 @@ package com.mcserver.launcher.server
 
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import com.mcserver.launcher.McApplication
-import com.mcserver.launcher.data.JreStatus
-import com.mcserver.launcher.data.ServerConfig
-import com.mcserver.launcher.data.ServerState
-import com.mcserver.launcher.data.ServerStatus
+import com.mcserver.launcher.data.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
-/**
- * 服务器管理器：统一管理 JRE、服务器启动/停止、状态跟踪
- */
 class ServerManager private constructor() {
 
     companion object {
@@ -22,86 +17,70 @@ class ServerManager private constructor() {
     private val context: Context get() = McApplication.instance
     private val jreManager = JreManager(context)
     private val jarRunner = JarRunner()
+    private val serverScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _serverStatus = MutableStateFlow(ServerStatus())
     val serverStatus: StateFlow<ServerStatus> = _serverStatus.asStateFlow()
 
-    val jreInfo: StateFlow<com.mcserver.launcher.data.JreInfo> = jreManager.jreInfo
+    val jreInfo: StateFlow<JreInfo> = jreManager.jreInfo
     val consoleOutput: SharedFlow<String> = jarRunner.consoleOutput
     val isRunning: Boolean get() = jarRunner.running
 
-    /** 当前选择的 Java 版本 */
     val selectedJreVersion: String get() = jreManager.selectedVersion
-    /** 当前选择的包类型 (jre/jdk) */
     val selectedJrePackage: String get() = jreManager.selectedPackage
-    /** 自定义下载源 */
     val customBaseUrl: String get() = jreManager.customBaseUrl
-    /** 当前可用的 Java 路径 */
     val currentJavaPath: String? get() = jreManager.currentJavaPath
+    val mirror: String get() = jreManager.mirror
 
     private var serverJob: Job? = null
     private var uptimeJob: Job? = null
 
-    /** 获取可选版本列表 */
-    suspend fun fetchAvailableVersions(): Result<List<String>> =
-        jreManager.fetchAvailableVersions()
+    suspend fun fetchAvailableVersions() = jreManager.fetchAvailableVersions()
 
-    /** 设置版本和包类型 */
-    fun setJreVersion(version: String, pkg: String) =
-        jreManager.setVersionAndPackage(version, pkg)
-
-    /** 设置自定义下载源 */
-    fun setCustomBaseUrl(url: String) {
-        jreManager.customBaseUrl = url
-    }
-
-    /** 镜像源 */
-    val mirror: String get() = jreManager.mirror
+    fun setJreVersion(version: String, pkg: String) = jreManager.setVersionAndPackage(version, pkg)
+    fun setCustomBaseUrl(url: String) { jreManager.customBaseUrl = url }
     fun setMirror(m: String) { jreManager.mirror = m }
-
-    /** 刷新 JRE 状态 */
-    fun refreshJreStatus() {
-        jreManager.checkJre().let { /* MutableStateFlow already updated inside */ }
-    }
-
-    /** 暂停下载 */
+    fun refreshJreStatus() = jreManager.checkJre()
     fun pauseDownload() = jreManager.pauseDownload()
-    /** 继续下载 */
     fun resumeDownload() = jreManager.resumeDownload()
-    /** 取消下载 */
     fun cancelDownload() = jreManager.cancelDownload()
+    fun deleteInstalledVersion(version: String) = jreManager.deleteInstalledVersion(version)
 
-    /** 删除已安装的 Java 版本 */
-    fun deleteInstalledVersion(version: String): Result<Unit> = jreManager.deleteInstalledVersion(version)
-
-    /**
-     * 启动服务器
-     */
-    fun startServer(config: ServerConfig, scope: CoroutineScope) {
+    fun startServer(config: ServerConfig) {
         if (jarRunner.running) return
 
         val jre = jreManager.checkJre()
         if (jre.status != JreStatus.INSTALLED) {
+            _serverStatus.value = ServerStatus(state = ServerState.ERROR)
             return
         }
 
+        serverJob?.cancel()
         _serverStatus.value = ServerStatus(state = ServerState.STARTING)
 
-        val serviceIntent = Intent(context, ServerForegroundService::class.java)
-        context.startForegroundService(serviceIntent)
+        // 启动前台服务（try-catch 防止权限不足崩溃）
+        try {
+            val si = Intent(context, ServerForegroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(si)
+            else context.startService(si)
+        } catch (e: Exception) {
+            // 前台服务启动失败不阻断
+        }
 
-        serverJob = scope.launch(Dispatchers.IO) {
+        serverJob = serverScope.launch {
             try {
                 _serverStatus.value = _serverStatus.value.copy(state = ServerState.RUNNING)
-                startUptimeCounter(scope)
+                startUptime()
                 jarRunner.start(config, jre.path)
-                stopUptimeCounter()
+                stopUptime()
                 _serverStatus.value = ServerStatus(state = ServerState.STOPPED)
-                context.stopService(Intent(context, ServerForegroundService::class.java))
+                try { context.stopService(Intent(context, ServerForegroundService::class.java)) } catch (_: Exception) {}
+            } catch (e: CancellationException) {
+                stopUptime()
             } catch (e: Exception) {
-                stopUptimeCounter()
+                stopUptime()
                 _serverStatus.value = ServerStatus(state = ServerState.ERROR)
-                context.stopService(Intent(context, ServerForegroundService::class.java))
+                try { context.stopService(Intent(context, ServerForegroundService::class.java)) } catch (_: Exception) {}
             }
         }
     }
@@ -111,27 +90,20 @@ class ServerManager private constructor() {
         jarRunner.stop()
     }
 
-    fun sendCommand(cmd: String) {
-        jarRunner.sendCommand(cmd)
-    }
+    fun sendCommand(cmd: String) = jarRunner.sendCommand(cmd)
 
-    suspend fun installJre(onProgress: (Float, Long, Long) -> Unit = { _, _, _ -> }): Result<String> {
-        return jreManager.downloadAndInstall(onProgress)
-    }
+    suspend fun installJre(onProgress: (Float, Long, Long) -> Unit = { _, _, _ -> }) =
+        jreManager.downloadAndInstall(onProgress)
 
-    private fun startUptimeCounter(scope: CoroutineScope) {
-        uptimeJob = scope.launch {
-            val startTime = System.currentTimeMillis()
+    private fun startUptime() {
+        uptimeJob = serverScope.launch {
+            val start = System.currentTimeMillis()
             while (isActive) {
-                val uptime = (System.currentTimeMillis() - startTime) / 1000
-                _serverStatus.value = _serverStatus.value.copy(uptimeSeconds = uptime)
+                _serverStatus.value = _serverStatus.value.copy(uptimeSeconds = (System.currentTimeMillis() - start) / 1000)
                 delay(1000)
             }
         }
     }
 
-    private fun stopUptimeCounter() {
-        uptimeJob?.cancel()
-        uptimeJob = null
-    }
+    private fun stopUptime() { uptimeJob?.cancel(); uptimeJob = null }
 }

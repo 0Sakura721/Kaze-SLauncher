@@ -202,7 +202,7 @@ fun HomeScreen(
             onStart = {
                 if (config.jarPath.isNotBlank()) {
                     scope.launch {
-                        serverManager.startServer(config, scope)
+                        serverManager.startServer(config)
                     }
                 }
             },
