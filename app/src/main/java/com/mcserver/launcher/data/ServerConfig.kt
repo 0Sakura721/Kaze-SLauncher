@@ -46,6 +46,7 @@ data class ServerStatus(
 enum class JreStatus {
     NOT_INSTALLED,
     DOWNLOADING,
+    PAUSED,
     EXTRACTING,
     INSTALLED,
     ERROR
@@ -58,5 +59,6 @@ data class JreInfo(
     val downloadProgress: Float = 0f,
     val downloadedBytes: Long = 0,
     val totalBytes: Long = 0,
-    val installedVersions: List<String> = emptyList()
+    val installedVersions: List<String> = emptyList(),
+    val isPaused: Boolean = false
 )

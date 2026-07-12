@@ -105,6 +105,7 @@ fun SettingsScreen(
                         JreStatus.INSTALLED -> "✅ Java $selectedVersion 已就绪"
                         JreStatus.NOT_INSTALLED -> "⚠️ 未安装"
                         JreStatus.DOWNLOADING -> "⬇️ 下载中 ${(jreInfo.downloadProgress * 100).toInt()}%"
+                        JreStatus.PAUSED -> "⏸️ 已暂停"
                         JreStatus.EXTRACTING -> "📦 解压中..."
                         JreStatus.ERROR -> "❌ 安装失败"
                     },
@@ -120,11 +121,14 @@ fun SettingsScreen(
                 }
 
                 // 下载进度详情
-                if (jreInfo.status == JreStatus.DOWNLOADING && jreInfo.totalBytes > 0) {
+                if ((jreInfo.status == JreStatus.DOWNLOADING || jreInfo.status == JreStatus.PAUSED) && jreInfo.totalBytes > 0) {
                     Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(
                         progress = { jreInfo.downloadProgress },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        color = if (jreInfo.status == JreStatus.PAUSED)
+                            MaterialTheme.colorScheme.tertiary
+                        else MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -134,7 +138,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            "${(jreInfo.downloadProgress * 100).toInt()}%",
+                            if (jreInfo.status == JreStatus.PAUSED) "⏸ ${(jreInfo.downloadProgress * 100).toInt()}%" else "${(jreInfo.downloadProgress * 100).toInt()}%",
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.Medium
                         )
@@ -266,21 +270,66 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // 安装按钮
-                val needInstall = jreInfo.status != JreStatus.INSTALLED ||
-                        !jreInfo.installedVersions.contains(selectedVersion)
-                Button(
-                    onClick = {
-                        scope.launch {
-                            showJreProgress = true
-                            serverManager.installJre { progress, _, _ -> jreProgress = progress }
-                            showJreProgress = false
+                // 安装 / 暂停 / 继续按钮
+                when (jreInfo.status) {
+                    JreStatus.DOWNLOADING -> {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { serverManager.pauseDownload() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.tertiary
+                                )
+                            ) {
+                                Icon(Icons.Filled.Pause, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("暂停")
+                            }
                         }
-                    },
-                    enabled = !showJreProgress,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (showJreProgress) "安装中..." else if (needInstall) "安装 Java $selectedVersion (${selectedPackage.uppercase()})" else "重新安装")
+                    }
+                    JreStatus.PAUSED -> {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        serverManager.resumeDownload()
+                                        serverManager.installJre()
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Filled.PlayArrow, null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("继续下载")
+                            }
+                            OutlinedButton(
+                                onClick = { serverManager.cancelDownload() },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text("取消")
+                            }
+                        }
+                    }
+                    else -> {
+                        val needInstall = jreInfo.status != JreStatus.INSTALLED ||
+                                !jreInfo.installedVersions.contains(selectedVersion)
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    showJreProgress = true
+                                    serverManager.installJre { progress, _, _ -> jreProgress = progress }
+                                    showJreProgress = false
+                                }
+                            },
+                            enabled = !showJreProgress,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (showJreProgress) "安装中..." else if (needInstall) "安装 Java $selectedVersion (${selectedPackage.uppercase()})" else "重新安装")
+                        }
+                    }
                 }
 
                 if (showJreProgress && jreInfo.totalBytes <= 0) {

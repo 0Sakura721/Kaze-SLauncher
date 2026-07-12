@@ -10,45 +10,41 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
-import java.io.BufferedReader
-import java.io.File
-import java.io.FileOutputStream
-import java.io.InputStreamReader
+import java.io.*
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * JRE/JDK 管理器：检测、下载、管理 ARM 架构的 Java 运行时
- * 默认使用 Adoptium (Eclipse Temurin)，支持自定义下载源
+ * 支持断点续传、暂停/继续
  */
 class JreManager(private val context: Context) {
 
     private val _jreInfo = MutableStateFlow(JreInfo())
     val jreInfo: StateFlow<JreInfo> = _jreInfo.asStateFlow()
 
-    /** 当前选择的 Java 主版本号，如 "21"、"17" 等 */
     var selectedVersion: String = "21"
-    /** JDK 或 JRE — 默认 JDK */
     var selectedPackage: String = "jdk"
 
-    /** 自定义下载源 URL（空字符串 = 使用默认 Adoptium） */
     var customBaseUrl: String = ""
-        set(value) {
-            field = value
-            savePrefs()
-        }
+        set(value) { field = value; savePrefs() }
 
-    private val prefsFile: File
-        get() = File(context.filesDir, "jre_prefs.txt")
+    /** 暂停标记，跨协程使用 */
+    private val pauseFlag = AtomicBoolean(false)
 
-    /** 获取 JRE 安装目录（不同版本不同目录） */
-    private fun jreDirFor(version: String): File =
-        File(context.filesDir, "java_$version")
+    /** 恢复标记：表示有暂停的下载可以继续 */
+    private var pendingResume = false
+    private var pendingPartialFile: File? = null
 
-    private fun javaExecutableFor(version: String): File =
-        File(jreDirFor(version), "bin/java")
+    private val prefsFile: File get() = File(context.filesDir, "jre_prefs.txt")
 
-    /** 当前激活的 java 路径 */
+    /** 部分下载文件 */
+    private fun partialFile(): File = File(context.cacheDir, "java_download.partial")
+
+    private fun jreDirFor(version: String): File = File(context.filesDir, "java_$version")
+    private fun javaExecutableFor(version: String): File = File(jreDirFor(version), "bin/java")
+
     val currentJavaPath: String? get() {
         val exe = javaExecutableFor(selectedVersion)
         return if (exe.exists() && exe.canExecute()) exe.absolutePath else null
@@ -65,17 +61,17 @@ class JreManager(private val context: Context) {
             return "arm"
         }
 
-        /** 构建 Adoptium 下载 URL */
         fun buildAdoptiumUrl(version: String, pkg: String, arch: String): String =
             "$ADOPTIUM_API/binary/latest/$version/ga/linux/$arch/$pkg/hotspot/normal/eclipse?project=jdk"
     }
 
     init {
         loadPrefs()
+        checkPendingPartial()
         _jreInfo.value = checkJre()
     }
 
-    // ─── 偏好存取 ───
+    // ─── 偏好 ───
 
     private fun loadPrefs() {
         try {
@@ -85,57 +81,76 @@ class JreManager(private val context: Context) {
                     selectedVersion = lines[0]
                     selectedPackage = lines[1].ifEmpty { "jdk" }
                     customBaseUrl = lines[2]
-                } else if (lines.size >= 2) {
-                    selectedVersion = lines[0]
-                    // 兼容旧数据：没有保存过 pkg 的默认改成 jdk
-                    selectedPackage = lines[1].ifEmpty { "jdk" }
-                    customBaseUrl = ""
                 }
             }
         } catch (_: Exception) {}
     }
 
     private fun savePrefs() {
-        try { prefsFile.writeText("$selectedVersion\n$selectedPackage\n$customBaseUrl") } catch (_: Exception) {}
+        try { prefsFile.writeText("$selectedVersion\n$selectedPackage\n$customBaseUrl") }
+        catch (_: Exception) {}
     }
 
-    fun setVersionAndPackage(version: String, pkg: String) {
-        selectedVersion = version
-        selectedPackage = pkg
-        savePrefs()
+    // ─── 检查未完成的下载 ───
+
+    private fun checkPendingPartial() {
+        val pf = partialFile()
+        if (pf.exists() && pf.length() > 0) {
+            pendingResume = true
+            pendingPartialFile = pf
+            _jreInfo.value = _jreInfo.value.copy(
+                status = JreStatus.PAUSED,
+                downloadedBytes = pf.length(),
+                isPaused = true
+            )
+        }
+    }
+
+    // ─── 暂停 / 继续 ───
+
+    fun pauseDownload() {
+        pauseFlag.set(true)
+        _jreInfo.value = _jreInfo.value.copy(status = JreStatus.PAUSED, isPaused = true)
+    }
+
+    fun resumeDownload() {
+        pauseFlag.set(false)
+        _jreInfo.value = _jreInfo.value.copy(status = JreStatus.DOWNLOADING, isPaused = false)
+    }
+
+    fun cancelDownload() {
+        pauseFlag.set(true)
+        partialFile().delete()
+        pendingResume = false
+        pendingPartialFile = null
         _jreInfo.value = checkJre()
     }
 
     // ─── 版本列表 ───
 
-    /** 获取可用版本列表（从 Adoptium 或自定义源） */
     suspend fun fetchAvailableVersions(): Result<List<String>> = withContext(Dispatchers.IO) {
         try {
-            val apiUrl = if (customBaseUrl.isNotBlank()) {
-                "$customBaseUrl/info/available_releases"
-            } else {
-                AVAILABLE_RELEASES
-            }
+            val apiUrl = if (customBaseUrl.isNotBlank())
+                "$customBaseUrl/info/available_releases" else AVAILABLE_RELEASES
             val connection = URL(apiUrl).openConnection() as HttpURLConnection
-            connection.connectTimeout = 15000
-            connection.readTimeout = 15000
+            connection.connectTimeout = 15000; connection.readTimeout = 15000
             connection.connect()
-
             val json = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
             connection.disconnect()
-
-            val array = JSONArray(json)
+            val arr = JSONArray(json)
             val versions = mutableListOf<String>()
-            for (i in 0 until array.length()) {
-                versions.add(array.getInt(i).toString())
-            }
+            for (i in 0 until arr.length()) versions.add(arr.getInt(i).toString())
             Result.success(versions.sortedByDescending { it.toInt() })
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
-    // ─── 检查和安装 ───
+    fun setVersionAndPackage(version: String, pkg: String) {
+        selectedVersion = version; selectedPackage = pkg
+        savePrefs()
+        _jreInfo.value = checkJre()
+    }
+
+    // ─── 检查 ───
 
     fun checkJre(): JreInfo {
         val exe = javaExecutableFor(selectedVersion)
@@ -144,87 +159,117 @@ class JreManager(private val context: Context) {
         context.filesDir.listFiles()?.forEach { dir ->
             if (dir.name.startsWith("java_")) {
                 val v = dir.name.removePrefix("java_")
-                val java = File(dir, "bin/java")
-                if (java.exists() && java.canExecute()) {
+                if (File(dir, "bin/java").let { it.exists() && it.canExecute() })
                     installedVersions.add(v)
-                }
             }
         }
-
-        return if (installed) {
-            JreInfo(
-                status = JreStatus.INSTALLED,
-                version = selectedVersion,
-                path = exe.absolutePath,
-                installedVersions = installedVersions
-            )
-        } else {
-            JreInfo(status = JreStatus.NOT_INSTALLED, installedVersions = installedVersions)
-        }
+        return if (installed) JreInfo(JreStatus.INSTALLED, selectedVersion, exe.absolutePath,
+            installedVersions = installedVersions)
+        else JreInfo(JreStatus.NOT_INSTALLED, installedVersions = installedVersions)
     }
 
-    /** 构建实际的下载 URL（自定义源或 Adoptium） */
+    // ─── 下载 URL ───
+
     private fun buildDownloadUrl(): String {
-        if (customBaseUrl.isNotBlank()) {
-            // 自定义源：假定用户提供了完整 URL 模版，替换占位符
-            return customBaseUrl
-                .replace("{version}", selectedVersion)
-                .replace("{arch}", getDeviceArch())
-                .replace("{package}", selectedPackage)
-        }
+        if (customBaseUrl.isNotBlank())
+            return customBaseUrl.replace("{version}", selectedVersion)
+                .replace("{arch}", getDeviceArch()).replace("{package}", selectedPackage)
         return buildAdoptiumUrl(selectedVersion, selectedPackage, getDeviceArch())
     }
+
+    // ─── 下载（支持断点续传 + 暂停） ───
 
     suspend fun downloadAndInstall(
         onProgress: (Float, Long, Long) -> Unit = { _, _, _ -> }
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
+            pauseFlag.set(false)
+
+            val pf = partialFile()
+            val initialOffset = if (pf.exists()) pf.length() else 0L
+
             _jreInfo.value = _jreInfo.value.copy(
                 status = JreStatus.DOWNLOADING, downloadProgress = 0f,
-                downloadedBytes = 0, totalBytes = 0
+                downloadedBytes = initialOffset, totalBytes = 0, isPaused = false
             )
-            onProgress(0f, 0, 0)
+            onProgress(0f, initialOffset, 0)
 
             val url = buildDownloadUrl()
-            val tempFile = File(context.cacheDir, "java_download.tar.gz")
+            var connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 30000; connection.readTimeout = 300000
 
-            val connection = URL(url).openConnection() as HttpURLConnection
-            connection.connectTimeout = 30000
-            connection.readTimeout = 300000
-            connection.connect()
+            // Range 请求实现断点续传
+            if (initialOffset > 0) {
+                connection.setRequestProperty("Range", "bytes=$initialOffset-")
+                connection.connect()
+                val responseCode = connection.responseCode
+                if (responseCode != 206 && responseCode != 200) {
+                    // 服务端不支持，从头开始
+                    pf.delete()
+                    connection = URL(url).openConnection() as HttpURLConnection
+                    connection.connect()
+                } else if (responseCode == 200) {
+                    // 忽略了 Range，从头开始
+                    pf.delete()
+                }
+            } else {
+                connection.connect()
+            }
 
-            val contentLength = if (connection.contentLength > 0) connection.contentLength.toLong() else -1L
-            var downloaded = 0L
+            val contentLengthHeader = connection.getHeaderField("Content-Length")
+            val contentLength = contentLengthHeader?.toLongOrNull() ?: -1L
+            val totalSize: Long = if (contentLength > 0) initialOffset + contentLength
+                else initialOffset + (connection.contentLength.takeIf { it > 0 }?.toLong() ?: -1L)
+            if (totalSize <= initialOffset) totalSize.let { /* unknown */ }
+
+            var downloaded = initialOffset
 
             // 更新总量到 UI
-            if (contentLength > 0) {
-                _jreInfo.value = _jreInfo.value.copy(totalBytes = contentLength)
-            }
+            if (totalSize > 0)
+                _jreInfo.value = _jreInfo.value.copy(totalBytes = totalSize)
 
-            connection.inputStream.use { input ->
-                FileOutputStream(tempFile).use { output ->
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
-                        downloaded += bytesRead
+            // 追加写入
+            val fos = FileOutputStream(pf, initialOffset > 0)
+            val bis = BufferedInputStream(connection.inputStream)
 
-                        val totalKnown: Long = if (contentLength > 0) contentLength else downloaded * 2L
-                        val progress = if (totalKnown > 0) {
-                            (downloaded.toFloat() / totalKnown).coerceIn(0f, 1f)
-                        } else 0f
-
+            try {
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                while (bis.read(buffer).also { bytesRead = it } != -1) {
+                    // 暂停检查
+                    if (pauseFlag.get()) {
+                        fos.flush(); fos.close(); bis.close()
+                        connection.disconnect()
                         _jreInfo.value = _jreInfo.value.copy(
-                            downloadProgress = progress,
-                            downloadedBytes = downloaded,
-                            totalBytes = totalKnown
+                            status = JreStatus.PAUSED, isPaused = true,
+                            downloadedBytes = downloaded, downloadProgress =
+                            if (totalSize > 0) downloaded.toFloat() / totalSize else 0f
                         )
-                        onProgress(progress, downloaded, totalKnown)
+                        pendingResume = true; pendingPartialFile = pf
+                        return@withContext Result.success("paused")
                     }
-                }
-            }
-            connection.disconnect()
 
+                    fos.write(buffer, 0, bytesRead)
+                    downloaded += bytesRead
+
+                    val effectiveTotal = if (totalSize > 0) totalSize else downloaded * 2
+                    val progress = if (effectiveTotal > 0)
+                        (downloaded.toFloat() / effectiveTotal).coerceIn(0f, 1f) else 0f
+
+                    _jreInfo.value = _jreInfo.value.copy(
+                        downloadProgress = progress,
+                        downloadedBytes = downloaded,
+                        totalBytes = effectiveTotal
+                    )
+                    onProgress(progress, downloaded, effectiveTotal)
+                }
+            } finally {
+                try { fos.close() } catch (_: Exception) {}
+                try { bis.close() } catch (_: Exception) {}
+                try { connection.disconnect() } catch (_: Exception) {}
+            }
+
+            // 下载完成后处理
             _jreInfo.value = _jreInfo.value.copy(status = JreStatus.EXTRACTING)
             onProgress(1f, downloaded, downloaded)
 
@@ -232,10 +277,11 @@ class JreManager(private val context: Context) {
             if (targetDir.exists()) targetDir.deleteRecursively()
             targetDir.mkdirs()
 
-            extractTarGz(tempFile, targetDir)
+            extractTarGz(pf, targetDir)
 
             javaExecutableFor(selectedVersion).setExecutable(true)
-            tempFile.delete()
+            pf.delete()
+            pendingResume = false; pendingPartialFile = null
 
             val info = checkJre()
             _jreInfo.value = info
@@ -249,11 +295,8 @@ class JreManager(private val context: Context) {
     private fun extractTarGz(tarGzFile: File, destDir: File) {
         val process = ProcessBuilder()
             .command("tar", "xzf", tarGzFile.absolutePath, "-C", destDir.absolutePath, "--strip-components=1")
-            .redirectErrorStream(true)
-            .start()
+            .redirectErrorStream(true).start()
         val exitCode = process.waitFor()
-        if (exitCode != 0) {
-            throw RuntimeException("无法解压 Java 包，退出码: $exitCode")
-        }
+        if (exitCode != 0) throw RuntimeException("无法解压，退出码: $exitCode")
     }
 }

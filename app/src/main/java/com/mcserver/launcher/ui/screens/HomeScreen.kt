@@ -62,6 +62,7 @@ fun HomeScreen(
                         tint = when (jreInfo.status) {
                             JreStatus.INSTALLED -> MaterialTheme.colorScheme.primary
                             JreStatus.DOWNLOADING, JreStatus.EXTRACTING -> MaterialTheme.colorScheme.tertiary
+                            JreStatus.PAUSED -> MaterialTheme.colorScheme.tertiary
                             JreStatus.ERROR -> MaterialTheme.colorScheme.error
                             JreStatus.NOT_INSTALLED -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
@@ -81,6 +82,7 @@ fun HomeScreen(
                                         "下载中：${formatSize(jreInfo.downloadedBytes)} / ${formatSize(jreInfo.totalBytes)}"
                                     else "下载中 ${(jreInfo.downloadProgress * 100).toInt()}%"
                                 }
+                                JreStatus.PAUSED -> "已暂停 — ${(jreInfo.downloadProgress * 100).toInt()}%"
                                 JreStatus.EXTRACTING -> "解压中..."
                                 JreStatus.INSTALLED -> "已就绪"
                                 JreStatus.ERROR -> "安装失败"
@@ -104,6 +106,26 @@ fun HomeScreen(
                                 Text("安装")
                             }
                         }
+                        JreStatus.DOWNLOADING -> {
+                            IconButton(onClick = { serverManager.pauseDownload() }) {
+                                Icon(Icons.Filled.Pause, "暂停", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                        JreStatus.PAUSED -> {
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(onClick = {
+                                    scope.launch {
+                                        serverManager.resumeDownload()
+                                        serverManager.installJre()
+                                    }
+                                }) {
+                                    Icon(Icons.Filled.PlayArrow, "继续", tint = MaterialTheme.colorScheme.primary)
+                                }
+                                IconButton(onClick = { serverManager.cancelDownload() }) {
+                                    Icon(Icons.Filled.Close, "取消", tint = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
                         JreStatus.INSTALLED -> {
                             Icon(
                                 Icons.Filled.CheckCircle,
@@ -115,7 +137,7 @@ fun HomeScreen(
                     }
                 }
                 // 下载进度条
-                if (jreInfo.status == JreStatus.DOWNLOADING) {
+                if (jreInfo.status == JreStatus.DOWNLOADING || jreInfo.status == JreStatus.PAUSED) {
                     LinearProgressIndicator(
                         progress = { jreInfo.downloadProgress },
                         modifier = Modifier

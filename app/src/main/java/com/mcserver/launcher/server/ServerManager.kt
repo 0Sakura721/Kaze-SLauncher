@@ -60,6 +60,13 @@ class ServerManager private constructor() {
         jreManager.checkJre().let { /* MutableStateFlow already updated inside */ }
     }
 
+    /** 暂停下载 */
+    fun pauseDownload() = jreManager.pauseDownload()
+    /** 继续下载 */
+    fun resumeDownload() = jreManager.resumeDownload()
+    /** 取消下载 */
+    fun cancelDownload() = jreManager.cancelDownload()
+
     /**
      * 启动服务器
      */
