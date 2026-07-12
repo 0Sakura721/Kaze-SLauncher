@@ -59,6 +59,7 @@ data class JreInfo(
     val downloadProgress: Float = 0f,
     val downloadedBytes: Long = 0,
     val totalBytes: Long = 0,
+    val downloadSpeedBytesPerSec: Long = 0,
     val installedVersions: List<String> = emptyList(),
     val isPaused: Boolean = false
 )

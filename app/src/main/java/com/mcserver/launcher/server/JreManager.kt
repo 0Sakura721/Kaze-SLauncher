@@ -232,6 +232,11 @@ class JreManager(private val context: Context) {
             val fos = FileOutputStream(pf, initialOffset > 0)
             val bis = BufferedInputStream(connection.inputStream)
 
+            // 速率追踪
+            var lastSpeedBytes = downloaded
+            var lastSpeedTime = System.currentTimeMillis()
+            var currentSpeed: Long = 0
+
             try {
                 val buffer = ByteArray(8192)
                 var bytesRead: Int
@@ -242,7 +247,9 @@ class JreManager(private val context: Context) {
                         connection.disconnect()
                         _jreInfo.value = _jreInfo.value.copy(
                             status = JreStatus.PAUSED, isPaused = true,
-                            downloadedBytes = downloaded, downloadProgress =
+                            downloadedBytes = downloaded,
+                            downloadSpeedBytesPerSec = 0,
+                            downloadProgress =
                             if (totalSize > 0) downloaded.toFloat() / totalSize else 0f
                         )
                         pendingResume = true; pendingPartialFile = pf
@@ -252,6 +259,15 @@ class JreManager(private val context: Context) {
                     fos.write(buffer, 0, bytesRead)
                     downloaded += bytesRead
 
+                    // 每 500ms 更新一次速率
+                    val now = System.currentTimeMillis()
+                    val elapsed = now - lastSpeedTime
+                    if (elapsed >= 500) {
+                        currentSpeed = if (elapsed > 0) ((downloaded - lastSpeedBytes) * 1000L / elapsed) else 0
+                        lastSpeedBytes = downloaded
+                        lastSpeedTime = now
+                    }
+
                     val effectiveTotal = if (totalSize > 0) totalSize else downloaded * 2
                     val progress = if (effectiveTotal > 0)
                         (downloaded.toFloat() / effectiveTotal).coerceIn(0f, 1f) else 0f
@@ -259,7 +275,8 @@ class JreManager(private val context: Context) {
                     _jreInfo.value = _jreInfo.value.copy(
                         downloadProgress = progress,
                         downloadedBytes = downloaded,
-                        totalBytes = effectiveTotal
+                        totalBytes = effectiveTotal,
+                        downloadSpeedBytesPerSec = currentSpeed
                     )
                     onProgress(progress, downloaded, effectiveTotal)
                 }

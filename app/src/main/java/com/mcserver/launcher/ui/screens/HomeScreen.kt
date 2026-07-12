@@ -153,8 +153,7 @@ fun HomeScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 8.dp),
+                                .padding(horizontal = 16.dp),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
@@ -163,12 +162,18 @@ fun HomeScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
+                                formatSpeed(jreInfo.downloadSpeedBytesPerSec),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
                                 "${(jreInfo.downloadProgress * 100).toInt()}%",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         }
+                        Spacer(modifier = Modifier.padding(bottom = 8.dp).height(2.dp))
                     } else {
                         Spacer(
                             modifier = Modifier
@@ -291,4 +296,12 @@ private fun formatSize(bytes: Long): String {
     if (mb < 1024) return "%.1f MB".format(mb)
     val gb = mb / 1024.0
     return "%.2f GB".format(gb)
+}
+
+private fun formatSpeed(bytesPerSec: Long): String {
+    if (bytesPerSec <= 0) return ""
+    val mbps = bytesPerSec / (1024.0 * 1024.0)
+    if (mbps >= 1.0) return "%.1f MB/s".format(mbps)
+    val kbps = bytesPerSec / 1024.0
+    return "%.0f KB/s".format(kbps)
 }

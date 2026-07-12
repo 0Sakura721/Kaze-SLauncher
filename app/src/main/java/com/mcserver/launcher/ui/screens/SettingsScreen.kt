@@ -143,6 +143,19 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                    // 下载速率
+                    if (jreInfo.status == JreStatus.DOWNLOADING && jreInfo.downloadSpeedBytesPerSec > 0) {
+                        Spacer(Modifier.height(2.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Icon(Icons.Filled.Speed, null, Modifier.size(12.dp), tint = MaterialTheme.colorScheme.tertiary)
+                            Spacer(Modifier.width(2.dp))
+                            Text(
+                                formatSpeed(jreInfo.downloadSpeedBytesPerSec),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(12.dp))
@@ -420,4 +433,12 @@ private fun formatBytes(bytes: Long): String {
     if (mb < 1024) return "%.1f MB".format(mb)
     val gb = mb / 1024.0
     return "%.2f GB".format(gb)
+}
+
+private fun formatSpeed(bytesPerSec: Long): String {
+    if (bytesPerSec <= 0) return ""
+    val mbps = bytesPerSec / (1024.0 * 1024.0)
+    if (mbps >= 1.0) return "%.1f MB/s".format(mbps)
+    val kbps = bytesPerSec / 1024.0
+    return "%.0f KB/s".format(kbps)
 }
