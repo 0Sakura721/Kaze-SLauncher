@@ -30,8 +30,28 @@ class ServerManager private constructor() {
     val consoleOutput: SharedFlow<String> = jarRunner.consoleOutput
     val isRunning: Boolean get() = jarRunner.running
 
+    /** 当前选择的 Java 版本 */
+    val selectedJreVersion: String get() = jreManager.selectedVersion
+    /** 当前选择的包类型 (jre/jdk) */
+    val selectedJrePackage: String get() = jreManager.selectedPackage
+    /** 当前可用的 Java 路径 */
+    val currentJavaPath: String? get() = jreManager.currentJavaPath
+
     private var serverJob: Job? = null
     private var uptimeJob: Job? = null
+
+    /** 获取可选版本列表 */
+    suspend fun fetchAvailableVersions(): Result<List<String>> =
+        jreManager.fetchAvailableVersions()
+
+    /** 设置版本和包类型 */
+    fun setJreVersion(version: String, pkg: String) =
+        jreManager.setVersionAndPackage(version, pkg)
+
+    /** 刷新 JRE 状态 */
+    fun refreshJreStatus() {
+        jreManager.checkJre().let { /* MutableStateFlow already updated inside */ }
+    }
 
     /**
      * 启动服务器
@@ -46,7 +66,6 @@ class ServerManager private constructor() {
 
         _serverStatus.value = ServerStatus(state = ServerState.STARTING)
 
-        // 启动前台服务
         val serviceIntent = Intent(context, ServerForegroundService::class.java)
         context.startForegroundService(serviceIntent)
 
@@ -55,7 +74,6 @@ class ServerManager private constructor() {
                 _serverStatus.value = _serverStatus.value.copy(state = ServerState.RUNNING)
                 startUptimeCounter(scope)
                 jarRunner.start(config, jre.path)
-                // 服务器停止后
                 stopUptimeCounter()
                 _serverStatus.value = ServerStatus(state = ServerState.STOPPED)
                 context.stopService(Intent(context, ServerForegroundService::class.java))
@@ -67,24 +85,15 @@ class ServerManager private constructor() {
         }
     }
 
-    /**
-     * 停止服务器
-     */
     fun stopServer() {
         _serverStatus.value = _serverStatus.value.copy(state = ServerState.STOPPING)
         jarRunner.stop()
     }
 
-    /**
-     * 发送命令
-     */
     fun sendCommand(cmd: String) {
         jarRunner.sendCommand(cmd)
     }
 
-    /**
-     * 下载/安装 JRE
-     */
     suspend fun installJre(onProgress: (Float) -> Unit = {}): Result<String> {
         return jreManager.downloadAndInstall(onProgress)
     }

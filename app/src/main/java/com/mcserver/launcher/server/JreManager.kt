@@ -9,14 +9,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.zip.ZipInputStream
 
 /**
- * JRE 管理器：检测、下载、管理 ARM 架构的 Java 运行时
+ * JRE/JDK 管理器：检测、下载、管理 ARM 架构的 Java 运行时
  * 使用 Adoptium (Eclipse Temurin) 提供的 ARM 构建版本
  */
 class JreManager(private val context: Context) {
@@ -24,65 +26,142 @@ class JreManager(private val context: Context) {
     private val _jreInfo = MutableStateFlow(JreInfo())
     val jreInfo: StateFlow<JreInfo> = _jreInfo.asStateFlow()
 
-    private val jreDir: File
-        get() = File(context.filesDir, "jre")
+    /** 当前选择的 Java 主版本号，如 "21"、"17" 等 */
+    var selectedVersion: String = "21"
+    /** JDK 或 JRE */
+    var selectedPackage: String = "jre"  // "jdk" or "jre"
 
-    private val javaExecutable: File
-        get() {
-            val binDir = File(jreDir, "bin")
-            return File(binDir, "java")
-        }
+    private val prefsFile: File
+        get() = File(context.filesDir, "jre_prefs.txt")
 
-    companion object {
-        // Adoptium JRE 21 ARM 构建下载地址
-        private const val JRE_VERSION = "21.0.3"
-        private const val BASE_URL = "https://api.adoptium.net/v3/binary/latest/21/ga"
+    /** 获取 JRE 安装目录（不同版本不同目录） */
+    private fun jreDirFor(version: String): File =
+        File(context.filesDir, "java_$version")
 
-        fun getJreDownloadUrl(): String {
-            val arch = if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() &&
-                Build.SUPPORTED_64_BIT_ABIS[0].contains("arm64")
-            ) {
-                "aarch64"
-            } else {
-                "arm"
-            }
-            return "$BASE_URL/linux/$arch/jre/hotspot/normal/eclipse?project=jdk"
-        }
+    private fun javaExecutableFor(version: String): File =
+        File(jreDirFor(version), "bin/java")
+
+    /** 当前激活的 java 路径 */
+    val currentJavaPath: String? get() {
+        val v = selectedVersion
+        val exe = javaExecutableFor(v)
+        return if (exe.exists() && exe.canExecute()) exe.absolutePath else null
     }
 
-    /**
-     * 检查 JRE 是否已安装
-     */
-    fun checkJre(): JreInfo {
-        val installed = javaExecutable.exists() && javaExecutable.canExecute()
-        return if (installed) {
-            JreInfo(
-                status = JreStatus.INSTALLED,
-                path = javaExecutable.absolutePath
-            )
-        } else {
-            JreInfo(status = JreStatus.NOT_INSTALLED)
+    companion object {
+        private const val ADOPTIUM_API = "https://api.adoptium.net/v3"
+        private const val AVAILABLE_RELEASES = "$ADOPTIUM_API/info/available_releases"
+
+        /** 获取设备架构字符串 */
+        fun getDeviceArch(): String {
+            if (Build.SUPPORTED_64_BIT_ABIS.isNotEmpty() &&
+                Build.SUPPORTED_64_BIT_ABIS[0].contains("arm64")
+            ) return "aarch64"
+            return "arm"
         }
+
+        /** 构建下载 URL */
+        fun buildDownloadUrl(version: String, pkg: String, arch: String): String =
+            "$ADOPTIUM_API/binary/latest/$version/ga/linux/$arch/$pkg/hotspot/normal/eclipse?project=jdk"
     }
 
     init {
+        loadPrefs()
         _jreInfo.value = checkJre()
     }
 
-    /**
-     * 下载并安装 JRE
-     */
+    // ─── 偏好存取 ───
+
+    private fun loadPrefs() {
+        try {
+            if (prefsFile.exists()) {
+                val lines = prefsFile.readLines()
+                if (lines.size >= 2) {
+                    selectedVersion = lines[0]
+                    selectedPackage = lines[1]
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun savePrefs() {
+        try { prefsFile.writeText("$selectedVersion\n$selectedPackage") } catch (_: Exception) {}
+    }
+
+    fun setVersionAndPackage(version: String, pkg: String) {
+        selectedVersion = version
+        selectedPackage = pkg
+        savePrefs()
+        _jreInfo.value = checkJre()
+    }
+
+    // ─── 版本列表 ───
+
+    /** 获取 Adoptium 可用版本列表 */
+    suspend fun fetchAvailableVersions(): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val connection = URL(AVAILABLE_RELEASES).openConnection() as HttpURLConnection
+            connection.connectTimeout = 15000
+            connection.readTimeout = 15000
+            connection.connect()
+
+            val json = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+            connection.disconnect()
+
+            val array = JSONArray(json)
+            val versions = mutableListOf<String>()
+            for (i in 0 until array.length()) {
+                versions.add(array.getInt(i).toString())
+            }
+            // 倒序，最新在前；只保留 Minecraft 常用的 LTS 和最新
+            Result.success(versions.sortedByDescending { it.toInt() })
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ─── 检查和安装 ───
+
+    fun checkJre(): JreInfo {
+        val exe = javaExecutableFor(selectedVersion)
+        val installed = exe.exists() && exe.canExecute()
+        // 同时检查是否为多版本环境
+        val installedVersions = mutableListOf<String>()
+        context.filesDir.listFiles()?.forEach { dir ->
+            if (dir.name.startsWith("java_")) {
+                val v = dir.name.removePrefix("java_")
+                val java = File(dir, "bin/java")
+                if (java.exists() && java.canExecute()) {
+                    installedVersions.add(v)
+                }
+            }
+        }
+
+        return if (installed) {
+            JreInfo(
+                status = JreStatus.INSTALLED,
+                version = selectedVersion,
+                path = exe.absolutePath,
+                installedVersions = installedVersions
+            )
+        } else {
+            JreInfo(status = JreStatus.NOT_INSTALLED, installedVersions = installedVersions)
+        }
+    }
+
     suspend fun downloadAndInstall(
         onProgress: (Float) -> Unit = {}
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            _jreInfo.value = _jreInfo.value.copy(status = JreStatus.DOWNLOADING, downloadProgress = 0f)
+            _jreInfo.value = _jreInfo.value.copy(
+                status = JreStatus.DOWNLOADING, downloadProgress = 0f
+            )
             onProgress(0f)
 
-            val url = getJreDownloadUrl()
-            val tempFile = File(context.cacheDir, "jre_download.tar.gz")
+            val url = buildDownloadUrl(selectedVersion, selectedPackage, getDeviceArch())
+            val ext = if (selectedPackage == "jdk") "jdk" else "jre"
+            val tempFile = File(context.cacheDir, "java_download_$ext.tar.gz")
 
-            // 下载
             val connection = URL(url).openConnection() as HttpURLConnection
             connection.connectTimeout = 30000
             connection.readTimeout = 300000
@@ -108,38 +187,35 @@ class JreManager(private val context: Context) {
             }
             connection.disconnect()
 
-            // 解压
             _jreInfo.value = _jreInfo.value.copy(status = JreStatus.EXTRACTING)
             onProgress(1f)
 
-            if (jreDir.exists()) jreDir.deleteRecursively()
-            jreDir.mkdirs()
+            val targetDir = jreDirFor(selectedVersion)
+            if (targetDir.exists()) targetDir.deleteRecursively()
+            targetDir.mkdirs()
 
-            extractTarGz(tempFile, jreDir)
+            extractTarGz(tempFile, targetDir)
 
-            // 确保可执行
-            javaExecutable.setExecutable(true)
+            javaExecutableFor(selectedVersion).setExecutable(true)
             tempFile.delete()
 
             val info = checkJre()
             _jreInfo.value = info
             Result.success(info.path)
         } catch (e: Exception) {
-            _jreInfo.value = JreInfo(status = JreStatus.ERROR)
+            _jreInfo.value = JreInfo(status = JreStatus.ERROR, installedVersions = emptyList())
             Result.failure(e)
         }
     }
 
     private fun extractTarGz(tarGzFile: File, destDir: File) {
-        // 使用 Android 内置的 tar 命令解压（如果可用）
         val process = ProcessBuilder()
             .command("tar", "xzf", tarGzFile.absolutePath, "-C", destDir.absolutePath, "--strip-components=1")
             .redirectErrorStream(true)
             .start()
         val exitCode = process.waitFor()
         if (exitCode != 0) {
-            // 备选方案：使用 busybox 或手动解压
-            throw RuntimeException("无法解压 JRE 包，退出码: $exitCode")
+            throw RuntimeException("无法解压 Java 包，退出码: $exitCode")
         }
     }
 }

@@ -101,10 +101,22 @@ fun MainApp(
                 HomeScreen(
                     config = config,
                     onNavigateToConfig = {
-                        navController.navigate(Screen.ServerConfig.route)
+                        navController.navigate(Screen.ServerConfig.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     },
                     onNavigateToConsole = {
-                        navController.navigate(Screen.Console.route)
+                        navController.navigate(Screen.Console.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 )
             }
