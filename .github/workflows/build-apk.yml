@@ -8,7 +8,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
   actions: read
   checks: write
 
@@ -43,25 +42,3 @@ jobs:
           name: MinecraftServerLauncher-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
-
-      - name: Rename APK
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk MinecraftServerLauncher-debug.apk
-
-      - name: Upload APK to Release (on push to main)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly
-          name: Nightly Build
-          files: MinecraftServerLauncher-debug.apk
-          prerelease: true
-          body: |
-            ## Nightly Build
-
-            - **Commit**: ${{ github.sha }}
-            - **Date**: ${{ github.event.head_commit.timestamp }}
-
-            > 自动构建，可能包含实验性功能。
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
