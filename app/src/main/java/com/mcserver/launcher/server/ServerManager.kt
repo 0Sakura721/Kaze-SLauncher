@@ -39,6 +39,18 @@ class ServerManager private constructor() {
     /** 区分「用户手动停止」与「崩溃退出」，避免自动重启把手动停止的服务器又拉起来 */
     private val manualStop = AtomicBoolean(false)
 
+    init {
+        // 将在线玩家列表同步到状态，供界面展示
+        serverScope.launch {
+            termuxManager.players.collect { list ->
+                _serverStatus.value = _serverStatus.value.copy(
+                    playerCount = list.size,
+                    players = list
+                )
+            }
+        }
+    }
+
     suspend fun fetchAvailableVersions() = jreManager.fetchAvailableVersions()
 
     fun setJreVersion(version: String, pkg: String) = jreManager.setVersionAndPackage(version, pkg)
@@ -94,7 +106,10 @@ class ServerManager private constructor() {
         }
 
         serverJob = serverScope.launch {
-            _serverStatus.value = _serverStatus.value.copy(state = ServerState.RUNNING)
+            _serverStatus.value = _serverStatus.value.copy(
+                state = ServerState.RUNNING,
+                memoryUsedMB = config.allocatedMemoryMB.toLong()
+            )
             startUptime()
             val result = termuxManager.startServer(config)
             if (result.isFailure) {

@@ -11,8 +11,11 @@ import com.mcserver.launcher.McApplication
 import com.mcserver.launcher.data.ServerConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.*
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
@@ -66,6 +69,11 @@ class TermuxManager {
 
     /** 服务器进程退出时回调（用于崩溃检测 / 自动重启） */
     var onServerExited: (() -> Unit)? = null
+
+    /** 在线玩家（从日志解析 join/leave） */
+    private val onlinePlayers = mutableSetOf<String>()
+    private val _players = MutableStateFlow<List<String>>(emptyList())
+    val players: StateFlow<List<String>> = _players.asStateFlow()
 
     private val _consoleOutput = MutableSharedFlow<String>(
         replay = 500, extraBufferCapacity = 100,
@@ -150,6 +158,11 @@ class TermuxManager {
 
                 // 1. 复制 JAR 到共享目录（处理 content:// URI）
                 val serverDir = serverDir(context)
+                // 重置在线玩家统计
+                onlinePlayers.clear()
+                _players.value = emptyList()
+                // 让配置中的端口生效（写入/更新 server.properties）
+                prepareServerProperties(serverDir, config.serverPort)
 
                 val localJarPath: String
                 try {
@@ -267,7 +280,10 @@ class TermuxManager {
                                 handleServerExit()
                                 return@launch
                             }
-                            if (line.isNotBlank()) _consoleOutput.tryEmit(line)
+                            if (line.isNotBlank()) {
+                                _consoleOutput.tryEmit(line)
+                                parsePlayerEvent(line)
+                            }
                         }
                         leftover = if (endsWithNewline) byteArrayOf()
                         else parts.last().toByteArray(StandardCharsets.UTF_8)
@@ -288,7 +304,47 @@ class TermuxManager {
         _stateChanged.tryEmit(false)
         emit("> 服务器进程已退出")
         tailJob?.cancel()
+        onlinePlayers.clear()
+        _players.value = emptyList()
         try { onServerExited?.invoke() } catch (_: Exception) {}
+    }
+
+    /** 从日志行解析玩家加入/离开，维护在线列表 */
+    private fun parsePlayerEvent(line: String) {
+        val joined = " joined the game"
+        val left = " left the game"
+        val name = when {
+            line.contains(joined) -> line.substringBefore(joined).substringAfterLast("]: ").trim()
+            line.contains(left) -> line.substringBefore(left).substringAfterLast("]: ").trim()
+            else -> return
+        }
+        if (name.isBlank()) return
+        val changed = if (line.contains(joined)) onlinePlayers.add(name) else onlinePlayers.remove(name)
+        if (changed) _players.value = onlinePlayers.toList()
+    }
+
+    /** 让配置中的端口生效：写入或更新 server.properties 的 server-port */
+    private fun prepareServerProperties(dir: File, port: Int) {
+        try {
+            val props = File(dir, "server.properties")
+            if (props.exists()) {
+                val lines = props.readLines().toMutableList()
+                var found = false
+                for (i in lines.indices) {
+                    if (lines[i].trim().startsWith("server-port")) {
+                        lines[i] = "server-port=$port"
+                        found = true
+                    }
+                }
+                if (!found) lines.add("server-port=$port")
+                props.writeText(lines.joinToString("\n"))
+            } else {
+                props.writeText("server-port=$port\n")
+            }
+            emit("> 端口: $port")
+        } catch (e: Exception) {
+            emit("> 端口设置失败：${e.message}")
+        }
     }
 
     // ─── 发送控制台命令 ───
@@ -327,6 +383,8 @@ class TermuxManager {
 
     fun stopServer() {
         emit("> 正在停止服务器...")
+        onlinePlayers.clear()
+        _players.value = emptyList()
         try {
             val stopScript = File(serverDir(context), "stop.sh")
             stopScript.writeText(

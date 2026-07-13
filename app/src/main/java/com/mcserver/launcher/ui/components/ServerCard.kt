@@ -60,6 +60,28 @@ fun ServerStatusCard(
                     InfoItem("玩家", "${status.playerCount}")
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+
+                // 在线玩家
+                if (status.players.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.People,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = status.players.joinToString("、"),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
             }
 
             // 操作按钮
