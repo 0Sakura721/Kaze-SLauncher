@@ -38,12 +38,6 @@ class MainActivity : ComponentActivity() {
                 MainApp(
                     themeMode = themeMode,
                     config = config,
-                    onThemeChange = { mode ->
-                        // 需要协程作用域
-                    },
-                    onConfigSave = { newConfig ->
-                        // 需要协程
-                    },
                     prefsManager = prefsManager
                 )
             }
@@ -55,8 +49,6 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
     themeMode: ThemeMode,
     config: ServerConfig,
-    onThemeChange: (ThemeMode) -> Unit,
-    onConfigSave: (ServerConfig) -> Unit,
     prefsManager: PreferencesManager
 ) {
     val navController = rememberNavController()

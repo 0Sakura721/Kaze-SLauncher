@@ -163,6 +163,8 @@ class TermuxManager {
                 _players.value = emptyList()
                 // 让配置中的端口生效（写入/更新 server.properties）
                 prepareServerProperties(serverDir, config.serverPort)
+                // 自动接受 EULA（Minecraft 首次启动会因 eula=false 直接退出）
+                prepareEula(serverDir)
 
                 val localJarPath: String
                 try {
@@ -323,6 +325,29 @@ class TermuxManager {
         if (changed) _players.value = onlinePlayers.toList()
     }
 
+    /**
+     * 自动接受 Minecraft EULA。
+     * 服务器首次启动会生成 eula.txt 并写入 eula=false，然后直接退出，
+     * 导致用户看到「启动失败」。这里在启动前主动写入 eula=true，
+     * 与 PufferPanel / MCSManager 等成熟面板的做法一致。
+     */
+    private fun prepareEula(dir: File) {
+        try {
+            val eula = File(dir, "eula.txt")
+            // 仅在不存在时写入，尊重用户后续手动修改（如接受更新后的 EULA）
+            if (!eula.exists()) {
+                eula.writeText(
+                    "# Minecraft EULA 由 MCServer Launcher 自动接受\n" +
+                    "# 详见 https://aka.ms/MinecraftEULA\n" +
+                    "eula=true\n"
+                )
+                emit("> 已自动接受 EULA (eula=true)")
+            }
+        } catch (e: Exception) {
+            emit("> EULA 写入失败：${e.message}")
+        }
+    }
+
     /** 让配置中的端口生效：写入或更新 server.properties 的 server-port */
     private fun prepareServerProperties(dir: File, port: Int) {
         try {
@@ -352,31 +377,54 @@ class TermuxManager {
     /**
      * 向运行中的服务器发送命令（如 stop / op / gamemode）
      * 通过命名管道喂给 java 的 stdin
+     *
+     * 注意：Android 8+ 对后台启动 Service 有严格限制，应用切到后台后
+     * 直接 startForegroundService 会抛异常导致命令丢失。因此这里优先
+     * 通过已运行的 ServerForegroundService 转发（它本身就是前台服务，
+     * 不受后台限制）；服务未运行时才回退到直接调用 Termux。
      */
     fun sendCommand(cmd: String) {
         if (!isRunning.get() || cmd.isBlank()) return
         emit("> $cmd")
         try {
-            val pipe = File(serverDir(context), "cmdpipe")
-            if (!pipe.exists()) {
-                emit("> 命令发送失败：服务器未就绪")
-                return
+            if (ServerForegroundService.isRunning) {
+                // 经由前台服务转发，规避后台启动 Service 限制
+                val broadcast = Intent(ServerForegroundService.ACTION_SEND_COMMAND).apply {
+                    setPackage(context.packageName)
+                    putExtra(ServerForegroundService.EXTRA_COMMAND, cmd)
+                }
+                context.sendBroadcast(broadcast)
+            } else {
+                // 回退：应用在前台时直接写入管道（仍需经 Termux 环境）
+                writeCommandToPipe(context, cmd)
             }
-            // 经由 Termux 写入管道（命令作为参数传入，避免 shell 注入）
-            val intent = Intent("com.termux.RUN_COMMAND")
-            intent.setClassName(TERMUX_PACKAGE, "com.termux.app.RunCommandService")
-            intent.putExtra("com.termux.RUN_COMMAND_PATH", "$TERMUX_BIN/bash")
-            intent.putExtra(
-                "com.termux.RUN_COMMAND_ARGUMENTS",
-                arrayOf("-c", "timeout 5 printf '%s\\n' \"\$1\" >> \"\$2\"", "sh", cmd, pipe.absolutePath)
-            )
-            intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                context.startForegroundService(intent)
-            else context.startService(intent)
         } catch (e: Exception) {
             emit("> 命令发送失败：${e.message}")
         }
+    }
+
+    /**
+     * 直接把命令写入命名管道（不启动额外 Service）。
+     * 由 ServerForegroundService 在收到广播后调用，也可作为前台回退。
+     */
+    fun writeCommandToPipe(ctx: Context, cmd: String) {
+        val pipe = File(serverDir(ctx), "cmdpipe")
+        if (!pipe.exists()) {
+            emit("> 命令发送失败：服务器未就绪")
+            return
+        }
+        // 经由 Termux 写入管道（命令作为参数传入，避免 shell 注入）
+        val intent = Intent("com.termux.RUN_COMMAND")
+        intent.setClassName(TERMUX_PACKAGE, "com.termux.app.RunCommandService")
+        intent.putExtra("com.termux.RUN_COMMAND_PATH", "$TERMUX_BIN/bash")
+        intent.putExtra(
+            "com.termux.RUN_COMMAND_ARGUMENTS",
+            arrayOf("-c", "timeout 5 printf '%s\\n' \"\$1\" >> \"\$2\"", "sh", cmd, pipe.absolutePath)
+        )
+        intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", TERMUX_HOME)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            ctx.startForegroundService(intent)
+        else ctx.startService(intent)
     }
 
     // ─── 停止 ───

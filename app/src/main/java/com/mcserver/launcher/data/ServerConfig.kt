@@ -13,17 +13,6 @@ data class ServerConfig(
     // 运行时：最大堆 = 用户分配值，最小堆 = 其一半（不低于 256MB）
     val maxRamMB: Int get() = allocatedMemoryMB
     val minRamMB: Int get() = (allocatedMemoryMB / 2).coerceAtLeast(256)
-
-    fun toCommandArgs(): List<String> {
-        return buildList {
-            add("-Xmx${maxRamMB}M")
-            add("-Xms${minRamMB}M")
-            addAll(additionalArgs.split(" ").filter { it.isNotBlank() })
-            add("-jar")
-            add(jarPath)
-            if (nogui) add("nogui")
-        }
-    }
 }
 
 enum class ServerState {
