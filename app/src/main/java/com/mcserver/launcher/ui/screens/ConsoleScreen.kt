@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mcserver.launcher.data.ServerState
 import com.mcserver.launcher.server.ServerManager
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.derivedStateOf
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,11 +50,15 @@ fun ConsoleScreen() {
     }
 
     // 用户滚动时判断是否停留在底部（决定是否自动跟随）
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (idx, _) ->
-                stickToBottom = idx >= consoleMessages.size - 3
-            }
+    val stickToBottomState = remember {
+        derivedStateOf {
+            val idx = listState.firstVisibleItemIndex
+            val total = listState.layoutInfo.totalItemsCount
+            total == 0 || idx >= total - 3
+        }
+    }
+    LaunchedEffect(stickToBottomState.value) {
+        stickToBottom = stickToBottomState.value
     }
 
     // 自动滚动到底部（仅当用户本就停在底部时）

@@ -56,30 +56,39 @@ fun MainApp(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
+    // 判断是否在管理子页面（显示返回按钮而非底部导航）
+    val isSubScreen = currentDestination?.route in listOf(
+        Screen.ServerConfig.route, Screen.Plugins.route,
+        Screen.Players.route, Screen.Files.route,
+        Screen.Backups.route, Screen.CoreDownload.route
+    )
+
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                bottomNavItems.forEach { screen ->
-                    val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
-                    NavigationBarItem(
-                        icon = {
-                            Icon(
-                                imageVector = screen.icon,
-                                contentDescription = screen.label
-                            )
-                        },
-                        label = { Text(screen.label) },
-                        selected = selected,
-                        onClick = {
-                            navController.navigate(screen.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+            if (!isSubScreen) {
+                NavigationBar {
+                    bottomNavItems.forEach { screen ->
+                        val selected = currentDestination?.hierarchy?.any { it.route == screen.route } == true
+                        NavigationBarItem(
+                            icon = {
+                                Icon(
+                                    imageVector = screen.icon,
+                                    contentDescription = screen.label
+                                )
+                            },
+                            label = { Text(screen.label) },
+                            selected = selected,
+                            onClick = {
+                                navController.navigate(screen.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -94,18 +103,11 @@ fun MainApp(
                     config = config,
                     onNavigateToConfig = {
                         navController.navigate(Screen.ServerConfig.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
                             launchSingleTop = true
-                            restoreState = true
                         }
                     },
                     onNavigateToConsole = {
                         navController.navigate(Screen.Console.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
-                            }
                             launchSingleTop = true
                             restoreState = true
                         }
@@ -114,6 +116,16 @@ fun MainApp(
             }
             composable(Screen.Console.route) {
                 ConsoleScreen()
+            }
+            composable(Screen.Management.route) {
+                ManagementScreen(
+                    config = config,
+                    onNavigate = { screen ->
+                        navController.navigate(screen.route) {
+                            launchSingleTop = true
+                        }
+                    }
+                )
             }
             composable(Screen.ServerConfig.route) {
                 ServerConfigScreen(
@@ -124,6 +136,25 @@ fun MainApp(
                         }
                     }
                 )
+            }
+            composable(Screen.CoreDownload.route) {
+                ServerCoreDownloadScreen(
+                    config = config,
+                    onJarDownloaded = { path ->
+                        scope.launch {
+                            prefsManager.saveServerConfig(config.copy(jarPath = path))
+                        }
+                    }
+                )
+            }
+            composable(Screen.Plugins.route) {
+                PluginsScreen()
+            }
+            composable(Screen.Players.route) {
+                PlayersScreen()
+            }
+            composable(Screen.Files.route) {
+                FilesScreen()
             }
             composable(Screen.Backups.route) {
                 BackupsScreen(

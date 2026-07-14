@@ -68,7 +68,7 @@ fun ServerConfigScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { selectedUri ->
-            // 持有持久��取权限
+            // 持有持久读取权限
             try {
                 context.contentResolver.takePersistableUriPermission(
                     selectedUri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION

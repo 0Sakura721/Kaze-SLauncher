@@ -203,12 +203,13 @@ class JreManager(private val context: Context) {
                 val pf = partialFile()
                 val initialOffset = if (pf.exists()) pf.length() else 0L
 
+                val initialProgress = if (initialOffset > 0) 0f else 0f
                 _jreInfo.value = _jreInfo.value.copy(
-                    status = JreStatus.DOWNLOADING, downloadProgress = 0f,
+                    status = JreStatus.DOWNLOADING, downloadProgress = initialProgress,
                     downloadedBytes = initialOffset, totalBytes = 0, isPaused = false,
                     downloadSpeedBytesPerSec = 0, remainingSeconds = 0
                 )
-                onProgress(0f, initialOffset, 0)
+                onProgress(initialProgress, initialOffset, 0)
 
                 val url = buildDownloadUrl()
                 var connection = URL(url).openConnection() as HttpURLConnection

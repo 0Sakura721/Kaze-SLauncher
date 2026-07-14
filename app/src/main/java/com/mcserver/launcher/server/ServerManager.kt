@@ -151,19 +151,20 @@ class ServerManager private constructor() {
         }
 
         serverJob = serverScope.launch {
-            _serverStatus.value = _serverStatus.value.copy(
-                state = ServerState.RUNNING,
-                memoryUsedMB = config.allocatedMemoryMB.toLong(),
-                maxRestarts = config.maxRestarts
-            )
-            startUptime()
             val result = termuxManager.startServer(config)
             if (result.isFailure) {
                 stopUptime()
                 _serverStatus.value = ServerStatus(state = ServerState.ERROR, maxRestarts = config.maxRestarts)
                 stopForeground()
                 termuxManager.onServerExited = null
+                return@launch
             }
+            _serverStatus.value = _serverStatus.value.copy(
+                state = ServerState.RUNNING,
+                memoryUsedMB = config.allocatedMemoryMB.toLong(),
+                maxRestarts = config.maxRestarts
+            )
+            startUptime()
             // 启动成功后，进程的实际退出由 onServerExited 回调处理
         }
     }
