@@ -6,14 +6,14 @@ plugins {
 
 android {
     namespace = "com.mcserver.launcher"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.mcserver.launcher"
         minSdk = 26
-        targetSdk = 36
-        versionCode = 6
-        versionName = "0.6.0"
+        targetSdk = 35
+        versionCode = 7
+        versionName = "0.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -22,10 +22,21 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            // CI 中使用 debug keystore；本地发布时替换为正式签名
+            storeFile = rootProject.file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "debug"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

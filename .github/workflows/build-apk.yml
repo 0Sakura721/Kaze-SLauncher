@@ -29,9 +29,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          packages: "platforms;android-36 build-tools;36.0.0"
+          packages: "platforms;android-35 build-tools;35.0.0"
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
@@ -60,9 +60,9 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
         with:
-          packages: "platforms;android-36 build-tools;36.0.0"
+          packages: "platforms;android-35 build-tools;35.0.0"
 
       - name: Create keystore
         run: |
@@ -103,7 +103,12 @@ jobs:
             在 Android 设备上运行 Minecraft Java 版服务器的原生启动器。
 
             ### 新增
-            - 请查看提交历史了解详情
+            - 服务器状态恢复（应用重启后自动检测并恢复）
+            - 控制台增强：命令历史、快捷命令按钮
+            - 玩家管理增强：踢出玩家、在线时长
+            - JVM 参数模板（Aikar's Flags 等）
+            - World 管理（查看/切换/导出世界）
+            - 性能告警通知
 
             ### 安装说明
             1. 下载 APK 文件

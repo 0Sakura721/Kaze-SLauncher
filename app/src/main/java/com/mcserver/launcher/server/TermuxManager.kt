@@ -123,6 +123,51 @@ class TermuxManager {
 
     val running: Boolean get() = isRunning.get()
 
+    // ─── 服务器存活检测（用于应用重启后恢复状态） ───
+
+    /**
+     * 检测服务器是否仍在 Termux 中运行。
+     * 通过检查 mcserver.pid 文件中的 PID 是否存活来判断。
+     * 借鉴 Pterodactyl 的进程存活检测机制。
+     */
+    fun isServerProcessAlive(): Boolean {
+        return try {
+            val dir = serverDir(context)
+            val pidFile = File(dir, "mcserver.pid")
+            if (!pidFile.exists()) return false
+            val pid = pidFile.readText().trim().toIntOrNull() ?: return false
+            // 检查 /proc/[pid] 是否存在
+            val procDir = File("/proc/$pid")
+            procDir.exists() && procDir.isDirectory
+        } catch (_: Exception) { false }
+    }
+
+    /**
+     * 重新连接到正在运行的服务器进程。
+     * 恢复日志追踪和状态监控。
+     * @return 是否成功重连
+     */
+    fun reconnectToRunningServer(): Boolean {
+        return try {
+            if (!isServerProcessAlive()) return false
+            val dir = serverDir(context)
+            logFile = File(dir, "server.log")
+            if (!logFile!!.exists()) {
+                logFile = null
+                return false
+            }
+            isRunning.set(true)
+            _stateChanged.tryEmit(true)
+            emit("> 检测到服务器仍在运行，正在恢复连接...")
+            startTailLog(logFile!!)
+            emit("> 已恢复与服务器的连接")
+            true
+        } catch (e: Exception) {
+            isRunning.set(false)
+            false
+        }
+    }
+
     // ─── 环境检测 ───
 
     /** 检查 Termux 中是否安装了 Java */

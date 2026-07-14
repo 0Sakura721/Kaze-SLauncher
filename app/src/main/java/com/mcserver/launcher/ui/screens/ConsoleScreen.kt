@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -48,6 +49,11 @@ fun ConsoleScreen() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
+    // 命令历史记录
+    val commandHistory = remember { mutableStateListOf<String>() }
+    var historyIndex by remember { mutableIntStateOf(-1) }
+    var savedInputBeforeHistory by remember { mutableStateOf("") }
+
     // 搜索/过滤
     var showSearch by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -55,6 +61,9 @@ fun ConsoleScreen() {
 
     // 快速命令面板
     var showQuickCommands by remember { mutableStateOf(false) }
+
+    // 命令历史面板
+    var showHistory by remember { mutableStateOf(false) }
 
     // 导出日志
     var showExportDialog by remember { mutableStateOf(false) }
@@ -349,6 +358,46 @@ fun ConsoleScreen() {
 
         // 命令输入区
         if (serverStatus.state == ServerState.RUNNING) {
+            // 命令历史面板
+            if (showHistory && commandHistory.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
+                    tonalElevation = 2.dp,
+                    shadowElevation = 4.dp
+                ) {
+                    LazyColumn(modifier = Modifier.padding(4.dp)) {
+                        items(commandHistory.reversed().take(20)) { cmd ->
+                            Surface(
+                                onClick = {
+                                    commandInput = cmd
+                                    showHistory = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Filled.History,
+                                        null,
+                                        Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        cmd,
+                                        style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 tonalElevation = 3.dp
@@ -359,6 +408,18 @@ fun ConsoleScreen() {
                         .padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 历史按钮
+                    IconButton(
+                        onClick = { showHistory = !showHistory },
+                        enabled = commandHistory.isNotEmpty()
+                    ) {
+                        Icon(
+                            Icons.Filled.History,
+                            contentDescription = "历史",
+                            tint = if (commandHistory.isNotEmpty()) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Icon(
                         Icons.Filled.ChevronRight,
                         contentDescription = null,
@@ -396,7 +457,15 @@ fun ConsoleScreen() {
                     IconButton(
                         onClick = {
                             if (commandInput.isNotBlank()) {
-                                serverManager.sendCommand(commandInput.trim())
+                                val cmd = commandInput.trim()
+                                serverManager.sendCommand(cmd)
+                                // 添加到历史记录（去重，最多 100 条）
+                                commandHistory.removeAll { it == cmd }
+                                commandHistory.add(cmd)
+                                if (commandHistory.size > 100) {
+                                    commandHistory.removeAt(0)
+                                }
+                                historyIndex = -1
                                 commandInput = ""
                             }
                         }

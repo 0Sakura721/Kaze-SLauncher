@@ -287,9 +287,58 @@ fun ServerConfigScreen(
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("高级", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
+
+                // JVM 参数模板选择（借鉴 Aikar's Flags / Pterodactyl Egg）
+                var showJvmTemplates by remember { mutableStateOf(false) }
+                var selectedJvmTemplate by remember { mutableStateOf("default") }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("JVM 参数", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    TextButton(onClick = { showJvmTemplates = !showJvmTemplates }) {
+                        Icon(Icons.Filled.AutoFixHigh, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("模板")
+                    }
+                }
+                if (showJvmTemplates) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            com.mcserver.launcher.server.JvmFlags.templates.forEach { template ->
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = selectedJvmTemplate == template.id,
+                                        onClick = {
+                                            selectedJvmTemplate = template.id
+                                            if (template.id != "custom" && template.flags.isNotBlank()) {
+                                                extraArgs = template.flags
+                                            }
+                                            if (template.id == "custom") {
+                                                showJvmTemplates = false
+                                            }
+                                        }
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(template.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                                        Text(template.recommendedFor, style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = extraArgs,
-                    onValueChange = { extraArgs = it },
+                    onValueChange = { extraArgs = it; selectedJvmTemplate = "custom" },
                     label = { Text("JVM 参数") },
                     supportingText = { Text("额外的 Java 虚拟机启动参数") },
                     modifier = Modifier.fillMaxWidth(),

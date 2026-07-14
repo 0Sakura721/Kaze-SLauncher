@@ -43,6 +43,10 @@ class ServerManager private constructor() {
     suspend fun deleteBackup(name: String) =
         BackupManager.deleteBackup(name).also { refreshBackups() }
 
+    /** 状态恢复标记：是否正在尝试恢复之前的服务器连接 */
+    private val _isRecovering = MutableStateFlow(false)
+    val isRecovering: StateFlow<Boolean> = _isRecovering.asStateFlow()
+
     private var serverJob: Job? = null
     private var uptimeJob: Job? = null
     private var lastConfig: ServerConfig? = null
@@ -66,6 +70,52 @@ class ServerManager private constructor() {
                     players = list
                 )
             }
+        }
+        // 尝试恢复之前的服务器状态（应用被杀后重新打开）
+        serverScope.launch {
+            tryRecoverServerState()
+        }
+    }
+
+    /**
+     * 尝试恢复之前的服务器运行状态。
+     * 应用被杀后重新打开时，检测 Termux 中是否仍有服务器进程运行，
+     * 如果有则自动重连日志追踪和性能监控。
+     * 借鉴 Pterodactyl 的 server state recovery 机制。
+     */
+    private suspend fun tryRecoverServerState() {
+        try {
+            val persistedState = ServerStateManager.state
+            if (!persistedState.isRunning) return
+
+            _isRecovering.value = true
+
+            // 检查 Termux 中的进程是否还活着
+            if (!termuxManager.isServerProcessAlive()) {
+                // 进程已经不在了，清理持久化状态
+                ServerStateManager.save(ServerStateManager.PersistentState())
+                _isRecovering.value = false
+                return
+            }
+
+            // 尝试恢复连接
+            delay(1000) // 给 Termux 一点时间
+            val reconnected = termuxManager.reconnectToRunningServer()
+            if (reconnected) {
+                _serverStatus.value = ServerStatus(
+                    state = ServerState.RUNNING,
+                    uptimeSeconds = (System.currentTimeMillis() - persistedState.startTimeMs) / 1000
+                )
+                PerformanceMonitor.instance.startMonitoring()
+                startUptime()
+                startForeground()
+            } else {
+                ServerStateManager.save(ServerStateManager.PersistentState())
+            }
+            _isRecovering.value = false
+        } catch (_: Exception) {
+            ServerStateManager.save(ServerStateManager.PersistentState())
+            _isRecovering.value = false
         }
     }
 

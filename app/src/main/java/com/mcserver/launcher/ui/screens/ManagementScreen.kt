@@ -152,5 +152,6 @@ private fun getScreenDescription(screen: Screen): String = when (screen) {
     Screen.Backups -> "完整备份/恢复服务器数据，自动备份策略"
     Screen.ResourcePacks -> "管理资源包，配置强制资源包和下载 URL"
     Screen.Schedules -> "定时执行命令、备份、重启、广播等任务"
+    Screen.Worlds -> "查看/切换/导出/删除 Minecraft 世界"
     else -> ""
 }

@@ -196,6 +196,47 @@ fun PlayersScreen() {
 
 @Composable
 private fun OnlinePlayersTab(status: com.mcserver.launcher.data.ServerStatus) {
+    val serverManager = ServerManager.instance
+    val scope = rememberCoroutineScope()
+    var showKickDialog by remember { mutableStateOf<String?>(null) }
+    var kickReason by remember { mutableStateOf("") }
+
+    // 踢出确认弹窗
+    showKickDialog?.let { playerName ->
+        AlertDialog(
+            onDismissRequest = { showKickDialog = null; kickReason = "" },
+            title = { Text("踢出玩家") },
+            text = {
+                Column {
+                    Text("确定要踢出「$playerName」吗？")
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = kickReason,
+                        onValueChange = { kickReason = it },
+                        label = { Text("原因（可选）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val reason = kickReason.trim()
+                        val cmd = if (reason.isNotEmpty()) "kick $playerName $reason" else "kick $playerName"
+                        serverManager.sendCommand(cmd)
+                        showKickDialog = null
+                        kickReason = ""
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) { Text("踢出") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showKickDialog = null; kickReason = "" }) { Text("取消") }
+            }
+        )
+    }
+
     Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -218,7 +259,19 @@ private fun OnlinePlayersTab(status: com.mcserver.launcher.data.ServerStatus) {
                     ) {
                         Icon(Icons.Filled.Person, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(12.dp))
-                        Text(player, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(player, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        // 踢出按钮
+                        IconButton(
+                            onClick = { showKickDialog = player },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.ExitToApp,
+                                contentDescription = "踢出",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                     HorizontalDivider()
                 }
