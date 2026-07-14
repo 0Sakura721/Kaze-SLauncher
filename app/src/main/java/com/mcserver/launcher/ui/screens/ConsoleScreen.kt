@@ -636,13 +636,13 @@ fun ConsoleScreen() {
                                             }
                                         }
                                         "diagnostic" -> {
-                                            // 需要从外部获取 config，这里使用 ServerManager 的上下文
-                                            // 从 prefsManager 获取配置较为复杂，简化处理
-                                            val config = com.mcserver.launcher.data.ServerConfig(
-                                                jarPath = "",
-                                                allocatedMemoryMB = 2048,
-                                                serverPort = 25565
-                                            )
+                                            // 使用 ServerManager 中最后使用的配置，或提供一个合理的默认值
+                                            val config = com.mcserver.launcher.server.ServerManager.instance.currentConfig
+                                                ?: com.mcserver.launcher.data.ServerConfig(
+                                                    jarPath = "",
+                                                    allocatedMemoryMB = 2048,
+                                                    serverPort = 25565
+                                                )
                                             val reportFile = com.mcserver.launcher.server.HealthChecker.exportDiagnosticReport(config)
                                             Toast.makeText(context,
                                                 "诊断报告已导出到 ${reportFile.absolutePath}",

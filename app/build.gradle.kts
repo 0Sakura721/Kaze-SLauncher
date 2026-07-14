@@ -12,14 +12,20 @@ android {
         applicationId = "com.mcserver.launcher"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.7.0"
+        versionCode = 8
+        versionName = "0.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
+
+        // BuildConfig fields accessible at runtime
+        buildConfigField("String", "BUILD_TIME", "\"${System.currentTimeMillis()}\"")
+        buildConfigField("String", "GIT_COMMIT", "\"${try {
+            ProcessBuilder("git", "rev-parse", "--short", "HEAD").start().inputStream.bufferedReader().readText().trim()
+        } catch (_: Exception) { "unknown" }}\"")
     }
 
     signingConfigs {
@@ -46,6 +52,7 @@ android {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            isDebuggable = true
         }
     }
 

@@ -50,6 +50,8 @@ class ServerManager private constructor() {
     private var serverJob: Job? = null
     private var uptimeJob: Job? = null
     private var lastConfig: ServerConfig? = null
+    /** 最后一次启动使用的服务器配置（供 ConsoleScreen 等界面使用） */
+    val currentConfig: ServerConfig? get() = lastConfig
     /** 区分「用户手动停止」与「崩溃退出」，避免自动重启把手动停止的服务器又拉起来 */
     private val manualStop = AtomicBoolean(false)
     /** 连续崩溃自动重启次数（仿 Pterodactyl restart policy） */

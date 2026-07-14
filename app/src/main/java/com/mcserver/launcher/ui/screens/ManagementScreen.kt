@@ -18,6 +18,8 @@ import com.mcserver.launcher.server.FileManager
 import com.mcserver.launcher.server.PluginManager
 import com.mcserver.launcher.server.PlayerManager
 import com.mcserver.launcher.server.ServerManager
+import com.mcserver.launcher.server.ServerStateManager
+import com.mcserver.launcher.ui.components.formatUptime
 import com.mcserver.launcher.ui.navigation.Screen
 import com.mcserver.launcher.ui.navigation.managementSubScreens
 import kotlinx.coroutines.launch
@@ -36,6 +38,7 @@ fun ManagementScreen(
     var diskUsage by remember { mutableStateOf<FileManager.DiskUsage?>(null) }
     var opCount by remember { mutableIntStateOf(0) }
     var backupCount by remember { mutableIntStateOf(0) }
+    var stats by remember { mutableStateOf(ServerStateManager.ServerStats()) }
 
     LaunchedEffect(Unit) {
         scope.launch {
@@ -44,6 +47,7 @@ fun ManagementScreen(
             diskUsage = FileManager.getDiskUsage()
             opCount = PlayerManager.getOps().size
             backupCount = ServerManager.instance.backups.value.size
+            stats = ServerStateManager.getStats()
         }
     }
 
@@ -76,6 +80,32 @@ fun ManagementScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+
+        // 服务器状态统计卡片
+        if (stats.totalRestarts > 0 || stats.totalUptimeSeconds > 0) {
+            Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("运行统计", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        if (stats.totalUptimeSeconds > 0) {
+                            StatItem(
+                                "累计运行",
+                                formatUptime(stats.totalUptimeSeconds),
+                                Icons.Filled.Timer
+                            )
+                        }
+                        StatItem("重启", "${stats.totalRestarts}", Icons.Filled.RestartAlt)
+                        StatItem(
+                            "崩溃",
+                            "${stats.totalCrashes}",
+                            Icons.Filled.ErrorOutline,
+                            tint = if (stats.totalCrashes > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }
@@ -134,11 +164,17 @@ private fun ManagementCard(
 }
 
 @Composable
-private fun StatItem(label: String, value: String, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+private fun StatItem(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(icon, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+        Icon(icon, null, Modifier.size(24.dp), tint = tint)
         Spacer(Modifier.height(4.dp))
-        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+            color = tint)
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

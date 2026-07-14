@@ -336,15 +336,8 @@ object HealthChecker {
             return HealthCheck("Java 兼容性", true, "未选择 JAR，跳过检查", Severity.INFO)
         }
 
-        val jarName = config.jarPath.lowercase()
-        val requiredVersion = when {
-            jarName.contains("1.21") || jarName.contains("1.22") || jarName.contains("1.23") ||
-            jarName.contains("1.24") || jarName.contains("1.25") -> 21
-            jarName.contains("1.18") || jarName.contains("1.19") || jarName.contains("1.20") -> 17
-            jarName.contains("1.17") -> 16
-            jarName.contains("1.16") -> 8
-            else -> 17
-        }
+        val requiredVersion = McVersionCompat.getRequiredJavaVersion(config.jarPath)
+        val serverType = McVersionCompat.guessServerType(config.jarPath)
 
         val currentJavaVersion = try {
             (System.getProperty("java.version") ?: "17")
@@ -355,11 +348,11 @@ object HealthChecker {
 
         return if (currentJavaVersion >= requiredVersion) {
             HealthCheck("Java 兼容性", true,
-                "Java $currentJavaVersion 满足最低要求 Java $requiredVersion",
+                "Java $currentJavaVersion 满足 $serverType 核心要求 (Java $requiredVersion+)",
                 Severity.INFO)
         } else {
             HealthCheck("Java 兼容性", true,
-                "JAR 需要 Java $requiredVersion，当前为 Java $currentJavaVersion",
+                "$serverType 核心需要 Java $requiredVersion+，当前为 Java $currentJavaVersion",
                 Severity.WARNING,
                 detail = "请在 Termux 中安装更高版本 Java: pkg install openjdk-21")
         }

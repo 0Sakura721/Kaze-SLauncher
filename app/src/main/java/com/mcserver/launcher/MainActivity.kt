@@ -133,6 +133,12 @@ fun MainApp(
                             launchSingleTop = true
                             restoreState = true
                         }
+                    },
+                    onNavigateToManagement = {
+                        navController.navigate(Screen.Management.route) {
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 )
             }

@@ -1,4 +1,4 @@
-# ─── MCServer Launcher ProGuard Rules ───
+# ─── MCServer Launcher ProGuard / R8 Rules ───
 
 # ── Kotlin ──
 -keepattributes *Annotation*
@@ -25,6 +25,7 @@
 -keep class com.mcserver.launcher.data.** { *; }
 -keep class com.mcserver.launcher.server.** { *; }
 -keep class com.mcserver.launcher.ui.** { *; }
+-keep class com.mcserver.launcher.utils.** { *; }
 
 # ── DataStore Preferences ──
 -keep class androidx.datastore.** { *; }
@@ -36,6 +37,8 @@
 -dontwarn androidx.compose.**
 -keep class androidx.compose.ui.** { *; }
 -keep class androidx.compose.runtime.** { *; }
+-keep class androidx.compose.material3.** { *; }
+-keep class androidx.compose.material.icons.** { *; }
 
 # ── Navigation Compose ──
 -keep class androidx.navigation.** { *; }
@@ -49,18 +52,20 @@
 -keep class org.json.** { *; }
 -keepclassmembers class org.json.** { *; }
 
-# ── Java IO / NIO ──
+# ── Java IO / NIO / JAR / ZIP ──
 -keep class java.io.** { *; }
 -keep class java.nio.** { *; }
 -keep class java.nio.file.** { *; }
+-keep class java.util.jar.** { *; }
+-keep class java.util.zip.** { *; }
 
 # ── Network ──
 -keep class java.net.** { *; }
 -keep class javax.net.** { *; }
+-keep class javax.net.ssl.** { *; }
 
-# ── java.util.jar (JarFile parsing) ──
--keep class java.util.jar.** { *; }
--keep class java.util.zip.** { *; }
+# ── Security / Crypto (MD5 for offline UUID) ──
+-keep class java.security.** { *; }
 
 # ── Prevent removal of used classes via reflection ──
 -keep class * extends android.app.Service { *; }
@@ -78,3 +83,7 @@
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
+
+# ── Reduce APK size: remove unused resources and debug info ──
+-allowaccessmodification
+-repackageclasses

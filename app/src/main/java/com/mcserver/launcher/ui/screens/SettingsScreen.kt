@@ -310,8 +310,12 @@ fun SettingsScreen(
         Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("关于", style = MaterialTheme.typography.titleMedium); Spacer(Modifier.height(8.dp))
-                AboutRow("版本", "0.5.0"); AboutRow("目标架构", "ARM64 (v7a / v8a)")
-                AboutRow("平台", "Android 8.0+ (API 26+)"); AboutRow("Java 运行时", "Eclipse Temurin / 国内镜像")
+                AboutRow("版本", com.mcserver.launcher.BuildConfig.VERSION_NAME)
+                AboutRow("构建号", "${com.mcserver.launcher.BuildConfig.VERSION_CODE}")
+                AboutRow("Git 提交", com.mcserver.launcher.BuildConfig.GIT_COMMIT)
+                AboutRow("目标架构", "ARM64 (v7a / v8a)")
+                AboutRow("平台", "Android 8.0+ (API 26+)")
+                AboutRow("Java 运行时", "Eclipse Temurin / 国内镜像")
             }
         }
     }

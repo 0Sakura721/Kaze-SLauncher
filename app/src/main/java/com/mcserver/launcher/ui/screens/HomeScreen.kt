@@ -1,5 +1,6 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -9,19 +10,18 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.mcserver.launcher.data.DashboardSummary
 import com.mcserver.launcher.data.JreStatus
 import com.mcserver.launcher.data.ServerConfig
 import com.mcserver.launcher.data.ServerState
-import com.mcserver.launcher.server.HealthChecker
-import com.mcserver.launcher.server.PerformanceMonitor
-import com.mcserver.launcher.server.ServerManager
-import com.mcserver.launcher.server.TermuxManager
-import com.mcserver.launcher.server.TermuxState
-import com.mcserver.launcher.ui.components.ServerStatusCard
+import com.mcserver.launcher.server.*
 import com.mcserver.launcher.ui.components.PerformanceChartCard
+import com.mcserver.launcher.ui.components.ServerStatusCard
 import com.mcserver.launcher.ui.components.formatUptime
+import com.mcserver.launcher.utils.NetworkUtils
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -29,7 +29,8 @@ import kotlinx.coroutines.launch
 fun HomeScreen(
     config: ServerConfig,
     onNavigateToConfig: () -> Unit,
-    onNavigateToConsole: () -> Unit
+    onNavigateToConsole: () -> Unit,
+    onNavigateToManagement: () -> Unit = {}
 ) {
     val serverManager = ServerManager.instance
     val serverStatus by serverManager.serverStatus.collectAsState()
@@ -44,7 +45,43 @@ fun HomeScreen(
     var showHealthCheck by remember { mutableStateOf(false) }
     var healthResult by remember { mutableStateOf<HealthChecker.HealthResult?>(null) }
 
-    LaunchedEffect(Unit) { termuxState = serverManager.termuxState }
+    // 网络状态
+    var networkState by remember { mutableStateOf(NetworkUtils.NetworkState.DISCONNECTED) }
+    var localIp by remember { mutableStateOf<String?>(null) }
+    var networkType by remember { mutableStateOf("未知") }
+
+    // 仪表盘摘要
+    var dashboardSummary by remember { mutableStateOf(DashboardSummary()) }
+
+    LaunchedEffect(Unit) {
+        termuxState = serverManager.termuxState
+        networkState = NetworkUtils.getNetworkState(context)
+        localIp = NetworkUtils.getLocalIpAddress()
+        networkType = NetworkUtils.getNetworkTypeDescription(context)
+
+        // 异步加载仪表盘数据
+        scope.launch {
+            val pluginCount = PluginManager.scanPlugins().size
+            val worldCount = FileManager.listWorlds().size
+            val playerCount = PlayerManager.getOps().size
+            val backupCount = serverManager.backups.value.size
+            val diskUsage = FileManager.getDiskUsage()
+            val stats = ServerStateManager.getStats()
+
+            dashboardSummary = DashboardSummary(
+                serverStatus = serverStatus,
+                jreInfo = jreInfo,
+                pluginCount = pluginCount,
+                worldCount = worldCount,
+                playerCount = serverStatus.playerCount,
+                opCount = playerCount,
+                backupCount = backupCount,
+                diskUsage = diskUsage,
+                stats = stats,
+                networkState = networkType
+            )
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -53,12 +90,91 @@ fun HomeScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 顶部标题
-        Text(
-            text = "Minecraft 服务器",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
-        )
+        // 顶部标题 + 网络状态
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Minecraft 服务器",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+            // 网络状态指示
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.clickable {
+                    // 刷新网络状态
+                    networkState = NetworkUtils.getNetworkState(context)
+                    localIp = NetworkUtils.getLocalIpAddress()
+                    networkType = NetworkUtils.getNetworkTypeDescription(context)
+                }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Wifi,
+                        contentDescription = null,
+                        tint = when (networkState) {
+                            NetworkUtils.NetworkState.CONNECTED -> MaterialTheme.colorScheme.primary
+                            NetworkUtils.NetworkState.CONNECTING -> MaterialTheme.colorScheme.tertiary
+                            NetworkUtils.NetworkState.DISCONNECTED -> MaterialTheme.colorScheme.error
+                        },
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = when (networkState) {
+                            NetworkUtils.NetworkState.CONNECTED -> networkType
+                            NetworkUtils.NetworkState.CONNECTING -> "连接中"
+                            NetworkUtils.NetworkState.DISCONNECTED -> "无网络"
+                        },
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+        }
+
+        // 局域网 IP（如果服务器在运行）
+        if (serverStatus.state == ServerState.RUNNING && localIp != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Lan,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            "局域网连接地址",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                        )
+                        Text(
+                            "$localIp:${config.serverPort}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+        }
 
         // JRE 状态卡片
         Card(
@@ -301,6 +417,51 @@ fun HomeScreen(
             }
         }
 
+        // 服务器统计卡片（累计数据）
+        val stats = dashboardSummary.stats
+        if (stats.totalRestarts > 0 || stats.totalUptimeSeconds > 0) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "累计统计",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        if (stats.totalUptimeSeconds > 0) {
+                            StatBadge(
+                                label = "累计运行",
+                                value = formatUptime(stats.totalUptimeSeconds),
+                                icon = Icons.Filled.Timer
+                            )
+                        }
+                        if (stats.totalRestarts > 0) {
+                            StatBadge(
+                                label = "重启次数",
+                                value = "${stats.totalRestarts}",
+                                icon = Icons.Filled.RestartAlt
+                            )
+                        }
+                        if (stats.totalCrashes > 0) {
+                            StatBadge(
+                                label = "崩溃次数",
+                                value = "${stats.totalCrashes}",
+                                icon = Icons.Filled.ErrorOutline,
+                                isWarning = true
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // 健康检查结果弹窗
         if (showHealthCheck && healthResult != null) {
             HealthCheckDialog(
@@ -330,6 +491,76 @@ fun HomeScreen(
                     InfoRow("JAR", config.jarPath.substringAfterLast("/"))
                     InfoRow("内存", "${config.allocatedMemoryMB} MB")
                     InfoRow("端口", "${config.serverPort}")
+                }
+            }
+
+            // 仪表盘概览（插件/世界/OP/备份数量 + 磁盘使用）
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "服务器概览",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TextButton(onClick = onNavigateToManagement) {
+                            Text("管理")
+                            Icon(Icons.Filled.ChevronRight, null, Modifier.size(16.dp))
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        StatBadge(
+                            label = "插件",
+                            value = "${dashboardSummary.pluginCount}",
+                            icon = Icons.Filled.Extension
+                        )
+                        StatBadge(
+                            label = "世界",
+                            value = "${dashboardSummary.worldCount}",
+                            icon = Icons.Filled.Public
+                        )
+                        StatBadge(
+                            label = "OP",
+                            value = "${dashboardSummary.opCount}",
+                            icon = Icons.Filled.AdminPanelSettings
+                        )
+                        StatBadge(
+                            label = "备份",
+                            value = "${dashboardSummary.backupCount}",
+                            icon = Icons.Filled.Backup
+                        )
+                    }
+                    dashboardSummary.diskUsage?.let { disk ->
+                        Spacer(Modifier.height(10.dp))
+                        HorizontalDivider()
+                        Spacer(Modifier.height(6.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "磁盘使用",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                "${FileManager.formatFileSize(disk.totalSize)} (${disk.totalFiles} 文件)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                 }
             }
         } else {
@@ -370,15 +601,51 @@ fun HomeScreen(
 
         // 快捷操作
         if (serverStatus.state == ServerState.RUNNING) {
-            TextButton(
-                onClick = onNavigateToConsole,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Filled.Terminal, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("打开控制台")
+                Button(
+                    onClick = onNavigateToConsole,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Filled.Terminal, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("控制台")
+                }
+                OutlinedButton(
+                    onClick = onNavigateToManagement,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("管理")
+                }
             }
         }
+
+        // 底部留白
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun StatBadge(
+    label: String,
+    value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isWarning: Boolean = false
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(
+            icon, null,
+            Modifier.size(22.dp),
+            tint = if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+            color = if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -398,7 +665,8 @@ private fun InfoRow(label: String, value: String) {
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.Medium,
+            fontFamily = FontFamily.Monospace
         )
     }
 }
