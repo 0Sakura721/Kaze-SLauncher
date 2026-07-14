@@ -56,6 +56,13 @@ fun ConsoleScreen() {
     // 快速命令面板
     var showQuickCommands by remember { mutableStateOf(false) }
 
+    // 导出日志
+    var showExportDialog by remember { mutableStateOf(false) }
+    var exportFilter by remember { mutableStateOf("all") }
+    var exportFromLine by remember { mutableStateOf("0") }
+    var exportToLine by remember { mutableStateOf("") }
+    var exporting by remember { mutableStateOf(false) }
+
     // 收集控制台输出
     LaunchedEffect(Unit) {
         serverManager.consoleOutput.collect { line ->
@@ -128,6 +135,13 @@ fun ConsoleScreen() {
                     Toast.makeText(context, "已复制 ${consoleMessages.size} 行日志", Toast.LENGTH_SHORT).show()
                 }) {
                     Icon(Icons.Filled.ContentCopy, contentDescription = "复制日志")
+                }
+                // 导出
+                IconButton(onClick = {
+                    exportToLine = consoleMessages.size.toString()
+                    showExportDialog = true
+                }) {
+                    Icon(Icons.Filled.FileDownload, contentDescription = "导出日志")
                 }
                 // 清除
                 IconButton(onClick = { consoleMessages.clear() }) {
@@ -421,6 +435,109 @@ fun ConsoleScreen() {
                     )
                 }
             }
+        }
+
+        // 导出日志对话框
+        if (showExportDialog) {
+            AlertDialog(
+                onDismissRequest = { showExportDialog = false },
+                icon = { Icon(Icons.Filled.FileDownload, null, tint = MaterialTheme.colorScheme.primary) },
+                title = { Text("导出日志") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("将控制台日志导出为 .log 文件到下载目录。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("日志级别过滤：", style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.width(8.dp))
+                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                listOf("all" to "全部", "error" to "错误", "warn" to "警告", "info" to "信息", "chat" to "聊天").forEach { (k, v) ->
+                                    FilterChip(
+                                        selected = exportFilter == k,
+                                        onClick = { exportFilter = k },
+                                        label = { Text(v, style = MaterialTheme.typography.labelSmall) }
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = exportFromLine,
+                                onValueChange = { exportFromLine = it.filter { c -> c.isDigit() } },
+                                label = { Text("起始行") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                enabled = !exporting
+                            )
+                            OutlinedTextField(
+                                value = exportToLine,
+                                onValueChange = { exportToLine = it.filter { c -> c.isDigit() } },
+                                label = { Text("结束行") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true,
+                                enabled = !exporting
+                            )
+                        }
+                        Text("共 ${consoleMessages.size} 行日志",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                exporting = true
+                                try {
+                                    val from = exportFromLine.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                                    val to = exportToLine.toIntOrNull()?.coerceAtMost(consoleMessages.size) ?: consoleMessages.size
+                                    val filtered = consoleMessages.subList(from, to).filter { msg ->
+                                        when (exportFilter) {
+                                            "all" -> true
+                                            "error" -> msg.contains("ERROR") || msg.contains("FATAL") || msg.contains("Exception")
+                                            "warn" -> msg.contains("WARN")
+                                            "info" -> msg.contains("INFO")
+                                            "chat" -> msg.contains("joined") || msg.contains("left") || msg.contains("<")
+                                            else -> true
+                                        }
+                                    }
+
+                                    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                                        .format(java.util.Date())
+                                    val fileName = "mcserver_console_$timestamp.log"
+                                    val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                                        android.os.Environment.DIRECTORY_DOWNLOADS)
+                                    downloadsDir.mkdirs()
+                                    val logFile = java.io.File(downloadsDir, fileName)
+                                    logFile.writeText(filtered.joinToString("\n"))
+
+                                    Toast.makeText(context,
+                                        "已导出 ${filtered.size} 行日志到 Downloads/$fileName",
+                                        Toast.LENGTH_LONG).show()
+                                    showExportDialog = false
+                                } catch (e: Exception) {
+                                    Toast.makeText(context,
+                                        "导出失败：${e.message}",
+                                        Toast.LENGTH_SHORT).show()
+                                }
+                                exporting = false
+                            }
+                        },
+                        enabled = !exporting
+                    ) {
+                        if (exporting) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Text("导出")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showExportDialog = false }) { Text("取消") }
+                }
+            )
         }
     }
 }

@@ -80,7 +80,8 @@ fun MainApp(
     val isSubScreen = currentDestination?.route in listOf(
         Screen.ServerConfig.route, Screen.Plugins.route,
         Screen.Players.route, Screen.Files.route,
-        Screen.Backups.route, Screen.CoreDownload.route
+        Screen.Backups.route, Screen.CoreDownload.route,
+        Screen.ResourcePacks.route
     )
 
     Scaffold(
@@ -185,6 +186,9 @@ fun MainApp(
                         }
                     }
                 )
+            }
+            composable(Screen.ResourcePacks.route) {
+                ResourcePacksScreen()
             }
             composable(Screen.Settings.route) {
                 SettingsScreen(

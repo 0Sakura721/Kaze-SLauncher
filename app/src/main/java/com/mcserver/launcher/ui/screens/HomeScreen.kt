@@ -426,9 +426,21 @@ private fun HealthCheckDialog(
                 tint = if (result.passed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
             )
         },
-        title = { Text(if (result.passed) "检查通过" else "启动前检查发现问题") },
+        title = {
+            Text(
+                when {
+                    result.passed && result.warnings.isEmpty() -> "诊断通过"
+                    result.passed -> "诊断通过（有注意事项）"
+                    else -> "启动前诊断发现问题"
+                }
+            )
+        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // 检查项列表
                 result.checks.forEach { check ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
@@ -445,9 +457,36 @@ private fun HealthCheckDialog(
                             }
                         )
                         Spacer(Modifier.width(8.dp))
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(check.name, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
                             Text(check.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (check.detail.isNotBlank()) {
+                                Text(check.detail, style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                            }
+                        }
+                    }
+                }
+
+                // 推荐建议
+                if (result.recommendations.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
+                    Text("推荐优化", style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary)
+                    result.recommendations.forEach { rec ->
+                        Row(
+                            modifier = Modifier.padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Icon(Icons.Filled.Lightbulb, null,
+                                Modifier.size(14.dp).padding(top = 2.dp),
+                                tint = MaterialTheme.colorScheme.tertiary)
+                            Spacer(Modifier.width(6.dp))
+                            Text(rec, style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }

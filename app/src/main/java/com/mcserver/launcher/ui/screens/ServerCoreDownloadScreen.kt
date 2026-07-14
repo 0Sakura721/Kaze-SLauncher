@@ -34,8 +34,10 @@ fun ServerCoreDownloadScreen(
 
     var selectedType by remember { mutableStateOf(ServerCoreManager.CoreType.PAPER) }
     var versions by remember { mutableStateOf<List<ServerCoreManager.CoreVersion>>(emptyList()) }
+    var forgeVersions by remember { mutableStateOf<List<String>>(emptyList()) }
     var builds by remember { mutableStateOf<List<ServerCoreManager.CoreBuild>>(emptyList()) }
     var selectedVersion by remember { mutableStateOf("") }
+    var selectedForgeVersion by remember { mutableStateOf("") }
     var selectedBuild by remember { mutableStateOf("") }
     var selectedFileName by remember { mutableStateOf("") }
 
@@ -57,7 +59,9 @@ fun ServerCoreDownloadScreen(
                 ServerCoreManager.CoreType.PURPUR -> coreManager.fetchPurpurVersions()
                 ServerCoreManager.CoreType.FABRIC -> coreManager.fetchFabricVersions()
                 ServerCoreManager.CoreType.VANILLA -> coreManager.fetchVanillaVersions()
-                ServerCoreManager.CoreType.SPIGOT -> coreManager.fetchPaperVersions() // Spigot 使用 Paper API 兜底
+                ServerCoreManager.CoreType.SPIGOT -> coreManager.fetchPaperVersions()
+                ServerCoreManager.CoreType.FORGE -> coreManager.fetchVanillaVersions() // Forge 版本与 Vanilla 同步
+                ServerCoreManager.CoreType.NEOFORGE -> coreManager.fetchVanillaVersions() // NeoForge 版本与 Vanilla 同步
             }
             result.fold(
                 onSuccess = { versions = it; loadingVersions = false },
@@ -77,15 +81,13 @@ fun ServerCoreDownloadScreen(
                     )
                 }
                 ServerCoreManager.CoreType.PURPUR -> {
-                    // Purpur 直接下载最新，无需选构建
-                    val url = coreManager.getPurpurDownloadUrl(version)
                     val fileName = "purpur-$version.jar"
                     builds = listOf(ServerCoreManager.CoreBuild("latest", "Latest", fileName))
                     loadingBuilds = false
                 }
                 ServerCoreManager.CoreType.FABRIC -> {
                     coreManager.getFabricDownloadUrl(version).fold(
-                        onSuccess = { url ->
+                        onSuccess = {
                             builds = listOf(ServerCoreManager.CoreBuild("latest", "Latest", "fabric-server-$version.jar"))
                             loadingBuilds = false
                         },
@@ -97,9 +99,34 @@ fun ServerCoreDownloadScreen(
                     loadingBuilds = false
                 }
                 ServerCoreManager.CoreType.SPIGOT -> {
-                    // Spigot 使用 BuildTools，不直接提供下载
                     buildError = "Spigot 需使用 BuildTools 构建，请选择 Paper 或 Purpur"
                     loadingBuilds = false
+                }
+                ServerCoreManager.CoreType.FORGE -> {
+                    coreManager.fetchForgeVersions(version).fold(
+                        onSuccess = { fvs ->
+                            forgeVersions = fvs
+                            builds = fvs.map { v ->
+                                val fv = v.substringAfter("$version-", v)
+                                ServerCoreManager.CoreBuild(fv, "Forge $fv", "forge-$v-installer.jar")
+                            }
+                            loadingBuilds = false
+                        },
+                        onFailure = { buildError = "获取 Forge 版本失败：${it.message}。请检查网络或稍后重试。"; loadingBuilds = false }
+                    )
+                }
+                ServerCoreManager.CoreType.NEOFORGE -> {
+                    coreManager.fetchNeoForgeVersions(version).fold(
+                        onSuccess = { fvs ->
+                            forgeVersions = fvs
+                            builds = fvs.map { v ->
+                                val nv = v.substringAfter("$version-", v)
+                                ServerCoreManager.CoreBuild(nv, "NeoForge $nv", "neoforge-$v-installer.jar")
+                            }
+                            loadingBuilds = false
+                        },
+                        onFailure = { buildError = "获取 NeoForge 版本失败：${it.message}。请检查网络或稍后重试。"; loadingBuilds = false }
+                    )
                 }
             }
         }
@@ -139,6 +166,18 @@ fun ServerCoreDownloadScreen(
                             downloading = false; return@launch
                         }
                         url = result.getOrThrow()
+                    }
+                    ServerCoreManager.CoreType.FORGE -> {
+                        val fv = selectedBuild.ifEmpty { "latest" }
+                        val fullVer = "$selectedVersion-$fv"
+                        fileName = "forge-$fullVer-installer.jar"
+                        url = coreManager.getForgeDownloadUrl(selectedVersion, fv)
+                    }
+                    ServerCoreManager.CoreType.NEOFORGE -> {
+                        val nv = selectedBuild.ifEmpty { "latest" }
+                        val fullVer = "$selectedVersion-$nv"
+                        fileName = "neoforge-$fullVer-installer.jar"
+                        url = coreManager.getNeoForgeDownloadUrl(selectedVersion, nv)
                     }
                     else -> { downloading = false; return@launch }
                 }
@@ -288,6 +327,7 @@ fun ServerCoreDownloadScreen(
         val canDownload = when (selectedType) {
             ServerCoreManager.CoreType.PAPER -> selectedVersion.isNotBlank() && selectedBuild.isNotBlank()
             ServerCoreManager.CoreType.PURPUR, ServerCoreManager.CoreType.FABRIC, ServerCoreManager.CoreType.VANILLA -> selectedVersion.isNotBlank()
+            ServerCoreManager.CoreType.FORGE, ServerCoreManager.CoreType.NEOFORGE -> selectedVersion.isNotBlank() && selectedBuild.isNotBlank()
             ServerCoreManager.CoreType.SPIGOT -> false
         }
 

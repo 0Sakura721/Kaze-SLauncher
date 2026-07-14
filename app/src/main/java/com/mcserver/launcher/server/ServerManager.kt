@@ -52,7 +52,12 @@ class ServerManager private constructor() {
     private var restartCount = 0
     private var lastExitTime = 0L
 
+    /** 累计统计数据（持久化） */
+    val stats: ServerStateManager.ServerStats get() = ServerStateManager.getStats()
+
     init {
+        // 加载上次持久化状态
+        ServerStateManager.load()
         // 将在线玩家列表同步到状态，供界面展示
         serverScope.launch {
             termuxManager.players.collect { list ->
@@ -116,6 +121,7 @@ class ServerManager private constructor() {
                             termuxManager.notifyConsole("> 备份失败：${it.message}")
                         }
                     }
+                    ServerStateManager.onServerStopped()
                     _serverStatus.value = ServerStatus(state = ServerState.STOPPED)
                     stopUptime()
                     stopForeground()
@@ -142,6 +148,7 @@ class ServerManager private constructor() {
                             )
                         }
                         restartCount = 0
+                        ServerStateManager.onServerCrashed()
                         _serverStatus.value = ServerStatus(state = ServerState.STOPPED)
                         stopUptime()
                         stopForeground()
@@ -165,6 +172,7 @@ class ServerManager private constructor() {
                 memoryUsedMB = config.allocatedMemoryMB.toLong(),
                 maxRestarts = config.maxRestarts
             )
+            ServerStateManager.onServerStarted(config)
             PerformanceMonitor.instance.startMonitoring()
             startUptime()
             // 启动成功后，进程的实际退出由 onServerExited 回调处理

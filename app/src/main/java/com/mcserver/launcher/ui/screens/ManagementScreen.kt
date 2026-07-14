@@ -145,10 +145,11 @@ private fun StatItem(label: String, value: String, icon: androidx.compose.ui.gra
 
 private fun getScreenDescription(screen: Screen): String = when (screen) {
     Screen.ServerConfig -> "服务器名称、JAR、内存、端口、游戏规则等核心配置"
-    Screen.CoreDownload -> "从 Paper/Purpur/Fabric/Vanilla 下载服务器 JAR 核心"
+    Screen.CoreDownload -> "从 Paper/Purpur/Fabric/Forge/NeoForge/Vanilla 下载服务器 JAR 核心"
     Screen.Plugins -> "管理 plugins/ 目录中的插件，启用/禁用/删除"
     Screen.Players -> "在线玩家列表、OP 管理、白名单、封禁列表"
     Screen.Files -> "浏览服务器文件、查看崩溃报告、编辑配置文件"
     Screen.Backups -> "完整备份/恢复服务器数据，自动备份策略"
+    Screen.ResourcePacks -> "管理资源包，配置强制资源包和下载 URL"
     else -> ""
 }

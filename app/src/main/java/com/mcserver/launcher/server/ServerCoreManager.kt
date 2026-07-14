@@ -10,7 +10,7 @@ import java.net.URL
 /**
  * 服务器核心下载管理器。
  * 借鉴 Pterodactyl 和 MCSManager 的服务器模板设计，
- * 支持从 Paper / Purpur / Fabric / Vanilla / Spigot 等源下载 JAR。
+ * 支持从 Paper / Purpur / Fabric / Forge / NeoForge / Vanilla / Spigot 等源下载 JAR。
  */
 class ServerCoreManager {
 
@@ -18,6 +18,8 @@ class ServerCoreManager {
         PAPER("Paper", "https://api.papermc.io/v2", "高性能 Spigot 分支，推荐"),
         PURPUR("Purpur", "https://api.purpurmc.org/v2", "Paper 分支 + 更多配置选项"),
         FABRIC("Fabric", "https://meta.fabricmc.net/v2", "轻量 Mod 加载器"),
+        FORGE("Forge", "https://maven.minecraftforge.net", "经典 Mod 加载器"),
+        NEOFORGE("NeoForge", "https://maven.neoforged.net", "Forge 现代分支"),
         VANILLA("Vanilla", "https://piston-meta.mojang.com", "官方原版"),
         SPIGOT("Spigot", "https://hub.spigotmc.org/versions", "经典 Bukkit 分支");
 
@@ -252,5 +254,110 @@ class ServerCoreManager {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    // ─── Forge 支持 ───
+
+    /**
+     * 获取 Forge 可用版本列表。
+     * Forge 使用 Maven 仓库，通过 maven-metadata.xml 获取版本。
+     */
+    suspend fun fetchForgeVersions(mcVersion: String): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            // Forge 的版本格式: mcVersion-forgeVersion
+            // 例如: 1.20.1-47.2.0
+            val url = "https://files.minecraftforge.net/net/minecraftforge/forge/index_$mcVersion.html"
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000; conn.readTimeout = 15000
+            conn.setRequestProperty("User-Agent", "MCServerLauncher/1.0")
+            conn.connect()
+
+            val html = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
+
+            // 从 HTML 中提取版本号
+            val versions = mutableListOf<String>()
+            val pattern = Regex("""${Regex.escape(mcVersion)}-(\d+\.\d+\.\d+)""")
+            pattern.findAll(html).forEach { match ->
+                versions.add(match.value)
+            }
+            // 去重并排序（最新在前）
+            Result.success(versions.distinct().sortedDescending())
+        } catch (e: Exception) {
+            // 回退：使用 Forge Maven metadata
+            try {
+                val mavenUrl = "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml"
+                val conn = URL(mavenUrl).openConnection() as HttpURLConnection
+                conn.connectTimeout = 10000; conn.readTimeout = 10000
+                conn.connect()
+
+                val xml = conn.inputStream.bufferedReader().readText()
+                conn.disconnect()
+
+                val versions = mutableListOf<String>()
+                val pattern = Regex("""<version>(${Regex.escape(mcVersion)}[^<]*)</version>""")
+                pattern.findAll(xml).forEach { match ->
+                    versions.add(match.groupValues[1])
+                }
+                Result.success(versions.distinct().sortedDescending())
+            } catch (e2: Exception) {
+                Result.failure(e2)
+            }
+        }
+    }
+
+    /**
+     * 获取 Forge 安装器下载 URL。
+     * Forge 服务器 JAR 需要通过安装器生成，或者直接下载已构建的 universal JAR。
+     */
+    fun getForgeDownloadUrl(mcVersion: String, forgeVersion: String): String {
+        // 完整版本号如 1.20.1-47.2.0
+        val fullVersion = if (forgeVersion.startsWith(mcVersion)) forgeVersion
+        else "$mcVersion-$forgeVersion"
+        return "https://maven.minecraftforge.net/net/minecraftforge/forge/$fullVersion/forge-$fullVersion-installer.jar"
+    }
+
+    /**
+     * 获取 Forge 服务器 JAR 直接下载 URL（universal jar）。
+     * 某些版本提供预构建的 universal JAR。
+     */
+    fun getForgeUniversalDownloadUrl(mcVersion: String, forgeVersion: String): String {
+        val fullVersion = if (forgeVersion.startsWith(mcVersion)) forgeVersion
+        else "$mcVersion-$forgeVersion"
+        return "https://maven.minecraftforge.net/net/minecraftforge/forge/$fullVersion/forge-$fullVersion-universal.jar"
+    }
+
+    // ─── NeoForge 支持 ───
+
+    /**
+     * 获取 NeoForge 可用版本列表。
+     * NeoForge 使用自己的 Maven 仓库。
+     */
+    suspend fun fetchNeoForgeVersions(mcVersion: String): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://maven.neoforged.net/net/neoforged/neoforge/maven-metadata.xml"
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 10000; conn.readTimeout = 10000
+            conn.connect()
+
+            val xml = conn.inputStream.bufferedReader().readText()
+            conn.disconnect()
+
+            val versions = mutableListOf<String>()
+            val pattern = Regex("""<version>(${Regex.escape(mcVersion)}[^<]*)</version>""")
+            pattern.findAll(xml).forEach { match ->
+                versions.add(match.groupValues[1])
+            }
+            Result.success(versions.distinct().sortedDescending())
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * 获取 NeoForge 下载 URL。
+     */
+    fun getNeoForgeDownloadUrl(mcVersion: String, neoVersion: String): String {
+        val fullVersion = if (neoVersion.startsWith(mcVersion)) neoVersion
+        else "$mcVersion-$neoVersion"
+        return "https://maven.neoforged.net/net/neoforged/neoforge/$fullVersion/neoforge-$fullVersion-installer.jar"
     }
 }
