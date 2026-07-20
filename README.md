@@ -104,3 +104,24 @@
 ## License
 
 MIT
+
+## 鸣谢
+
+本项目的开发在以下方面受惠于开源社区与工具链：
+
+### 设计借鉴
+- **Pterodactyl** — 进程分组管理、崩溃自动重启与冷却策略、资源监控面板、server.properties 变量注入
+- **MCSManager** — 完整目录备份/恢复思路、启动前健康诊断、资源包管理
+- **PufferPanel** — EULA 自动接受等首次启动处理
+- **Operit** — proot + Ubuntu 24.04 容器化运行方案（APK 内置 Linux 环境）
+
+### AI 开发协作
+- **Operit** — 全栈 AI 开发平台，提供代码生成、GitHub 操作、终端执行、包管理等能力
+- **Karpathy Guidelines** — 编码最佳实践参考（避免过度工程化、精准修改、定义可验证成功标准）
+- **Vibe Coding Workflow**（tradecatlabs/vibe-coding-cn）— 编程工作流方法论（先找现成方案，不重复造轮子）
+- **Cross-Platform Link Jumping** — 跨平台链接跳转与内容消费方法论
+
+### 运行时组件
+- **proot-me / Termux** — proot ARM 二进制来源（Android 进程模拟器）
+- **Ubuntu** — 24.04 base rootfs（glibc Linux 运行环境）
+- **Eclipse Temurin / Ubuntu apt** — OpenJDK 构建与分发
