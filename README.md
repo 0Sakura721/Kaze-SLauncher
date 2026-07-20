@@ -1,113 +1,107 @@
-# Kaze-SLauncher
+# Kaze SLauncher
 
-在 Android 设备上原生运行 Minecraft Java 版服务器的启动器。
-**无需 Termux、无需 root** — 内置完整的 Linux 运行环境（proot + Ubuntu 24.04）。
+> 一个在 Android 上运行 Minecraft Java 版服务器的启动器，基于 Proot + Ubuntu 24.04，无需 Termux、无需 Root。
 
-## 功能特性
+![Kotlin](https://img.shields.io/badge/Kotlin-1.9.20-blue?logo=kotlin)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-1.7-green)
+![minSdk](https://img.shields.io/badge/minSdk-27-orange)
+![License](https://img.shields.io/badge/license-MIT-yellow)
 
-- **JAR 文件运行** — 选择并启动 Minecraft 服务器 JAR（Paper、Spigot、Vanilla、Forge 等）
-- **核心下载** — 内置 Paper / Purpur / Fabric / Forge / NeoForge / Vanilla 等核心的版本列表与下载
-- **Java 运行时管理** — 自动下载并安装 Java 8/11/17/21（apt 安装），国内镜像源加速
-- **内置 Linux 环境** — 首次启动自动部署 proot + Ubuntu 24.04 base rootfs，无需额外安装 Termux
-- **实时控制台** — 终端风格控制台，支持搜索/过滤、日志级别高亮、快速命令面板、复制日志、日志导出
-- **在线玩家** — 自动解析日志，实时显示在线人数与玩家名
-- **性能监控** — 实时 CPU（系统+进程级）、内存、TPS/MSPT（Spark/Paper/Purpur 多源检测）、磁盘 I/O、线程数、运行时间
-- **启动健康检查** — 9 项启动前诊断 + 推荐配置建议
-- **自动重启** — 服务器崩溃后可选自动重启，支持最大重启次数与冷却限制
-- **服务器状态持久化** — 应用重启后保留状态信息，累计运行时间与重启统计
-- **崩溃检测** — 进程退出后状态正确复位，不再卡在「运行中」
-- **三种主题** — 明亮（白）、暗色（黑）、AMOLED 纯黑（省电）
-- **前台服务** — 服务器后台运行，通知栏状态显示
-- **服务器配置** — 内存分配、JVM 参数、端口等全面可配，端口写入 `server.properties` 生效
-- **EULA 自动接受** — 首次启动自动写入 `eula.txt`
-- **后台命令** — 前台服务可靠转发命令到服务器
-- **优雅停止** — 先发 `stop` 命令保存存档，再按 PID 精确结束进程
-- **崩溃重启保护** — 崩溃后自动重启，支持「最大重启次数」与「重启冷却」限制
-- **游戏设置注入** — MOTD、游戏模式、难度、最大玩家、PVP、正版验证、白名单等，启动前写入 `server.properties`
-- **备份与恢复** — 完整备份服务器目录（JAR/配置/world/插件）到带时间戳目录，支持手动/自动备份、恢复与删除
-- **插件管理** — 扫描 plugins/ 目录，解析 plugin.yml / paper-plugin.yml / fabric.mod.json 元数据，支持启用/禁用/删除
-- **玩家管理** — OP 列表、白名单、封禁列表管理
-- **文件管理** — 浏览服务器文件、查看世界文件夹、查看崩溃报告、编辑配置文件
-- **资源包管理** — 管理 resourcepacks/ 目录，配置强制资源包、下载 URL、SHA1 哈希
-- **启动诊断** — 自动识别端口占用、JAR 损坏、Java 版本不符、内存不足等
+## ✨ 功能特性
 
-## 运行原理（v0.10.0 起）
+- 🚀 **零依赖运行**：内置 Proot + Ubuntu 24.04 rootfs，无需安装 Termux 或 Root
+- 📱 **Material You 界面**：Jetpack Compose 打造的现代化 UI，支持动态配色
+- 🔧 **多核心支持**：Vanilla / Forge / Fabric / Quilt / NeoForge / Paper / Spigot
+- 📦 **模组与插件管理**：内置 Modrinth / CurseForge 搜索与一键安装
+- 💾 **备份与恢复**：完整服务器目录备份，支持导出到本地
+- 📊 **性能监控**：实时 CPU / 内存 / 玩家数 / TPS 监控
+- 🔔 **前台服务**：服务器运行在前台服务中，自带常驻通知
+- 🛡️ **安全设计**：沙箱化运行环境，细粒度权限控制
 
-```
-┌─────────────────────────────────────────┐
-│            Kaze SLauncher (APK)        │
-│  ┌───────────────────────────────────┐  │
-│  │  assets/bundled/ (内置在 APK)      │  │
-│  │  ├── proot-aarch64 / proot-armhf   │  │
-│  │  └── ubuntu-base-24.04-*.tar.gz    │  │
-│  └──────────────┬────────────────────┘  │
-│                 │ 首次启动自动解压        │
-│                 ▼                        │
-│  ┌───────────────────────────────────┐  │
-│  │  Linux 工作目录 (filesDir/linux/)  │  │
-│  │  ├── proot (Android 本地进程)      │  │
-│  │  └── rootfs/ (Ubuntu 24.04)       │  │
-│  └──────────────┬────────────────────┘  │
-│                 │ proot -0 -r rootfs     │
-│                 ▼                        │
-│  ┌───────────────────────────────────┐  │
-│  │  Ubuntu 24.04 容器                 │  │
-│  │  ├── apt install openjdk-*-jdk    │  │
-│  │  └── java -jar server.jar         │  │
-│  └───────────────────────────────────┘  │
-└─────────────────────────────────────────┘
-```
+## 📸 截图
 
-**无需 Termux** — 应用自带 proot（进程模拟器）+ Ubuntu 24.04 base rootfs，完全在应用沙箱内运行。
+（待补充）
 
-## 兼容性
+## 🚀 快速开始
 
-| 项目 | 支持 |
-|------|------|
-| 最低 Android | 8.0 (API 26) |
-| 目标 Android | 16 (API 36) |
-| CPU 架构 | `arm64-v8a`、`armeabi-v7a` |
-| Java 版本 | 8 / 11 / 17 / 21（apt 安装，全版本可选） |
+1. **下载 APK**：从 [Releases](https://github.com/0Sakura721/Kaze-SLauncher/releases) 下载最新版
+2. **安装运行**：安装后打开，首次启动会自动部署运行环境
+3. **选择核心**：在「核心管理」中下载并安装你想要的服务端核心
+4. **启动服务器**：回到主页点击启动，享受 Minecraft 服务器之旅
 
-## 快速开始
+## 🛠️ 构建
 
-1. 安装 APK（首次安装约需 200 MB 可用空间）
-2. 打开应用 → 自动进入「环境部署」页面
-3. 应用自动下载并部署：proot → Ubuntu 24.04 rootfs → Java
-4. 在「配置」页选择或下载 Minecraft 服务器 JAR
-5. 回到首页点击「启动服务器」
+### 环境要求
 
-> 内置版 APK（首次启动零下载）：运行 `./gradlew :app:downloadBundledAssets :app:assembleDebug` 构建
+- Android Studio Iguana+
+- JDK 17
+- Android SDK 34
+- NDK（用于 proot 编译）
 
-## 构建
+### 构建命令
 
 ```bash
-# 标准构建（不内置资源，运行时自动下载）
-./gradlew :app:assembleDebug
+# Debug 构建
+./gradlew assembleDebug
 
-# 完整内置版构建（首次启动零下载）
-./gradlew :app:downloadBundledAssets :app:assembleDebug
+# Release 构建
+./gradlew assembleRelease
 ```
 
-或在 Android Studio 中打开项目直接构建。
+### Release 签名
 
-## 技术栈
+在 `local.properties` 中配置：
 
-- **语言**: Kotlin
-- **UI**: Jetpack Compose + Material 3
-- **架构**: ViewModel + StateFlow + DataStore
-- **运行环境**: proot + Ubuntu 24.04（内置，无需 Termux）
-- **包管理器**: apt（Ubuntu 源 + 国内镜像加速）
-- **JRE**: openjdk-8/11/17/21（Ubuntu apt 包）
-- **下载加速**: 35+ 镜像源自动测速选优
+```properties
+storeFile=/path/to/keystore.jks
+storePassword=your_store_password
+keyAlias=your_key_alias
+keyPassword=your_key_password
+```
 
-## License
+## 📁 项目结构
 
-MIT
+```
+app/src/main/java/com/mcserver/launcher/
+├── server/          # 服务器核心逻辑
+│   ├── ServerManager.kt         # 服务器生命周期管理
+│   ├── TermuxManager.kt         # Proot / Ubuntu 环境管理
+│   ├── JreManager.kt            # JRE 管理
+│   ├── PluginManager.kt         # 插件管理
+│   ├── BackupManager.kt         # 备份管理
+│   ├── WorldManager.kt          # 世界管理
+│   └── ...
+├── ui/screens/      # Compose 界面
+├── data/            # 数据层（配置、偏好设置）
+└── MainActivity.kt
+```
 
-## 鸣谢
+## 🤝 贡献
 
-### 设计借鉴
-- **Pterodactyl** — 进程分组管理、崩溃自动重启与冷却策略、资源监控面板、server.properties 变量注入
-- **MCSManager** — 完整目录备份/恢复思路、启动前健康诊断、资源包管理
-- **PufferPanel** — EULA 自动接受等首次启动处理
+欢迎提交 Issue 和 Pull Request！
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+## 💰 支持开发
+
+如果这个项目对你有帮助，可以请我喝杯奶茶 ☕
+
+| 支付宝 | 微信 |
+|:------:|:----:|
+| ![支付宝](docs/images/alipay.png) | ![微信](docs/images/wechat.png) |
+
+> 赞赏时欢迎备注你的 ID，我会把你加入赞助者名单～
+
+## 📄 许可证
+
+本项目采用 [MIT License](LICENSE) 许可证。
+
+## ⚠️ 免责声明
+
+- 本项目仅供学习与个人使用，请遵守 Mojang EULA
+- 使用本软件造成的任何损失由使用者自行承担
+- Minecraft 是 Mojang Studios 的注册商标，本项目与 Mojang 无关
