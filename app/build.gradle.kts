@@ -2,6 +2,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.io.FileOutputStream
 import java.io.File
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -149,7 +150,7 @@ android {
         } catch (_: Exception) { "unknown" }}\"")
     }
 
-    val localProperties = java.util.Properties()
+    val localProperties = Properties()
     val localPropertiesFile = rootProject.file("local.properties")
     if (localPropertiesFile.exists()) {
         localPropertiesFile.inputStream().use { localProperties.load(it) }
