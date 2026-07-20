@@ -1,4 +1,4 @@
-# Minecraft Server Launcher (MCServer Launcher / Kaze-SLauncher)
+# Kaze-SLauncher
 
 在 Android 设备上原生运行 Minecraft Java 版服务器的启动器。
 **无需 Termux、无需 root** — 内置完整的 Linux 运行环境（proot + Ubuntu 24.04）。
@@ -100,29 +100,6 @@
 - **包管理器**: apt（Ubuntu 源 + 国内镜像加速）
 - **JRE**: openjdk-8/11/17/21（Ubuntu apt 包）
 - **下载加速**: 35+ 镜像源自动测速选优
-
-## 版本历史
-
-### v0.10.0 — 内置 Linux 环境（Pre-release）
-- 🎉 **内置 proot + Ubuntu 24.04**，无需安装 Termux
-- 🔄 Alpine → Ubuntu 迁移（glibc 兼容性提升）
-- ⚡ 35+ 镜像源自动测速（GitHub/Ubuntu/包管理器）
-- 📦 APK 内置 proot + Ubuntu rootfs（首次启动零下载）
-- 🧰 自动安装 Java 8/11/17/21（全版本可选）
-- 🔧 Gradle 任务完全自动化（CI 自动下载内置资源）
-
-### v0.9.0 — Ubuntu 迁移（Pre-release）
-- 🔄 Linux 环境从 Alpine 迁移至 Ubuntu 24.04（glibc 兼容）
-- 📡 35+ 镜像源并行测速
-- 📦 提供内置版构建方案
-
-### v0.8.1 — 热修复
-- 🐛 修复启动诊断 9 步不显示超时信息
-- 📝 启动日志中记录诊断与配置摘要
-
-### v0.8.0 — 健康检查与配置
-- ✅ 9 项启动前健康诊断 + 推荐配置建议
-- ⚙️ 游戏设置变量注入（server.properties）
 
 ## License
 
