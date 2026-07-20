@@ -140,7 +140,7 @@ android {
 
     defaultConfig {
         applicationId = "com.mcserver.launcher"
-        minSdk = 26; targetSdk = 35; versionCode = 11; versionName = "0.10.1"
+        minSdk = 26; targetSdk = 35; versionCode = 12; versionName = "0.10.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         buildConfigField("String", "BUILD_TIME", "\"${System.currentTimeMillis()}\"")
