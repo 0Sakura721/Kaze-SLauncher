@@ -35,7 +35,7 @@
 
 ```
 ┌─────────────────────────────────────────┐
-│            MCServer Launcher (APK)       │
+│            Kaze SLauncher (APK)        │
 │  ┌───────────────────────────────────┐  │
 │  │  assets/bundled/ (内置在 APK)      │  │
 │  │  ├── proot-aarch64 / proot-armhf   │  │
