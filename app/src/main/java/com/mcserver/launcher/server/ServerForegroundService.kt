@@ -52,11 +52,10 @@ class ServerForegroundService : Service() {
         isRunning = true
         // 仅接收本应用发出的命令广播，无需在 Manifest 声明
         val filter = IntentFilter(ACTION_SEND_COMMAND)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(commandReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(commandReceiver, filter)
-        }
+        ContextCompat.registerReceiver(
+            this, commandReceiver, filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
