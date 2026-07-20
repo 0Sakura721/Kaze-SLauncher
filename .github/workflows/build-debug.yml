@@ -3,6 +3,7 @@ name: Build Debug APK
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
@@ -39,9 +40,21 @@ jobs:
       - name: Build Debug APK (with bundled assets)
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Upload APK
+      - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Upload APK to Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          APK_PATH=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+          APK_NAME="Kaze-SLauncher-${TAG}-bundled-debug.apk"
+          echo "Uploading ${APK_PATH} to Release ${TAG} as ${APK_NAME}..."
+          gh release upload "${TAG}" "${APK_PATH}" --clobber --target "${GITHUB_SHA}"
+          echo "✅ APK uploaded to Release ${TAG}"
