@@ -149,6 +149,19 @@ class ServerManager private constructor(private val context: Context) {
     }
 
     /**
+     * 释放 ServerManager 持有的所有资源。
+     * 一般用于测试或调试，正常使用无需调用（伴随进程结束自动回收）。
+     */
+    fun shutdown() {
+        serverJob?.cancel()
+        uptimeJob?.cancel()
+        serverScope.cancel()
+        if (prootServerManager.running) {
+            prootServerManager.stopServer()
+        }
+    }
+
+    /**
      * 尝试恢复之前的服务器运行状态。
      * 应用被杀后重新打开时，检测 Linux 环境中是否仍有服务器进程运行，
      * 如果有则自动重连日志追踪和性能监控。

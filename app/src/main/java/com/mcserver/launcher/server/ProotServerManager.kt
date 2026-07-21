@@ -48,12 +48,17 @@ class ProotServerManager {
     }
 
     private val context: Context get() = McApplication.instance
+
+    /** 协程作用域：内部管理，避免外部随意修改导致泄漏 */
+    private val internalScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /**
      * 外部注入的协程作用域（由 ServerManager 在 init 中设置）。
-     * 如果未设置则使用内部默认 scope，确保协程不会泄漏。
+     * 默认指向 internalScope，必须显式设置才会切换；避免空指针。
      */
-    var scope: CoroutineScope? = null
-    private val effectiveScope: CoroutineScope get() = scope ?: internalScope
+    var scope: CoroutineScope = internalScope
+    private val effectiveScope: CoroutineScope get() = scope
+
     private val isRunning = AtomicBoolean(false)
     private var tailJob: Job? = null
     private var logFile: File? = null
@@ -93,8 +98,6 @@ class ProotServerManager {
 
     val running: Boolean get() = isRunning.get()
 
-    /** 协程作用域：内部管理，避免外部随意修改导致泄漏 */
-    private val internalScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     /** 停止操作原子锁：防止重复执行 stopServer */
     private val stopInProgress = AtomicBoolean(false)
 
@@ -289,7 +292,7 @@ class ProotServerManager {
 
                 emit("> 服务器已在 Linux 环境中启动")
 
-                val processWaitScope = scope ?: effectiveScope
+                val processWaitScope = effectiveScope
                 processWaitScope.launch {
                     try {
                         serverProcess?.waitFor()
@@ -315,7 +318,7 @@ class ProotServerManager {
 
     private fun startTailLog(file: File) {
         tailJob?.cancel()
-        val coroutineScope = scope ?: effectiveScope
+        val coroutineScope = effectiveScope
         tailJob = coroutineScope.launch {
             var lastSize = 0L
             var leftover = byteArrayOf()
@@ -479,7 +482,7 @@ class ProotServerManager {
     }
 
     private fun sendCommandViaRcon(cmd: String) {
-        val coroutineScope = scope ?: effectiveScope
+        val coroutineScope = effectiveScope
         coroutineScope.launch {
             try {
                 val result = rconClient?.sendCommand(cmd)
@@ -505,7 +508,7 @@ class ProotServerManager {
         }
         val pwd = config.rconPassword.ifEmpty { RconClient.generatePassword() }
         rconClient = RconClient(port = config.rconPort, password = pwd)
-        val coroutineScope = scope ?: effectiveScope
+        val coroutineScope = effectiveScope
         coroutineScope.launch {
             try {
                 var connected = false

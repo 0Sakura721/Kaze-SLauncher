@@ -1,9 +1,12 @@
 package com.mcserver.launcher
 
+import android.Manifest
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,17 +19,33 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mcserver.launcher.data.PreferencesManager
 import com.mcserver.launcher.data.ServerConfig
+import com.mcserver.launcher.ui.components.ErrorBoundary
 import com.mcserver.launcher.ui.navigation.Screen
 import com.mcserver.launcher.ui.navigation.bottomNavItems
 import com.mcserver.launcher.ui.screens.*
 import com.mcserver.launcher.ui.theme.McServerTheme
 import com.mcserver.launcher.ui.theme.ThemeMode
+import com.mcserver.launcher.utils.PermissionHelper
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var notificationLauncher: ActivityResultLauncher<String>
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // 绑定权限助手
+        PermissionHelper.bind(this)
+        notificationLauncher = PermissionHelper.createNotificationLauncher(this)
+
+        // Android 13+ 启动时尝试请求通知权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            PermissionHelper.shouldRequestNotificationPermission(this)
+        ) {
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
 
         val prefsManager = PreferencesManager(this)
 
@@ -36,24 +55,36 @@ class MainActivity : ComponentActivity() {
             val setupCompleted by prefsManager.setupCompleted.collectAsState(initial = false)
 
             McServerTheme(themeMode = themeMode) {
-                if (!setupCompleted) {
-                    val setupScope = rememberCoroutineScope()
-                    EnvSetupScreen(
-                        onSetupComplete = {
-                            setupScope.launch {
-                                prefsManager.setSetupCompleted()
+                ErrorBoundary {
+                    if (!setupCompleted) {
+                        val setupScope = rememberCoroutineScope()
+                        EnvSetupScreen(
+                            onSetupComplete = {
+                                setupScope.launch {
+                                    prefsManager.setSetupCompleted()
+                                }
                             }
-                        }
-                    )
-                } else {
-                    MainApp(
-                        themeMode = themeMode,
-                        config = config,
-                        prefsManager = prefsManager
-                    )
+                        )
+                    } else {
+                        MainApp(
+                            themeMode = themeMode,
+                            config = config,
+                            prefsManager = prefsManager,
+                            onRequestNotificationPermission = {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        PermissionHelper.refreshNotificationStatus(this)
     }
 }
 
@@ -61,7 +92,8 @@ class MainActivity : ComponentActivity() {
 fun MainApp(
     themeMode: ThemeMode,
     config: ServerConfig,
-    prefsManager: PreferencesManager
+    prefsManager: PreferencesManager,
+    onRequestNotificationPermission: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     val scope = rememberCoroutineScope()

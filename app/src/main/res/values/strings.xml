@@ -22,4 +22,18 @@
     <string name="theme_amoled">AMOLED 省电</string>
     <string name="notification_running">Kaze SLauncher 运行中</string>
     <string name="notification_running_desc">Minecraft 服务器正在后台运行</string>
+    <string name="linux_terminal">Linux 终端</string>
+    <string name="server_list">服务器列表</string>
+    <string name="create_server">创建服务器</string>
+    <string name="delete_server">删除服务器</string>
+    <string name="switch_server">切换</string>
+    <string name="current">当前</string>
+    <string name="curseforge_api_key">CurseForge API Key</string>
+    <string name="curseforge_api_key_hint">输入你的 CurseForge API Key</string>
+    <string name="save">保存</string>
+    <string name="cancel">取消</string>
+    <string name="clear">清除</string>
+    <string name="refresh">刷新</string>
+    <string name="retry">重试</string>
+    <string name="error_occurred">出现错误</string>
 </resources>
