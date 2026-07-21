@@ -624,7 +624,7 @@ fun ConsoleScreen() {
                                                 Toast.LENGTH_LONG).show()
                                         }
                                         "server" -> {
-                                            val path = com.mcserver.launcher.server.ServerManager.instance.termuxManager.exportLogs()
+                                            val path = com.mcserver.launcher.server.ServerManager.instance.prootServerManager.exportLogs()
                                             if (path != null) {
                                                 Toast.makeText(context,
                                                     "服务器日志已导出到 $path",

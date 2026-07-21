@@ -12,12 +12,18 @@ plugins {
 
 // ═══════════════════════════════════════════════════════════════
 //  内置资源任务 — CI 自动运行，首次启动零下载
+//
+//  说明：
+//  - proot-{aarch64,armhf}.tar.gz（含 proot 二进制 + loader + libtalloc +
+//    libandroid-shmem）已 commit 到 git（共约 228 KB），无需 task 下载
+//  - Ubuntu 24.04 rootfs（arm64 + armhf，约 55 MB）太大，由本 task 在 CI
+//    上下载到 assets/bundled/，避免 git 仓库膨胀
 // ═══════════════════════════════════════════════════════════════
 val bundledAssetsDir = layout.projectDirectory.dir("src/main/assets/bundled")
 
 val downloadBundledAssets by tasks.registering {
     group = "bundled"
-    description = "下载 proot + Ubuntu rootfs 到 assets/bundled/"
+    description = "下载 Ubuntu 24.04 rootfs 到 assets/bundled/（proot 已内置 commit）"
 
     val ubuntuVersion = "24.04.4"
     val files = linkedMapOf(
@@ -25,10 +31,6 @@ val downloadBundledAssets by tasks.registering {
             "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-arm64.tar.gz",
         "ubuntu-base-24.04-armhf.tar.gz" to
             "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-armhf.tar.gz",
-        "proot-aarch64.deb" to
-            "https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.85_aarch64.deb",
-        "proot-armhf.deb" to
-            "https://packages.termux.dev/apt/termux-main/pool/main/p/proot/proot_5.1.107.85_arm.deb",
     )
 
     doLast {
@@ -73,63 +75,20 @@ val downloadBundledAssets by tasks.registering {
             }
         }
 
-        // 辅助：ByteArray 中查找子数组
-        fun indexOfBytes(haystack: ByteArray, needle: String): Int {
-            val n = needle.toByteArray()
-            for (i in 0..haystack.size - n.size) {
-                var found = true
-                for (j in n.indices) { if (haystack[i + j] != n[j]) { found = false; break } }
-                if (found) return i
-            }
-            return -1
-        }
-
-        // 从 Termux .deb 提取 proot（优先 dpkg-deb，回退手动 ar/tar）
-        fun extractProot(debFile: File, targetNameBase: String) {
-            val target = File(debFile.parentFile, targetNameBase)
-            try {
-                val tmp = File(debFile.parentFile, "_x_$targetNameBase"); tmp.mkdirs()
-                val p = ProcessBuilder("sh", "-c",
-                    "dpkg-deb -x '${debFile.absolutePath}' '${tmp.absolutePath}' && " +
-                    "cp '${tmp.absolutePath}/data/data/com.termux/files/usr/bin/proot' '${target.absolutePath}' && " +
-                    "chmod 755 '${target.absolutePath}' && rm -rf '${tmp.absolutePath}' '${debFile.absolutePath}'"
-                ).start()
-                if (p.waitFor() == 0) {
-                    println("  ✓ proot $targetNameBase (${target.length() / 1024} KB)")
-                    return
-                }
-                // dpkg-deb 不可用，手动解析
-                println("  ⚠ 手动解析 .deb ...")
-                val b = debFile.readBytes()
-                val di = indexOfBytes(b, "data.tar")
-                if (di < 0) { System.err.println("  ✗ $targetNameBase 格式异常"); return }
-                val arHeader = String(b, di - 48, 60, Charsets.ISO_8859_1)
-                val m = Regex("(\\d+)").find(arHeader.substringAfterLast("data.tar"))
-                val dataSize = m?.value?.toLongOrNull() ?: 0L
-                if (dataSize <= 0) { System.err.println("  ✗ $targetNameBase 大小解析失败"); return }
-                val tarStart = di - 48 + 60
-                val tarData = b.copyOfRange(tarStart, (tarStart + dataSize).toInt())
-                val fi = indexOfBytes(tarData, "data/data/com.termux/files/usr/bin/proot")
-                if (fi < 0) { System.err.println("  ✗ $targetNameBase 找不到 proot"); return }
-                val sizeStr = String(tarData, fi + 124, 12, Charsets.UTF_8).trim { it <= ' ' || it == '\u0000' }
-                val fileSize = sizeStr.toLong(8)
-                target.writeBytes(tarData.copyOfRange(fi + 512, (fi + 512 + fileSize).toInt()))
-                target.setExecutable(true); debFile.delete()
-                println("  ✓ proot $targetNameBase (${target.length() / 1024} KB)")
-            } catch (e: Exception) {
-                System.err.println("  ✗ $targetNameBase: ${e.message}")
-            }
-        }
-
-        println("═══ 下载预置资源 ═══")
+        println("═══ 下载 Ubuntu rootfs ═══")
         var ok = true
         files.forEach { (name, url) ->
-            val d = File(destDir, name)
-            if (download(url, d)) {
-                if (name.endsWith(".deb")) {
-                    extractProot(d, name.removeSuffix(".deb"))
-                }
-            } else ok = false
+            if (!download(url, File(destDir, name))) ok = false
+        }
+        // 验证 proot tarball 已 commit
+        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz").forEach { name ->
+            val f = File(destDir, name)
+            if (!f.exists() || f.length() == 0L) {
+                System.err.println("  ✗ 缺少内置资源 $name（应已 commit 到 git）")
+                ok = false
+            } else {
+                println("  ✓ $name (${f.length() / 1024} KB, 内置)")
+            }
         }
         println("═══ 完成 ${if (ok) "✓" else "(有失败项)"} ═══")
     }

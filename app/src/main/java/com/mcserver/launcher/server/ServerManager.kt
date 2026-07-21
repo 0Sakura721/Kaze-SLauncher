@@ -36,16 +36,16 @@ class ServerManager private constructor(private val context: Context) {
     private val jreManager = JreManager(context)
     private val preferencesManager = PreferencesManager(context)
     val jreManagerInstance: JreManager get() = jreManager
-    /** Termux 管理器实例（暴露给 ScheduleManager/ConsoleScreen 等模块复用） */
-    val termuxManager = TermuxManager()
+    /** ProotServerManager 实例（暴露给 ScheduleManager/ConsoleScreen 等模块复用） */
+    val prootServerManager = ProotServerManager()
     private val serverScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private val _serverStatus = MutableStateFlow(ServerStatus())
     val serverStatus: StateFlow<ServerStatus> = _serverStatus.asStateFlow()
 
     val jreInfo: StateFlow<JreInfo> = jreManager.jreInfo
-    val consoleOutput: SharedFlow<String> = termuxManager.consoleOutput
-    val isRunning: Boolean get() = termuxManager.running
+    val consoleOutput: SharedFlow<String> = prootServerManager.consoleOutput
+    val isRunning: Boolean get() = prootServerManager.running
 
     val selectedJreVersion: String get() = jreManager.selectedVersion
     val selectedJrePackage: String get() = jreManager.selectedPackage
@@ -95,12 +95,12 @@ class ServerManager private constructor(private val context: Context) {
                 }
             }
         }
-        termuxManager.scope = serverScope
+        prootServerManager.scope = serverScope
         // 加载上次持久化状态
         ServerStateManager.load()
         // 将在线玩家列表同步到状态，供界面展示
         serverScope.launch {
-            termuxManager.players.collect { list ->
+            prootServerManager.players.collect { list ->
                 _serverStatus.value = _serverStatus.value.copy(
                     playerCount = list.size,
                     players = list
@@ -115,7 +115,7 @@ class ServerManager private constructor(private val context: Context) {
 
     /**
      * 尝试恢复之前的服务器运行状态。
-     * 应用被杀后重新打开时，检测 Termux 中是否仍有服务器进程运行，
+     * 应用被杀后重新打开时，检测 Linux 环境中是否仍有服务器进程运行，
      * 如果有则自动重连日志追踪和性能监控。
      * 借鉴 Pterodactyl 的 server state recovery 机制。
      */
@@ -126,8 +126,8 @@ class ServerManager private constructor(private val context: Context) {
 
             _isRecovering.value = true
 
-            // 检查 Termux 中的进程是否还活着
-            if (!termuxManager.isServerProcessAlive()) {
+            // 检查 Linux 环境中的进程是否还活着
+            if (!prootServerManager.isServerProcessAlive()) {
                 // 进程已经不在了，清理持久化状态
                 ServerStateManager.save(ServerStateManager.PersistentState())
                 _isRecovering.value = false
@@ -135,8 +135,8 @@ class ServerManager private constructor(private val context: Context) {
             }
 
             // 尝试恢复连接
-            delay(1000) // 给 Termux 一点时间
-            val reconnected = termuxManager.reconnectToRunningServer()
+            delay(1000) // 给 Linux 环境一点时间
+            val reconnected = prootServerManager.reconnectToRunningServer()
             if (reconnected) {
                 if (transitionState(ServerState.RUNNING)) {
                     _serverStatus.value = ServerStatus(
@@ -169,10 +169,8 @@ class ServerManager private constructor(private val context: Context) {
     fun deleteInstalledVersion(version: String) = jreManager.deleteInstalledVersion(version)
     suspend fun testMirrorLatency() = jreManager.testAllMirrors()
 
-    /** Termux 状态 */
-    val termuxState: TermuxState get() = termuxManager.checkState()
-    fun openTermuxDownload() = TermuxManager.openTermuxDownload(context)
-    fun installJavaInTermux() = termuxManager.installJavaInTermux()
+    /** Linux 环境状态 */
+    val linuxEnvState: LinuxEnvState2 get() = prootServerManager.checkState()
 
     /**
      * 检查状态转换是否合法。
@@ -204,7 +202,7 @@ class ServerManager private constructor(private val context: Context) {
     }
 
     fun startServer(config: ServerConfig) {
-        if (termuxManager.running || isLaunching.get()) return
+        if (prootServerManager.running || isLaunching.get()) return
         lastConfig = config
         manualStop.set(false)
         // 全新启动，重置崩溃计数
@@ -216,12 +214,11 @@ class ServerManager private constructor(private val context: Context) {
 
     /** 真正执行一次启动（含自动重启时的重复调用） */
     private fun launchServer(config: ServerConfig) {
-        // ── 环境检查：Termux 或 LinuxEnvironment(proot+Ubuntu) 至少有一方就绪 ──
-        val termuxOk = TermuxManager.isTermuxInstalled(context)
+        // ── 环境检查：LinuxEnvironment(proot+Ubuntu) 必须就绪 ──
         val linuxEnvOk = LinuxEnvironmentManager.isEnvironmentReady()
-        if (!termuxOk && !linuxEnvOk) {
+        if (!linuxEnvOk) {
             transitionState(ServerState.ERROR)
-            termuxManager.notifyConsole("> 请先完成运行环境部署（Termux 或内置 Linux 环境）")
+            prootServerManager.notifyConsole("> 请先完成运行环境部署（内置 Linux 环境）")
             return
         }
 
@@ -236,7 +233,7 @@ class ServerManager private constructor(private val context: Context) {
         startForeground()
 
         // 服务器进程退出回调：崩溃检测 + 自动重启 + 手动停止收尾
-        termuxManager.onServerExited = {
+        prootServerManager.onServerExited = {
             serverScope.launch {
                 if (!exitHandled.compareAndSet(false, true)) {
                     return@launch
@@ -247,11 +244,11 @@ class ServerManager private constructor(private val context: Context) {
                     restartCount.set(0)
                     lastExitTime.set(0L)
                     if (config.backupOnStop) {
-                        termuxManager.notifyConsole("> 正在创建停止前备份...")
+                        prootServerManager.notifyConsole("> 正在创建停止前备份...")
                         BackupManager.createBackup("stop").onSuccess {
-                            termuxManager.notifyConsole("> 备份完成：$it")
+                            prootServerManager.notifyConsole("> 备份完成：$it")
                         }.onFailure {
-                            termuxManager.notifyConsole("> 备份失败：${it.message}")
+                            prootServerManager.notifyConsole("> 备份失败：${it.message}")
                         }
                     }
                     ServerStateManager.onServerStopped()
@@ -279,7 +276,7 @@ class ServerManager private constructor(private val context: Context) {
                         }
                         lastExitTime.set(System.currentTimeMillis())
                         val newCount = restartCount.incrementAndGet()
-                        termuxManager.notifyConsole(
+                        prootServerManager.notifyConsole(
                             "> 检测到服务器退出，第 $newCount 次自动重启（最多 $max 次）"
                         )
                         // 发送崩溃通知
@@ -291,7 +288,7 @@ class ServerManager private constructor(private val context: Context) {
                         launchServer(config)
                     } else {
                         if (triggered) {
-                            termuxManager.notifyConsole(
+                            prootServerManager.notifyConsole(
                                 "> 已连续崩溃 $currentCount 次，超过上限 $max，停止自动重启。" +
                                 "请检查日志排查原因。"
                             )
@@ -312,7 +309,7 @@ class ServerManager private constructor(private val context: Context) {
         }
 
         serverJob = serverScope.launch {
-            val result = termuxManager.startServer(config)
+            val result = prootServerManager.startServer(config)
             if (result.isFailure) {
                 isLaunching.set(false)
                 stopUptime()
@@ -320,7 +317,7 @@ class ServerManager private constructor(private val context: Context) {
                 transitionState(ServerState.ERROR)
                 _serverStatus.value = _serverStatus.value.copy(state = ServerState.ERROR, maxRestarts = config.maxRestarts)
                 stopForeground()
-                termuxManager.onServerExited = null
+                prootServerManager.onServerExited = null
                 return@launch
             }
             isLaunching.set(false)
@@ -337,14 +334,14 @@ class ServerManager private constructor(private val context: Context) {
             McApplication.showServerEventNotification("服务器已启动", "Minecraft 服务器启动成功")
             // 启动成功后尝试建立 RCON 连接
             if (config.rconEnabled) {
-                termuxManager.tryConnectRcon(config)
+                prootServerManager.tryConnectRcon(config)
             }
             // 启动成功后，进程的实际退出由 onServerExited 回调处理
         }
     }
 
     fun stopServer() {
-        if (!termuxManager.running) {
+        if (!prootServerManager.running) {
             transitionState(ServerState.STOPPED)
             stopUptime()
             stopForeground()
@@ -354,10 +351,10 @@ class ServerManager private constructor(private val context: Context) {
         // 保留 onServerExited 回调，由它负责把状态收尾为「已停止」
         transitionState(ServerState.STOPPING)
         serverScope.launch {
-            termuxManager.stopServer()
+            prootServerManager.stopServer()
             // 安全兜底：若 4s 内回调未触发，强制收尾
             delay(4000)
-            if (termuxManager.running && !exitHandled.get()) {
+            if (prootServerManager.running && !exitHandled.get()) {
                 if (exitHandled.compareAndSet(false, true)) {
                     isLaunching.set(false)
                     transitionState(ServerState.STOPPED)
@@ -370,7 +367,7 @@ class ServerManager private constructor(private val context: Context) {
     }
 
     fun sendCommand(cmd: String) {
-        termuxManager.sendCommand(cmd)
+        prootServerManager.sendCommand(cmd)
     }
 
     suspend fun installJre(onProgress: (Float, Long, Long) -> Unit = { _, _, _ -> }) =

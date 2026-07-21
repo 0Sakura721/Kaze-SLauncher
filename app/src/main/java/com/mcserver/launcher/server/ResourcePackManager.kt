@@ -17,7 +17,7 @@ import java.io.File
  */
 object ResourcePackManager {
 
-    private val serverDir: File get() = TermuxManager.serverDir(McApplication.instance)
+    private val serverDir: File get() = ProotServerManager.serverDir(McApplication.instance)
     val packsDir: File get() = File(serverDir, "resourcepacks")
 
     data class PackInfo(

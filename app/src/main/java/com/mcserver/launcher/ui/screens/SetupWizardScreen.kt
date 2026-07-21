@@ -18,13 +18,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mcserver.launcher.data.ServerConfig
-import com.mcserver.launcher.server.TermuxManager
-import com.mcserver.launcher.server.TermuxState
+import com.mcserver.launcher.server.ProotServerManager
+import com.mcserver.launcher.server.LinuxEnvState2
+import com.mcserver.launcher.server.LinuxEnvironmentManager
+import kotlinx.coroutines.launch
 
 /**
  * 首次启动引导向导。
  * 借鉴 Pterodactyl 和 MCSManager 的安装向导设计，分步引导用户完成：
- * 1. Termux 安装检测
+ * 1. Linux 环境检测
  * 2. Java 安装
  * 3. 服务器核心选择/下载
  * 4. 内存分配
@@ -41,8 +43,9 @@ fun SetupWizardScreen(
     val totalSteps = 4
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    val termuxManager = remember { TermuxManager() }
-    var termuxState by remember { mutableStateOf(termuxManager.checkState()) }
+    val prootManager = remember { ProotServerManager() }
+    var linuxState by remember { mutableStateOf(prootManager.checkState()) }
+    val coroutineScope = rememberCoroutineScope()
 
     // 配置编辑状态
     var jarPath by remember { mutableStateOf(config.jarPath) }
@@ -67,7 +70,7 @@ fun SetupWizardScreen(
         Spacer(Modifier.height(8.dp))
         Text(
             text = when (currentStep) {
-                0 -> "第 1 步：安装 Termux"
+                0 -> "第 1 步：初始化 Linux 环境"
                 1 -> "第 2 步：Java 运行时"
                 2 -> "第 3 步：选择服务器核心"
                 3 -> "第 4 步：完成配置"
@@ -97,16 +100,22 @@ fun SetupWizardScreen(
 
         // 步骤内容
         when (currentStep) {
-            0 -> StepTermux(termuxState, onCheck = {
-                termuxState = termuxManager.checkState()
+            0 -> StepLinuxEnv(linuxState, onCheck = {
+                linuxState = prootManager.checkState()
             }, onInstall = {
-                TermuxManager.openTermuxDownload(context)
+                coroutineScope.launch {
+                    LinuxEnvironmentManager.runFullSetup()
+                    linuxState = prootManager.checkState()
+                }
             })
 
-            1 -> StepJava(termuxState, onInstallJava = {
-                termuxManager.installJavaInTermux()
+            1 -> StepJava(linuxState, onInstallJava = {
+                coroutineScope.launch {
+                    LinuxEnvironmentManager.runFullSetup()
+                    linuxState = prootManager.checkState()
+                }
             }, onCheck = {
-                termuxState = termuxManager.checkState()
+                linuxState = prootManager.checkState()
             })
 
             2 -> StepServerCore(
@@ -158,8 +167,8 @@ fun SetupWizardScreen(
                     }
                 },
                 enabled = when (currentStep) {
-                    0 -> termuxState == TermuxState.INSTALLED || termuxState == TermuxState.JAVA_MISSING || termuxState == TermuxState.READY
-                    1 -> termuxState == TermuxState.READY
+                    0 -> linuxState == LinuxEnvState2.READY || linuxState == LinuxEnvState2.JAVA_MISSING
+                    1 -> linuxState == LinuxEnvState2.READY
                     2 -> true
                     3 -> true
                     else -> true
@@ -186,8 +195,8 @@ fun SetupWizardScreen(
 }
 
 @Composable
-private fun StepTermux(
-    state: TermuxState,
+private fun StepLinuxEnv(
+    state: LinuxEnvState2,
     onCheck: () -> Unit,
     onInstall: () -> Unit
 ) {
@@ -204,20 +213,20 @@ private fun StepTermux(
                 null,
                 Modifier.size(64.dp),
                 tint = when (state) {
-                    TermuxState.READY -> MaterialTheme.colorScheme.primary
-                    TermuxState.JAVA_MISSING, TermuxState.INSTALLED -> MaterialTheme.colorScheme.tertiary
+                    LinuxEnvState2.READY -> MaterialTheme.colorScheme.primary
+                    LinuxEnvState2.JAVA_MISSING -> MaterialTheme.colorScheme.tertiary
                     else -> MaterialTheme.colorScheme.error
                 }
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                "安装 Termux",
+                "初始化 Linux 环境",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "MCServer Launcher 需要 Termux 提供 Linux 环境来运行 Java 和 Minecraft 服务器。\n\n请从 F-Droid 安装 Termux（Google Play 版本功能不全）。",
+                "MCServer Launcher 使用内置的 proot+Ubuntu 环境运行 Java 和 Minecraft 服务器。\n\n点击下方按钮初始化 Linux 环境。",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -228,8 +237,8 @@ private fun StepTermux(
             Surface(
                 shape = MaterialTheme.shapes.medium,
                 color = when (state) {
-                    TermuxState.READY -> MaterialTheme.colorScheme.primaryContainer
-                    TermuxState.NOT_INSTALLED -> MaterialTheme.colorScheme.errorContainer
+                    LinuxEnvState2.READY -> MaterialTheme.colorScheme.primaryContainer
+                    LinuxEnvState2.NOT_READY -> MaterialTheme.colorScheme.errorContainer
                     else -> MaterialTheme.colorScheme.tertiaryContainer
                 }
             ) {
@@ -239,25 +248,24 @@ private fun StepTermux(
                 ) {
                     Icon(
                         when (state) {
-                            TermuxState.READY -> Icons.Filled.CheckCircle
-                            TermuxState.NOT_INSTALLED -> Icons.Filled.Cancel
+                            LinuxEnvState2.READY -> Icons.Filled.CheckCircle
+                            LinuxEnvState2.NOT_READY -> Icons.Filled.Cancel
                             else -> Icons.Filled.Warning
                         },
                         null,
                         Modifier.size(20.dp),
                         tint = when (state) {
-                            TermuxState.READY -> MaterialTheme.colorScheme.primary
-                            TermuxState.NOT_INSTALLED -> MaterialTheme.colorScheme.error
+                            LinuxEnvState2.READY -> MaterialTheme.colorScheme.primary
+                            LinuxEnvState2.NOT_READY -> MaterialTheme.colorScheme.error
                             else -> MaterialTheme.colorScheme.tertiary
                         }
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         when (state) {
-                            TermuxState.NOT_INSTALLED -> "未检测到 Termux"
-                            TermuxState.INSTALLED -> "Termux 已安装"
-                            TermuxState.JAVA_MISSING -> "Termux 已安装，Java 未安装"
-                            TermuxState.READY -> "Termux 环境已就绪"
+                            LinuxEnvState2.NOT_READY -> "Linux 环境未初始化"
+                            LinuxEnvState2.JAVA_MISSING -> "Linux 环境已就绪，Java 未安装"
+                            LinuxEnvState2.READY -> "Linux 环境已就绪"
                         },
                         fontWeight = FontWeight.Medium
                     )
@@ -266,11 +274,11 @@ private fun StepTermux(
 
             Spacer(Modifier.height(12.dp))
 
-            if (state == TermuxState.NOT_INSTALLED) {
+            if (state == LinuxEnvState2.NOT_READY) {
                 Button(onClick = onInstall, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Filled.OpenInBrowser, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("前往 F-Droid 安装 Termux")
+                    Text("初始化 Linux 环境")
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -290,7 +298,7 @@ private fun StepTermux(
 
 @Composable
 private fun StepJava(
-    state: TermuxState,
+    state: LinuxEnvState2,
     onInstallJava: () -> Unit,
     onCheck: () -> Unit
 ) {
@@ -307,7 +315,7 @@ private fun StepJava(
                 null,
                 Modifier.size(64.dp),
                 tint = when (state) {
-                    TermuxState.READY -> MaterialTheme.colorScheme.primary
+                    LinuxEnvState2.READY -> MaterialTheme.colorScheme.primary
                     else -> MaterialTheme.colorScheme.tertiary
                 }
             )
@@ -319,21 +327,21 @@ private fun StepJava(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Minecraft 服务器需要 Java 21 或更高版本。\n在 Termux 中运行以下命令即可安装：\n\npkg update && pkg install openjdk-21\n\n或点击下方按钮自动安装。",
+                "Minecraft 服务器需要 Java 21 或更高版本。\n点击下方按钮自动安装 JDK 21。",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(16.dp))
 
-            if (state == TermuxState.JAVA_MISSING || state == TermuxState.INSTALLED) {
+            if (state == LinuxEnvState2.JAVA_MISSING) {
                 Button(
                     onClick = onInstallJava,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Filled.Download, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("在 Termux 中安装 Java 21")
+                    Text("安装 JDK 21")
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -341,7 +349,7 @@ private fun StepJava(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            } else if (state == TermuxState.READY) {
+            } else if (state == LinuxEnvState2.READY) {
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.primaryContainer

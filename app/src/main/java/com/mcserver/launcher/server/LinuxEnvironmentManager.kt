@@ -126,8 +126,14 @@ object LinuxEnvironmentManager {
             return dir
         }
 
-    /** proot 二进制路径 */
-    private val prootBinary: File get() = File(linuxDir, "proot")
+    /** proot 解压根目录（包含 bin/libexec/lib） */
+    private val prootHomeDir: File get() = File(linuxDir, "proot-home").also { it.mkdirs() }
+    /** proot 二进制路径（解压自内置 tarball） */
+    private val prootBinary: File get() = File(prootHomeDir, "bin/proot")
+    /** proot loader 路径（被 ptrace 注入到子进程） */
+    private val prootLoader: File get() = File(prootHomeDir, "libexec/loader")
+    /** proot 共享库目录（libtalloc/libandroid-shmem） */
+    private val prootLibDir: File get() = File(prootHomeDir, "lib")
     /** rootfs 目录 */
     val rootfsDir: File get() = File(linuxDir, "rootfs")
     /** Ubuntu 内 Java 根目录 */
@@ -174,7 +180,30 @@ object LinuxEnvironmentManager {
     // ── 环境检查 ──
     fun isEnvironmentReady(): Boolean {
         return prootBinary.exists() && prootBinary.canExecute() &&
+            prootLoader.exists() && prootLoader.canExecute() &&
             rootfsDir.exists() && File(rootfsDir, "bin/sh").exists()
+    }
+
+    /**
+     * proot 运行所需的环境变量。
+     * - PROOT_LOADER：proot 通过 ptrace 注入到子进程的加载器路径
+     * - LD_LIBRARY_PATH：proot 二进制依赖的 libtalloc.so.2 / libandroid-shmem.so
+     *
+     * 由 buildProotCommand / executeCommand 等方法注入，外部一般无需手动调用。
+     */
+    private fun prootEnvironment(): Map<String, String> {
+        val env = mutableMapOf<String, String>()
+        env["PROOT_LOADER"] = prootLoader.absolutePath
+        // 保留已有的 LD_LIBRARY_PATH，避免覆盖系统配置
+        val existing = System.getenv("LD_LIBRARY_PATH") ?: ""
+        env["LD_LIBRARY_PATH"] = if (existing.isEmpty()) {
+            prootLibDir.absolutePath
+        } else {
+            prootLibDir.absolutePath + ":" + existing
+        }
+        // 让 proot 在前台运行（避免被 Android lowmemorykiller 杀掉）
+        env["PROOT_NO_SECCOMP"] = "1"
+        return env
     }
 
     fun isJdkInstalled(version: Int): Boolean {
@@ -212,35 +241,54 @@ object LinuxEnvironmentManager {
 
             // ── Step 1: proot 二进制 ──
             log(">>> 阶段 1/6：获取 proot 二进制（$archName）")
-            val prootAssetName = "proot-$archName"
-            if (extractBundledAsset(prootAssetName, prootBinary)) {
-                log("  ✓ 从内置资源提取 proot（无需下载）")
-                updateItem("proot", DownloadItemState.COMPLETED)
-            } else {
-                // 回退到网络下载
-                log("  内置资源不可用，从网络下载...")
-                val prootMirrors = if (isAarch64) MirrorSpeedTester.PROOT_MIRRORS_AARCH64
-                                    else MirrorSpeedTester.PROOT_MIRRORS_ARMHF
-                _isTestingMirrors.value = true
-                log("  正在测速 ${prootMirrors.size} 个镜像源...")
-                val prootResults = MirrorSpeedTester.testMirrors(prootMirrors)
-                _mirrorResults.value = prootResults
-                _isTestingMirrors.value = false
-                val bestProot = prootResults.firstOrNull { it.error == null }
-                if (bestProot != null) {
-                    log("  ✓ 最优: ${bestProot.name} (${bestProot.latencyMs}ms)")
+            val prootAssetName = "proot-$archName.tar.gz"
+            val prootTarball = File(linuxDir, "proot.tar.gz")
+            if (!prootBinary.exists() || !prootLoader.exists()) {
+                if (extractBundledAsset(prootAssetName, prootTarball)) {
+                    log("  ✓ 从内置资源提取 proot（无需下载）")
+                    // 解压到 prootHomeDir（bin/proot, libexec/loader[, loader32], lib/*.so）
+                    extractTarGz(prootTarball, prootHomeDir)
+                    prootTarball.delete()
+                    updateItem("proot", DownloadItemState.COMPLETED)
                 } else {
-                    log("  ⚠ 所有镜像超时，回退到 GitHub 官方")
+                    // 回退到网络下载（旧版单文件 proot 兼容路径，不再生产使用）
+                    log("  内置资源不可用，从网络下载...")
+                    val prootMirrors = if (isAarch64) MirrorSpeedTester.PROOT_MIRRORS_AARCH64
+                                        else MirrorSpeedTester.PROOT_MIRRORS_ARMHF
+                    _isTestingMirrors.value = true
+                    log("  正在测速 ${prootMirrors.size} 个镜像源...")
+                    val prootResults = MirrorSpeedTester.testMirrors(prootMirrors)
+                    _mirrorResults.value = prootResults
+                    _isTestingMirrors.value = false
+                    val bestProot = prootResults.firstOrNull { it.error == null }
+                    if (bestProot != null) {
+                        log("  ✓ 最优: ${bestProot.name} (${bestProot.latencyMs}ms)")
+                    } else {
+                        log("  ⚠ 所有镜像超时，回退到 GitHub 官方")
+                    }
+                    val prootUrl = bestProot?.url ?: prootMirrors.first().url
+                    updateItem("proot", DownloadItemState.DOWNLOADING)
+                    downloadFile(prootUrl, prootTarball) { progress, downloaded, total, speed ->
+                        updateProgress("proot", progress, downloaded, total, speed)
+                    }
+                    // 网络下载的可能是单文件二进制或 tarball
+                    if (prootTarball.name.endsWith(".tar.gz") || prootTarball.name.endsWith("tar.gz")) {
+                        extractTarGz(prootTarball, prootHomeDir)
+                    } else {
+                        prootTarball.copyTo(prootBinary, overwrite = true)
+                    }
+                    prootTarball.delete()
+                    updateItem("proot", DownloadItemState.COMPLETED)
                 }
-                val prootUrl = bestProot?.url ?: prootMirrors.first().url
-                updateItem("proot", DownloadItemState.DOWNLOADING)
-                downloadFile(prootUrl, prootBinary) { progress, downloaded, total, speed ->
-                    updateProgress("proot", progress, downloaded, total, speed)
-                }
+            } else {
+                log("  ✓ proot 已就绪（跳过提取）")
                 updateItem("proot", DownloadItemState.COMPLETED)
             }
             prootBinary.setExecutable(true)
-            log("  ✓ proot 就绪")
+            prootLoader.setExecutable(true)
+            File(prootHomeDir, "libexec/loader32").takeIf { it.exists() }?.setExecutable(true)
+            log("  ✓ proot 就绪：${prootBinary.absolutePath}")
+            log("    loader=${prootLoader.absolutePath}, lib=${prootLibDir.absolutePath}")
 
             // ── Step 2: Ubuntu rootfs ──
             log(">>> 阶段 2/6：获取 Ubuntu 24.04 rootfs（$archName）")
@@ -403,21 +451,10 @@ object LinuxEnvironmentManager {
         onProgress: (Float, Long, Long, Long) -> Unit
     ) = withContext(Dispatchers.IO) {
         require(validatePackageName(pkgName)) { "软件包名包含非法字符: $pkgName" }
-        // 使用 proot 在 Ubuntu rootfs 中安装包
-        val proc = ProcessBuilder()
-            .command(
-                prootBinary.absolutePath,
-                "-0",
-                "-r", rootfsDir.absolutePath,
-                "-b", "/dev:/dev",
-                "-b", "/proc:/proc",
-                "-b", "/sys:/sys",
-                "-b", "${serverDir.absolutePath}:${serverDir.absolutePath}",
-                "/bin/sh", "-c",
-                "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $pkgName"
-            )
-            .redirectErrorStream(true)
-            .start()
+        // 使用 proot 在 Ubuntu rootfs 中安装包（环境变量由 buildProotCommand 注入）
+        val proc = buildProotCommand(
+            command = "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $pkgName"
+        ).start()
 
         // 按时间估算进度
         val startTime = System.currentTimeMillis()
@@ -447,6 +484,37 @@ object LinuxEnvironmentManager {
     }
 
     // ── Proot 执行命令（在 Ubuntu rootfs 中） ──
+
+    /**
+     * 构建 proot 命令并返回已注入环境变量的 [ProcessBuilder]。
+     *
+     * proot 是 Termux 编译的动态二进制，依赖：
+     *   - libtalloc.so.2 / libandroid-shmem.so（通过 LD_LIBRARY_PATH 加载）
+     *   - libexec/loader（通过 PROOT_LOADER 指定，proot 用 ptrace 注入到子进程）
+     *
+     * 因此调用方不能直接用 `ProcessBuilder(args).start()`，必须使用本方法返回的
+     * [ProcessBuilder]（已通过 `environment().putAll(...)` 注入上述变量）。
+     *
+     * @param command 要在 Ubuntu 环境中执行的完整 shell 命令
+     * @param workDir 工作目录（绝对路径，服务器目录会自动绑定）
+     */
+    fun buildProotCommand(command: String, workDir: String = "/root"): ProcessBuilder {
+        val args = listOf(
+            prootBinary.absolutePath,
+            "-0",
+            "-r", rootfsDir.absolutePath,
+            "-b", "/dev:/dev",
+            "-b", "/proc:/proc",
+            "-b", "/sys:/sys",
+            "-b", "${serverDir.absolutePath}:${serverDir.absolutePath}",
+            "/bin/sh", "-c",
+            "cd $workDir && $command"
+        )
+        val pb = ProcessBuilder(args).redirectErrorStream(true)
+        pb.environment().putAll(prootEnvironment())
+        return pb
+    }
+
     /**
      * 通过 proot 在 Ubuntu 环境中执行命令。
      * @param command 完整 shell 命令
@@ -463,21 +531,7 @@ object LinuxEnvironmentManager {
         check(rootfsDir.exists()) { "rootfs 未解压" }
         require(validateShellSafe(workDir)) { "工作目录包含不安全的 shell 元字符: $workDir" }
 
-        val args = mutableListOf(
-            prootBinary.absolutePath,
-            "-0",
-            "-r", rootfsDir.absolutePath,
-            "-b", "/dev:/dev",
-            "-b", "/proc:/proc",
-            "-b", "/sys:/sys",
-            "-b", "${serverDir.absolutePath}:${serverDir.absolutePath}",
-            "/bin/sh", "-c",
-            "cd $workDir && $command"
-        )
-
-        val proc = ProcessBuilder(args)
-            .redirectErrorStream(true)
-            .start()
+        val proc = buildProotCommand(command, workDir).start()
 
         if (onOutput != null) {
             Thread {
@@ -499,16 +553,7 @@ object LinuxEnvironmentManager {
         }
         val flow = MutableSharedFlow<String>(extraBufferCapacity = 200)
         scope.launch {
-            val args = listOf(
-                prootBinary.absolutePath, "-0",
-                "-r", rootfsDir.absolutePath,
-                "-b", "/dev:/dev",
-                "-b", "/proc:/proc",
-                "-b", "/sys:/sys",
-                "-b", "${serverDir.absolutePath}:${serverDir.absolutePath}",
-                "/bin/sh", "-c", "cd $workDir && $command"
-            )
-            val proc = ProcessBuilder(args).redirectErrorStream(true).start()
+            val proc = buildProotCommand(command, workDir).start()
             proc.inputStream.bufferedReader().use { reader ->
                 reader.lines().forEach { flow.tryEmit(it) }
             }

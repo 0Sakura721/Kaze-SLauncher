@@ -16,7 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.data.ServerConfig
 import com.mcserver.launcher.server.ServerCoreManager
-import com.mcserver.launcher.server.TermuxManager
+import com.mcserver.launcher.server.ProotServerManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -136,7 +136,7 @@ fun ServerCoreDownloadScreen(
     fun startDownload() {
         scope.launch {
             downloading = true; downloadProgress = 0f; downloadMessage = null
-            val serverDir = TermuxManager.serverDir(context)
+            val serverDir = ProotServerManager.serverDir(context)
             val fileName: String
             val url: String
 

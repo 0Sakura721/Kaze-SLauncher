@@ -19,7 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mcserver.launcher.server.FileManager
-import com.mcserver.launcher.server.TermuxManager
+import com.mcserver.launcher.server.ProotServerManager
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -32,7 +32,7 @@ fun FilesScreen() {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabs = listOf("文件浏览", "世界", "崩溃报告")
 
-    var currentDir by remember { mutableStateOf(TermuxManager.serverDir(context)) }
+    var currentDir by remember { mutableStateOf(ProotServerManager.serverDir(context)) }
     var entries by remember { mutableStateOf<List<FileManager.FileEntry>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
 
@@ -198,10 +198,10 @@ fun FilesScreen() {
         when (selectedTab) {
             0 -> {
                 // 面包屑导航
-                if (currentDir.absolutePath != TermuxManager.serverDir(context).absolutePath) {
+                if (currentDir.absolutePath != ProotServerManager.serverDir(context).absolutePath) {
                     TextButton(
                         onClick = {
-                            currentDir = TermuxManager.serverDir(context)
+                            currentDir = ProotServerManager.serverDir(context)
                         }
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(16.dp))

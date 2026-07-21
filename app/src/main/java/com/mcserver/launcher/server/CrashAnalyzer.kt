@@ -72,7 +72,7 @@ object CrashAnalyzer {
 
     /** 获取 crash-reports 目录（使用实际服务器运行目录） */
     private fun getCrashReportsDir(): File {
-        val baseDir = TermuxManager.serverDir(context)
+        val baseDir = ProotServerManager.serverDir(context)
         return File(baseDir, "crash-reports")
     }
 
@@ -300,9 +300,9 @@ object CrashAnalyzer {
             return Triple(
                 CrashCause.PERMISSION,
                 "文件权限不足。建议：\n" +
-                "1. 检查 Termux 是否有存储权限\n" +
+                "1. 检查应用是否有存储权限\n" +
                 "2. 确认服务器目录可读写\n" +
-                "3. 在 Termux 中运行 termux-setup-storage",
+                "3. 确认应用存储权限已授予",
                 CrashSeverity.HIGH
             )
         }
@@ -315,8 +315,8 @@ object CrashAnalyzer {
             return Triple(
                 CrashCause.NATIVE_LIBRARY,
                 "原生库加载失败。建议：\n" +
-                "1. 确认 Termux 中安装了必要的依赖\n" +
-                "2. 在 Termux 中运行 pkg install openjdk-21\n" +
+                "1. 确认 Linux 环境中安装了必要的依赖\n" +
+                "2. 在应用内安装 JDK 21\n" +
                 "3. 某些模组可能不兼容 ARM 架构",
                 CrashSeverity.MEDIUM
             )

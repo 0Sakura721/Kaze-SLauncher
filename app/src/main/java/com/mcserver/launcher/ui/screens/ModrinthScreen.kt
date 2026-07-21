@@ -13,7 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.server.ModrinthManager
-import com.mcserver.launcher.server.TermuxManager
+import com.mcserver.launcher.server.ProotServerManager
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -78,7 +78,7 @@ fun ModrinthScreen() {
         scope.launch {
             downloading = true; downloadProgress = 0f; message = null
             try {
-                val serverDir = TermuxManager.serverDir(context)
+                val serverDir = ProotServerManager.serverDir(context)
                 val subDir = when (selectedType) {
                     "plugin" -> File(serverDir, "plugins")
                     "mod" -> File(serverDir, "mods")

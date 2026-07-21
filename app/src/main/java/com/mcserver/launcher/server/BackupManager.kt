@@ -23,7 +23,7 @@ import java.util.Locale
 object BackupManager {
 
     private const val TAG = "BackupManager"
-    private val serverDir: File get() = TermuxManager.serverDir(McApplication.instance)
+    private val serverDir: File get() = ProotServerManager.serverDir(McApplication.instance)
     private val backupsRoot: File get() = File(serverDir, "backups")
 
     private val _backups = MutableStateFlow<List<BackupEntry>>(emptyList())

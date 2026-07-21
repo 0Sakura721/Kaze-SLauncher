@@ -67,7 +67,7 @@ object ConfigTemplateManager {
                 })
 
                 // 读取当前 server.properties
-                val propsFile = File(TermuxManager.serverDir(context), "server.properties")
+                val propsFile = File(ProotServerManager.serverDir(context), "server.properties")
                 if (propsFile.exists()) {
                     val props = JSONObject()
                     propsFile.readLines().forEach { line ->

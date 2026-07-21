@@ -13,7 +13,7 @@ import java.io.File
  */
 object PlayerManager {
 
-    private val serverDir: File get() = TermuxManager.serverDir(McApplication.instance)
+    private val serverDir: File get() = ProotServerManager.serverDir(McApplication.instance)
 
     data class OpEntry(val name: String, val uuid: String, val level: Int = 4, val bypassesPlayerLimit: Boolean = false)
     data class WhitelistEntry(val name: String, val uuid: String)

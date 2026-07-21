@@ -13,7 +13,7 @@ import java.util.Locale
  */
 object FileManager {
 
-    private val serverDir: File get() = TermuxManager.serverDir(McApplication.instance)
+    private val serverDir: File get() = ProotServerManager.serverDir(McApplication.instance)
 
     data class FileEntry(
         val name: String,

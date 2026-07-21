@@ -136,7 +136,7 @@ class PerformanceMonitor private constructor() {
 
     private fun getServerPid(): Int? {
         return try {
-            val serverDir = TermuxManager.serverDir(context)
+            val serverDir = ProotServerManager.serverDir(context)
             val pidFile = File(serverDir, "mcserver.pid")
             if (!pidFile.exists()) return null
             pidFile.readText().trim().toIntOrNull()

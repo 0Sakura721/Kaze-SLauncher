@@ -18,7 +18,7 @@ import java.util.jar.JarFile
  * 借鉴 Pterodactyl、MCSManager 和 PufferPanel 的启动前验证逻辑。
  *
  * 新增检查项（v0.5.0）：
- * - Termux 环境完整性检查
+ * - Linux 环境完整性检查
  * - Java 二进制可执行性验证
  * - 系统资源综合评估
  * - 推荐配置建议
@@ -26,7 +26,7 @@ import java.util.jar.JarFile
 object HealthChecker {
 
     private val context: Context get() = McApplication.instance
-    private val serverDir: File get() = TermuxManager.serverDir(context)
+    private val serverDir: File get() = ProotServerManager.serverDir(context)
 
     data class HealthResult(
         val passed: Boolean,
@@ -53,8 +53,8 @@ object HealthChecker {
         val warnings = mutableListOf<String>()
         val recommendations = mutableListOf<String>()
 
-        // 1. Termux 环境检查
-        checks.add(checkTermux())
+        // 1. Linux 环境检查
+        checks.add(checkLinuxEnv())
 
         // 2. JAR 文件检查
         checks.add(checkJarFile(config))
@@ -102,32 +102,23 @@ object HealthChecker {
 
     // ─── 新增检查项 ───
 
-    /** 检查 Termux 环境是否可用 */
-    private fun checkTermux(): HealthCheck {
-        val installed = TermuxManager.isTermuxInstalled(context)
-        if (!installed) {
-            return HealthCheck("Termux 环境", false,
-                "未检测到 Termux。Minecraft 服务器需要 Termux 提供的 Linux 环境。",
-                detail = "请从 F-Droid 安装 Termux: https://f-droid.org/packages/com.termux/")
+    /** 检查内置 Linux 环境是否可用 */
+    private fun checkLinuxEnv(): HealthCheck {
+        val ready = LinuxEnvironmentManager.isEnvironmentReady()
+        if (!ready) {
+            return HealthCheck("Linux 环境", false,
+                "未检测到 Linux 运行环境。Minecraft 服务器需要内置的 proot+Ubuntu 环境。",
+                detail = "请在设置中初始化 Linux 环境")
         }
-        val bash = File(TermuxManager.getTermuxBashPath())
-        if (!bash.exists() || !bash.canExecute()) {
-            return HealthCheck("Termux 环境", false,
-                "Termux 已安装但 bash 不可执行，请确认 Termux 已正确初始化。",
-                detail = "请打开 Termux 应用一次以完成初始化。")
-        }
-        val state = TermuxManager().checkState()
-        return when (state) {
-            TermuxState.READY -> HealthCheck("Termux 环境", true,
-                "Termux 环境已就绪（Java 已安装）", Severity.INFO)
-            TermuxState.JAVA_MISSING -> HealthCheck("Termux 环境", true,
-                "Termux 已安装但 Java 未安装，启动前会自动检测。",
-                Severity.WARNING,
-                detail = "请在 Termux 中运行: pkg install openjdk-21")
-            TermuxState.INSTALLED -> HealthCheck("Termux 环境", true,
-                "Termux 已安装", Severity.INFO)
-            else -> HealthCheck("Termux 环境", false,
-                "Termux 状态异常", detail = "请确认 Termux 已从 F-Droid 安装并初始化。")
+        val hasJava = listOf(21, 17, 11, 8).any { LinuxEnvironmentManager.isJdkInstalled(it) }
+        return if (hasJava) {
+            HealthCheck("Linux 环境", true,
+                "Linux 环境已就绪（Java 已安装）", Severity.INFO)
+        } else {
+            HealthCheck("Linux 环境", false,
+                "Linux 环境已就绪但 Java 未安装",
+                detail = "请在应用内安装 JDK",
+                severity = Severity.WARNING)
         }
     }
 
@@ -341,7 +332,7 @@ object HealthChecker {
 
         // 获取实际将用于运行服务器的 Java 版本：
         // 优先从 JreManager（内置 JRE），回退到 LinuxEnvironmentManager（proot+Ubuntu JDK），
-        // 最后才用 Termux 安装的 Java 版本。
+        // 最后才用内置 Linux 环境的 Java 版本。
         val currentJavaVersion = when {
             ServerManager.instance.selectedJreVersion.toIntOrNull() != null ->
                 ServerManager.instance.selectedJreVersion.toIntOrNull() ?: 17
@@ -353,18 +344,23 @@ object HealthChecker {
                 candidate ?: (ServerManager.instance.selectedJreVersion.toIntOrNull() ?: 17)
             }
             else -> {
-                // 回退：检查 Termux 中的 Java 版本（通过检查 Termux java 路径）
-                val termuxJava = File("${TermuxManager.TERMUX_BIN}/java")
-                if (termuxJava.exists()) {
-                    try {
-                        val proc = ProcessBuilder(termuxJava.absolutePath, "-version")
-                            .redirectErrorStream(true).start()
+                // 回退：检查内置 Linux 环境中的 Java 版本
+                listOf(21, 17, 11, 8).forEach { ver ->
+                    if (LinuxEnvironmentManager.isJdkInstalled(ver)) {
+                        val javaPath = LinuxEnvironmentManager.getJavaPath(ver)
+                        val proc = ProcessBuilder(javaPath, "-version").redirectErrorStream(true).start()
                         val output = proc.inputStream.bufferedReader().readText()
-                        proc.waitFor()
-                        val match = Regex("""version\s+"(\d+)""").find(output)
-                        match?.groupValues?.get(1)?.toIntOrNull() ?: 17
-                    } catch (_: Exception) { 17 }
-                } else 17
+                        if (proc.waitFor() == 0) {
+                            val versionMatch = Regex("version \"(\\d+)").find(output)
+                            if (versionMatch != null) {
+                                return HealthCheck("Java 版本", true,
+                                    "Java ${versionMatch.groupValues[1]} (Linux 环境内置)",
+                                    Severity.INFO)
+                            }
+                        }
+                    }
+                }
+                17
             }
         }
 
@@ -376,7 +372,7 @@ object HealthChecker {
             HealthCheck("Java 兼容性", true,
                 "$serverType 核心需要 Java $requiredVersion+，当前为 Java $currentJavaVersion",
                 Severity.WARNING,
-                detail = "请在 Termux 中安装更高版本 Java: pkg install openjdk-21")
+                detail = "请在应用内安装更高版本 JDK")
         }
     }
 
@@ -435,12 +431,12 @@ object HealthChecker {
         sb.appendLine("  空闲空间: ${formatFileSize(freeSpace * 1024 * 1024)}")
         sb.appendLine()
 
-        // Termux 状态
-        sb.appendLine("--- Termux 环境 ---")
-        sb.appendLine("  Termux 已安装: ${TermuxManager.isTermuxInstalled(context)}")
-        sb.appendLine("  Bash 路径: ${TermuxManager.getTermuxBashPath()}")
-        val termuxState = TermuxManager().checkState()
-        sb.appendLine("  状态: ${termuxState.name}")
+        // Linux 环境状态
+        sb.appendLine("--- Linux 环境 ---")
+        sb.appendLine("  环境就绪: ${LinuxEnvironmentManager.isEnvironmentReady()}")
+        listOf(21, 17, 11, 8).forEach { ver ->
+            sb.appendLine("  JDK $ver: ${if (LinuxEnvironmentManager.isJdkInstalled(ver)) "已安装" else "未安装"}")
+        }
         sb.appendLine()
 
         // Java 信息（报告实际将用于运行服务器的 Java 版本）
@@ -454,7 +450,7 @@ object HealthChecker {
                 }
                 installed.joinToString(", ") { "Java $it" }.ifEmpty { "未知" }
             }
-            else -> "Termux: ${System.getProperty("java.version", "未知")}"
+            else -> "系统: ${System.getProperty("java.version", "未知")}"
         }
         sb.appendLine("  Java 版本: $actualJavaVersion")
         sb.appendLine("  JRE 管理器: ${ServerManager.instance.selectedJreVersion}")

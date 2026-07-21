@@ -276,56 +276,56 @@ object ScheduleManager {
     /** 执行单个任务 */
     private fun executeTask(task: ScheduleTask) {
         val serverManager = ServerManager.instance
-        // 使用 ServerManager 的 TermuxManager 实例，确保命令能到达运行中的服务器
-        val termux = serverManager.termuxManager
+        // 使用 ServerManager 的 ProotServerManager 实例，确保命令能到达运行中的服务器
+        val server = serverManager.prootServerManager
 
         try {
             when (task.type) {
                 TaskType.COMMAND -> {
                     if (task.payload.isNotBlank()) {
-                        termux.sendCommand(task.payload)
-                        termux.notifyConsole("> [定时任务:${task.name}] 执行命令: ${task.payload}")
+                        server.sendCommand(task.payload)
+                        server.notifyConsole("> [定时任务:${task.name}] 执行命令: ${task.payload}")
                     }
                 }
                 TaskType.BACKUP -> {
-                    termux.notifyConsole("> [定时任务:${task.name}] 开始自动备份...")
+                    server.notifyConsole("> [定时任务:${task.name}] 开始自动备份...")
                     CoroutineScope(Dispatchers.IO).launch {
                         BackupManager.createBackup("auto_${task.id.take(4)}").onSuccess { path ->
-                            termux.notifyConsole("> [定时任务:${task.name}] 备份完成: $path")
+                            server.notifyConsole("> [定时任务:${task.name}] 备份完成: $path")
                         }.onFailure { e ->
-                            termux.notifyConsole("> [定时任务:${task.name}] 备份失败: ${e.message}")
+                            server.notifyConsole("> [定时任务:${task.name}] 备份失败: ${e.message}")
                         }
                     }
                 }
                 TaskType.RESTART -> {
                     if (serverManager.isRunning) {
-                        termux.notifyConsole("> [定时任务:${task.name}] 执行定时重启")
+                        server.notifyConsole("> [定时任务:${task.name}] 执行定时重启")
                         if (task.payload.isNotBlank()) {
-                            termux.sendCommand("say ${task.payload}")
+                            server.sendCommand("say ${task.payload}")
                         }
-                        termux.sendCommand("say §e[定时任务] 服务器将在 30 秒后重启")
+                        server.sendCommand("say §e[定时任务] 服务器将在 30 秒后重启")
                         CoroutineScope(Dispatchers.IO).launch {
                             delay(30000)
-                            termux.sendCommand("save-all")
+                            server.sendCommand("save-all")
                             delay(5000)
                             serverManager.stopServer()
                             delay(5000)
-                            termux.notifyConsole("> [定时任务:${task.name}] 服务器已停止，如需自动启动请开启自动重启")
+                            server.notifyConsole("> [定时任务:${task.name}] 服务器已停止，如需自动启动请开启自动重启")
                         }
                     }
                 }
                 TaskType.BROADCAST -> {
                     if (task.payload.isNotBlank() && serverManager.isRunning) {
-                        termux.sendCommand("say §b[定时] ${task.payload}")
+                        server.sendCommand("say §b[定时] ${task.payload}")
                     }
                 }
                 TaskType.STOP -> {
                     if (serverManager.isRunning) {
-                        termux.notifyConsole("> [定时任务:${task.name}] 执行定时停止")
+                        server.notifyConsole("> [定时任务:${task.name}] 执行定时停止")
                         if (task.payload.isNotBlank()) {
-                            termux.sendCommand("say ${task.payload}")
+                            server.sendCommand("say ${task.payload}")
                         }
-                        termux.sendCommand("save-all")
+                        server.sendCommand("save-all")
                         CoroutineScope(Dispatchers.IO).launch {
                             delay(5000)
                             serverManager.stopServer()
@@ -334,13 +334,13 @@ object ScheduleManager {
                 }
                 TaskType.WORLD_SAVE -> {
                     if (serverManager.isRunning) {
-                        termux.sendCommand("save-all")
-                        termux.notifyConsole("> [定时任务:${task.name}] 已执行世界保存")
+                        server.sendCommand("save-all")
+                        server.notifyConsole("> [定时任务:${task.name}] 已执行世界保存")
                     }
                 }
             }
         } catch (e: Exception) {
-            termux.notifyConsole("> [定时任务:${task.name}] 执行失败: ${e.message}")
+            server.notifyConsole("> [定时任务:${task.name}] 执行失败: ${e.message}")
         }
     }
 

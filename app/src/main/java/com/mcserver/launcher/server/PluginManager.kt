@@ -12,7 +12,7 @@ import java.util.jar.JarFile
  */
 object PluginManager {
 
-    private val serverDir: File get() = TermuxManager.serverDir(McApplication.instance)
+    private val serverDir: File get() = ProotServerManager.serverDir(McApplication.instance)
     val pluginsDir: File get() = File(serverDir, "plugins")
 
     data class PluginInfo(

@@ -40,7 +40,7 @@ class ServerForegroundService : Service() {
             if (intent?.action == ACTION_SEND_COMMAND) {
                 val cmd = intent.getStringExtra(EXTRA_COMMAND) ?: return
                 try {
-                    ServerManager.instance.termuxManager.writeCommandToPipe(this@ServerForegroundService, cmd)
+                    ServerManager.instance.prootServerManager.writeCommandToPipe(cmd)
                 } catch (_: Exception) {}
             }
         }

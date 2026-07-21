@@ -23,7 +23,7 @@ import java.util.zip.ZipOutputStream
  */
 object WorldManager {
 
-    private val serverDir: File get() = TermuxManager.serverDir(McApplication.instance)
+    private val serverDir: File get() = ProotServerManager.serverDir(McApplication.instance)
 
     data class WorldInfo(
         val name: String,
