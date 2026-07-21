@@ -14,7 +14,7 @@ import java.net.URLEncoder
  * API Key 获取方式：CurseForge for Studios 控制台免费注册即可获得。
  * 此 Key 仅用于模组/插件搜索和下载，不涉及用户身份认证。
  */
-class CurseForgeManager(private val apiKey: String) {
+class CurseForgeManager(private var apiKey: String) {
 
     companion object {
         @Volatile
@@ -28,6 +28,8 @@ class CurseForgeManager(private val apiKey: String) {
                         instance = CurseForgeManager(apiKey)
                     }
                 }
+            } else {
+                instance?.apiKey = apiKey
             }
         }
     }

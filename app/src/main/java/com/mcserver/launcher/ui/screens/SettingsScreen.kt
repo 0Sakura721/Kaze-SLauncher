@@ -12,9 +12,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mcserver.launcher.data.JreStatus
+import com.mcserver.launcher.data.PreferencesManager
+import com.mcserver.launcher.server.CurseForgeManager
 import com.mcserver.launcher.server.JreManager
 import com.mcserver.launcher.server.MirrorLatency
 import com.mcserver.launcher.server.ServerManager
@@ -27,11 +31,15 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     currentTheme: ThemeMode,
     onThemeChange: (ThemeMode) -> Unit,
-    onNavigateToAppearance: () -> Unit = {}
+    onNavigateToAppearance: () -> Unit = {},
+    prefsManager: PreferencesManager
 ) {
     val serverManager = ServerManager.instance
     val jreInfo by serverManager.jreInfo.collectAsState()
+    val curseforgeApiKey by prefsManager.curseforgeApiKey.collectAsState(initial = "")
     val scope = rememberCoroutineScope()
+
+    var inputApiKey by remember { mutableStateOf(curseforgeApiKey) }
 
     var showJreProgress by remember { mutableStateOf(false) }
     var jreProgress by remember { mutableFloatStateOf(0f) }
@@ -328,6 +336,49 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // CurseForge API Key
+        Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("CurseForge API Key", style = MaterialTheme.typography.titleMedium)
+                    if (curseforgeApiKey.isNotBlank()) {
+                        Icon(Icons.Filled.CheckCircle, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("用于访问 CurseForge 模组仓库。前往 https://console.curseforge.com 免费注册获取。",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = inputApiKey,
+                    onValueChange = { inputApiKey = it },
+                    label = { Text("API Key") },
+                    placeholder = { Text("输入你的 CurseForge API Key") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    visualTransformation = if (inputApiKey.isNotBlank()) PasswordVisualTransformation() else VisualTransformation.None,
+                    trailingIcon = {
+                        if (inputApiKey.isNotBlank()) {
+                            Row {
+                                IconButton(onClick = { inputApiKey = "" }) {
+                                    Icon(Icons.Filled.Clear, "清除", Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = {
+                    scope.launch {
+                        prefsManager.setCurseforgeApiKey(inputApiKey.trim())
+                        CurseForgeManager.initialize(inputApiKey.trim())
+                    }
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Save, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("保存")
                 }
             }
         }

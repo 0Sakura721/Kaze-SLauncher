@@ -236,7 +236,8 @@ fun MainApp(
                         navController.navigate(Screen.Appearance.route) {
                             launchSingleTop = true
                         }
-                    }
+                    },
+                    prefsManager = prefsManager
                 )
             }
             composable(Screen.Appearance.route) {
