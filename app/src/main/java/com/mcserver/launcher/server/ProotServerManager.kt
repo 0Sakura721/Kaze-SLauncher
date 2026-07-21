@@ -51,7 +51,7 @@ class ProotServerManager {
     private val isRunning = AtomicBoolean(false)
     private var tailJob: Job? = null
     private var logFile: File? = null
-    private var serverProcess: Process? = null
+    private var serverProcess: java.lang.Process? = null
 
     private var rconClient: RconClient? = null
     private var rconReady = false
@@ -251,9 +251,9 @@ class ProotServerManager {
                     appendLine("echo '--- Minecraft Server Started ---' > '$safeLogPath'")
                     appendLine(": > '$safePidFile'")
                     appendLine("$safeJavaBin -Xmx${xmx}M -Xms${xms}M $args -jar '$safeJarName' $noguiArg >> '$safeLogPath' 2>&1 < '$safePipePath' &")
-                    appendLine("JAVA_PID=$!")
-                    appendLine("echo $JAVA_PID > '$safePidFile'")
-                    appendLine("wait $JAVA_PID")
+                    appendLine("JAVA_PID=\$!")
+                    appendLine("echo \$JAVA_PID > '$safePidFile'")
+                    appendLine("wait \$JAVA_PID")
                     appendLine("echo '--- Server Stopped ---' >> '$safeLogPath'")
                     appendLine("rm -f '$safePipePath' '$safePidFile'")
                 }
