@@ -75,31 +75,47 @@ class JreManager(private val context: Context) {
 
     init {
         loadPrefs()
-        extractBuiltinJava()
+        extractBuiltinJava(selectedVersion, selectedPackage)
         _jreInfo.value = checkJre()
         startDownloadService()
     }
 
-    private fun extractBuiltinJava() {
+    /**
+     * 从 APK 内置资源中解压指定版本的 Java。
+     * 优先尝试用户选择的包类型 (jdk/jre)，失败则回退到另一种。
+     *
+     * @param version Java 主版本号 (如 "8", "11", "17", "21")
+     * @param pkg 包类型 ("jdk" 或 "jre")
+     * @return true 如果解压成功或目标已存在
+     */
+    private fun extractBuiltinJava(version: String, pkg: String): Boolean {
+        val targetDir = jreDirFor(version)
+        if (javaExecutableFor(version).exists()) return true
+
         val arch = getDeviceArch()
-        val assetName = "java-21-${arch}.tar.gz"
-        val targetDir = jreDirFor("21")
+        // 尝试顺序：优先用户选择的包类型，再回退另一种
+        val candidates = listOf(pkg, if (pkg == "jdk") "jre" else "jdk").distinct()
 
-        if (targetDir.exists()) return
-
-        try {
-            context.assets.open("bundled/$assetName").use { input ->
-                val tempFile = File(context.cacheDir, "java_builtin_temp.tar.gz")
-                FileOutputStream(tempFile).use { output ->
-                    input.copyTo(output)
+        for (candidatePkg in candidates) {
+            val assetName = "java-$version-$candidatePkg-$arch.tar.gz"
+            try {
+                context.assets.open("bundled/$assetName").use { input ->
+                    val tempFile = File(context.cacheDir, "java_builtin_${version}_$candidatePkg.tar.gz")
+                    FileOutputStream(tempFile).use { output -> input.copyTo(output) }
+                    if (targetDir.exists()) targetDir.deleteRecursively()
+                    targetDir.mkdirs()
+                    extractTarGz(tempFile, targetDir)
+                    javaExecutableFor(version).setExecutable(true)
+                    tempFile.delete()
+                    Log.i(TAG, "extractBuiltinJava: $assetName 解压成功")
+                    return true
                 }
-                extractTarGz(tempFile, targetDir)
-                javaExecutableFor("21").setExecutable(true)
-                tempFile.delete()
+            } catch (e: IOException) {
+                // 该包类型不存在内置资源，尝试下一个
+                Log.d(TAG, "extractBuiltinJava: $assetName 不存在或解压失败: ${e.message}")
             }
-        } catch (e: IOException) {
-            Log.w(TAG, "extractBuiltinJava failed", e)
         }
+        return false
     }
 
     private fun loadPrefs() {
@@ -130,7 +146,10 @@ class JreManager(private val context: Context) {
 
     fun setVersionAndPackage(version: String, pkg: String) {
         selectedVersion = version; selectedPackage = pkg
-        savePrefs(); _jreInfo.value = checkJre()
+        savePrefs()
+        // 尝试从内置资源解压该版本
+        extractBuiltinJava(version, pkg)
+        _jreInfo.value = checkJre()
     }
 
     // ─── 版本列表 ───

@@ -26,17 +26,38 @@ val downloadBundledAssets by tasks.registering {
     description = "下载 Ubuntu 24.04 rootfs 到 assets/bundled/（proot 已内置 commit）"
 
     val ubuntuVersion = "24.04.4"
+    // 内置 Java 全部版本（8/11/17/21）+ JDK/JRE + aarch64/armhf
+    // 命名约定：java-{version}-{jdk|jre}-{arch}.tar.gz
+    val javaVersions = listOf(
+        Triple(21, "21.0.14+9", "21.0.14+9"),
+        Triple(17, "17.0.16+8", "17.0.16+8"),
+        Triple(11, "11.0.24+8", "11.0.24+8"),
+        Triple(8, "8u422-b05", "8u422b05")
+    )
+    val javaFiles = linkedMapOf<String, String>()
+    javaVersions.forEach { (ver, jdkPatch, jrePatch) ->
+        // JDK - aarch64
+        javaFiles["java-$ver-jdk-aarch64.tar.gz"] =
+            "https://mirrors.aliyun.com/adoptium/$ver/jdk/aarch64/linux/jdk-${jdkPatch}_linux-aarch64_bin.tar.gz"
+        // JDK - armhf
+        javaFiles["java-$ver-jdk-armhf.tar.gz"] =
+            "https://mirrors.aliyun.com/adoptium/$ver/jdk/arm/linux/jdk-${jdkPatch}_linux-arm_bin.tar.gz"
+        // JRE - aarch64
+        javaFiles["java-$ver-jre-aarch64.tar.gz"] =
+            "https://mirrors.aliyun.com/adoptium/$ver/jre/aarch64/linux/jre-${jrePatch}_linux-aarch64_bin.tar.gz"
+        // JRE - armhf
+        javaFiles["java-$ver-jre-armhf.tar.gz"] =
+            "https://mirrors.aliyun.com/adoptium/$ver/jre/arm/linux/jre-${jrePatch}_linux-arm_bin.tar.gz"
+    }
+
     val files = linkedMapOf(
         "ubuntu-base-24.04-arm64.tar.gz" to
             "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-arm64.tar.gz",
         "ubuntu-base-24.04-armhf.tar.gz" to
             "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-armhf.tar.gz",
-        // Java 21 JDK (内置首次启动零等待)
-        "java-21-aarch64.tar.gz" to
-            "https://mirrors.aliyun.com/adoptium/21/jdk/aarch64/linux/jdk-21.0.14+9_linux-aarch64_bin.tar.gz",
-        "java-21-armhf.tar.gz" to
-            "https://mirrors.aliyun.com/adoptium/21/jdk/arm/linux/jdk-21.0.14+9_linux-arm_bin.tar.gz",
     )
+    // 加入所有 Java 版本
+    files.putAll(javaFiles)
 
     doLast {
         val destDir = bundledAssetsDir.asFile
@@ -86,14 +107,24 @@ val downloadBundledAssets by tasks.registering {
             if (!download(url, File(destDir, name))) ok = false
         }
         // 验证 proot tarball 已 commit
-        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz",
-            "java-21-aarch64.tar.gz", "java-21-armhf.tar.gz").forEach { name ->
+        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz").forEach { name ->
             val f = File(destDir, name)
             if (!f.exists() || f.length() == 0L) {
                 System.err.println("  ✗ 缺少内置资源 $name（应已 commit 到 git）")
                 ok = false
             } else {
                 println("  ✓ $name (${f.length() / 1024} KB, 内置)")
+            }
+        }
+        // 验证 Java 资源
+        val javaAssetNames = javaFiles.keys.toList()
+        javaAssetNames.forEach { name ->
+            val f = File(destDir, name)
+            if (!f.exists() || f.length() == 0L) {
+                System.err.println("  ✗ 缺少 Java 资源 $name")
+                ok = false
+            } else {
+                println("  ✓ $name (${f.length() / 1024 / 1024} MB)")
             }
         }
         println("═══ 完成 ${if (ok) "✓" else "(有失败项)"} ═══")
@@ -106,7 +137,7 @@ android {
 
     defaultConfig {
         applicationId = "com.mcserver.launcher"
-        minSdk = 26; targetSdk = 35; versionCode = 17; versionName = "0.13.1-pre"
+        minSdk = 26; targetSdk = 35; versionCode = 18; versionName = "0.13.2-pre"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         buildConfigField("String", "BUILD_TIME", "\"${System.currentTimeMillis()}\"")
