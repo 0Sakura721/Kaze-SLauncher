@@ -76,7 +76,8 @@ fun MainApp(
         Screen.ResourcePacks.route, Screen.Schedules.route,
         Screen.Worlds.route, Screen.Diagnostics.route,
         Screen.Modrinth.route, Screen.CrashReports.route,
-        Screen.Appearance.route
+        Screen.Appearance.route, Screen.Terminal.route,
+        Screen.ServerList.route
     )
 
     Scaffold(
@@ -132,6 +133,16 @@ fun MainApp(
                         navController.navigate(Screen.Management.route) {
                             launchSingleTop = true
                             restoreState = true
+                        }
+                    },
+                    onNavigateToServerList = {
+                        navController.navigate(Screen.ServerList.route) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onNavigateToTerminal = {
+                        navController.navigate(Screen.Terminal.route) {
+                            launchSingleTop = true
                         }
                     }
                 )
@@ -236,6 +247,17 @@ fun MainApp(
                         scope.launch {
                             prefsManager.setTheme(mode)
                         }
+                    }
+                )
+            }
+            composable(Screen.Terminal.route) {
+                TerminalScreen()
+            }
+            composable(Screen.ServerList.route) {
+                ServerListScreen(
+                    onBack = { navController.popBackStack() },
+                    onServerSelected = {
+                        navController.popBackStack()
                     }
                 )
             }

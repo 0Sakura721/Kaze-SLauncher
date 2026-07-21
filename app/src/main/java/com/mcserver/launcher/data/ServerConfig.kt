@@ -1,6 +1,9 @@
 package com.mcserver.launcher.data
 
+import java.util.UUID
+
 data class ServerConfig(
+    val id: String = UUID.randomUUID().toString(),
     val name: String = "Minecraft Server",
     val jarPath: String = "",
     val javaPath: String = "",

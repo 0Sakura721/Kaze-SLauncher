@@ -31,12 +31,16 @@ fun HomeScreen(
     config: ServerConfig,
     onNavigateToConfig: () -> Unit,
     onNavigateToConsole: () -> Unit,
-    onNavigateToManagement: () -> Unit = {}
+    onNavigateToManagement: () -> Unit = {},
+    onNavigateToServerList: () -> Unit = {},
+    onNavigateToTerminal: () -> Unit = {}
 ) {
     val serverManager = ServerManager.instance
     val serverStatus by serverManager.serverStatus.collectAsState()
     val jreInfo by serverManager.jreInfo.collectAsState()
     val perfMetrics by PerformanceMonitor.instance.metrics.collectAsState()
+    val serverList by serverManager.serverList.collectAsState()
+    val currentServerId by serverManager.currentServerId.collectAsState()
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -47,6 +51,7 @@ fun HomeScreen(
     var pluginCount by remember { mutableIntStateOf(0) }
     var worldCount by remember { mutableIntStateOf(0) }
     var backupCount by remember { mutableIntStateOf(0) }
+    var showServerMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         networkState = NetworkUtils.getNetworkState(context)
@@ -69,17 +74,67 @@ fun HomeScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // ══ 顶部：名称 + 网络状态 ══
+        // ══ 顶部：名称（可切换） + 网络状态 ══
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = config.name,
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onBackground
-            )
+            Box {
+                TextButton(onClick = { if (!isRunning) showServerMenu = true }) {
+                    Text(
+                        text = config.name,
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Icon(
+                        Icons.Filled.ArrowDropDown,
+                        null,
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
+                }
+                DropdownMenu(
+                    expanded = showServerMenu,
+                    onDismissRequest = { showServerMenu = false }
+                ) {
+                    serverList.forEach { server ->
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (server.id == currentServerId) {
+                                        Icon(
+                                            Icons.Filled.CheckCircle,
+                                            null,
+                                            Modifier.size(16.dp),
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(server.name)
+                                }
+                            },
+                            onClick = {
+                                if (server.id != currentServerId && !isRunning) {
+                                    serverManager.switchServer(server.id)
+                                }
+                                showServerMenu = false
+                            },
+                            enabled = server.id != currentServerId && !isRunning
+                        )
+                    }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("管理服务器...") },
+                        leadingIcon = {
+                            Icon(Icons.Filled.Dns, null, Modifier.size(18.dp))
+                        },
+                        onClick = {
+                            showServerMenu = false
+                            onNavigateToServerList()
+                        }
+                    )
+                }
+            }
             Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
                 Row(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -162,6 +217,11 @@ fun HomeScreen(
                 OutlinedButton(onClick = onNavigateToConsole, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Filled.Terminal, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("控制台")
                 }
+                OutlinedButton(onClick = onNavigateToTerminal, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.Computer, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Linux 终端")
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onNavigateToManagement, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Filled.ManageAccounts, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("管理")
                 }

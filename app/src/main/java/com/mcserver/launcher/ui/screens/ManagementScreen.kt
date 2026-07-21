@@ -180,6 +180,7 @@ private fun StatItem(
 }
 
 private fun getScreenDescription(screen: Screen): String = when (screen) {
+    Screen.ServerList -> "创建、删除、切换多个独立的服务器实例"
     Screen.ServerConfig -> "服务器名称、JAR、内存、端口、游戏规则等核心配置"
     Screen.CoreDownload -> "从 Paper/Purpur/Fabric/Forge/NeoForge/Vanilla 下载服务器 JAR 核心"
     Screen.Modrinth -> "从 Modrinth 浏览和下载模组、插件、数据包和资源包"
@@ -191,5 +192,6 @@ private fun getScreenDescription(screen: Screen): String = when (screen) {
     Screen.Schedules -> "定时执行命令、备份、重启、广播等任务"
     Screen.Worlds -> "查看/切换/导出/删除 Minecraft 世界"
     Screen.Diagnostics -> "服务器健康诊断、性能分析、崩溃报告查看"
+    Screen.Terminal -> "进入内置 Linux 环境的交互式终端，执行 shell 命令"
     else -> ""
 }

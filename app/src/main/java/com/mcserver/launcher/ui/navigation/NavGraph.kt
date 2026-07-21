@@ -24,6 +24,8 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     data object Diagnostics : Screen("diagnostics", "诊断报告", Icons.Filled.MonitorHeart)
     data object CrashReports : Screen("crash_reports", "崩溃报告", Icons.Filled.BugReport)
     data object Appearance : Screen("appearance", "外观", Icons.Filled.Palette)
+    data object Terminal : Screen("terminal", "Linux 终端", Icons.Filled.Computer)
+    data object ServerList : Screen("server_list", "服务器列表", Icons.Filled.Dns)
 }
 
 val bottomNavItems = listOf(
@@ -35,6 +37,7 @@ val bottomNavItems = listOf(
 
 /** 管理子页列表，用于 ManagementScreen 内导航 */
 val managementSubScreens = listOf(
+    Screen.ServerList,
     Screen.ServerConfig,
     Screen.CoreDownload,
     Screen.Modrinth,
@@ -45,5 +48,6 @@ val managementSubScreens = listOf(
     Screen.ResourcePacks,
     Screen.Schedules,
     Screen.Worlds,
-    Screen.Diagnostics
+    Screen.Diagnostics,
+    Screen.Terminal
 )

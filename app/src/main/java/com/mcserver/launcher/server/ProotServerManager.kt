@@ -28,10 +28,15 @@ class ProotServerManager {
 
     companion object {
         const val TAG = "ProotServerManager"
+        const val DEFAULT_SERVER_ID = "default"
 
-        /** 共享工作目录 */
-        fun serverDir(ctx: Context): File {
-            val dir = File(Environment.getExternalStorageDirectory(), "mcserver")
+        /** 当前全局选中的服务器 ID（由 ServerManager 统一管理） */
+        @Volatile
+        var activeServerId: String = DEFAULT_SERVER_ID
+
+        /** 共享工作目录（按服务器实例分目录，使用全局 activeServerId） */
+        fun serverDir(ctx: Context, serverId: String = activeServerId): File {
+            val dir = File(Environment.getExternalStorageDirectory(), "mcserver/$serverId")
             if (!dir.exists()) dir.mkdirs()
             return dir
         }
@@ -64,6 +69,16 @@ class ProotServerManager {
     private val _players = MutableStateFlow<List<String>>(emptyList())
     val players: StateFlow<List<String>> = _players.asStateFlow()
 
+    /** 当前服务器实例 ID */
+    var currentServerId: String = DEFAULT_SERVER_ID
+        set(value) {
+            require(!isRunning.get()) { "运行中禁止切换服务器实例" }
+            field = value
+        }
+
+    /** 当前服务器工作目录 */
+    private fun serverDir(): File = serverDir(context, currentServerId)
+
     private val _consoleOutput = MutableSharedFlow<String>(
         replay = 500, extraBufferCapacity = 100,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
@@ -85,7 +100,7 @@ class ProotServerManager {
 
     fun isServerProcessAlive(): Boolean {
         return try {
-            val dir = serverDir(context)
+            val dir = serverDir()
             val pidFile = File(dir, "mcserver.pid")
             if (!pidFile.exists()) return false
             val pid = pidFile.readText().trim().toIntOrNull() ?: return false
@@ -110,7 +125,7 @@ class ProotServerManager {
     fun reconnectToRunningServer(): Boolean {
         return try {
             if (!isServerProcessAlive()) return false
-            val dir = serverDir(context)
+            val dir = serverDir()
             val file = File(dir, "server.log")
             if (!file.exists()) {
                 logFile = null
@@ -196,7 +211,7 @@ class ProotServerManager {
 
                 emit("> 准备 Linux 环境...")
 
-                val serverDir = serverDir(context)
+                val serverDir = serverDir()
                 synchronized(onlinePlayers) { onlinePlayers.clear() }
                 _players.value = emptyList()
                 prepareServerProperties(serverDir, config)
@@ -523,7 +538,7 @@ class ProotServerManager {
 
     fun exportLogs(): String? {
         return try {
-            val dir = serverDir(context)
+            val dir = serverDir()
             val exportDir = File(dir, "exports")
             exportDir.mkdirs()
             val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
@@ -568,7 +583,7 @@ class ProotServerManager {
     }
 
     fun writeCommandToPipe(cmd: String) {
-        val pipe = File(serverDir(context), "cmdpipe")
+        val pipe = File(serverDir(), "cmdpipe")
         if (!pipe.exists()) {
             emit("> 命令发送失败：服务器未就绪")
             return
@@ -577,7 +592,7 @@ class ProotServerManager {
             val escapedCmd = cmd.replace("'", "'\\''")
             val prootProcessBuilder = LinuxEnvironmentManager.buildProotCommand(
                 command = "printf '%s\\n' '$escapedCmd' >> '${ShellUtils.escapeSingleQuote(pipe.absolutePath)}'",
-                workDir = serverDir(context).absolutePath
+                workDir = serverDir().absolutePath
             )
             val proc = prootProcessBuilder.start()
             proc.waitFor()
@@ -601,7 +616,7 @@ class ProotServerManager {
         _players.value = emptyList()
         disconnectRcon()
 
-        val dir = serverDir(context)
+        val dir = serverDir()
         val pidFile = File(dir, "mcserver.pid")
         val pipe = File(dir, "cmdpipe")
 

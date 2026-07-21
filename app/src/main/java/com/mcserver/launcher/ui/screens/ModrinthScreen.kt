@@ -1,5 +1,6 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,7 +15,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.server.ModrinthManager
 import com.mcserver.launcher.server.ProotServerManager
+import com.mcserver.launcher.server.ServerManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -34,6 +38,14 @@ fun ModrinthScreen() {
     var downloading by remember { mutableStateOf(false) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var message by remember { mutableStateOf<String?>(null) }
+
+    // 多服务器安装选择
+    var showInstallDialog by remember { mutableStateOf(false) }
+    var pendingDownloadFile by remember { mutableStateOf<File?>(null) }
+    var pendingInstallType by remember { mutableStateOf("") }
+    var selectedTargetServerId by remember { mutableStateOf("") }
+    val serverList by ServerManager.instance.serverList.collectAsState()
+    val currentServerId by ServerManager.instance.currentServerId.collectAsState()
 
     fun search() {
         if (searchQuery.isBlank()) return
@@ -78,23 +90,21 @@ fun ModrinthScreen() {
         scope.launch {
             downloading = true; downloadProgress = 0f; message = null
             try {
-                val serverDir = ProotServerManager.serverDir(context)
-                val subDir = when (selectedType) {
-                    "plugin" -> File(serverDir, "plugins")
-                    "mod" -> File(serverDir, "mods")
-                    "datapack" -> File(serverDir, "datapacks")
-                    "resourcepack" -> File(serverDir, "resourcepacks")
-                    else -> serverDir
-                }
+                val cacheDir = File(ProotServerManager.serverDir(context), "downloads")
+                cacheDir.mkdirs()
                 val file = version.files.firstOrNull { it.primary } ?: version.files.firstOrNull()
                 if (file == null) {
                     message = "下载失败：没有可用文件"
                     downloading = false
                     return@launch
                 }
-                val downloadedFile = ModrinthManager.downloadFile(file, subDir) { p ->
+                val downloadedFile = ModrinthManager.downloadFile(file, cacheDir) { p ->
                     downloadProgress = p
                 }
+                pendingDownloadFile = downloadedFile
+                pendingInstallType = selectedType
+                selectedTargetServerId = currentServerId
+                showInstallDialog = true
                 message = "下载完成：${downloadedFile.name}"
                 downloading = false
             } catch (e: Exception) {
@@ -102,6 +112,73 @@ fun ModrinthScreen() {
                 downloading = false
             }
         }
+    }
+
+    fun installToServer(targetServerId: String) {
+        val file = pendingDownloadFile ?: return
+        val type = pendingInstallType
+        scope.launch(Dispatchers.IO) {
+            try {
+                val targetDir = ProotServerManager.serverDir(context, targetServerId)
+                val subDir = when (type) {
+                    "plugin" -> File(targetDir, "plugins")
+                    "mod" -> File(targetDir, "mods")
+                    "datapack" -> File(targetDir, "datapacks")
+                    "resourcepack" -> File(targetDir, "resourcepacks")
+                    else -> targetDir
+                }
+                subDir.mkdirs()
+                val destFile = File(subDir, file.name)
+                file.copyTo(destFile, overwrite = true)
+                file.delete()
+                withContext(Dispatchers.Main) {
+                    message = "已安装到 ${targetDir.name}/${subDir.name}"
+                    showInstallDialog = false
+                    pendingDownloadFile = null
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    message = "安装失败：${e.message}"
+                }
+            }
+        }
+    }
+
+    // 安装目标选择对话框
+    if (showInstallDialog) {
+        AlertDialog(
+            onDismissRequest = { showInstallDialog = false },
+            icon = { Icon(Icons.Filled.Download, null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text("安装到哪个服务器？") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    serverList.forEach { server ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedTargetServerId = server.id }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = selectedTargetServerId == server.id,
+                                onClick = { selectedTargetServerId = server.id }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(server.name)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { installToServer(selectedTargetServerId) }) {
+                    Text("安装")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showInstallDialog = false }) { Text("取消") }
+            }
+        )
     }
 
     // 详情视图

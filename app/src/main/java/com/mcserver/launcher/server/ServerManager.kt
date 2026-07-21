@@ -40,6 +40,41 @@ class ServerManager private constructor(private val context: Context) {
     val prootServerManager = ProotServerManager()
     private val serverScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    /** 多服务器列表 */
+    val serverList: StateFlow<List<ServerConfig>> = preferencesManager.serverList
+        .stateIn(serverScope, SharingStarted.Eagerly, emptyList())
+    /** 当前选中的服务器 ID */
+    val currentServerId: StateFlow<String> = preferencesManager.currentServerId
+        .stateIn(serverScope, SharingStarted.Eagerly, ProotServerManager.DEFAULT_SERVER_ID)
+
+    /** 切换服务器实例（运行中禁止切换） */
+    fun switchServer(serverId: String) {
+        if (prootServerManager.running) {
+            Log.w(TAG, "服务器运行中，禁止切换实例")
+            return
+        }
+        ProotServerManager.activeServerId = serverId
+        prootServerManager.currentServerId = serverId
+        serverScope.launch {
+            preferencesManager.switchServer(serverId)
+            // 加载新服务器的配置
+            val config = preferencesManager.serverConfig.first()
+            lastConfig = config
+        }
+    }
+
+    /** 创建新服务器实例 */
+    suspend fun createServer(name: String): ServerConfig {
+        val config = ServerConfig(name = name)
+        preferencesManager.createServer(config)
+        return config
+    }
+
+    /** 删除服务器实例 */
+    suspend fun deleteServer(serverId: String) {
+        preferencesManager.deleteServer(serverId)
+    }
+
     private val _serverStatus = MutableStateFlow(ServerStatus())
     val serverStatus: StateFlow<ServerStatus> = _serverStatus.asStateFlow()
 
