@@ -8,6 +8,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import com.mcserver.launcher.McApplication
 import com.mcserver.launcher.data.ServerConfig
+import com.mcserver.launcher.utils.ShellUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,11 +19,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.*
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
-
-/**
- * Linux 环境状态
- */
-enum class LinuxEnvState2 { NOT_READY, READY, JAVA_MISSING }
 
 /**
  * 通过 proot + Ubuntu 环境执行 Java JAR 文件
@@ -47,7 +43,12 @@ class ProotServerManager {
     }
 
     private val context: Context get() = McApplication.instance
+    /**
+     * 外部注入的协程作用域（由 ServerManager 在 init 中设置）。
+     * 如果未设置则使用内部默认 scope，确保协程不会泄漏。
+     */
     var scope: CoroutineScope? = null
+    private val effectiveScope: CoroutineScope get() = scope ?: internalScope
     private val isRunning = AtomicBoolean(false)
     private var tailJob: Job? = null
     private var logFile: File? = null
@@ -58,6 +59,7 @@ class ProotServerManager {
 
     var onServerExited: (() -> Unit)? = null
 
+    /** 在线玩家集合，使用 synchronized 保证线程安全 */
     private val onlinePlayers = mutableSetOf<String>()
     private val _players = MutableStateFlow<List<String>>(emptyList())
     val players: StateFlow<List<String>> = _players.asStateFlow()
@@ -76,17 +78,10 @@ class ProotServerManager {
 
     val running: Boolean get() = isRunning.get()
 
-    private fun validateShellSafe(s: String): Boolean {
-        val dangerous = listOf(";", "`", "$(", "|", ">", "<", "&&", "||", "\n", "\r")
-        for (d in dangerous) {
-            if (s.contains(d)) return false
-        }
-        return true
-    }
-
-    private fun escapeSingleQuote(s: String): String {
-        return s.replace("'", "'\\''")
-    }
+    /** 协程作用域：内部管理，避免外部随意修改导致泄漏 */
+    private val internalScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** 停止操作原子锁：防止重复执行 stopServer */
+    private val stopInProgress = AtomicBoolean(false)
 
     fun isServerProcessAlive(): Boolean {
         return try {
@@ -134,11 +129,11 @@ class ProotServerManager {
         }
     }
 
-    fun checkState(): LinuxEnvState2 {
-        if (!LinuxEnvironmentManager.isEnvironmentReady()) return LinuxEnvState2.NOT_READY
+    fun checkState(): LinuxEnvState {
+        if (!LinuxEnvironmentManager.isEnvironmentReady()) return LinuxEnvState.NOT_INITIALIZED
         val hasJava = listOf(21, 17, 11, 8).any { LinuxEnvironmentManager.isJdkInstalled(it) }
-        if (!hasJava) return LinuxEnvState2.JAVA_MISSING
-        return LinuxEnvState2.READY
+        if (!hasJava) return LinuxEnvState.JAVA_MISSING
+        return LinuxEnvState.READY
     }
 
     private suspend fun ensureLocalJarPath(jarPath: String): String {
@@ -202,7 +197,7 @@ class ProotServerManager {
                 emit("> 准备 Linux 环境...")
 
                 val serverDir = serverDir(context)
-                onlinePlayers.clear()
+                synchronized(onlinePlayers) { onlinePlayers.clear() }
                 _players.value = emptyList()
                 prepareServerProperties(serverDir, config)
                 prepareEula(serverDir)
@@ -231,17 +226,17 @@ class ProotServerManager {
                 val xms = config.minRamMB
                 val noguiArg = if (config.nogui) "nogui" else ""
                 val args = config.additionalArgs.trim()
-                if (args.isNotBlank() && !validateShellSafe(args)) {
+                if (args.isNotBlank() && !ShellUtils.validateShellSafe(args)) {
                     return@withContext Result.failure(IllegalArgumentException("启动参数包含不安全的 shell 元字符"))
                 }
 
                 val pidFile = File(serverDir, "mcserver.pid").absolutePath
-                val safeServerDir = escapeSingleQuote(serverDir.absolutePath)
-                val safePipePath = escapeSingleQuote(pipePath)
-                val safeLogPath = escapeSingleQuote(logPath)
-                val safePidFile = escapeSingleQuote(pidFile)
-                val safeJarName = escapeSingleQuote(targetJar.name)
-                val safeJavaBin = escapeSingleQuote(javaBin)
+                val safeServerDir = ShellUtils.escapeSingleQuote(serverDir.absolutePath)
+                val safePipePath = ShellUtils.escapeSingleQuote(pipePath)
+                val safeLogPath = ShellUtils.escapeSingleQuote(logPath)
+                val safePidFile = ShellUtils.escapeSingleQuote(pidFile)
+                val safeJarName = ShellUtils.escapeSingleQuote(targetJar.name)
+                val safeJavaBin = ShellUtils.escapeSingleQuote(javaBin)
 
                 val script = buildString {
                     appendLine("#!/bin/sh")
@@ -279,7 +274,7 @@ class ProotServerManager {
 
                 emit("> 服务器已在 Linux 环境中启动")
 
-                val processWaitScope = scope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
+                val processWaitScope = scope ?: effectiveScope
                 processWaitScope.launch {
                     try {
                         serverProcess?.waitFor()
@@ -305,7 +300,7 @@ class ProotServerManager {
 
     private fun startTailLog(file: File) {
         tailJob?.cancel()
-        val coroutineScope = scope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
+        val coroutineScope = scope ?: effectiveScope
         tailJob = coroutineScope.launch {
             var lastSize = 0L
             var leftover = byteArrayOf()
@@ -356,10 +351,11 @@ class ProotServerManager {
 
     private fun handleServerExit() {
         if (!isRunning.compareAndSet(true, false)) return
+        stopInProgress.set(false)
         _stateChanged.tryEmit(false)
         emit("> 服务器进程已退出")
         tailJob?.cancel()
-        onlinePlayers.clear()
+        synchronized(onlinePlayers) { onlinePlayers.clear() }
         _players.value = emptyList()
         try { onServerExited?.invoke() } catch (_: Exception) {}
     }
@@ -388,8 +384,10 @@ class ProotServerManager {
             else -> return
         }
         if (name.isBlank()) return
-        val changed = if (line.contains(joined)) onlinePlayers.add(name) else onlinePlayers.remove(name)
-        if (changed) _players.value = onlinePlayers.toList()
+        val changed = synchronized(onlinePlayers) {
+            if (line.contains(joined)) onlinePlayers.add(name) else onlinePlayers.remove(name)
+        }
+        if (changed) _players.value = synchronized(onlinePlayers) { onlinePlayers.toList() }
     }
 
     private fun prepareEula(dir: File) {
@@ -466,7 +464,7 @@ class ProotServerManager {
     }
 
     private fun sendCommandViaRcon(cmd: String) {
-        val coroutineScope = scope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
+        val coroutineScope = scope ?: effectiveScope
         coroutineScope.launch {
             try {
                 val result = rconClient?.sendCommand(cmd)
@@ -492,7 +490,7 @@ class ProotServerManager {
         }
         val pwd = config.rconPassword.ifEmpty { RconClient.generatePassword() }
         rconClient = RconClient(port = config.rconPort, password = pwd)
-        val coroutineScope = scope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
+        val coroutineScope = scope ?: effectiveScope
         coroutineScope.launch {
             try {
                 var connected = false
@@ -578,7 +576,7 @@ class ProotServerManager {
         try {
             val escapedCmd = cmd.replace("'", "'\\''")
             val prootProcessBuilder = LinuxEnvironmentManager.buildProotCommand(
-                command = "printf '%s\\n' '$escapedCmd' >> '${escapeSingleQuote(pipe.absolutePath)}'",
+                command = "printf '%s\\n' '$escapedCmd' >> '${ShellUtils.escapeSingleQuote(pipe.absolutePath)}'",
                 workDir = serverDir(context).absolutePath
             )
             val proc = prootProcessBuilder.start()
@@ -593,8 +591,13 @@ class ProotServerManager {
             emit("> 服务器未在运行")
             return
         }
+        // 原子锁：防止 stopServer 被并发调用导致状态混乱
+        if (!stopInProgress.compareAndSet(false, true)) {
+            emit("> 停止操作正在进行中...")
+            return
+        }
         emit("> 正在停止服务器...")
-        onlinePlayers.clear()
+        synchronized(onlinePlayers) { onlinePlayers.clear() }
         _players.value = emptyList()
         disconnectRcon()
 
@@ -610,7 +613,7 @@ class ProotServerManager {
 
         val stopScript = File(dir, "stop.sh")
         val pidPath = pidFile.absolutePath
-        val safePidPath = escapeSingleQuote(pidPath)
+        val safePidPath = ShellUtils.escapeSingleQuote(pidPath)
         stopScript.writeText(
             "#!/bin/sh\n" +
             "sleep 8\n" +
@@ -634,11 +637,11 @@ class ProotServerManager {
             prootProcessBuilder.start()
         } catch (_: Exception) {}
 
-        val coroutineScope = scope ?: CoroutineScope(Dispatchers.IO + SupervisorJob())
-        coroutineScope.launch {
+        effectiveScope.launch {
             delay(15000)
             if (isRunning.get()) {
                 isRunning.set(false)
+                stopInProgress.set(false)
                 _stateChanged.tryEmit(false)
                 emit("> 服务器已停止")
             }

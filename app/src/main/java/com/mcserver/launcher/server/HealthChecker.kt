@@ -330,49 +330,37 @@ object HealthChecker {
         val requiredVersion = McVersionCompat.getRequiredJavaVersion(config.jarPath)
         val serverType = McVersionCompat.guessServerType(config.jarPath)
 
-        // 获取实际将用于运行服务器的 Java 版本：
-        // 优先从 JreManager（内置 JRE），回退到 LinuxEnvironmentManager（proot+Ubuntu JDK），
-        // 最后才用内置 Linux 环境的 Java 版本。
-        val currentJavaVersion = when {
-            ServerManager.instance.selectedJreVersion.toIntOrNull() != null ->
-                ServerManager.instance.selectedJreVersion.toIntOrNull() ?: 17
-            LinuxEnvironmentManager.isEnvironmentReady() -> {
-                // 从 McVersionCompat 推断所需版本并检查是否已安装
-                val candidate = listOf(21, 17, 11, 8).firstOrNull {
-                    LinuxEnvironmentManager.isJdkInstalled(it)
-                }
-                candidate ?: (ServerManager.instance.selectedJreVersion.toIntOrNull() ?: 17)
-            }
-            else -> {
-                // 回退：检查内置 Linux 环境中的 Java 版本
-                listOf(21, 17, 11, 8).forEach { ver ->
-                    if (LinuxEnvironmentManager.isJdkInstalled(ver)) {
-                        val javaPath = LinuxEnvironmentManager.getJavaPath(ver)
-                        val proc = ProcessBuilder(javaPath, "-version").redirectErrorStream(true).start()
-                        val output = proc.inputStream.bufferedReader().readText()
-                        if (proc.waitFor() == 0) {
-                            val versionMatch = Regex("version \"(\\d+)").find(output)
-                            if (versionMatch != null) {
-                                return HealthCheck("Java 版本", true,
-                                    "Java ${versionMatch.groupValues[1]} (Linux 环境内置)",
-                                    Severity.INFO)
-                            }
-                        }
-                    }
-                }
-                17
-            }
+        // ProotServerManager 实际在 Linux 环境中运行 Java，直接查询已安装的 JDK
+        val installedVersion = listOf(21, 17, 11, 8).firstOrNull {
+            LinuxEnvironmentManager.isJdkInstalled(it)
         }
 
-        return if (currentJavaVersion >= requiredVersion) {
-            HealthCheck("Java 兼容性", true,
-                "Java $currentJavaVersion 满足 $serverType 核心要求 (Java $requiredVersion+)",
-                Severity.INFO)
-        } else {
-            HealthCheck("Java 兼容性", true,
-                "$serverType 核心需要 Java $requiredVersion+，当前为 Java $currentJavaVersion",
-                Severity.WARNING,
-                detail = "请在应用内安装更高版本 JDK")
+        // 如果用户有偏好版本且已安装，优先显示；否则显示实际检测到的最高版本
+        val preferred = ServerManager.instance.selectedJreVersion.toIntOrNull()
+        val currentJavaVersion = when {
+            preferred != null && LinuxEnvironmentManager.isJdkInstalled(preferred) -> preferred
+            installedVersion != null -> installedVersion
+            else -> 0 // 未安装任何 JDK
+        }
+
+        return when {
+            currentJavaVersion == 0 -> {
+                HealthCheck("Java 兼容性", false,
+                    "Linux 环境中未安装任何 JDK",
+                    Severity.ERROR,
+                    detail = "请在「设置」中安装所需版本的 JDK（推荐 Java $requiredVersion）")
+            }
+            currentJavaVersion >= requiredVersion -> {
+                HealthCheck("Java 兼容性", true,
+                    "Java $currentJavaVersion 满足 $serverType 核心要求 (Java $requiredVersion+)",
+                    Severity.INFO)
+            }
+            else -> {
+                HealthCheck("Java 兼容性", false,
+                    "$serverType 核心需要 Java $requiredVersion+，当前为 Java $currentJavaVersion",
+                    Severity.WARNING,
+                    detail = "请在应用内安装更高版本 JDK")
+            }
         }
     }
 

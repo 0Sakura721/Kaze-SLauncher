@@ -170,7 +170,7 @@ class ServerManager private constructor(private val context: Context) {
     suspend fun testMirrorLatency() = jreManager.testAllMirrors()
 
     /** Linux 环境状态 */
-    val linuxEnvState: LinuxEnvState2 get() = prootServerManager.checkState()
+    val linuxEnvState: LinuxEnvState get() = prootServerManager.checkState()
 
     /**
      * 检查状态转换是否合法。

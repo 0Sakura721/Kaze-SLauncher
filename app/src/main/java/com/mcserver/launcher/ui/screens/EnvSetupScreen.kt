@@ -46,7 +46,7 @@ fun EnvSetupScreen(
     val isTestingMirrors by LinuxEnvironmentManager.isTestingMirrors.collectAsState()
 
     var currentStep by remember { mutableStateOf(1) }
-    var step1Confirmed by remember { mutableStateOf(envState == LinuxEnvState.READY) }
+    var step1Confirmed by remember { mutableStateOf(envState == LinuxEnvState.READY || envState == LinuxEnvState.JAVA_MISSING) }
     var step2Confirmed by remember { mutableStateOf(false) }
     var step3Confirmed by remember { mutableStateOf(false) }
     var step4Confirmed by remember { mutableStateOf(false) }
@@ -272,7 +272,7 @@ fun EnvSetupScreen(
                 text = {
                     Text(
                         "环境已配置完成。你可以随时在设置中修改这些选项。\n\n" +
-                        "• Linux 环境：${if (envState == LinuxEnvState.READY) "✓ 就绪" else "⚠ 跳过"}\n" +
+                        "• Linux 环境：${if (envState == LinuxEnvState.READY || envState == LinuxEnvState.JAVA_MISSING) "✓ 就绪" else "⚠ 跳过"}\n" +
                         "• 服务器核心：${if (step2Confirmed) "✓ 已选" else "⚠ 跳过"}\n" +
                         "• 配置文件：${if (step3Confirmed) "✓ 已配置" else "⚠ 跳过"}\n" +
                         "• 模组/插件：${if (step4Confirmed) "✓ 已选" else "⚠ 跳过"}",
@@ -512,7 +512,7 @@ private fun Step1Environment(
 
             Spacer(Modifier.height(12.dp))
 
-            if (envState == LinuxEnvState.READY) {
+            if (envState == LinuxEnvState.READY || envState == LinuxEnvState.JAVA_MISSING) {
                 Button(
                     onClick = onConfirm,
                     modifier = Modifier.align(Alignment.CenterHorizontally)

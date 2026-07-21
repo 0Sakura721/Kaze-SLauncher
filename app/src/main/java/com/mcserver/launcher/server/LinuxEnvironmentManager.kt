@@ -3,6 +3,7 @@ package com.mcserver.launcher.server
 import android.content.Context
 import android.util.Log
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.ShellUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,8 @@ enum class LinuxEnvState {
     SETTING_UP,
     /** 环境就绪 */
     READY,
+    /** 环境就绪但 Java 未安装 */
+    JAVA_MISSING,
     /** 出错 */
     ERROR
 }
@@ -499,7 +502,9 @@ object LinuxEnvironmentManager {
      * @param workDir 工作目录（绝对路径，服务器目录会自动绑定）
      */
     fun buildProotCommand(command: String, workDir: String = "/root"): ProcessBuilder {
-        val args = listOf(
+        // 内部安全检查：防止调用方绕过验证直接传入危险字符
+        require(ShellUtils.validateShellSafe(workDir)) { "工作目录包含不安全的 shell 元字符: $workDir" }
+        val pb = ProcessBuilder(
             prootBinary.absolutePath,
             "-0",
             "-r", rootfsDir.absolutePath,
@@ -509,8 +514,7 @@ object LinuxEnvironmentManager {
             "-b", "${serverDir.absolutePath}:${serverDir.absolutePath}",
             "/bin/sh", "-c",
             "cd $workDir && $command"
-        )
-        val pb = ProcessBuilder(args).redirectErrorStream(true)
+        ).redirectErrorStream(true)
         pb.environment().putAll(prootEnvironment())
         return pb
     }
@@ -529,7 +533,7 @@ object LinuxEnvironmentManager {
     ): Int {
         check(prootBinary.exists()) { "proot 未安装" }
         check(rootfsDir.exists()) { "rootfs 未解压" }
-        require(validateShellSafe(workDir)) { "工作目录包含不安全的 shell 元字符: $workDir" }
+        require(ShellUtils.validateShellSafe(workDir)) { "工作目录包含不安全的 shell 元字符: $workDir" }
 
         val proc = buildProotCommand(command, workDir).start()
 
@@ -548,7 +552,7 @@ object LinuxEnvironmentManager {
      * 异步执行命令并通过 Flow 输出。
      */
     fun executeAsync(command: String, workDir: String = "/root"): SharedFlow<String> {
-        if (!validateShellSafe(workDir)) {
+        if (!ShellUtils.validateShellSafe(workDir)) {
             throw IllegalArgumentException("工作目录包含不安全的 shell 元字符: $workDir")
         }
         val flow = MutableSharedFlow<String>(extraBufferCapacity = 200)
@@ -564,13 +568,7 @@ object LinuxEnvironmentManager {
 
     // ── 工具函数 ──
 
-    private fun validateShellSafe(s: String): Boolean {
-        val dangerous = listOf(";", "`", "$(", "|", ">", "<", "&&", "||", "\n", "\r")
-        for (d in dangerous) {
-            if (s.contains(d)) return false
-        }
-        return true
-    }
+
 
     private fun validatePackageName(pkgName: String): Boolean {
         return pkgName.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' }
@@ -600,12 +598,6 @@ object LinuxEnvironmentManager {
             )
             log("  Ubuntu 软件源: $mirrorHost")
         }
-    }
-
-    private fun ensureFile(rootfs: File, path: String, content: String) {
-        val file = File(rootfs, path)
-        file.parentFile?.mkdirs()
-        file.writeText(content)
     }
 
     private fun updateItem(id: String, state: DownloadItemState) {

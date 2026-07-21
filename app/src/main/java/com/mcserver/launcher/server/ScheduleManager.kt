@@ -308,9 +308,16 @@ object ScheduleManager {
                             delay(30000)
                             server.sendCommand("save-all")
                             delay(5000)
+                            // 先停止再启动，实现完整重启
+                            val config = serverManager.currentConfig
                             serverManager.stopServer()
-                            delay(5000)
-                            server.notifyConsole("> [定时任务:${task.name}] 服务器已停止，如需自动启动请开启自动重启")
+                            if (config != null) {
+                                delay(3000)
+                                server.notifyConsole("> [定时任务:${task.name}] 正在重新启动服务器...")
+                                serverManager.startServer(config)
+                            } else {
+                                server.notifyConsole("> [定时任务:${task.name}] 重启失败：未找到服务器配置")
+                            }
                         }
                     }
                 }
