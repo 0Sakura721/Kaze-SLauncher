@@ -20,22 +20,37 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up JDK 17
+        id: setup-java
         uses: actions/setup-java@v5
         with:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Enforce JAVA_HOME to JDK 17
+        run: |
+          echo "JAVA_HOME=${{ steps.setup-java.outputs.path }}" >> "$GITHUB_ENV"
+          echo "${{ steps.setup-java.outputs.path }}/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Java version
+        run: |
+          echo "JAVA_HOME=$JAVA_HOME"
+          "$JAVA_HOME/bin/java" -version
+          java -version
+
       - name: Setup Android SDK
         run: |
-          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> $GITHUB_ENV
-          echo "/usr/local/lib/android/sdk/platform-tools" >> $GITHUB_PATH
-          echo "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "/usr/local/lib/android/sdk/platform-tools" >> "$GITHUB_PATH"
+          echo "/usr/local/lib/android/sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "sdk.dir=/usr/local/lib/android/sdk" > local.properties
           yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+
+      - name: Stop any stale Gradle daemon
+        run: ./gradlew --stop || true
 
       - name: Download bundled assets (proot + Ubuntu rootfs)
         run: ./gradlew :app:downloadBundledAssets --stacktrace
@@ -45,7 +60,9 @@ jobs:
         continue-on-error: true
 
       - name: Build Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee /tmp/build-debug.log | tail -100
+        run: |
+          set -euxo pipefail
+          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee /tmp/build-debug.log | tail -100
 
       - name: Upload Debug APK as artifact
         uses: actions/upload-artifact@v7
@@ -75,7 +92,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           {
             echo "TAG=${TAG}"
-            echo "HAS_KEYSTORE=$([ -n \"$KEYSTORE_BASE64\" ] && echo yes || echo no)"
+            echo "HAS_KEYSTORE=$([ -n "$KEYSTORE_BASE64" ] && echo yes || echo no)"
             RELEASE_BUILD_OK=false
             if [ -n "$KEYSTORE_BASE64" ]; then
               echo "$KEYSTORE_BASE64" | base64 -d > release-keystore.jks
@@ -85,19 +102,28 @@ jobs:
               echo "keyPassword=$KEY_PASSWORD" >> local.properties
               if ./gradlew :app:assembleRelease --stacktrace; then
                 RELEASE_BUILD_OK=true
-                SOURCE_APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
-                APK_NAME="Kaze-SLauncher-${TAG}-release.apk"
-                echo "Uploading signed release APK: ${APK_NAME}"
+                echo "Release build succeeded"
               else
-                echo "⚠️ assembleRelease failed, falling back to debug APK"
+                echo "assembleRelease failed, falling back to debug APK"
               fi
             fi
-            if [ "$RELEASE_BUILD_OK" != "true" ]; then
-              SOURCE_APK=$(ls app/build/outputs/apk/debug/*.apk | head -1)
+            if [ "$RELEASE_BUILD_OK" = "true" ]; then
+              SOURCE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
+              APK_NAME="Kaze-SLauncher-${TAG}-release.apk"
+            else
+              SOURCE_APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
               APK_NAME="Kaze-SLauncher-${TAG}-debug.apk"
-              echo "Uploading debug APK: ${APK_NAME}"
+            fi
+            if [ -z "$SOURCE_APK" ] || [ ! -f "$SOURCE_APK" ]; then
+              echo "ERROR: no APK found at expected path"
+              echo "release/ dir:"
+              ls -la app/build/outputs/apk/release/ 2>&1 || true
+              echo "debug/ dir:"
+              ls -la app/build/outputs/apk/debug/ 2>&1 || true
+              exit 1
             fi
             echo "SOURCE_APK=${SOURCE_APK}"
+            echo "APK_NAME=${APK_NAME}"
             cp "$SOURCE_APK" "$APK_NAME"
             if gh release view "${TAG}" > /dev/null 2>&1; then
               echo "Release ${TAG} exists, uploading asset..."
@@ -106,7 +132,7 @@ jobs:
               echo "Creating new release ${TAG}..."
               gh release create "${TAG}" "$APK_NAME" --title "${TAG}" --generate-notes --prerelease
             fi
-            echo "✅ APK uploaded to Release ${TAG}"
+            echo "APK uploaded to Release ${TAG}"
           } 2>&1 | tee /tmp/build-release.log | tail -100
 
       - name: Upload Release build log on failure
