@@ -1,8 +1,8 @@
 package com.mcserver.launcher.server
 
 import android.content.Context
-import android.util.Log
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.L
 import com.mcserver.launcher.utils.ShellUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -175,7 +175,7 @@ object LinuxEnvironmentManager {
             }
             true
         } catch (e: Exception) {
-            Log.w(TAG, "extractBundledAsset failed: $assetName", e)
+            L.w(TAG, "extractBundledAsset failed: $assetName", e)
             false
         }
     }

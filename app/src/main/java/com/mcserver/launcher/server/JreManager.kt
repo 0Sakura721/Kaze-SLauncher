@@ -1,12 +1,9 @@
 package com.mcserver.launcher.server
 
-import android.app.*
-import android.util.Log
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.os.IBinder
-import androidx.core.app.NotificationCompat
+import com.mcserver.launcher.utils.L
 import com.mcserver.launcher.MainActivity
 import com.mcserver.launcher.McApplication
 import com.mcserver.launcher.R
@@ -144,11 +141,11 @@ class JreManager(private val context: Context) {
                     extractTarGz(tempFile, targetDir)
                     javaExecutableFor(version).setExecutable(true)
                     tempFile.delete()
-                    Log.i(TAG, "extractBuiltinJava: $assetName 解压成功")
+                    L.i(TAG, "extractBuiltinJava: $assetName 解压成功")
                     return@withContext true
                 }
             } catch (e: IOException) {
-                Log.d(TAG, "extractBuiltinJava: $assetName 不存在或解压失败: ${e.message}")
+                L.d(TAG, "extractBuiltinJava: $assetName 不存在或解压失败: ${e.message}")
             }
         }
         false
@@ -162,13 +159,13 @@ class JreManager(private val context: Context) {
                 if (lines.size >= 4) mirror = lines[3]
             }
         } catch (e: Exception) {
-            Log.w(TAG, "loadPrefs failed", e)
+            L.w(TAG, "loadPrefs failed", e)
         }
     }
 
     private fun savePrefs() {
         try { prefsFile.writeText("$selectedVersion\n$selectedPackage\n$customBaseUrl\n$mirror") } catch (e: Exception) {
-            Log.w(TAG, "savePrefs failed", e)
+            L.w(TAG, "savePrefs failed", e)
         }
     }
 
@@ -215,7 +212,7 @@ class JreManager(private val context: Context) {
         context.filesDir.listFiles()?.forEach { dir ->
             if (dir.name.startsWith("java_")) {
                 val v = dir.name.removePrefix("java_")
-                if (File(dir, "bin/java").let { it.exists() && it.canExecute() })
+                if (File(dir, "bin/java").run { exists() && canExecute() })
                     installedVersions.add(v)
             }
         }

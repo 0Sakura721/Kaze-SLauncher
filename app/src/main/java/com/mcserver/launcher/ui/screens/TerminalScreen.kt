@@ -134,7 +134,7 @@ fun TerminalScreen() {
                     Icon(Icons.Filled.DeleteSweep, contentDescription = "清除")
                 }
                 IconButton(onClick = {
-                    processRef?.let { it.destroy(); processRef = null }
+                    processRef?.run { destroy(); processRef = null }
                     sessionKey++
                 }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "重置终端")

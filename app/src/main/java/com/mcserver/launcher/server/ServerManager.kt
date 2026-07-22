@@ -2,8 +2,8 @@ package com.mcserver.launcher.server
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import android.os.Build
+import com.mcserver.launcher.utils.L
 import com.mcserver.launcher.McApplication
 import com.mcserver.launcher.data.*
 import kotlinx.coroutines.*
@@ -50,7 +50,7 @@ class ServerManager private constructor(private val context: Context) {
     /** 切换服务器实例（运行中禁止切换） */
     fun switchServer(serverId: String) {
         if (prootServerManager.running) {
-            Log.w(TAG, "服务器运行中，禁止切换实例")
+            L.w(TAG, "服务器运行中，禁止切换实例")
             return
         }
         ProotServerManager.activeServerId = serverId
@@ -439,13 +439,13 @@ class ServerManager private constructor(private val context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(si)
             else context.startService(si)
         } catch (e: Exception) {
-            Log.w(TAG, "startForeground failed", e)
+            L.w(TAG, "startForeground failed", e)
         }
     }
 
     private fun stopForeground() {
         try { context.stopService(Intent(context, ServerForegroundService::class.java)) } catch (e: Exception) {
-            Log.w(TAG, "stopForeground failed", e)
+            L.w(TAG, "stopForeground failed", e)
         }
     }
 }

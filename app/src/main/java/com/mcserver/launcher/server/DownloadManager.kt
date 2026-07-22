@@ -1,8 +1,8 @@
 package com.mcserver.launcher.server
 
 import android.content.Context
-import android.util.Log
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.L
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -206,7 +206,7 @@ class DownloadManager {
         } catch (e: CancellationException) {
             // 用户取消
         } catch (e: Exception) {
-            Log.w(TAG, "download failed: ${task.id}", e)
+            L.w(TAG, "download failed: ${task.id}", e)
             updateTask(task.id) {
                 it.copy(state = DownloadState.FAILED, errorMessage = e.message ?: "下载失败")
             }

@@ -1,7 +1,7 @@
 package com.mcserver.launcher.server
 
-import android.util.Log
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.L
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,7 +47,7 @@ object BackupManager {
         return try {
             file.canonicalFile.startsWith(root.canonicalFile)
         } catch (e: Exception) {
-            Log.w(TAG, "validatePathInsideRoot failed", e)
+            L.w(TAG, "validatePathInsideRoot failed", e)
             false
         }
     }

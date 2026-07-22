@@ -1,8 +1,8 @@
 package com.mcserver.launcher.server
 
 import android.os.*
-import android.util.Log
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.L
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -141,7 +141,7 @@ class PerformanceMonitor private constructor() {
             if (!pidFile.exists()) return null
             pidFile.readText().trim().toIntOrNull()
         } catch (e: Exception) {
-            Log.d(TAG, "getServerPid failed", e)
+            L.d(TAG, "getServerPid failed", e)
             null
         }
     }
@@ -171,7 +171,7 @@ class PerformanceMonitor private constructor() {
 
             return (vmRss / 1024) to (vmSize / 1024)
         } catch (e: Exception) {
-            Log.d(TAG, "collectServerMemoryInfo failed", e)
+            L.d(TAG, "collectServerMemoryInfo failed", e)
             return fallbackMemoryInfo()
         }
     }
@@ -203,7 +203,7 @@ class PerformanceMonitor private constructor() {
 
             ((totalDiff - idleDiff).toFloat() / totalDiff * 100f).coerceIn(0f, 100f)
         } catch (e: Exception) {
-            Log.d(TAG, "collectSystemCpuUsage failed", e)
+            L.d(TAG, "collectSystemCpuUsage failed", e)
             0f
         }
     }
@@ -227,7 +227,7 @@ class PerformanceMonitor private constructor() {
                 parts[6].toLong(), if (parts.size > 7) parts[7].toLong() else 0
             )
         } catch (e: Exception) {
-            Log.d(TAG, "readProcStat failed", e)
+            L.d(TAG, "readProcStat failed", e)
             null
         }
     }
@@ -274,7 +274,7 @@ class PerformanceMonitor private constructor() {
             lastProcessCpuSampleTime = now
             return 0f
         } catch (e: Exception) {
-            Log.d(TAG, "collectProcessCpuUsage failed", e)
+            L.d(TAG, "collectProcessCpuUsage failed", e)
             0f
         }
     }
@@ -292,7 +292,7 @@ class PerformanceMonitor private constructor() {
                 ?.trim()
                 ?.toIntOrNull() ?: 0
         } catch (e: Exception) {
-            Log.d(TAG, "collectThreadCount failed", e)
+            L.d(TAG, "collectThreadCount failed", e)
             0
         }
     }
@@ -335,7 +335,7 @@ class PerformanceMonitor private constructor() {
 
             readRate to writeRate
         } catch (e: Exception) {
-            Log.d(TAG, "collectDiskIO failed", e)
+            L.d(TAG, "collectDiskIO failed", e)
             0L to 0L
         }
     }
@@ -431,7 +431,7 @@ class PerformanceMonitor private constructor() {
                 }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "feedLogLine failed", e)
+            L.d(TAG, "feedLogLine failed", e)
         }
     }
 }

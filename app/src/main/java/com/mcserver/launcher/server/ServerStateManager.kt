@@ -1,8 +1,8 @@
 package com.mcserver.launcher.server
 
 import android.content.Context
-import android.util.Log
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.L
 import com.mcserver.launcher.data.ServerConfig
 import com.mcserver.launcher.data.ServerState
 import org.json.JSONObject
@@ -59,7 +59,7 @@ object ServerStateManager {
             )
             _state
         } catch (e: Exception) {
-            Log.w(TAG, "load state failed", e)
+            L.w(TAG, "load state failed", e)
             _state = PersistentState()
             _state
         }
@@ -81,7 +81,7 @@ object ServerStateManager {
             }
             stateFile.writeText(json.toString())
         } catch (e: Exception) {
-            Log.w(TAG, "save state failed", e)
+            L.w(TAG, "save state failed", e)
         }
     }
 

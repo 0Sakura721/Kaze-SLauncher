@@ -5,8 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.*
 import android.provider.OpenableColumns
-import android.util.Log
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.L
 import com.mcserver.launcher.data.ServerConfig
 import com.mcserver.launcher.utils.ShellUtils
 import kotlinx.coroutines.*
@@ -308,7 +308,7 @@ class ProotServerManager {
 
                 Result.success(Unit)
             } catch (e: Exception) {
-                Log.e(TAG, "启动失败", e)
+                L.e(TAG, "启动失败", e)
                 emit("> 错误: ${e.message}")
                 _stateChanged.tryEmit(false)
                 isRunning.set(false)
@@ -360,7 +360,7 @@ class ProotServerManager {
                         leftover = byteArrayOf()
                     }
                 } catch (e: Exception) {
-                    Log.d(TAG, "tail error", e)
+                    L.d(TAG, "tail error", e)
                 }
                 delay(300)
             }

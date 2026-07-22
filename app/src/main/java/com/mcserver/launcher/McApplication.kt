@@ -4,8 +4,8 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
-import android.util.Log
 import android.os.Build
+import com.mcserver.launcher.utils.L
 import com.mcserver.launcher.server.ScheduleManager
 import com.mcserver.launcher.server.ServerForegroundService
 import com.mcserver.launcher.server.ServerManager
@@ -32,7 +32,7 @@ class McApplication : Application() {
                     instance.startService(intent)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "showServerEventNotification failed", e)
+                L.e(TAG, "showServerEventNotification failed", e)
             }
         }
     }
