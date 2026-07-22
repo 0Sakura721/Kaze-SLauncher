@@ -1,5 +1,6 @@
 package com.mcserver.launcher.ui.screens
 
+import java.util.Locale
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -794,9 +795,9 @@ private fun formatSize(bytes: Long): String {
     return when {
         bytes <= 0 -> "0 B"
         bytes < 1024 -> "$bytes B"
-        bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
-        bytes < 1024 * 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024))
-        else -> String.format("%.2f GB", bytes / (1024.0 * 1024 * 1024))
+        bytes < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+        bytes < 1024 * 1024 * 1024 -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024))
+        else -> String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024 * 1024))
     }
 }
 
@@ -804,7 +805,7 @@ private fun formatSpeed(bytesPerSec: Long): String {
     return when {
         bytesPerSec <= 0 -> ""
         bytesPerSec < 1024 -> "${bytesPerSec} B/s"
-        bytesPerSec < 1024 * 1024 -> String.format("%.1f KB/s", bytesPerSec / 1024.0)
-        else -> String.format("%.1f MB/s", bytesPerSec / (1024.0 * 1024))
+        bytesPerSec < 1024 * 1024 -> String.format(Locale.US, "%.1f KB/s", bytesPerSec / 1024.0)
+        else -> String.format(Locale.US, "%.1f MB/s", bytesPerSec / (1024.0 * 1024))
     }
 }

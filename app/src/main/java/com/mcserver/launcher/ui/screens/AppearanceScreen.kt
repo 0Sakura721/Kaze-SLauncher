@@ -1,6 +1,7 @@
 package com.mcserver.launcher.ui.screens
 
 import android.net.Uri
+import java.util.Locale
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -167,7 +168,7 @@ fun AppearanceScreen(
         Spacer(Modifier.height(12.dp))
 
         // 模糊强度
-        Text("模糊强度: ${String.format("%.0f", bgBlur * 10)}%")
+        Text("模糊强度: ${String.format(Locale.US, "%.0f", bgBlur * 10)}%")
         Slider(
             value = bgBlur,
             onValueChange = { scope.launch { prefsManager.setBackgroundBlur(it) } },
@@ -176,7 +177,7 @@ fun AppearanceScreen(
         )
 
         // 暗化遮罩
-        Text("暗化遮罩: ${String.format("%.0f", bgDarkMask * 100)}%")
+        Text("暗化遮罩: ${String.format(Locale.US, "%.0f", bgDarkMask * 100)}%")
         Slider(
             value = bgDarkMask,
             onValueChange = { scope.launch { prefsManager.setBackgroundDarkMask(it) } },
