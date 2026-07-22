@@ -45,13 +45,21 @@ jobs:
         continue-on-error: true
 
       - name: Build Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace 2>&1 | tail -100
+        run: ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee /tmp/build-debug.log | tail -100
 
       - name: Upload Debug APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+
+      - name: Upload Debug build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-debug-log
+          path: /tmp/build-debug.log
           if-no-files-found: ignore
 
       - name: Build and Upload Release APK (tag only)
@@ -70,7 +78,7 @@ jobs:
             echo "storePassword=$KEYSTORE_PASSWORD" >> local.properties
             echo "keyAlias=$KEY_ALIAS" >> local.properties
             echo "keyPassword=$KEY_PASSWORD" >> local.properties
-            ./gradlew :app:assembleRelease --stacktrace
+            ./gradlew :app:assembleRelease --stacktrace 2>&1 | tee /tmp/build-release.log | tail -100
             SOURCE_APK=$(ls app/build/outputs/apk/release/*.apk | head -1)
             APK_NAME="Kaze-SLauncher-${TAG}-release.apk"
             echo "Uploading signed release APK"
@@ -88,3 +96,11 @@ jobs:
             gh release create "${TAG}" "$APK_NAME" --title "${TAG}" --generate-notes --prerelease
           fi
           echo "✅ APK uploaded to Release ${TAG}"
+
+      - name: Upload Release build log on failure
+        if: failure() && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-release-log
+          path: /tmp/build-release.log
+          if-no-files-found: ignore
