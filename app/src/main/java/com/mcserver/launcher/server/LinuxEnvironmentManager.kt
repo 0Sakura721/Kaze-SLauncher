@@ -180,6 +180,55 @@ object LinuxEnvironmentManager {
         }
     }
 
+    private fun extractBundledJdk(version: Int): Boolean {
+        val archSuffix = if (isAarch64) "aarch64" else "armhf"
+        val assetName = "java-$version-jdk-$archSuffix.tar.gz"
+        return try {
+            context.assets.openFd("bundled/$assetName")?.use { afd ->
+                val tempFile = File(linuxDir, "jdk_$version.tar.gz")
+                context.assets.open("bundled/$assetName").use { input ->
+                    FileOutputStream(tempFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                val extractDir = File(linuxDir, "jdk_extract_$version")
+                if (extractDir.exists()) extractDir.deleteRecursively()
+                extractDir.mkdirs()
+                extractTarGz(tempFile, extractDir)
+                tempFile.delete()
+                // Adoptium JDK tar.gz 解压后顶层是版本号目录（如 jdk-21.0.3+9/）
+                // 找到包含 bin/java 的实际 JDK 根目录
+                val jdkRoot = findJdkRoot(extractDir)
+                if (jdkRoot == null) {
+                    extractDir.deleteRecursively()
+                    return@use false
+                }
+                val destDir = File(javaHomeDir, "java-$version-openjdk-$jdkArchSuffix")
+                if (destDir.exists()) destDir.deleteRecursively()
+                destDir.parentFile?.mkdirs()
+                jdkRoot.renameTo(destDir)
+                extractDir.deleteRecursively()
+                File(destDir, "bin/java").setExecutable(true)
+                true
+            } ?: false
+        } catch (e: Exception) {
+            L.w(TAG, "extractBundledJdk failed: $assetName", e)
+            false
+        }
+    }
+
+    /** 递归查找包含 bin/java 的目录（JDK 根目录） */
+    private fun findJdkRoot(dir: File): File? {
+        if (File(dir, "bin/java").exists()) return dir
+        dir.listFiles()?.forEach { child ->
+            if (child.isDirectory) {
+                val found = findJdkRoot(child)
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
     // ── 环境检查 ──
     fun isEnvironmentReady(): Boolean {
         return prootBinary.exists() && prootBinary.canExecute() &&
@@ -349,6 +398,16 @@ object LinuxEnvironmentManager {
                     updateItem(itemId, DownloadItemState.COMPLETED)
                     continue
                 }
+                // 优先从内置资源提取（零下载）
+                log(">>> 阶段 $stepNum/6：${jdk.label} — 尝试从内置资源提取...")
+                updateItem(itemId, DownloadItemState.EXTRACTING)
+                val extracted = extractBundledJdk(version)
+                if (extracted) {
+                    log("  ✓ ${jdk.label} 从内置资源提取成功")
+                    updateItem(itemId, DownloadItemState.COMPLETED)
+                    continue
+                }
+                // 回退到在线安装
                 log(">>> 阶段 $stepNum/6：在线安装 ${jdk.label}（apt install ${jdk.aptPackage}）")
                 updateItem(itemId, DownloadItemState.DOWNLOADING)
                 installUbuntuPackage(jdk.aptPackage) { progress, downloaded, total, speed ->
