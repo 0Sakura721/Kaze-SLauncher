@@ -28,33 +28,36 @@ val downloadBundledAssets by tasks.registering {
     val ubuntuVersion = "24.04.4"
     // 内置 Java 全部版本（8/11/17/21）+ JDK/JRE + aarch64/armhf
     // 命名约定：java-{version}-{jdk|jre}-{arch}.tar.gz
-    val javaVersions = listOf(
-        Triple(21, "21.0.14+9", "21.0.14+9"),
-        Triple(17, "17.0.16+8", "17.0.16+8"),
-        Triple(11, "11.0.24+8", "11.0.24+8"),
-        Triple(8, "8u422-b05", "8u422b05")
-    )
-    val javaFiles = linkedMapOf<String, String>()
-    javaVersions.forEach { (ver, jdkPatch, jrePatch) ->
-        // JDK - aarch64
-        javaFiles["java-$ver-jdk-aarch64.tar.gz"] =
-            "https://mirrors.aliyun.com/adoptium/$ver/jdk/aarch64/linux/jdk-${jdkPatch}_linux-aarch64_bin.tar.gz"
-        // JDK - armhf
-        javaFiles["java-$ver-jdk-armhf.tar.gz"] =
-            "https://mirrors.aliyun.com/adoptium/$ver/jdk/arm/linux/jdk-${jdkPatch}_linux-arm_bin.tar.gz"
-        // JRE - aarch64
-        javaFiles["java-$ver-jre-aarch64.tar.gz"] =
-            "https://mirrors.aliyun.com/adoptium/$ver/jre/aarch64/linux/jre-${jrePatch}_linux-aarch64_bin.tar.gz"
-        // JRE - armhf
-        javaFiles["java-$ver-jre-armhf.tar.gz"] =
-            "https://mirrors.aliyun.com/adoptium/$ver/jre/arm/linux/jre-${jrePatch}_linux-arm_bin.tar.gz"
+    val javaVersions = listOf(21, 17, 11, 8)
+    val javaFiles = linkedMapOf<String, List<String>>()
+    javaVersions.forEach { ver ->
+        val adoptiumArch = { arch: String ->
+            when (arch) {
+                "aarch64" -> "aarch64"
+                "armhf" -> "arm"
+                else -> arch
+            }
+        }
+        listOf("jdk" to "jdk", "jre" to "jre").forEach { (pkg, apiPkg) ->
+            listOf("aarch64", "armhf").forEach { arch ->
+                val adoptiumArchName = adoptiumArch(arch)
+                javaFiles["java-$ver-$pkg-$arch.tar.gz"] = listOf(
+                    // 主源：Adoptium API，自动返回最新 GA 版本
+                    "https://api.adoptium.net/v3/binary/latest/$ver/ga/linux/$adoptiumArchName/$apiPkg/hotspot/normal/eclipse",
+                    // 备用：阿里云镜像（固定版本，可能滞后）
+                    "https://mirrors.aliyun.com/adoptium/$ver/$pkg/$adoptiumArchName/linux/${ver}u-latest_${pkg}_linux-${adoptiumArchName}_bin.tar.gz"
+                )
+            }
+        }
     }
 
     val files = linkedMapOf(
-        "ubuntu-base-24.04-arm64.tar.gz" to
-            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-arm64.tar.gz",
-        "ubuntu-base-24.04-armhf.tar.gz" to
-            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-armhf.tar.gz",
+        "ubuntu-base-24.04-arm64.tar.gz" to listOf(
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-arm64.tar.gz"
+        ),
+        "ubuntu-base-24.04-armhf.tar.gz" to listOf(
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-armhf.tar.gz"
+        ),
     )
     // 加入所有 Java 版本
     files.putAll(javaFiles)
@@ -63,10 +66,10 @@ val downloadBundledAssets by tasks.registering {
         val destDir = bundledAssetsDir.asFile
         destDir.mkdirs()
 
-        fun download(urlStr: String, dest: File): Boolean {
+        fun downloadOne(urlStr: String, dest: File): Boolean {
             if (dest.exists() && dest.length() > 0) { println("  ⏭ ${dest.name}"); return true }
             try {
-                println("  ⬇ ${dest.name} ...")
+                println("  ⬇ ${dest.name} (via ${urlStr.take(60)}...)")
                 val conn = URL(urlStr).openConnection() as HttpURLConnection
                 conn.connectTimeout = 60000; conn.readTimeout = 300000
                 conn.instanceFollowRedirects = true
@@ -101,10 +104,17 @@ val downloadBundledAssets by tasks.registering {
             }
         }
 
+        fun download(urls: List<String>, dest: File): Boolean {
+            for (url in urls) {
+                if (downloadOne(url, dest)) return true
+            }
+            return false
+        }
+
         println("═══ 下载 Ubuntu rootfs ═══")
         var ok = true
-        files.forEach { (name, url) ->
-            if (!download(url, File(destDir, name))) ok = false
+        files.forEach { (name, urls) ->
+            if (!download(urls, File(destDir, name))) ok = false
         }
         // 验证 proot tarball 已 commit
         listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz").forEach { name ->
