@@ -3,6 +3,7 @@ package com.mcserver.launcher.ui.screens
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
+import com.mcserver.launcher.utils.L
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -81,7 +82,9 @@ fun ServerConfigScreen(
                 context.contentResolver.takePersistableUriPermission(
                     selectedUri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                L.w("ServerConfigScreen", "takePersistableUriPermission failed", e)
+            }
             scope.launch {
                 try {
                     jarPath = copyContentUriToLocal(context, selectedUri)

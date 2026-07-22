@@ -358,9 +358,9 @@ class JreManager(private val context: Context) {
                         onProgress(progress, downloaded, effectiveTotal)
                     }
                 } finally {
-                    try { fos.close() } catch (_: Exception) {}
-                    try { bis.close() } catch (_: Exception) {}
-                    try { connection.disconnect() } catch (_: Exception) {}
+                    try { fos.close() } catch (e: Exception) { L.w("JreManager", "close fos failed", e) }
+                    try { bis.close() } catch (e: Exception) { L.w("JreManager", "close bis failed", e) }
+                    try { connection.disconnect() } catch (e: Exception) { L.w("JreManager", "disconnect failed", e) }
                 }
 
                 _jreInfo.value = _jreInfo.value.copy(status = JreStatus.EXTRACTING, downloadSpeedBytesPerSec = 0, remainingSeconds = 0)

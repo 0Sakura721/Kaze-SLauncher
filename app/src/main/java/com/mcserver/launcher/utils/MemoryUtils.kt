@@ -14,7 +14,8 @@ class MemoryInfo(
 )
 
 fun Context.getDeviceMemoryInfo(): MemoryInfo {
-    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        ?: return MemoryInfo(0, 0, 0)
     val memoryInfo = ActivityManager.MemoryInfo()
     activityManager.getMemoryInfo(memoryInfo)
 

@@ -23,10 +23,10 @@ val bundledAssetsDir = layout.projectDirectory.dir("src/main/assets/bundled")
 
 val downloadBundledAssets by tasks.registering {
     group = "bundled"
-    description = "下载 Ubuntu 24.04 rootfs 到 assets/bundled/（proot 已内置 commit）"
+    description = "下载 Ubuntu 24.04 rootfs 和所有 Java 版本到 assets/bundled/（proot 已内置 commit）"
 
     val ubuntuVersion = "24.04.4"
-    // 内置 Java 全部版本（8/11/17/21）+ JDK/JRE + aarch64/armhf
+    // 内置全部 Java 版本（8/11/17/21）+ JDK/JRE + aarch64/armhf
     // 命名约定：java-{version}-{jdk|jre}-{arch}.tar.gz
     val javaVersions = listOf(21, 17, 11, 8)
     val javaFiles = linkedMapOf<String, List<String>>()
@@ -40,13 +40,11 @@ val downloadBundledAssets by tasks.registering {
         }
         listOf("jdk" to "jdk", "jre" to "jre").forEach { (pkg, apiPkg) ->
             listOf("aarch64", "armhf").forEach { arch ->
-                // Adoptium 官方仅对 ARM 32-bit 提供 Java 8/11 的构建，17/21 会 404
+                // Adoptium 仅对 ARM 32-bit 提供 Java 8/11 的构建，17/21 会 404
                 if (arch == "armhf" && ver !in listOf(8, 11)) return@forEach
                 val adoptiumArchName = adoptiumArch(arch)
                 javaFiles["java-$ver-$pkg-$arch.tar.gz"] = listOf(
-                    // 主源：Adoptium API，自动返回最新 GA 版本
                     "https://api.adoptium.net/v3/binary/latest/$ver/ga/linux/$adoptiumArchName/$apiPkg/hotspot/normal/eclipse",
-                    // 备用：阿里云镜像（固定版本，可能滞后）
                     "https://mirrors.aliyun.com/adoptium/$ver/$pkg/$adoptiumArchName/linux/${ver}u-latest_${pkg}_linux-${adoptiumArchName}_bin.tar.gz"
                 )
             }
@@ -61,7 +59,6 @@ val downloadBundledAssets by tasks.registering {
             "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-armhf.tar.gz"
         ),
     )
-    // 加入所有 Java 版本
     files.putAll(javaFiles)
 
     doLast {
@@ -149,7 +146,7 @@ android {
 
     defaultConfig {
         applicationId = "com.mcserver.launcher"
-        minSdk = 26; targetSdk = 35; versionCode = 26; versionName = "0.14.0-pre"
+        minSdk = 26; targetSdk = 35; versionCode = 27; versionName = "0.14.1-pre"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         buildConfigField("String", "BUILD_TIME", "\"${System.currentTimeMillis()}\"")

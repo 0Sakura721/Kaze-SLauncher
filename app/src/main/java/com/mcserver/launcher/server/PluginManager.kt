@@ -1,6 +1,7 @@
 package com.mcserver.launcher.server
 
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.L
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -99,7 +100,7 @@ object PluginManager {
                             } ?: json.optString("author", "")
                             description = json.optString("description", "")
                             main = json.optString("main", "")
-                        } catch (_: Exception) {}
+                        } catch (e: Exception) { L.w("PluginManager", "parse plugin.yml failed: ${entryName}", e) }
                     }
                     break // 第一个成功解析的就用
                 }
@@ -117,7 +118,7 @@ object PluginManager {
                         } ?: ""
                         description = json.optString("description", "")
                         main = json.optString("entrypoints", "")
-                    } catch (_: Exception) {}
+                    } catch (e: Exception) { L.w("PluginManager", "parse fabric.mod.json failed", e) }
                 }
 
                 PluginInfo(

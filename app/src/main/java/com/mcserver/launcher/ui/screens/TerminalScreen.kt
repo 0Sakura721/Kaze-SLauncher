@@ -3,6 +3,7 @@ package com.mcserver.launcher.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import com.mcserver.launcher.utils.L
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -113,7 +114,7 @@ fun TerminalScreen() {
         onDispose {
             job.cancel()
             processRef?.let { proc ->
-                try { proc.destroy() } catch (_: Exception) {}
+                try { proc.destroy() } catch (e: Exception) { L.w("TerminalScreen", "destroy process failed", e) }
                 processRef = null
             }
         }

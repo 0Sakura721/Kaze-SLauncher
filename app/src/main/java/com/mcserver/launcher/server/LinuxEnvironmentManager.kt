@@ -63,17 +63,17 @@ data class DownloadItem(
 /**
  * Linux 环境管理器 — proot + Ubuntu 24.04（内置）
  *
- * 下载清单（顺序）：
- *   1. proot 二进制（~1.2 MB）— APK 内置，无需网络
- *   2. Ubuntu 24.04 base rootfs（~30 MB 压缩）— APK 内置，无需网络
- *   3. JDK 8（~80 MB）— 通过 apt 网络安装
- *   4. JDK 11（~82 MB）
- *   5. JDK 17（~88 MB）
- *   6. JDK 21（~90 MB）
+ * 资源清单（全部内置，首次启动零下载）：
+ *   1. proot 二进制（~1.2 MB）— APK 内置
+ *   2. Ubuntu 24.04 base rootfs（~55 MB 压缩）— APK 内置
+ *   3. JDK 8（~80 MB）— APK 内置，回退 apt 安装
+ *   4. JDK 11（~82 MB）— APK 内置，回退 apt 安装
+ *   5. JDK 17（~88 MB）— APK 内置，回退 apt 安装
+ *   6. JDK 21（~90 MB）— APK 内置，回退 apt 安装
  *
  * 架构支持：
  *   - arm64-v8a（aarch64）
- *   - armeabi-v7a（armhf）
+ *   - armeabi-v7a（armhf，仅 JDK 8/11）
  *
  * 为什么是 Ubuntu 而不是 Alpine：
  *   - glibc 兼容性（Alpine 用 musl，某些 Java 库可能不兼容）
@@ -284,10 +284,10 @@ object LinuxEnvironmentManager {
             val items = mutableListOf(
                 DownloadItem("proot", "proot 运行时", "自带，解压即用"),
                 DownloadItem("rootfs", "Ubuntu 24.04", "自带，解压即用"),
-                DownloadItem("jdk8", "Java 8", "Minecraft 1.8-1.12（需在线安装）"),
-                DownloadItem("jdk11", "Java 11", "Minecraft 1.13-1.16（需在线安装）"),
-                DownloadItem("jdk17", "Java 17", "Minecraft 1.17-1.20.4（需在线安装）"),
-                DownloadItem("jdk21", "Java 21", "Minecraft 1.20.5+（需在线安装）")
+                DownloadItem("jdk8", "Java 8", "Minecraft 1.8-1.12（内置，解压即用）"),
+                DownloadItem("jdk11", "Java 11", "Minecraft 1.13-1.16（内置，解压即用）"),
+                DownloadItem("jdk17", "Java 17", "Minecraft 1.17-1.20.4（内置，解压即用）"),
+                DownloadItem("jdk21", "Java 21", "Minecraft 1.20.5+（内置，解压即用）")
             )
             _downloadItems.value = items
 

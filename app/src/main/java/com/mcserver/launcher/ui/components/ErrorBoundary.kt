@@ -38,7 +38,7 @@ fun ErrorBoundary(
             content()
         } else {
             ErrorFallback(
-                error = throwable!!,
+                error = throwable,
                 onRetry = { throwable = null }
             )
         }

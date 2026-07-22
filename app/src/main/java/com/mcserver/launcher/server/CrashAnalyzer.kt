@@ -2,6 +2,7 @@ package com.mcserver.launcher.server
 
 import android.content.Context
 import com.mcserver.launcher.McApplication
+import com.mcserver.launcher.utils.L
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -360,10 +361,10 @@ object CrashAnalyzer {
             for (format in formats) {
                 try {
                     return SimpleDateFormat(format, Locale.US).parse(timeStr)?.time ?: continue
-                } catch (_: Exception) {}
+                } catch (e: Exception) { L.w("CrashAnalyzer", "parse crash time failed: $timeStr", e) }
             }
             0L
-        } catch (_: Exception) { 0L }
+        } catch (e: Exception) { L.w("CrashAnalyzer", "parse timestamp failed", e); 0L }
     }
 
     /** 删除崩溃报告 */

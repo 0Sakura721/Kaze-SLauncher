@@ -36,4 +36,26 @@
     <string name="refresh">刷新</string>
     <string name="retry">重试</string>
     <string name="error_occurred">出现错误</string>
+
+    <string name="error_server_dir_not_found">服务器目录不存在</string>
+    <string name="error_no_jar_found">未找到服务器 JAR，无法备份</string>
+    <string name="error_backup_path_traversal">备份路径越界</string>
+    <string name="error_backup_not_found">备份不存在</string>
+    <string name="error_version_not_found">版本不存在</string>
+    <string name="error_file_path_traversal">文件路径越界</string>
+    <string name="error_server_props_not_found">server.properties 不存在</string>
+    <string name="error_cannot_delete_default_world">不能删除当前默认世界，请先切换到其他世界</string>
+    <string name="error_world_dir_not_found">世界目录不存在</string>
+    <string name="error_invalid_world_dir">不是有效的世界目录</string>
+    <string name="error_world_not_found">世界不存在或已损坏</string>
+    <string name="error_dir_not_found">目录不存在</string>
+    <string name="error_linux_env_not_ready">Linux 环境未就绪</string>
+    <string name="error_java_not_installed">Java 未安装</string>
+    <string name="error_rcon_auth_failed">RCON 认证失败：密码错误</string>
+    <string name="error_rcon_no_response">RCON 认证失败：无响应</string>
+    <string name="error_rcon_not_connected">RCON 未连接</string>
+    <string name="error_rcon_connect_failed">RCON 连接失败</string>
+    <string name="error_rcon_command_failed">RCON 命令失败</string>
+    <string name="error_cannot_read_jar">无法读取 JAR 文件</string>
+    <string name="error_http_request_failed">HTTP 请求失败</string>
 </resources>

@@ -9,8 +9,11 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import java.io.InputStream
+import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.net.URL
 
 /**
  * 网络状态工具 — 检测网络连接状态、获取本地 IP。
@@ -127,6 +130,117 @@ object NetworkUtils {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "以太网"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
             else -> "其他"
+        }
+    }
+
+    private const val HTTP_TIMEOUT = 15000
+
+    private fun HttpURLConnection.setup(
+        method: String,
+        headers: Map<String, String>
+    ) {
+        connectTimeout = HTTP_TIMEOUT
+        readTimeout = HTTP_TIMEOUT
+        requestMethod = method
+        headers.forEach { setRequestProperty(it.key, it.value) }
+    }
+
+    fun httpGet(urlString: String, headers: Map<String, String> = emptyMap()): Result<String> {
+        var conn: HttpURLConnection? = null
+        return try {
+            val url = URL(urlString)
+            conn = url.openConnection() as HttpURLConnection
+            conn.setup("GET", headers)
+
+            if (conn.responseCode == HttpURLConnection.HTTP_OK) {
+                conn.inputStream.bufferedReader().use { reader ->
+                    Result.success(reader.readText())
+                }
+            } else {
+                Result.failure(Exception("HTTP ${conn.responseCode}: ${conn.responseMessage}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    fun httpGetInputStream(urlString: String, headers: Map<String, String> = emptyMap()): Result<InputStream> {
+        return try {
+            val url = URL(urlString)
+            val conn = url.openConnection() as HttpURLConnection
+            conn.setup("GET", headers)
+
+            if (conn.responseCode == HttpURLConnection.HTTP_OK) {
+                Result.success(conn.inputStream)
+            } else {
+                conn.disconnect()
+                Result.failure(Exception("HTTP ${conn.responseCode}: ${conn.responseMessage}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun httpGetWithRedirect(urlString: String, maxRedirects: Int = 5, headers: Map<String, String> = emptyMap()): Result<String> {
+        var url = URL(urlString)
+        var redirectCount = 0
+        var conn: HttpURLConnection? = null
+
+        return try {
+            while (redirectCount < maxRedirects) {
+                conn?.disconnect()
+                conn = url.openConnection() as HttpURLConnection
+                conn.setup("GET", headers)
+                conn.instanceFollowRedirects = false
+
+                val code = conn.responseCode
+                if (code == HttpURLConnection.HTTP_MOVED_TEMP ||
+                    code == HttpURLConnection.HTTP_MOVED_PERM ||
+                    code == HttpURLConnection.HTTP_SEE_OTHER
+                ) {
+                    val newUrl = conn.getHeaderField("Location") ?: return Result.failure(Exception("重定向缺少 Location"))
+                    url = URL(newUrl)
+                    redirectCount++
+                } else if (code == HttpURLConnection.HTTP_OK) {
+                    return conn.inputStream.bufferedReader().use { reader ->
+                        Result.success(reader.readText())
+                    }
+                } else {
+                    return Result.failure(Exception("HTTP $code"))
+                }
+            }
+            Result.failure(Exception("重定向次数过多"))
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    fun httpPost(urlString: String, body: String, headers: Map<String, String> = emptyMap()): Result<String> {
+        var conn: HttpURLConnection? = null
+        return try {
+            val url = URL(urlString)
+            conn = url.openConnection() as HttpURLConnection
+            conn.setup("POST", headers)
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+
+            conn.outputStream.bufferedWriter().use { writer -> writer.write(body) }
+
+            if (conn.responseCode == HttpURLConnection.HTTP_OK || conn.responseCode == HttpURLConnection.HTTP_CREATED) {
+                conn.inputStream.bufferedReader().use { reader ->
+                    Result.success(reader.readText())
+                }
+            } else {
+                Result.failure(Exception("HTTP ${conn.responseCode}: ${conn.responseMessage}"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        } finally {
+            conn?.disconnect()
         }
     }
 }

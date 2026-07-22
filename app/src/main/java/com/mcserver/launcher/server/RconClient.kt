@@ -2,6 +2,7 @@ package com.mcserver.launcher.server
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.mcserver.launcher.utils.L
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.net.Socket
@@ -132,9 +133,9 @@ class RconClient(
 
     /** 断开连接 */
     fun disconnect() {
-        try { input?.close() } catch (_: Exception) {}
-        try { output?.close() } catch (_: Exception) {}
-        try { socket?.close() } catch (_: Exception) {}
+        try { input?.close() } catch (e: Exception) { L.w("RconClient", "close input failed", e) }
+        try { output?.close() } catch (e: Exception) { L.w("RconClient", "close output failed", e) }
+        try { socket?.close() } catch (e: Exception) { L.w("RconClient", "close socket failed", e) }
         input = null
         output = null
         socket = null
@@ -142,8 +143,8 @@ class RconClient(
 
     /** 发送一个 RCON 数据包 */
     private fun sendPacket(type: Int, payload: String) {
+        val out = output ?: return
         val payloadBytes = payload.toByteArray(Charsets.UTF_8)
-        // 包大小 = 10 (3个Int32 + 2个填充字节) + payload长度
         val packetSize = 10 + payloadBytes.size
         val buffer = ByteBuffer.allocate(4 + packetSize).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -151,30 +152,28 @@ class RconClient(
         buffer.putInt(requestId)
         buffer.putInt(type)
         buffer.put(payloadBytes)
-        buffer.put(0)  // null terminator
-        buffer.put(0)  // padding
+        buffer.put(0)
+        buffer.put(0)
 
-        output?.write(buffer.array())
-        output?.flush()
+        out.write(buffer.array())
+        out.flush()
     }
 
     /** 读取一个 RCON 数据包，返回 (requestId, payload) */
     private fun readPacket(): Pair<Int, String>? {
-        try {
-            // 读取包大小
+        val inp = input ?: return null
+        return try {
             val sizeBytes = ByteArray(4)
-            input?.readFully(sizeBytes)
+            inp.readFully(sizeBytes)
             val size = ByteBuffer.wrap(sizeBytes).order(ByteOrder.LITTLE_ENDIAN).int
 
-            // 读取剩余数据
             val data = ByteArray(size)
-            input?.readFully(data)
+            inp.readFully(data)
 
             val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
             val reqId = buffer.int
             val type = buffer.int
 
-            // 读取 null-terminated 字符串
             val payloadBytes = mutableListOf<Byte>()
             while (buffer.hasRemaining()) {
                 val b = buffer.get()
@@ -183,9 +182,9 @@ class RconClient(
             }
             val payload = String(payloadBytes.toByteArray(), Charsets.UTF_8)
 
-            return reqId to payload
+            reqId to payload
         } catch (e: Exception) {
-            return null
+            null
         }
     }
 }
