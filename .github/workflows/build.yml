@@ -92,25 +92,17 @@ jobs:
             COMMITS=$(git log "${TAG}" --oneline --no-merges -20)
           fi
           
+          RELEASE_NOTES_FILE="/tmp/release-notes.md"
           if [ -n "$COMMITS" ]; then
-            RELEASE_NOTES=$(cat <<EOF
-## 更新内容
-
-$(echo "$COMMITS" | sed 's/^/\- /')
-
----
-
-*版本: ${TAG}*
-EOF
-)
+            echo "## 更新内容" > "$RELEASE_NOTES_FILE"
+            echo "" >> "$RELEASE_NOTES_FILE"
+            echo "$COMMITS" | sed 's/^/\- /' >> "$RELEASE_NOTES_FILE"
+            echo "" >> "$RELEASE_NOTES_FILE"
+            echo "---" >> "$RELEASE_NOTES_FILE"
+            echo "" >> "$RELEASE_NOTES_FILE"
+            echo "*版本: ${TAG}*" >> "$RELEASE_NOTES_FILE"
           else
-            RELEASE_NOTES="## 更新内容
-
-暂无详细更新记录。
-
----
-
-*版本: ${TAG}*"
+            printf "## 更新内容\n\n暂无详细更新记录。\n\n---\n\n*版本: ${TAG}*\n" > "$RELEASE_NOTES_FILE"
           fi
           
           {
@@ -149,15 +141,15 @@ EOF
             echo "SOURCE_APK=${SOURCE_APK}"
             echo "APK_NAME=${APK_NAME}"
             cp "$SOURCE_APK" "$APK_NAME"
-            echo "RELEASE_NOTES=$(printf '%s' "$RELEASE_NOTES" | head -20)"
+            echo "RELEASE_NOTES_FILE=${RELEASE_NOTES_FILE}"
             if gh release view "${TAG}" > /dev/null 2>&1; then
               echo "Release ${TAG} exists, updating notes..."
-              echo "$RELEASE_NOTES" | gh release edit "${TAG}" --notes-file -
+              gh release edit "${TAG}" --notes-file "$RELEASE_NOTES_FILE"
               echo "Uploading asset..."
               gh release upload "${TAG}" "$APK_NAME" --clobber
             else
               echo "Creating new release ${TAG}..."
-              echo "$RELEASE_NOTES" | gh release create "${TAG}" "$APK_NAME" --title "${TAG}" --notes-file - --prerelease
+              gh release create "${TAG}" "$APK_NAME" --title "${TAG}" --notes-file "$RELEASE_NOTES_FILE" --prerelease
             fi
             echo "APK uploaded to Release ${TAG}"
           } 2>&1 | tee /tmp/build-release.log
