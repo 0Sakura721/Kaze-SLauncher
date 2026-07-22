@@ -40,6 +40,8 @@ val downloadBundledAssets by tasks.registering {
         }
         listOf("jdk" to "jdk", "jre" to "jre").forEach { (pkg, apiPkg) ->
             listOf("aarch64", "armhf").forEach { arch ->
+                // Adoptium 官方仅对 ARM 32-bit 提供 Java 8/11 的构建，17/21 会 404
+                if (arch == "armhf" && ver !in listOf(8, 11)) return@forEach
                 val adoptiumArchName = adoptiumArch(arch)
                 javaFiles["java-$ver-$pkg-$arch.tar.gz"] = listOf(
                     // 主源：Adoptium API，自动返回最新 GA 版本

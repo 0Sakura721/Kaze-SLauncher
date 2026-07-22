@@ -95,11 +95,13 @@ class JreManager(private val context: Context) {
         if (javaExecutableFor(version).exists()) return@withContext true
 
         val arch = getDeviceArch()
+        // 内置资源命名与 CI 保持一致：aarch64 / armhf
+        val assetArch = if (arch == "arm") "armhf" else arch
         // 尝试顺序：优先用户选择的包类型，再回退另一种
         val candidates = listOf(pkg, if (pkg == "jdk") "jre" else "jdk").distinct()
 
         for (candidatePkg in candidates) {
-            val assetName = "java-$version-$candidatePkg-$arch.tar.gz"
+            val assetName = "java-$version-$candidatePkg-$assetArch.tar.gz"
             try {
                 context.assets.openFd("bundled/$assetName")?.use { afd ->
                     val total = afd.length
