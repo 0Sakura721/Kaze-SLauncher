@@ -34,11 +34,12 @@ fun ErrorBoundary(
             onError(t)
         }
     ) {
-        if (throwable == null) {
+        val currentError = throwable
+        if (currentError == null) {
             content()
         } else {
             ErrorFallback(
-                error = throwable,
+                error = currentError,
                 onRetry = { throwable = null }
             )
         }

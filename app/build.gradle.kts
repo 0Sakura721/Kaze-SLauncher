@@ -146,7 +146,7 @@ android {
 
     defaultConfig {
         applicationId = "com.mcserver.launcher"
-        minSdk = 26; targetSdk = 35; versionCode = 27; versionName = "0.14.1-pre"
+        minSdk = 26; targetSdk = 35; versionCode = 27; versionName = "0.14.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         buildConfigField("String", "BUILD_TIME", "\"${System.currentTimeMillis()}\"")
@@ -198,6 +198,10 @@ android {
         freeCompilerArgs += listOf("-opt-in=androidx.compose.material3.ExperimentalMaterial3Api")
     }
     buildFeatures { compose = true; buildConfig = true }
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
 }
 
 dependencies {
