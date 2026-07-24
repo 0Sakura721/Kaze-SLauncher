@@ -5,7 +5,7 @@
 ![Kotlin](https://img.shields.io/badge/Kotlin-1.9.20-blue?logo=kotlin)
 ![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-1.7-green)
 ![minSdk](https://img.shields.io/badge/minSdk-27-orange)
-![License](https://img.shields.io/badge/license-MIT-yellow)
+![License](https://img.shields.io/badge/license-LGPLv3-blue)
 
 ## ✨ 功能特性
 
@@ -97,7 +97,7 @@ app/src/main/java/com/mcserver/launcher/
 
 ## 📄 许可证
 
-本项目采用 [MIT License](LICENSE) 许可证。
+本项目采用 [GNU LGPLv3](LICENSE) 许可证。
 
 ## ⚠️ 免责声明
 
