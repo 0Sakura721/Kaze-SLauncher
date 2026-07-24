@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Kaze SLauncher</string>
-    <string name="tab_home">Server</string>
+    <string name="tab_home">Home</string>
     <string name="tab_console">Console</string>
     <string name="tab_config">Config</string>
     <string name="tab_settings">Settings</string>
@@ -11,15 +11,15 @@
     <string name="server_stopping">Stopping…</string>
     <string name="start_server">Start Server</string>
     <string name="stop_server">Stop Server</string>
-    <string name="select_jar">Select JAR File</string>
+    <string name="select_jar">Select JAR file</string>
     <string name="no_jar_selected">No server file selected</string>
-    <string name="jre_not_installed">Java runtime not installed</string>
+    <string name="jre_not_installed">Java Runtime not installed</string>
     <string name="install_jre">Install JRE</string>
-    <string name="jre_installed">JRE ready</string>
-    <string name="save_config">Save Configuration</string>
+    <string name="jre_installed">JRE Ready</string>
+    <string name="save_config">Save Config</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
-    <string name="theme_amoled">AMOLED Battery Saver</string>
+    <string name="theme_amoled">AMOLED</string>
     <string name="notification_running">Kaze SLauncher is running</string>
     <string name="notification_running_desc">Minecraft server is running in background</string>
     <string name="linux_terminal">Linux Terminal</string>
@@ -36,4 +36,26 @@
     <string name="refresh">Refresh</string>
     <string name="retry">Retry</string>
     <string name="error_occurred">An error occurred</string>
+
+    <string name="error_server_dir_not_found">Server directory not found</string>
+    <string name="error_no_jar_found">No server JAR found, cannot backup</string>
+    <string name="error_backup_path_traversal">Backup path traversal</string>
+    <string name="error_backup_not_found">Backup not found</string>
+    <string name="error_version_not_found">Version not found</string>
+    <string name="error_file_path_traversal">File path traversal</string>
+    <string name="error_server_props_not_found">server.properties not found</string>
+    <string name="error_cannot_delete_default_world">Cannot delete current default world, please switch first</string>
+    <string name="error_world_dir_not_found">World directory not found</string>
+    <string name="error_invalid_world_dir">Not a valid world directory</string>
+    <string name="error_world_not_found">World not found or corrupted</string>
+    <string name="error_dir_not_found">Directory not found</string>
+    <string name="error_linux_env_not_ready">Linux environment not ready</string>
+    <string name="error_java_not_installed">Java not installed</string>
+    <string name="error_rcon_auth_failed">RCON auth failed: wrong password</string>
+    <string name="error_rcon_no_response">RCON auth failed: no response</string>
+    <string name="error_rcon_not_connected">RCON not connected</string>
+    <string name="error_rcon_connect_failed">RCON connection failed</string>
+    <string name="error_rcon_command_failed">RCON command failed</string>
+    <string name="error_cannot_read_jar">Cannot read JAR file</string>
+    <string name="error_http_request_failed">HTTP request failed</string>
 </resources>

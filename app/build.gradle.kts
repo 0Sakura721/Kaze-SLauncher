@@ -181,9 +181,15 @@ android {
         } else if (projectKeystore.exists()) {
             create("release") {
                 storeFile = projectKeystore
-                storePassword = "kaze_slauncher_2026"
-                keyAlias = "kaze_slauncher"
-                keyPassword = "kaze_slauncher_2026"
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                    ?: localProperties.getProperty("storePassword")
+                    ?: "kaze_slauncher_2026"
+                keyAlias = System.getenv("KEY_ALIAS")
+                    ?: localProperties.getProperty("keyAlias")
+                    ?: "kaze_slauncher"
+                keyPassword = System.getenv("KEY_PASSWORD")
+                    ?: localProperties.getProperty("keyPassword")
+                    ?: "kaze_slauncher_2026"
             }
         }
     }
@@ -217,22 +223,22 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
+    val composeBom = platform("androidx.compose:compose-bom:2025.02.00")
     implementation(composeBom)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.activity:activity-compose:1.9.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.2")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
-    implementation("androidx.navigation:navigation-compose:2.7.7")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("io.coil-kt.coil3:coil-compose:3.0.4")
-    implementation("io.coil-kt.coil3:coil-core:3.0.4")
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.0")
+    implementation("androidx.navigation:navigation-compose:2.8.8")
+    implementation("androidx.datastore:datastore-preferences:1.1.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("io.coil-kt.coil3:coil-compose:3.1.0")
+    implementation("io.coil-kt.coil3:coil-core:3.1.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
