@@ -2,6 +2,28 @@
 
 All notable changes to Kaze SLauncher.
 
+## [0.17.1] - 2026-07
+
+### Fixed
+- HTTP connection leak in ServerCoreManager (12 functions) — all URLConnections now use try/finally
+- HTTP connection leak in SpigotBuildManager
+- Duplicate CI workflow (build-debug.yml removed, kept build.yml)
+- Gradle OOM during APK compression: heap 4096m → 6144m
+- Keystore password hardcoded → now supports env vars (KEYSTORE_PASSWORD/KEY_ALIAS/KEY_PASSWORD)
+
+### Changed
+- Compose BOM: 2024.06.00 → 2025.02.00
+- Dependencies: activity 1.9.0→1.10.1, lifecycle 2.8.2→2.9.0,
+  navigation 2.7.7→2.8.8, coroutines 1.8.1→1.10.1,
+  core-ktx 1.13.1→1.15.0, coil 3.0.4→3.1.0, datastore 1.1.1→1.1.3
+- .gitignore: added .DS_Store *.log *.bak *.swp *.swo
+
+### Added
+- English translations (values-en/strings.xml)
+- CHANGELOG.md with version history
+- Issues/PR badges in README
+- README contribution links
+
 ## [0.17.0-pre] - 2026-07
 
 ### Added
