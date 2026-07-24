@@ -8,6 +8,7 @@ import android.provider.OpenableColumns
 import com.mcserver.launcher.McApplication
 import com.mcserver.launcher.utils.L
 import com.mcserver.launcher.data.ServerConfig
+import com.mcserver.launcher.data.StartupMode
 import com.mcserver.launcher.utils.ShellUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -247,43 +248,83 @@ class ProotServerManager {
                 val logPath = File(serverDir, "server.log").absolutePath
                 val pipePath = File(serverDir, "cmdpipe").absolutePath
 
-                val xmx = config.maxRamMB
-                val xms = config.minRamMB
-                val noguiArg = if (config.nogui) "nogui" else ""
-                val args = config.additionalArgs.trim()
-                if (args.isNotBlank() && !ShellUtils.validateShellSafe(args)) {
-                    return@withContext Result.failure(IllegalArgumentException("启动参数包含不安全的 shell 元字符"))
-                }
-
                 val pidFile = File(serverDir, "mcserver.pid").absolutePath
                 val safeServerDir = ShellUtils.escapeSingleQuote(serverDir.absolutePath)
                 val safePipePath = ShellUtils.escapeSingleQuote(pipePath)
                 val safeLogPath = ShellUtils.escapeSingleQuote(logPath)
                 val safePidFile = ShellUtils.escapeSingleQuote(pidFile)
-                val safeJarName = ShellUtils.escapeSingleQuote(targetJar.name)
-                val safeJavaBin = ShellUtils.escapeSingleQuote(javaBin)
 
-                val script = buildString {
-                    appendLine("#!/bin/sh")
-                    appendLine("cd '$safeServerDir' || exit 1")
-                    appendLine("rm -f '$safePipePath'")
-                    appendLine("mkfifo '$safePipePath'")
-                    appendLine("echo '--- Minecraft Server Started ---' > '$safeLogPath'")
-                    appendLine(": > '$safePidFile'")
-                    appendLine("$safeJavaBin -Xmx${xmx}M -Xms${xms}M $args -jar '$safeJarName' $noguiArg >> '$safeLogPath' 2>&1 < '$safePipePath' &")
-                    appendLine("JAVA_PID=\$!")
-                    appendLine("echo \$JAVA_PID > '$safePidFile'")
-                    appendLine("wait \$JAVA_PID")
-                    appendLine("echo '--- Server Stopped ---' >> '$safeLogPath'")
-                    appendLine("rm -f '$safePipePath' '$safePidFile'")
+                val script = when (config.startupMode) {
+                    StartupMode.SHELL_SCRIPT -> {
+                        // 复制外部脚本到服务器目录
+                        val srcScript = File(config.shScriptPath)
+                        val targetScript = File(serverDir, srcScript.name)
+                        if (srcScript.absolutePath != targetScript.absolutePath) {
+                            if (!targetScript.exists() || srcScript.lastModified() > targetScript.lastModified()) {
+                                srcScript.copyTo(targetScript, overwrite = true)
+                            }
+                        }
+                        targetScript.setExecutable(true)
+                        val safeScriptName = ShellUtils.escapeSingleQuote(targetScript.name)
+
+                        val noguiArg = if (config.nogui) "nogui" else ""
+                        buildString {
+                            appendLine("#!/bin/sh")
+                            appendLine("cd '$safeServerDir' || exit 1")
+                            appendLine("rm -f '$safePipePath'")
+                            appendLine("mkfifo '$safePipePath'")
+                            appendLine("echo '--- Minecraft Server Started ---' > '$safeLogPath'")
+                            appendLine(": > '$safePidFile'")
+                            // Forge/NeoForge 的 run.sh 使用当前目录的 java，proot 内 PATH 已配置好
+                            appendLine("./$safeScriptName $noguiArg >> '$safeLogPath' 2>&1 < '$safePipePath' &")
+                            appendLine("JAVA_PID=\$!")
+                            appendLine("echo \$JAVA_PID > '$safePidFile'")
+                            appendLine("wait \$JAVA_PID")
+                            appendLine("echo '--- Server Stopped ---' >> '$safeLogPath'")
+                            appendLine("rm -f '$safePipePath' '$safePidFile'")
+                        }
+                    }
+                    StartupMode.DIRECT_JAR -> {
+                        val xmx = config.maxRamMB
+                        val xms = config.minRamMB
+                        val noguiArg = if (config.nogui) "nogui" else ""
+                        val args = config.additionalArgs.trim()
+                        if (args.isNotBlank() && !ShellUtils.validateShellSafe(args)) {
+                            return@withContext Result.failure(IllegalArgumentException("启动参数包含不安全的 shell 元字符"))
+                        }
+                        val safeJarName = ShellUtils.escapeSingleQuote(targetJar.name)
+                        val safeJavaBin = ShellUtils.escapeSingleQuote(javaBin)
+
+                        buildString {
+                            appendLine("#!/bin/sh")
+                            appendLine("cd '$safeServerDir' || exit 1")
+                            appendLine("rm -f '$safePipePath'")
+                            appendLine("mkfifo '$safePipePath'")
+                            appendLine("echo '--- Minecraft Server Started ---' > '$safeLogPath'")
+                            appendLine(": > '$safePidFile'")
+                            appendLine("$safeJavaBin -Xmx${xmx}M -Xms${xms}M $args -jar '$safeJarName' $noguiArg >> '$safeLogPath' 2>&1 < '$safePipePath' &")
+                            appendLine("JAVA_PID=\$!")
+                            appendLine("echo \$JAVA_PID > '$safePidFile'")
+                            appendLine("wait \$JAVA_PID")
+                            appendLine("echo '--- Server Stopped ---' >> '$safeLogPath'")
+                            appendLine("rm -f '$safePipePath' '$safePidFile'")
+                        }
+                    }
                 }
                 scriptFile.writeText(script)
                 scriptFile.setExecutable(true)
 
                 emit("> 启动脚本: ${scriptFile.absolutePath}")
-                emit("> JAR: ${targetJar.name}")
-                emit("> 内存: ${xmx}MB / ${xms}MB")
-                if (noguiArg.isNotEmpty()) emit("> 模式: 无 GUI (nogui)") else emit("> 模式: 带 GUI")
+                when (config.startupMode) {
+                    StartupMode.SHELL_SCRIPT -> {
+                        emit("> 模式: Shell 脚本 (${config.shScriptPath})")
+                    }
+                    StartupMode.DIRECT_JAR -> {
+                        emit("> JAR: ${targetJar.name}")
+                        emit("> 内存: ${config.maxRamMB}MB / ${config.minRamMB}MB")
+                        if (config.nogui) emit("> 模式: 无 GUI (nogui)") else emit("> 模式: 带 GUI")
+                    }
+                }
 
                 logFile = File(logPath)
                 logFile?.writeText("")

@@ -15,8 +15,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.data.ServerConfig
+import com.mcserver.launcher.data.StartupMode
 import com.mcserver.launcher.server.ServerCoreManager
 import com.mcserver.launcher.server.ProotServerManager
+import com.mcserver.launcher.server.LinuxEnvironmentManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -25,7 +27,7 @@ import java.io.File
 @Composable
 fun ServerCoreDownloadScreen(
     config: ServerConfig,
-    onJarDownloaded: (String) -> Unit
+    onJarDownloaded: (String, StartupMode) -> Unit
 ) {
     val coreManager = remember { ServerCoreManager() }
     val scope = rememberCoroutineScope()
@@ -49,6 +51,8 @@ fun ServerCoreDownloadScreen(
     var downloadMessage by remember { mutableStateOf<String?>(null) }
     var versionError by remember { mutableStateOf<String?>(null) }
     var buildError by remember { mutableStateOf<String?>(null) }
+    var installing by remember { mutableStateOf(false) }
+    var installMessage by remember { mutableStateOf<String?>(null) }
 
     fun loadVersions() {
         scope.launch {
@@ -191,9 +195,57 @@ fun ServerCoreDownloadScreen(
                 }
                 result.fold(
                     onSuccess = { file ->
-                        downloadMessage = "下载完成：${file.name}"
-                        onJarDownloaded(file.absolutePath)
-                        downloading = false
+                        // Forge / NeoForge 需要额外运行安装器
+                        if (selectedType == ServerCoreManager.CoreType.FORGE ||
+                            selectedType == ServerCoreManager.CoreType.NEOFORGE
+                        ) {
+                            scope.launch {
+                                downloading = false
+                                installing = true
+                                installMessage = "> 正在运行安装器，请耐心等待..."
+
+                                // 按优先级获取 proot 内 Java 路径
+                                val javaPath = listOf(21, 17, 11, 8).firstNotNullOfOrNull {
+                                    if (LinuxEnvironmentManager.isJdkInstalled(it))
+                                        LinuxEnvironmentManager.getJavaPath(it)
+                                    else null
+                                } ?: run {
+                                    installMessage = "> 错误：proot 内未找到可用 JDK，请先部署 Linux 环境"
+                                    installing = false
+                                    return@launch
+                                }
+
+                                val installResult = coreManager.installForgeServer(
+                                    installerFile = file,
+                                    serverDir = serverDir,
+                                    javaPath = javaPath,
+                                    onOutput = { line ->
+                                        // executeCommand 在后台线程回调，需切到主线程更新 Compose 状态
+                                        scope.launch(Dispatchers.Main) {
+                                            installMessage = line
+                                        }
+                                    }
+                                )
+
+                                installResult.fold(
+                                    onSuccess = { entry ->
+                                        installMessage = "> 安装完成：${entry.name}"
+                                        val mode = if (entry.name.endsWith(".sh"))
+                                            StartupMode.SHELL_SCRIPT else StartupMode.DIRECT_JAR
+                                        onJarDownloaded(entry.absolutePath, mode)
+                                        installing = false
+                                    },
+                                    onFailure = { err ->
+                                        installMessage = "> 安装失败：${err.message}"
+                                        installing = false
+                                    }
+                                )
+                            }
+                        } else {
+                            downloadMessage = "下载完成：${file.name}"
+                            onJarDownloaded(file.absolutePath, StartupMode.DIRECT_JAR)
+                            downloading = false
+                        }
                     },
                     onFailure = {
                         downloadMessage = "下载失败：${it.message}"
@@ -334,7 +386,7 @@ fun ServerCoreDownloadScreen(
             ServerCoreManager.CoreType.FORGE, ServerCoreManager.CoreType.NEOFORGE -> selectedVersion.isNotBlank() && selectedBuild.isNotBlank()
         }
 
-        if (canDownload || downloading) {
+        if (canDownload || downloading || installing) {
             Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     if (downloading) {
@@ -346,6 +398,16 @@ fun ServerCoreDownloadScreen(
                             Text("${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}", style = MaterialTheme.typography.bodySmall)
                             Text("${(downloadProgress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                         }
+                    } else if (installing) {
+                        Text("正在运行 Forge/NeoForge 安装器...", style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            installMessage ?: "请耐心等待，安装过程可能需要几分钟",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     } else {
                         Button(
                             onClick = { startDownload() },
@@ -378,6 +440,29 @@ fun ServerCoreDownloadScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(msg, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        installMessage?.let { msg ->
+            if (!installing && (msg.startsWith("> 安装完成") || msg.startsWith("> 安装失败") || msg.startsWith("> 错误"))) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (msg.startsWith("> 安装完成")) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (msg.startsWith("> 安装完成")) Icons.Filled.CheckCircle else Icons.Filled.Info,
+                            null, Modifier.size(18.dp),
+                            tint = if (msg.startsWith("> 安装完成")) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(msg, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         }

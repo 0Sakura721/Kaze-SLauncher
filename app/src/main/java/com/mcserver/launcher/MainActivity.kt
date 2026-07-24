@@ -23,6 +23,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.mcserver.launcher.data.PreferencesManager
 import com.mcserver.launcher.data.ServerConfig
+import com.mcserver.launcher.data.StartupMode
 import com.mcserver.launcher.ui.components.ErrorBoundary
 import com.mcserver.launcher.ui.navigation.Screen
 import com.mcserver.launcher.ui.navigation.bottomNavItems
@@ -213,9 +214,15 @@ fun MainApp(
             composable(Screen.CoreDownload.route) {
                 ServerCoreDownloadScreen(
                     config = config,
-                    onJarDownloaded = { path ->
+                    onJarDownloaded = { path, startupMode ->
                         scope.launch {
-                            prefsManager.saveServerConfig(config.copy(jarPath = path))
+                            prefsManager.saveServerConfig(
+                                config.copy(
+                                    jarPath = path,
+                                    startupMode = startupMode,
+                                    shScriptPath = if (startupMode == StartupMode.SHELL_SCRIPT) path else config.shScriptPath
+                                )
+                            )
                         }
                     }
                 )

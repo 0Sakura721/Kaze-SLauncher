@@ -1,5 +1,6 @@
 package com.mcserver.launcher.server
 
+import com.mcserver.launcher.utils.ShellUtils
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -378,5 +379,88 @@ class ServerCoreManager {
     /** 获取 Spigot 构建说明 */
     fun getSpigotBuildInstructions(mcVersion: String): String {
         return SpigotBuildManager.getBuildInstructions(mcVersion)
+    }
+
+    // ─── Forge / NeoForge 安装器支持 ───
+
+    /**
+     * 在 proot Ubuntu 环境中运行 Forge/NeoForge 安装器。
+     *
+     * @param installerFile 已下载的安装器 JAR（Android 外部路径）
+     * @param serverDir 服务器工作目录（Android 外部路径）
+     * @param javaPath proot 内可用的 Java 绝对路径（如 /usr/lib/jvm/java-21-openjdk-arm64/bin/java）
+     * @param onOutput 安装过程输出回调
+     * @return 安装后检测到的启动入口文件
+     */
+    suspend fun installForgeServer(
+        installerFile: File,
+        serverDir: File,
+        javaPath: String,
+        onOutput: ((String) -> Unit)? = null
+    ): Result<File> = withContext(Dispatchers.IO) {
+        try {
+            // 复制 installer 到 serverDir（安装器需要在目标目录运行）
+            val targetInstaller = File(serverDir, installerFile.name)
+            if (!targetInstaller.exists() || targetInstaller.length() != installerFile.length()) {
+                installerFile.copyTo(targetInstaller, overwrite = true)
+            }
+
+            val safeJava = ShellUtils.escapeSingleQuote(javaPath)
+            val safeInstaller = ShellUtils.escapeSingleQuote(targetInstaller.name)
+            val safeWorkDir = ShellUtils.escapeSingleQuote(serverDir.absolutePath)
+
+            val command = "$safeJava -jar $safeInstaller --installServer"
+
+            onOutput?.invoke("> 正在运行 Forge/NeoForge 安装器...")
+            onOutput?.invoke("> 命令: $command")
+
+            val exitCode = LinuxEnvironmentManager.executeCommand(command, safeWorkDir, onOutput)
+
+            if (exitCode != 0) {
+                return@withContext Result.failure(
+                    Exception("Forge/NeoForge 安装器退出码: $exitCode，请检查日志")
+                )
+            }
+
+            onOutput?.invoke("> 安装器执行完毕，检测启动入口...")
+
+            val entry = detectForgeLaunchEntry(serverDir)
+                ?: return@withContext Result.failure(
+                    Exception("安装完成后未找到启动入口（run.sh 或 universal.jar），可能安装失败")
+                )
+
+            onOutput?.invoke("> 检测到启动入口: ${entry.name}")
+            Result.success(entry)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * 检测 Forge/NeoForge 安装后的启动入口。
+     * 新版（1.17+）生成 run.sh，旧版生成 universal.jar。
+     */
+    fun detectForgeLaunchEntry(serverDir: File): File? {
+        // 优先找 run.sh（新版 Forge/NeoForge 标准启动脚本）
+        val runSh = File(serverDir, "run.sh")
+        if (runSh.exists()) return runSh
+
+        // 旧版 Forge: forge-<mc>-<forge>-universal.jar
+        serverDir.listFiles { f ->
+            f.isFile && f.name.matches(Regex("""forge-[\d.]+-[\d.]+-universal\.jar"""))
+        }?.maxByOrNull { it.lastModified() }?.let { return it }
+
+        // NeoForge 旧版: neoforge-<mc>-<neo>-universal.jar
+        serverDir.listFiles { f ->
+            f.isFile && f.name.matches(Regex("""neoforge-[\d.]+-[\d.]+-universal\.jar"""))
+        }?.maxByOrNull { it.lastModified() }?.let { return it }
+
+        // 兜底：任何看起来像 forge/neoforge server 的 jar
+        serverDir.listFiles { f ->
+            f.isFile && (f.name.startsWith("forge-") || f.name.startsWith("neoforge-"))
+                && f.name.endsWith(".jar") && !f.name.contains("installer")
+        }?.maxByOrNull { it.lastModified() }?.let { return it }
+
+        return null
     }
 }
