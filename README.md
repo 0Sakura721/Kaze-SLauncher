@@ -80,7 +80,7 @@ app/src/main/java/com/mcserver/launcher/
 
 ## 🤝 贡献
 
-欢迎提交 Issue 和 Pull Request！
+欢迎提交 [Issue](https://github.com/0Sakura721/Kaze-SLauncher/issues) 和 [Pull Request](https://github.com/0Sakura721/Kaze-SLauncher/pulls)！
 
 1. Fork 本仓库
 2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
