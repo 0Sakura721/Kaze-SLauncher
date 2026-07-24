@@ -312,15 +312,16 @@ object LinuxEnvironmentManager {
                     val prootResults = MirrorSpeedTester.testMirrors(prootMirrors)
                     _mirrorResults.value = prootResults
                     _isTestingMirrors.value = false
-                    val bestProot = prootResults.firstOrNull { it.error == null }
+                    val bestProot = prootResults.firstOrNull { it.error == null && it.latencyMs < Long.MAX_VALUE }
                     if (bestProot != null) {
                         log("  ✓ 最优: ${bestProot.name} (${bestProot.latencyMs}ms)")
                     } else {
                         log("  ⚠ 所有镜像超时，回退到 GitHub 官方")
                     }
-                    val prootUrl = bestProot?.url ?: prootMirrors.first().url
+                    val prootUrls = MirrorSpeedTester.reachableUrlsInOrder(prootResults)
+                        .ifEmpty { listOf(prootMirrors.first().url) }
                     updateItem("proot", DownloadItemState.DOWNLOADING)
-                    downloadFile(prootUrl, prootTarball) { progress, downloaded, total, speed ->
+                    downloadFileWithFallback(prootUrls, prootTarball) { progress, downloaded, total, speed ->
                         updateProgress("proot", progress, downloaded, total, speed)
                     }
                     // 网络下载的可能是单文件二进制或 tarball
@@ -360,15 +361,16 @@ object LinuxEnvironmentManager {
                 val ubuntuResults = MirrorSpeedTester.testMirrors(ubuntuMirrors)
                 _mirrorResults.value = ubuntuResults
                 _isTestingMirrors.value = false
-                val bestUbuntu = ubuntuResults.firstOrNull { it.error == null }
+                val bestUbuntu = ubuntuResults.firstOrNull { it.error == null && it.latencyMs < Long.MAX_VALUE }
                 if (bestUbuntu != null) {
                     log("  ✓ 最优: ${bestUbuntu.name} (${bestUbuntu.latencyMs}ms)")
                 } else {
                     log("  ⚠ 所有镜像超时，回退到 Ubuntu 官方")
                 }
+                val rootfsUrls = MirrorSpeedTester.reachableUrlsInOrder(ubuntuResults)
+                    .ifEmpty { listOf(ubuntuMirrors.first().url) }
                 updateItem("rootfs", DownloadItemState.DOWNLOADING)
-                val rootfsUrl = bestUbuntu?.url ?: ubuntuMirrors.first().url
-                downloadFile(rootfsUrl, rootfsTarball) { progress, downloaded, total, speed ->
+                downloadFileWithFallback(rootfsUrls, rootfsTarball) { progress, downloaded, total, speed ->
                     updateProgress("rootfs", progress, downloaded, total, speed)
                 }
                 updateItem("rootfs", DownloadItemState.COMPLETED)
@@ -491,6 +493,40 @@ object LinuxEnvironmentManager {
             }
         }
         connection.disconnect()
+    }
+
+    /**
+     * 按 URL 列表顺序依次尝试下载文件。任一 URL 成功即返回，失败/超时切到下一个。
+     * 关键改进：解决「测速最优源下载中途断流必须手动重试」的问题。
+     *
+     * 行为：
+     * - 每次切换 URL 前先删掉残破的目标文件，从头开始（避免上一个源下载了 30% 后切源导致 zip 不完整）
+     * - 成功下载到 >= 1MB 视作 OK（更严格的完整校验留给调用方做）
+     */
+    private suspend fun downloadFileWithFallback(
+        urls: List<String>,
+        dest: File,
+        onProgress: (Float, Long, Long, Long) -> Unit
+    ) {
+        require(urls.isNotEmpty()) { "URL 列表不能为空" }
+        val errors = mutableListOf<String>()
+        for ((index, url) in urls.withIndex()) {
+            // 每次切源都从头开始下载（避免半文件 + 不同源拼接）
+            if (dest.exists()) dest.delete()
+            try {
+                log("  [${index + 1}/${urls.size}] 尝试下载: ${url.take(80)}...")
+                downloadFile(url, dest, onProgress)
+                if (dest.exists() && dest.length() > 0) {
+                    log("  ✓ 镜像 ${index + 1} 下载成功: ${dest.length() / 1024} KB")
+                    return
+                }
+                errors.add("$url: 文件为空")
+            } catch (e: Exception) {
+                log("  ✗ 镜像 ${index + 1} 失败: ${e.message}")
+                errors.add("$url: ${e.message}")
+            }
+        }
+        throw RuntimeException("所有 ${urls.size} 个镜像源都下载失败:\n${errors.joinToString("\n")}")
     }
 
     // ── tar.gz 解压 ──

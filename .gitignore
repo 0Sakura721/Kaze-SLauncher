@@ -7,8 +7,10 @@ local.properties
 *.aapt2.real
 *.aapt2.wrapper
 *.keystore
-*.jks
 keystore.properties
+# 例外：项目自带的 release keystore 提交到 git，
+# 让本地和 CI 用同一份签名，保证覆盖安装不会因签名不同而失败
+!app/release-keystore.jks
 # 构建时下载的内置资源（不应提交到 Git）
 # 但 proot tarball 已 commit（约 228 KB，包含 proot 二进制 + loader + 依赖库）
 app/src/main/assets/bundled/*

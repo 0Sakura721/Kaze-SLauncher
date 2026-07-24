@@ -181,6 +181,8 @@ object MirrorSpeedTester {
 
     /**
      * 并发测试所有镜像延迟，返回按延迟排序的结果。
+     * 关键改进：丢弃不可达源（latencyMs == Long.MAX_VALUE）后排序，
+     * 避免一个快源 + 几十个超时源时"最优点"实际是第一个 MAX 的尴尬。
      */
     suspend fun testMirrors(
         mirrors: List<MirrorOption>,
@@ -208,12 +210,22 @@ object MirrorSpeedTester {
             }
         }
 
-        val bestLatency = results.filter { it.latencyMs < Long.MAX_VALUE }
-            .minOfOrNull { it.latencyMs } ?: Long.MAX_VALUE
-        results.sortedBy { it.latencyMs }.map {
-            it.copy(isBest = it.latencyMs == bestLatency && it.latencyMs < Long.MAX_VALUE)
-        }
+        val reachable = results.filter { it.error == null && it.latencyMs < Long.MAX_VALUE }
+        val unreachable = results.filter { it.error != null || it.latencyMs >= Long.MAX_VALUE }
+        val bestLatency = reachable.minOfOrNull { it.latencyMs } ?: Long.MAX_VALUE
+        // 可达源按延迟升序排在前，不可达源（按原顺序）排在后
+        val sorted = reachable.sortedBy { it.latencyMs } + unreachable
+        sorted.map { it.copy(isBest = it.latencyMs == bestLatency && it.latencyMs < Long.MAX_VALUE) }
     }
+
+    /**
+     * 按测速顺序返回有效 URL 列表（延迟升序、丢弃不可达）。
+     * 用于下载时按顺序回退到下一个镜像。
+     */
+    fun reachableUrlsInOrder(results: List<MirrorTestResult>): List<String> =
+        results.filter { it.error == null && it.latencyMs < Long.MAX_VALUE }
+            .sortedBy { it.latencyMs }
+            .map { it.url }
 
     /**
      * 同步测试单个 URL 的延迟（HEAD 请求）。

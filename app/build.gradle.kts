@@ -146,7 +146,7 @@ android {
 
     defaultConfig {
         applicationId = "com.mcserver.launcher"
-        minSdk = 26; targetSdk = 35; versionCode = 30; versionName = "0.15.2"
+        minSdk = 26; targetSdk = 35; versionCode = 31; versionName = "0.16.0-pre"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
         buildConfigField("String", "BUILD_TIME", "\"${System.currentTimeMillis()}\"")
@@ -162,16 +162,28 @@ android {
     }
 
     signingConfigs {
-        val hasReleaseSigning = localProperties.getProperty("storeFile") != null &&
+        // 优先用项目内置的 release keystore（app/release-keystore.jks，已 commit 到 git）
+        // 这样本地和 CI 用同一份签名，覆盖安装不会因签名不一致而失败
+        // 可通过 local.properties 的 storeFile/storePassword/keyAlias/keyPassword 覆盖
+        val projectKeystore = file("release-keystore.jks")
+        val overrideStoreFile = localProperties.getProperty("storeFile")
+        val hasOverride = overrideStoreFile != null &&
             localProperties.getProperty("storePassword") != null &&
             localProperties.getProperty("keyAlias") != null &&
             localProperties.getProperty("keyPassword") != null
-        if (hasReleaseSigning) {
+        if (hasOverride) {
             create("release") {
-                storeFile = rootProject.file(localProperties.getProperty("storeFile"))
+                storeFile = rootProject.file(overrideStoreFile)
                 storePassword = localProperties.getProperty("storePassword")
                 keyAlias = localProperties.getProperty("keyAlias")
                 keyPassword = localProperties.getProperty("keyPassword")
+            }
+        } else if (projectKeystore.exists()) {
+            create("release") {
+                storeFile = projectKeystore
+                storePassword = "kaze_slauncher_2026"
+                keyAlias = "kaze_slauncher"
+                keyPassword = "kaze_slauncher_2026"
             }
         }
     }

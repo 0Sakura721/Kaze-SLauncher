@@ -110,18 +110,20 @@ jobs:
             echo "PREV_TAG=${PREV_TAG:-none}"
             echo "HAS_KEYSTORE=$([ -n "$KEYSTORE_BASE64" ] && echo yes || echo no)"
             RELEASE_BUILD_OK=false
+            # 优先用仓库自带的 app/release-keystore.jks（本地+CI 同一份签名，覆盖安装不会冲突）
+            # 如果存在 KEystore 密钥，则使用 secret 中的 keystore 覆盖
             if [ -n "$KEYSTORE_BASE64" ]; then
               echo "$KEYSTORE_BASE64" | base64 -d > release-keystore.jks
               echo "storeFile=release-keystore.jks" >> local.properties
               echo "storePassword=$KEYSTORE_PASSWORD" >> local.properties
               echo "keyAlias=$KEY_ALIAS" >> local.properties
               echo "keyPassword=$KEY_PASSWORD" >> local.properties
-              if ./gradlew :app:assembleRelease --stacktrace; then
-                RELEASE_BUILD_OK=true
-                echo "Release build succeeded"
-              else
-                echo "assembleRelease failed, falling back to debug APK"
-              fi
+            fi
+            if ./gradlew :app:assembleRelease --stacktrace; then
+              RELEASE_BUILD_OK=true
+              echo "Release build succeeded"
+            else
+              echo "assembleRelease failed, falling back to debug APK"
             fi
             if [ "$RELEASE_BUILD_OK" = "true" ]; then
               SOURCE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
