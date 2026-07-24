@@ -145,16 +145,17 @@ class ServerCoreManager {
         try {
             val conn = URL("${CoreType.VANILLA.apiBase}/mc/game/version_manifest_v2.json")
                 .openConnection() as HttpURLConnection
-            conn.connectTimeout = 10000; conn.readTimeout = 10000
-            conn.connect()
-            val json = JSONObject(conn.inputStream.bufferedReader().readText())
-            conn.disconnect()
-            val arr = json.getJSONArray("versions")
-            val list = (0 until arr.length()).map {
-                val obj = arr.getJSONObject(it)
-                CoreVersion(obj.getString("id"), obj.optString("type") == "release")
-            }
-            Result.success(list)
+            try {
+                conn.connectTimeout = 10000; conn.readTimeout = 10000
+                conn.connect()
+                val json = JSONObject(conn.inputStream.bufferedReader().readText())
+                val arr = json.getJSONArray("versions")
+                val list = (0 until arr.length()).map {
+                    val obj = arr.getJSONObject(it)
+                    CoreVersion(obj.getString("id"), obj.optString("type") == "release")
+                }
+                Result.success(list)
+            } finally { conn.disconnect() }
         } catch (e: Exception) { Result.failure(e) }
     }
 
