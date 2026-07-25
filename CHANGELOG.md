@@ -2,6 +2,20 @@
 
 All notable changes to Kaze SLauncher.
 
+## [1.0.0-pre] - 2026-07
+
+### Highlights
+- 首个成熟稳定版本发布 🎉
+- 代码经过四轮审查，修复16+核心问题
+- 所有HTTP连接使用try/finally保护，消除资源泄漏
+- 双内存检查（设备物理 + App堆），避免OOM误判
+- 多服务器实例完全隔离
+- CI 稳定构建，Release APK 已签名
+
+### Changed
+- versionCode: 33 → 100
+- versionName: 0.17.1 → 1.0.0-pre
+
 ## [0.17.1] - 2026-07
 
 ### Fixed
