@@ -220,7 +220,7 @@ android {
         abortOnError = true
         checkReleaseBuilds = true
         // AGP 8.7.3 内置检查器与 Kotlin 2.1.0 不兼容，跳过此检查
-        disable += "MutableLiveData"
+        disable += "NullSafeMutableLiveData"
     }
 }
 
