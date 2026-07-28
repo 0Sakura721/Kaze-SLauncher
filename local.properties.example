@@ -1,0 +1,21 @@
+# ═════════════════════════════════════════════════════════════
+# Kaze-SLauncher 本地构建配置
+#
+# 复制此文件为 local.properties 并填入你的信息：
+#   cp local.properties.example local.properties
+#
+# 注意：local.properties 已加入 .gitignore，不会提交！
+# ═════════════════════════════════════════════════════════════
+
+# JDK 路径（可选，项目默认使用 Android Studio 内置 JDK）
+# jdk.dir=C:\\Program Files\\Java\\jdk-17
+
+# Android SDK 路径（可选，项目默认使用环境变量 ANDROID_HOME）
+# sdk.dir=C:\\Users\\<用户名>\\AppData\\Local\\Android\\Sdk
+
+# Release 签名配置
+# 生成 keystore: keytool -genkey -v -keystore release-keystore.jks -alias kaze_slauncher -keyalg RSA -keysize 2048 -validity 10000
+storeFile=release-keystore.jks
+storePassword=your_keystore_password
+keyAlias=kaze_slauncher
+keyPassword=your_key_password
