@@ -43,7 +43,6 @@ jobs:
 
       - name: Run lint
         run: ./gradlew :app:lintDebug --stacktrace
-        continue-on-error: true
 
       - name: Build Debug APK
         id: debug-build
@@ -80,9 +79,9 @@ jobs:
           set -euxo pipefail
           TAG="${GITHUB_REF_NAME}"
           
-          PREV_TAG=$(git tag -l "v*" --sort=-v:refname | grep -A1 "^${TAG}$" | tail -1)
-          if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git tag -l "v*" --sort=-v:refname | head -1)
+          PREV_TAG=$(git tag -l "v*" --sort=-v:refname | grep -B1 "^${TAG}$" | head -1)
+          if [ "$PREV_TAG" = "$TAG" ] || [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git tag -l "v*" --sort=-v:refname | head -2 | tail -1)
             [ "$PREV_TAG" = "$TAG" ] && PREV_TAG=""
           fi
           
@@ -119,19 +118,12 @@ jobs:
               echo "keyAlias=$KEY_ALIAS" >> local.properties
               echo "keyPassword=$KEY_PASSWORD" >> local.properties
             fi
-            if ./gradlew :app:assembleRelease --stacktrace; then
-              RELEASE_BUILD_OK=true
-              echo "Release build succeeded"
-            else
-              echo "assembleRelease failed, falling back to debug APK"
+            if ! ./gradlew :app:assembleRelease --stacktrace; then
+              echo "ERROR: Release build failed, aborting release"
+              exit 1
             fi
-            if [ "$RELEASE_BUILD_OK" = "true" ]; then
-              SOURCE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
-              APK_NAME="Kaze-SLauncher-${TAG}-release.apk"
-            else
-              SOURCE_APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print -quit)
-              APK_NAME="Kaze-SLauncher-${TAG}-debug.apk"
-            fi
+            SOURCE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
+            APK_NAME="Kaze-SLauncher-${TAG}-release.apk"
             if [ -z "$SOURCE_APK" ] || [ ! -f "$SOURCE_APK" ]; then
               echo "ERROR: no APK found at expected path"
               echo "release/ dir:"
@@ -151,7 +143,11 @@ jobs:
               gh release upload "${TAG}" "$APK_NAME" --clobber
             else
               echo "Creating new release ${TAG}..."
-              gh release create "${TAG}" "$APK_NAME" --title "${TAG}" --notes-file "$RELEASE_NOTES_FILE" --prerelease
+              IS_PRERELEASE=""
+              case "${TAG}" in
+                *-pre|*-alpha|*-beta|*-rc*) IS_PRERELEASE="--prerelease" ;;
+              esac
+              gh release create "${TAG}" "$APK_NAME" --title "${TAG}" --notes-file "$RELEASE_NOTES_FILE" $IS_PRERELEASE
             fi
             echo "APK uploaded to Release ${TAG}"
           } 2>&1 | tee /tmp/build-release.log
