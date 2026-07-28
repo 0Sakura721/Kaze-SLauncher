@@ -2,6 +2,15 @@
 
 All notable changes to Kaze SLauncher.
 
+## [1.0.0] - 2026-07-28
+
+### Added
+- 全新UI：青蓝游戏风配色 + 弧形仪表盘 + 资源环 + 脉冲动画
+- HomeScreen 重写，drawArc 使用命名参数消除编译歧义
+
+### Changed
+- versionName: 1.0.0-pre → 1.0.0 (正式发布 🎉)
+
 ## [1.0.0-pre] - 2026-07
 
 ### Highlights
