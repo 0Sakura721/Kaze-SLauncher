@@ -146,8 +146,8 @@ private fun Ring(label: String, fraction: Float, value: String, color: Color) {
             val f by animateFloatAsState(fraction, tween(600))
             Canvas(Modifier.size(72.dp)) {
                 val s = 6.dp.toPx()
-                drawArc(color.copy(0.15f), 135f, 270f, false, Stroke(s, cap = StrokeCap.Round))
-                drawArc(color, 135f, 270f * f, false, Stroke(s, cap = StrokeCap.Round))
+                drawArc(color = color.copy(0.15f), startAngle = 135f, sweepAngle = 270f, useCenter = false, style = Stroke(width = s, cap = StrokeCap.Round))
+                drawArc(color = color, startAngle = 135f, sweepAngle = 270f * f, useCenter = false, style = Stroke(width = s, cap = StrokeCap.Round))
             }
             Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = McColors.OnSurface, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
         }
