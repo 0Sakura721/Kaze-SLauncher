@@ -376,6 +376,8 @@ class JreManager(private val context: Context) {
                 extractTarGz(pf, targetDir)
                 javaExecutableFor(selectedVersion).setExecutable(true)
                 pf.delete()
+                // 同步到 Ubuntu rootfs：设置页安装的 Java 才能被服务器启动真正使用
+                LinuxEnvironmentManager.syncJavaToRootfs(selectedVersion, targetDir)
                 _jreInfo.value = checkJre()
                 stopDownloadService()
             } catch (e: CancellationException) { /* expected */ } catch (e: Exception) {

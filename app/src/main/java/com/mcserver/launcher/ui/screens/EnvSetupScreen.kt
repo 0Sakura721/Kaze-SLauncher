@@ -2,6 +2,9 @@ package com.mcserver.launcher.ui.screens
 
 import java.util.Locale
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,7 +31,7 @@ import kotlinx.coroutines.launch
  * 首屏全自动环境初始化页面。
  *
  * 4 段式流程：
- *   1. Linux 环境（proot + Ubuntu 24.04 + 4个 JDK）
+ *   1. Linux 环境（proot + Ubuntu 24.04 + 可选的 JDK 版本）
  *   2. 服务器核心（Paper/Purpur/Fabric/Forge/NeoForge/Vanilla/Spigot）
  *   3. 配置编辑（server.properties + .sh 脚本）
  *   4. 模组/插件（Modrinth + CurseForge）
@@ -53,6 +56,8 @@ fun EnvSetupScreen(
 
     var startSetup by remember { mutableStateOf(false) }
     var showConfirmDialog by remember { mutableStateOf(false) }
+    // 用户选择安装的 Java 版本（默认全选，可取消不需要的）
+    var selectedJdks by remember { mutableStateOf(setOf(8, 11, 17, 21)) }
     val logs = remember { mutableStateListOf<String>() }
 
     // 收集日志
@@ -182,10 +187,14 @@ fun EnvSetupScreen(
                         logs = logs,
                         mirrorResults = mirrorResults,
                         isTestingMirrors = isTestingMirrors,
+                        selectedJdks = selectedJdks,
+                        onToggleJdk = { v ->
+                            selectedJdks = if (v in selectedJdks) selectedJdks - v else selectedJdks + v
+                        },
                         onStartSetup = {
                             startSetup = true
                             scope.launch {
-                                LinuxEnvironmentManager.runFullSetup()
+                                LinuxEnvironmentManager.runFullSetup(selectedJdks.toList())
                             }
                         },
                         onConfirm = {
@@ -298,6 +307,14 @@ fun EnvSetupScreen(
 // 步骤 1：Linux 环境
 // ═══════════════════════════════════════════
 
+/** 可选的 Java 版本（勾选安装，不必全部） */
+private val jdkOptions = listOf(
+    8 to "Java 8（Minecraft 1.8-1.12）",
+    11 to "Java 11（Minecraft 1.13-1.16）",
+    17 to "Java 17（Minecraft 1.17-1.20.4）",
+    21 to "Java 21（Minecraft 1.20.5+）"
+)
+
 @Composable
 private fun Step1Environment(
     envState: LinuxEnvState,
@@ -307,6 +324,8 @@ private fun Step1Environment(
     logs: List<String>,
     mirrorResults: List<MirrorTestResult>,
     isTestingMirrors: Boolean,
+    selectedJdks: Set<Int>,
+    onToggleJdk: (Int) -> Unit,
     onStartSetup: () -> Unit,
     onConfirm: () -> Unit
 ) {
@@ -316,7 +335,7 @@ private fun Step1Environment(
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
         )
         Text(
-            "下载 proot 运行时和 Ubuntu 24.04，以及 4 个 Minecraft 所需的 Java 版本",
+            "下载 proot 运行时和 Ubuntu 24.04，并安装你选择的 Java 版本",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -324,9 +343,11 @@ private fun Step1Environment(
         Spacer(Modifier.height(16.dp))
 
         if (!startSetup) {
-            // 未开始 — 显示说明和测速按钮
+            // 未开始 — 显示说明和测速按钮（内容较多，支持滚动）
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(Modifier.height(24.dp))
@@ -344,12 +365,9 @@ private fun Step1Environment(
                 )
                 Spacer(Modifier.height(8.dp))
                 listOf(
-                    "提取 proot 运行时（内置）",
-                    "提取 Ubuntu 24.04（内置，约 30 MB）",
-                    "安装 Java 8（Minecraft 1.8-1.12）",
-                    "安装 Java 11（Minecraft 1.13-1.16）",
-                    "安装 Java 17（Minecraft 1.17-1.20.4）",
-                    "安装 Java 21（Minecraft 1.20.5+）"
+                    "提取 proot 运行时（必需 · 内置，不消耗流量）",
+                    "提取 Ubuntu 24.04（必需 · 内置，不消耗流量）",
+                    "安装你勾选的 Java 版本（可选 · 需网络下载，未勾选的不安装）"
                 ).forEach { item ->
                     Text(
                         "• $item",
@@ -358,11 +376,76 @@ private fun Step1Environment(
                         modifier = Modifier.padding(vertical = 2.dp)
                     )
                 }
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(12.dp))
+                // ── 必需项（内置，锁定不可取消） ──
                 Text(
-                    "预计共需下载 ~350 MB，请确保 Wi-Fi 已连接",
+                    "必需组件（已内置，无需下载）：",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.height(4.dp))
+                listOf(
+                    "proot 运行时（解压即用）",
+                    "Ubuntu 24.04（解压即用，约 30 MB）"
+                ).forEach { label ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = true, onCheckedChange = null, enabled = false)
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                // ── Java 版本多选（可选） ──
+                Text(
+                    "选择需要安装的 Java 版本（可选，不勾选则跳过）：",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    "不同 Minecraft 版本需要不同 Java，只选你需要的可节省下载时间与空间",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                jdkOptions.forEach { (version, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onToggleJdk(version) }
+                            .padding(vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = version in selectedJdks,
+                            onCheckedChange = { onToggleJdk(version) }
+                        )
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                val estMb = selectedJdks.size * 80
+                Text(
+                    if (selectedJdks.isEmpty())
+                        "不勾选任何 Java 版本也可以完成部署（之后可在「设置」中随时补装）"
+                    else
+                        "预计需下载 ~$estMb MB（每个 Java 约 80 MB），请确保 Wi-Fi 已连接",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selectedJdks.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 // ── 镜像测速状态 ──
@@ -415,6 +498,7 @@ private fun Step1Environment(
                 }
 
                 Spacer(Modifier.height(16.dp))
+                // 允许不勾选任何 Java：只部署必需组件（proot + Ubuntu），之后可在设置页补装 Java
                 Button(onClick = onStartSetup) {
                     Icon(Icons.Filled.Download, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -634,7 +718,7 @@ private fun Step2ServerCore(
     confirmed: Boolean,
     onConfirm: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Text(
             "第 2 步：选择服务器核心",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
@@ -688,7 +772,7 @@ private fun Step3Config(
     confirmed: Boolean,
     onConfirm: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Text(
             "第 3 步：服务器配置",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
@@ -742,7 +826,7 @@ private fun Step4Mods(
     confirmed: Boolean,
     onConfirm: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         Text(
             "第 4 步：模组和插件",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)

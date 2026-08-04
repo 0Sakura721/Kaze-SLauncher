@@ -162,31 +162,43 @@ object LinuxEnvironmentManager {
     // ── 内置资源提取 ──
     /**
      * 尝试从 APK assets/bundled 提取文件到目标路径。
+     *
+     * 兼容 AGP 的 assets 处理行为：mergeDebugAssets 会把源码目录中带 `.gz` 后缀的
+     * asset 自动解压为去掉 `.gz` 的文件（如 `proot-aarch64.tar.gz` → `proot-aarch64.tar`），
+     * 因此 APK 内的实际文件名可能与源码不同，需要依次尝试候选名。
      * @return true 表示提取成功，false 表示资源不存在
      */
     private fun extractBundledAsset(assetName: String, dest: File): Boolean {
         if (dest.exists() && dest.length() > 0) return true // 已存在
-        return try {
-            dest.parentFile?.mkdirs()
-            context.assets.open("bundled/$assetName").use { input ->
-                FileOutputStream(dest).use { output ->
-                    input.copyTo(output)
+        val candidates = if (assetName.endsWith(".gz")) {
+            listOf(assetName, assetName.removeSuffix(".gz"))
+        } else listOf(assetName)
+        for (candidate in candidates) {
+            try {
+                dest.parentFile?.mkdirs()
+                context.assets.open("bundled/$candidate").use { input ->
+                    FileOutputStream(dest).use { output ->
+                        input.copyTo(output)
+                    }
                 }
+                return true
+            } catch (e: Exception) {
+                L.d(TAG, "extractBundledAsset 候选不存在: $candidate")
             }
-            true
-        } catch (e: Exception) {
-            L.w(TAG, "extractBundledAsset failed: $assetName", e)
-            false
         }
+        L.w(TAG, "extractBundledAsset failed: $assetName (候选: $candidates)")
+        return false
     }
 
     private fun extractBundledJdk(version: Int): Boolean {
         val archSuffix = if (isAarch64) "aarch64" else "armhf"
         val assetName = "java-$version-jdk-$archSuffix.tar.gz"
-        return try {
-            context.assets.openFd("bundled/$assetName")?.use { afd ->
-                val tempFile = File(linuxDir, "jdk_$version.tar.gz")
-                context.assets.open("bundled/$assetName").use { input ->
+        // AGP 会把 .gz asset 解压为无后缀文件，两个名字都要尝试
+        val candidates = listOf(assetName, assetName.removeSuffix(".gz"))
+        for (assetCandidate in candidates) {
+            try {
+                val tempFile = File(linuxDir, "jdk_$version.tar")
+                context.assets.open("bundled/$assetCandidate").use { input ->
                     FileOutputStream(tempFile).use { output ->
                         input.copyTo(output)
                     }
@@ -201,7 +213,7 @@ object LinuxEnvironmentManager {
                 val jdkRoot = findJdkRoot(extractDir)
                 if (jdkRoot == null) {
                     extractDir.deleteRecursively()
-                    return@use false
+                    return false
                 }
                 val destDir = File(javaHomeDir, "java-$version-openjdk-$jdkArchSuffix")
                 if (destDir.exists()) destDir.deleteRecursively()
@@ -209,12 +221,13 @@ object LinuxEnvironmentManager {
                 jdkRoot.renameTo(destDir)
                 extractDir.deleteRecursively()
                 File(destDir, "bin/java").setExecutable(true)
-                true
-            } ?: false
-        } catch (e: Exception) {
-            L.w(TAG, "extractBundledJdk failed: $assetName", e)
-            false
+                return true
+            } catch (e: Exception) {
+                L.d(TAG, "extractBundledJdk 候选不存在: $assetCandidate")
+            }
         }
+        L.w(TAG, "extractBundledJdk failed: $assetName")
+        return false
     }
 
     /** 递归查找包含 bin/java 的目录（JDK 根目录） */
@@ -265,6 +278,29 @@ object LinuxEnvironmentManager {
         return javaBin.exists() && javaBin.canExecute()
     }
 
+    /**
+     * 将 App 私有目录中的 JDK（设置页下载的 Adoptium JRE/JDK）同步到 Ubuntu rootfs，
+     * 使服务器启动时能真正使用。同步目标路径与 apt 安装的 JDK 一致。
+     * @return true 表示同步成功（或无需同步）
+     */
+    fun syncJavaToRootfs(version: String, sourceJdkRoot: File): Boolean {
+        if (!isEnvironmentReady() || !sourceJdkRoot.exists() || !File(sourceJdkRoot, "bin/java").exists()) {
+            return false
+        }
+        return try {
+            val destDir = File(javaHomeDir, "java-$version-openjdk-$jdkArchSuffix")
+            if (destDir.exists()) destDir.deleteRecursively()
+            destDir.parentFile?.mkdirs()
+            sourceJdkRoot.copyRecursively(destDir)
+            File(destDir, "bin/java").setExecutable(true)
+            L.i(TAG, "Java $version 已同步到 Ubuntu 环境: ${destDir.absolutePath}")
+            true
+        } catch (e: Exception) {
+            L.w(TAG, "syncJavaToRootfs failed", e)
+            false
+        }
+    }
+
     fun getJavaPath(version: Int): String {
         val suffix = "java-$version-openjdk-$jdkArchSuffix"
         val candidate = File(javaHomeDir, suffix)
@@ -276,23 +312,43 @@ object LinuxEnvironmentManager {
     }
 
     // ── 全自动初始化 ──
-    suspend fun runFullSetup(): Result<Unit> = withContext(Dispatchers.IO) {
-        if (_envState.value == LinuxEnvState.READY) return@withContext Result.success(Unit)
+    /**
+     * 全自动初始化:proot + Ubuntu rootfs + apt + 用户选择的 JDK 版本。
+     * @param jdkVersions 需要安装的 Java 版本列表(可只选需要的,不必全部安装)
+     */
+    suspend fun runFullSetup(
+        jdkVersions: List<Int> = listOf(8, 11, 17, 21)
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        if (_envState.value == LinuxEnvState.READY && jdkVersions.all { isJdkInstalled(it) }) {
+            return@withContext Result.success(Unit)
+        }
         _envState.value = LinuxEnvState.SETTING_UP
 
         try {
+            val jdkVersionsSorted = jdkVersions.distinct().sorted()
+            val totalSteps = 3 + jdkVersionsSorted.size // proot + rootfs + apt + 各 JDK
             val items = mutableListOf(
                 DownloadItem("proot", "proot 运行时", "自带，解压即用"),
-                DownloadItem("rootfs", "Ubuntu 24.04", "自带，解压即用"),
-                DownloadItem("jdk8", "Java 8", "Minecraft 1.8-1.12（内置，解压即用）"),
-                DownloadItem("jdk11", "Java 11", "Minecraft 1.13-1.16（内置，解压即用）"),
-                DownloadItem("jdk17", "Java 17", "Minecraft 1.17-1.20.4（内置，解压即用）"),
-                DownloadItem("jdk21", "Java 21", "Minecraft 1.20.5+（内置，解压即用）")
+                DownloadItem("rootfs", "Ubuntu 24.04", "自带，解压即用")
             )
+            jdkVersionsSorted.forEach { version ->
+                val jdk = JdkVersion.forVersion(version) ?: return@forEach
+                items.add(
+                    DownloadItem(
+                        "jdk$version", jdk.label,
+                        when (version) {
+                            8 -> "Minecraft 1.8-1.12"
+                            11 -> "Minecraft 1.13-1.16"
+                            17 -> "Minecraft 1.17-1.20.4"
+                            else -> "Minecraft 1.20.5+"
+                        }
+                    )
+                )
+            }
             _downloadItems.value = items
 
             // ── Step 1: proot 二进制 ──
-            log(">>> 阶段 1/6：获取 proot 二进制（$archName）")
+            log(">>> 阶段 1/$totalSteps：获取 proot 二进制（$archName）")
             val prootAssetName = "proot-$archName.tar.gz"
             val prootTarball = File(linuxDir, "proot.tar.gz")
             if (!prootBinary.exists() || !prootLoader.exists()) {
@@ -344,7 +400,7 @@ object LinuxEnvironmentManager {
             log("    loader=${prootLoader.absolutePath}, lib=${prootLibDir.absolutePath}")
 
             // ── Step 2: Ubuntu rootfs ──
-            log(">>> 阶段 2/6：获取 Ubuntu 24.04 rootfs（$archName）")
+            log(">>> 阶段 2/$totalSteps：获取 Ubuntu 24.04 rootfs（$archName）")
             val ubuntuArch = if (isAarch64) "arm64" else "armhf"
             val rootfsAssetName = "ubuntu-base-24.04-$ubuntuArch.tar.gz"
             val rootfsTarball = File(linuxDir, "rootfs.tar.gz")
@@ -385,23 +441,22 @@ object LinuxEnvironmentManager {
             rootfsTarball.delete()
 
             // ── Step 3: 初始化 Ubuntu 包管理器 ──
-            log(">>> 阶段 3/6：初始化 apt 包管理器")
+            log(">>> 阶段 3/$totalSteps：初始化 apt 包管理器")
             setupUbuntuRepos()
             log("  ✓ apt 就绪")
 
-            // ── Step 4-6: 安装各版本 JDK（跳过已安装的）
-            val jdkList = listOf(8 to "jdk8", 11 to "jdk11", 17 to "jdk17", 21 to "jdk21")
-            for ((index, pair) in jdkList.withIndex()) {
-                val (version, itemId) = pair
+            // ── Step 4+: 安装用户选择的 JDK 版本（跳过已安装的）
+            for ((index, version) in jdkVersionsSorted.withIndex()) {
                 val jdk = JdkVersion.forVersion(version) ?: continue
+                val itemId = "jdk$version"
                 val stepNum = index + 4
                 if (isJdkInstalled(version)) {
-                    log(">>> 阶段 $stepNum/6：${jdk.label} — 已安装，跳过")
+                    log(">>> 阶段 $stepNum/$totalSteps：${jdk.label} — 已安装，跳过")
                     updateItem(itemId, DownloadItemState.COMPLETED)
                     continue
                 }
                 // 优先从内置资源提取（零下载）
-                log(">>> 阶段 $stepNum/6：${jdk.label} — 尝试从内置资源提取...")
+                log(">>> 阶段 $stepNum/$totalSteps：${jdk.label} — 尝试从内置资源提取...")
                 updateItem(itemId, DownloadItemState.EXTRACTING)
                 val extracted = extractBundledJdk(version)
                 if (extracted) {
@@ -410,7 +465,7 @@ object LinuxEnvironmentManager {
                     continue
                 }
                 // 回退到在线安装
-                log(">>> 阶段 $stepNum/6：在线安装 ${jdk.label}（apt install ${jdk.aptPackage}）")
+                log(">>> 阶段 $stepNum/$totalSteps：在线安装 ${jdk.label}（apt install ${jdk.aptPackage}）")
                 updateItem(itemId, DownloadItemState.DOWNLOADING)
                 installUbuntuPackage(jdk.aptPackage) { progress, downloaded, total, speed ->
                     updateProgress(itemId, progress, downloaded, total, speed)
@@ -420,7 +475,7 @@ object LinuxEnvironmentManager {
             }
 
             _envState.value = LinuxEnvState.READY
-            log(">>> 环境初始化完成！所有 JDK 已就绪")
+            log(">>> 环境初始化完成！已安装 ${jdkVersionsSorted.count { isJdkInstalled(it) }} 个 Java 版本")
             Result.success(Unit)
         } catch (e: Exception) {
             _envState.value = LinuxEnvState.ERROR
@@ -529,11 +584,22 @@ object LinuxEnvironmentManager {
         throw RuntimeException("所有 ${urls.size} 个镜像源都下载失败:\n${errors.joinToString("\n")}")
     }
 
-    // ── tar.gz 解压 ──
+    // ── tar.gz / tar 解压（自动识别压缩格式） ──
+    /**
+     * 解压 tar 归档到 destDir。自动检测 gzip：AGP 可能已将 assets 中的 .tar.gz 解压为 .tar。
+     */
     private fun extractTarGz(tarGzFile: File, destDir: File) {
         destDir.mkdirs()
+        // gzip 魔数 1F 8B；其余视为未压缩 tar
+        val isGzip = try {
+            RandomAccessFile(tarGzFile, "r").use { raf ->
+                raf.readUnsignedByte() == 0x1f && raf.readUnsignedByte() == 0x8b
+            }
+        } catch (e: Exception) {
+            false
+        }
         val proc = ProcessBuilder()
-            .command("tar", "xzf", tarGzFile.absolutePath, "-C", destDir.absolutePath)
+            .command("tar", if (isGzip) "xzf" else "xf", tarGzFile.absolutePath, "-C", destDir.absolutePath)
             .redirectErrorStream(true)
             .start()
         val exitCode = proc.waitFor()
