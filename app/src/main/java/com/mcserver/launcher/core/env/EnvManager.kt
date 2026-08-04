@@ -220,7 +220,13 @@ object EnvManager {
                                 java.nio.file.Paths.get(String(linkBytes, 0, read, Charsets.UTF_8))
                             )
                         } catch (_: Exception) {
-                            // 符号链接创建失败不影响继续(尽力而为)
+                            // 符号链接创建失败(沙箱限制)时,复制链接目标文件兜底,
+                            // 保证 soname 链接(如 libtalloc.so.2)存在,否则 proot 无法加载库
+                            try {
+                                val linkTarget = String(linkBytes, 0, read, Charsets.UTF_8)
+                                val resolved = File(target.parentFile ?: File("."), linkTarget)
+                                if (resolved.exists()) resolved.copyTo(target, overwrite = true)
+                            } catch (_: Exception) { }
                         }
                     }
                     isRegular -> {
@@ -277,6 +283,9 @@ object EnvManager {
         val existing = System.getenv("LD_LIBRARY_PATH") ?: ""
         env["LD_LIBRARY_PATH"] = if (existing.isEmpty()) prootLibDir.absolutePath else "${prootLibDir.absolutePath}:$existing"
         env["PROOT_NO_SECCOMP"] = "1"
+        // proot 需要可写临时目录做 glue rootfs/f2fs 探测,否则启动即失败
+        env["PROOT_TMP_DIR"] = File(rootfsDir, "tmp").absolutePath
+        env["TMPDIR"] = File(rootfsDir, "tmp").absolutePath
         return env
     }
 
@@ -294,8 +303,10 @@ object EnvManager {
             args.add("${serverBaseDir.absolutePath}:${serverBaseDir.absolutePath}")
         }
         // Ubuntu 24.04 usrmerge 兼容:bin/lib/sbin 是符号链接,Android 沙箱无法创建,
-        // 用 proot 绑定将 usr 子目录映射到根目录(仅当宿主无真实 bin 目录时)
-        if (File(rootfsDir, "usr/bin").exists() && !File(rootfsDir, "bin").isDirectory) {
+        // 用 proot 绑定将 usr 子目录映射到根目录。
+        // 注意:proot 首次绑定会在 rootfs 创建空的挂载点目录(权限 000),
+        // 不能用 !isDirectory 判断(空目录会被误判为真实目录),改用 bin/sh 是否存在
+        if (File(rootfsDir, "usr/bin").exists() && !File(rootfsDir, "bin/sh").exists()) {
             args.add("-b"); args.add("${File(rootfsDir, "usr/bin").absolutePath}:/bin")
             args.add("-b"); args.add("${File(rootfsDir, "usr/lib").absolutePath}:/lib")
             args.add("-b"); args.add("${File(rootfsDir, "usr/sbin").absolutePath}:/sbin")

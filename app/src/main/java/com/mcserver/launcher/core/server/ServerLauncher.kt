@@ -108,6 +108,20 @@ class ServerLauncher(private val context: Context) {
                 process = pb.start()
                 emit("> 服务器启动中(${instance.name} ${instance.mcVersion} ${instance.coreType.displayName})")
 
+                // 消费 proot 进程的输出(含 stderr 警告/错误),否则管道缓冲会阻塞
+                // 且失败原因无法查看
+                val procOut = process
+                scope.launch {
+                    procOut?.inputStream?.bufferedReader()?.useLines { lines ->
+                        lines.forEach { line ->
+                            if (line.isNotBlank()) {
+                                Logger.w("proot: $line")
+                                emit(line)
+                            }
+                        }
+                    }
+                }
+
                 // 进程退出监控
                 processWaitJob?.cancel()
                 processWaitJob = scope.launch {
