@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
@@ -47,6 +48,8 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(0) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showRename by remember { mutableStateOf(false) }
+    var currentName by remember { mutableStateOf(instance.name) }
 
     Column(modifier.fillMaxSize()) {
         Row(
@@ -55,7 +58,12 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
         ) {
             IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "返回") }
             Column(Modifier.weight(1f)) {
-                Text(instance.name, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(currentName, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    IconButton(onClick = { showRename = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Edit, "重命名", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 Text(
                     "${instance.coreType.displayName} ${instance.mcVersion} · ${PluginManager.dirLabel(instance)} 目录",
                     style = MaterialTheme.typography.labelSmall,
@@ -64,6 +72,15 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
             }
             ServerControlButton(instance)
             IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Filled.Delete, "删除实例") }
+        }
+
+        if (showRename) {
+            RenameInstanceDialog(
+                instance = instance,
+                initialName = currentName,
+                onDismiss = { showRename = false },
+                onRenamed = { newName -> currentName = newName; showRename = false }
+            )
         }
         TabRow(selectedTabIndex = tab) {
             Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("控制台") })
@@ -454,3 +471,36 @@ private fun listWorlds(instance: ServerInstance): List<File> =
         ?.filter { it.isDirectory && it.name != "plugins" && it.name != "mods" && it.name != "world_import_tmp" &&
             (File(it, "level.dat").exists() || File(it, "data").exists()) }
         ?.sortedBy { it.name } ?: emptyList()
+
+/** 重命名实例对话框 */
+@Composable
+private fun RenameInstanceDialog(
+    instance: com.mcserver.launcher.data.ServerInstance,
+    initialName: String,
+    onDismiss: () -> Unit,
+    onRenamed: (String) -> Unit
+) {
+    var name by remember { mutableStateOf(initialName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重命名实例") },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(30) },
+                label = { Text("实例标题") },
+                singleLine = true
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val newName = name.trim()
+                if (newName.isNotEmpty() && newName != instance.name) {
+                    com.mcserver.launcher.core.server.InstanceStore.update(instance.copy(name = newName))
+                }
+                onRenamed(if (newName.isEmpty()) instance.name else newName)
+            }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}

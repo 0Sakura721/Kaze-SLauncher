@@ -136,7 +136,8 @@ private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onStart:
             }
             Spacer(Modifier.height(10.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("端口 ${instance.config.serverPort}", style = MaterialTheme.typography.labelSmall,
+                Text("端口 ${instance.config.serverPort} · 最多 ${instance.config.maxPlayers} 人",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.weight(1f))
                 if (running) {
