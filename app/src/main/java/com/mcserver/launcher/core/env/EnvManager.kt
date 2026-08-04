@@ -79,7 +79,7 @@ object EnvManager {
     fun isEnvironmentReady(): Boolean =
         prootBinary.exists() && prootBinary.canExecute() &&
             prootLoader.exists() && prootLoader.canExecute() &&
-            rootfsDir.exists() && File(rootfsDir, "bin/sh").exists()
+            rootfsDir.exists() && File(rootfsDir, "usr/bin/dash").exists()
 
     fun isJdkInstalled(version: Int): Boolean {
         val javaBin = File(javaHomeDir, "java-$version-openjdk-$jdkArchSuffix/bin/java")
@@ -197,16 +197,35 @@ object EnvManager {
                 val type = header[156].toInt().toChar()
                 val path = name()
                 val target = File(destDir, path)
+                val isRegular = type == '0' || type == '\u0000'
+
                 when {
                     // 目录条目:tar 目录标记,或以 / 结尾,或根路径(./、空名)
                     type == '5' || path.endsWith("/") || path.isBlank() || path == "." || path == "./" -> {
                         if (path.isNotBlank() && path != "." && path != "./") target.mkdirs()
                     }
-                    else -> {
+                    // 符号链接:读链接目标并创建
+                    type == '2' -> {
+                        val linkBytes = ByteArray(size.toInt().coerceAtMost(4096))
+                        var read = 0
+                        while (read < linkBytes.size) {
+                            val n = rawInput.read(linkBytes, read, linkBytes.size - read)
+                            if (n == -1) break
+                            read += n
+                        }
                         if (path.contains("/")) target.parentFile?.mkdirs()
-                        // 硬链接/符号链接等特殊类型:跳过内容
-                        val dataLen = if (type == '0' || type == '\u0000') size else 0
-                        var remaining = dataLen
+                        try {
+                            java.nio.file.Files.createSymbolicLink(
+                                target.toPath(),
+                                java.nio.file.Paths.get(String(linkBytes, 0, read, Charsets.UTF_8))
+                            )
+                        } catch (_: Exception) {
+                            // 符号链接创建失败不影响继续(尽力而为)
+                        }
+                    }
+                    isRegular -> {
+                        if (path.contains("/")) target.parentFile?.mkdirs()
+                        var remaining = size
                         FileOutputStream(target).use { out ->
                             while (remaining > 0) {
                                 val chunk = rawInput.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
@@ -218,14 +237,23 @@ object EnvManager {
                         // 可执行位
                         if (path.contains("bin/") || path.contains("libexec/")) target.setExecutable(true)
                     }
+                    else -> {
+                        // 其他类型(如 'L' 长文件名、'x' 扩展头):跳过数据
+                        var remaining = size
+                        while (remaining > 0) {
+                            val n = rawInput.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                            if (n == -1) break
+                            remaining -= n
+                        }
+                    }
                 }
-                // 跳过数据后补齐到 512 对齐
+                // 统一补齐到 512 对齐(数据已读/跳过,只补 padding)
                 val padded = (size + 511) / 512 * 512
-                var skip = padded - size
-                while (skip > 0) {
-                    val n = rawInput.read(buffer, 0, minOf(buffer.size.toLong(), skip).toInt())
+                var pad = padded - size
+                while (pad > 0) {
+                    val n = rawInput.read(buffer, 0, minOf(buffer.size.toLong(), pad).toInt())
                     if (n == -1) break
-                    skip -= n
+                    pad -= n
                 }
                 processed += padded
                 report()
@@ -264,6 +292,13 @@ object EnvManager {
         if (serverBaseDir.exists()) {
             args.add("-b")
             args.add("${serverBaseDir.absolutePath}:${serverBaseDir.absolutePath}")
+        }
+        // Ubuntu 24.04 usrmerge 兼容:bin/lib/sbin 是符号链接,Android 沙箱无法创建,
+        // 用 proot 绑定将 usr 子目录映射到根目录(仅当宿主无真实 bin 目录时)
+        if (File(rootfsDir, "usr/bin").exists() && !File(rootfsDir, "bin").isDirectory) {
+            args.add("-b"); args.add("${File(rootfsDir, "usr/bin").absolutePath}:/bin")
+            args.add("-b"); args.add("${File(rootfsDir, "usr/lib").absolutePath}:/lib")
+            args.add("-b"); args.add("${File(rootfsDir, "usr/sbin").absolutePath}:/sbin")
         }
         bindExtra.forEach { (host, guest) ->
             args.add("-b")
@@ -352,7 +387,7 @@ object EnvManager {
             )
             val ubuntuArch = if (isAarch64) "arm64" else "armhf"
             val rootfsTarball = File(linuxDir, "rootfs.tar.gz")
-            if (!File(rootfsDir, "bin/sh").exists()) {
+            if (!File(rootfsDir, "usr/bin/dash").exists()) {
                 if (extractBundledAsset("ubuntu-base-24.04-$ubuntuArch.tar.gz", rootfsTarball)) {
                     log("  ✓ 内置提取成功")
                 } else {
@@ -360,6 +395,9 @@ object EnvManager {
                     downloadToFile("https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-$ubuntuArch.tar.gz", rootfsTarball)
                 }
                 log("  解压 rootfs(~200MB,请耐心等待)...")
+                // 清理可能残留的不完整解压
+                if (rootfsDir.exists()) rootfsDir.deleteRecursively()
+                rootfsDir.mkdirs()
                 updateItem("rootfs", SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用", phase = "解压中", totalBytes = rootfsTarball.length()))
                 extractTarWithProgress(rootfsTarball, rootfsDir) { processed, total, speed ->
                     updateItem("rootfs") {
@@ -373,6 +411,9 @@ object EnvManager {
                     }
                 }
                 rootfsTarball.delete()
+                if (!File(rootfsDir, "usr/bin/dash").exists()) {
+                    throw RuntimeException("rootfs 解压不完整(usr/bin/dash 缺失),请重试")
+                }
                 updateItem("rootfs", SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用", done = true))
                 log("  ✓ rootfs 就绪")
             } else log("  ✓ 已就绪,跳过")
