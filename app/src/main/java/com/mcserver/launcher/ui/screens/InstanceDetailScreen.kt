@@ -7,11 +7,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
@@ -32,6 +35,7 @@ import com.mcserver.launcher.core.server.ServerManager
 import com.mcserver.launcher.data.ServerInstance
 import com.mcserver.launcher.util.FileImporter
 import kotlinx.coroutines.launch
+import java.io.File
 
 /**
  * 实例详情:控制台(日志/命令)+ 插件模组管理(本地导入优先 + Modrinth 搜索)。
@@ -41,6 +45,7 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(0) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -57,15 +62,38 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit) {
                 )
             }
             ServerControlButton(instance)
+            IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Filled.Delete, "删除实例") }
         }
         TabRow(selectedTabIndex = tab) {
             Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("控制台") })
             Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("插件/模组") })
+            Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("配置") })
+            Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("世界") })
         }
         when (tab) {
             0 -> ConsoleTab()
             1 -> AddonTab(instance)
+            2 -> ConfigTab(instance)
+            3 -> WorldTab(instance)
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除实例") },
+            text = { Text("将删除「${instance.name}」及其全部文件(核心/世界/插件/模组),此操作不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    scope.launch {
+                        com.mcserver.launcher.core.server.InstanceStore.delete(instance.id)
+                        onBack()
+                    }
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") } }
+        )
     }
 }
 
@@ -332,3 +360,175 @@ private fun ModrinthSearchDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
     )
 }
+
+// ═══════════ 配置 ═══════════
+
+@Composable
+private fun ConfigTab(instance: ServerInstance) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val cfg = instance.config
+    var port by remember { mutableStateOf(cfg.serverPort.toString()) }
+    var maxRam by remember { mutableStateOf(cfg.maxRamMB.toString()) }
+    var maxPlayers by remember { mutableStateOf(cfg.maxPlayers.toString()) }
+    var motd by remember { mutableStateOf(cfg.motd) }
+    var onlineMode by remember { mutableStateOf(cfg.onlineMode) }
+    var whiteList by remember { mutableStateOf(cfg.whiteList) }
+    var pvp by remember { mutableStateOf(cfg.pvp) }
+    var gamemode by remember { mutableStateOf(cfg.gamemode) }
+    var difficulty by remember { mutableStateOf(cfg.difficulty) }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Text("服务器配置(保存后重启生效)", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedTextField(value = port, onValueChange = { port = it.filter { c -> c.isDigit() }.take(5) },
+            label = { Text("端口") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = maxRam, onValueChange = { maxRam = it.filter { c -> c.isDigit() }.take(5) },
+            label = { Text("最大内存(MB),如 2048") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = maxPlayers, onValueChange = { maxPlayers = it.filter { c -> c.isDigit() }.take(4) },
+            label = { Text("最大玩家数") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = motd, onValueChange = { motd = it },
+            label = { Text("服务器描述(MOTD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+
+        Spacer(Modifier.height(12.dp))
+        SwitchRow("在线模式(正版验证)", onlineMode) { onlineMode = it }
+        SwitchRow("白名单", whiteList) { whiteList = it }
+        SwitchRow("允许 PvP", pvp) { pvp = it }
+
+        Spacer(Modifier.height(12.dp))
+        Text("游戏模式", style = MaterialTheme.typography.labelMedium)
+        Row {
+            listOf("survival", "creative", "adventure").forEach { gm ->
+                FilterChip(
+                    selected = gamemode == gm,
+                    onClick = { gamemode = gm },
+                    label = { Text(gm) },
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("难度", style = MaterialTheme.typography.labelMedium)
+        Row {
+            listOf("peaceful", "easy", "normal", "hard").forEach { d ->
+                FilterChip(
+                    selected = difficulty == d,
+                    onClick = { difficulty = d },
+                    label = { Text(d) },
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Button(onClick = {
+            val newCfg = cfg.copy(
+                serverPort = port.toIntOrNull() ?: cfg.serverPort,
+                maxRamMB = maxRam.toIntOrNull()?.coerceAtLeast(512) ?: cfg.maxRamMB,
+                maxPlayers = maxPlayers.toIntOrNull() ?: cfg.maxPlayers,
+                motd = motd,
+                onlineMode = onlineMode,
+                whiteList = whiteList,
+                pvp = pvp,
+                gamemode = gamemode,
+                difficulty = difficulty
+            )
+            com.mcserver.launcher.core.server.InstanceStore.update(instance.copy(config = newCfg))
+            android.widget.Toast.makeText(context, "配置已保存,重启服务器后生效", android.widget.Toast.LENGTH_SHORT).show()
+        }, modifier = Modifier.fillMaxWidth()) { Text("保存配置") }
+    }
+}
+
+@Composable
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+// ═══════════ 世界管理 ═══════════
+
+@Composable
+private fun WorldTab(instance: ServerInstance) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var worlds by remember { mutableStateOf<List<File>>(emptyList()) }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val dest = java.io.File(instance.dir(com.mcserver.launcher.core.server.InstanceStore.instancesDir), "world_import_tmp")
+                if (dest.exists()) dest.deleteRecursively()
+                com.mcserver.launcher.util.FileImporter.copyTree(context, uri, dest)
+                    .onSuccess { count ->
+                        if (count == 0) {
+                            dest.deleteRecursively()
+                            android.widget.Toast.makeText(context, "所选目录为空", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            // 导入为 world_<时间戳>
+                            val name = "world_" + System.currentTimeMillis().toString().takeLast(8)
+                            val target = java.io.File(instance.dir(com.mcserver.launcher.core.server.InstanceStore.instancesDir), name)
+                            dest.renameTo(target)
+                            android.widget.Toast.makeText(context, "已导入世界 $name(可在 server.properties 设置 level-name)", android.widget.Toast.LENGTH_SHORT).show()
+                            worlds = listWorlds(instance)
+                        }
+                    }
+                    .onFailure { err -> android.widget.Toast.makeText(context, "导入失败:${err.message}", android.widget.Toast.LENGTH_LONG).show() }
+            }
+        }
+    }
+
+    LaunchedEffect(instance.id) { worlds = listWorlds(instance) }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("世界管理", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(4.dp))
+        Text("导入本地世界目录(优先本地,不耗流量);导入后可在配置页将 level-name 设为该目录名", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = { importLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("从本地导入世界(不耗流量)")
+        }
+        Spacer(Modifier.height(12.dp))
+        if (worlds.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("还没有世界,点上方导入", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(worlds, key = { it.name }) { world ->
+                    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(world.name, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                                Text(formatSize(world.length()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = {
+                                scope.launch {
+                                    world.deleteRecursively()
+                                    worlds = listWorlds(instance)
+                                }
+                            }) { Icon(Icons.Filled.Delete, "删除世界", Modifier.size(18.dp)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 列出实例中的世界目录(含 level.dat 或 data/ 的目录) */
+private fun listWorlds(instance: ServerInstance): List<File> =
+    instance.dir(com.mcserver.launcher.core.server.InstanceStore.instancesDir).listFiles()
+        ?.filter { it.isDirectory && it.name != "plugins" && it.name != "mods" && it.name != "world_import_tmp" &&
+            (File(it, "level.dat").exists() || File(it, "data").exists()) }
+        ?.sortedBy { it.name } ?: emptyList()
