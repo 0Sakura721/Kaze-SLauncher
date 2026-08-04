@@ -31,8 +31,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeMode by SettingsStore.themeMode.collectAsState()
             val systemDark = isSystemInDarkTheme()
+            val darkAmoled by SettingsStore.darkAmoled.collectAsState()
             val setupCompleted by SettingsStore.setupCompleted.collectAsState()
-            KazeTheme(mode = themeMode, systemDark = systemDark) {
+            KazeTheme(mode = themeMode, systemDark = systemDark, darkAmoled = darkAmoled) {
                 if (!setupCompleted) {
                     val scope = rememberCoroutineScope()
                     EnvSetupScreen(

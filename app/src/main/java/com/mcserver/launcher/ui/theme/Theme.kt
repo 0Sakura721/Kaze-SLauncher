@@ -48,15 +48,16 @@ private val LightColors = lightColorScheme(
 /**
  * @param mode 主题模式:ThemeMode.SYSTEM/LIGHT/DARK/AMOLED
  * @param systemDark 系统当前是否深色(跟随系统模式时使用)
+ * @param darkAmoled 深色配色是否使用 AMOLED 纯黑(深色/跟随系统深色时生效)
  */
 @Composable
-fun KazeTheme(mode: String, systemDark: Boolean, content: @Composable () -> Unit) {
-    // 跟随系统:系统深色 → AMOLED 纯黑(极致省电);系统浅色 → 明亮
+fun KazeTheme(mode: String, systemDark: Boolean, darkAmoled: Boolean, content: @Composable () -> Unit) {
+    val darkScheme = if (darkAmoled) AmoledColors else DarkColors
     val scheme = when (mode) {
-        com.mcserver.launcher.data.ThemeMode.SYSTEM -> if (systemDark) AmoledColors else LightColors
+        com.mcserver.launcher.data.ThemeMode.SYSTEM -> if (systemDark) darkScheme else LightColors
         com.mcserver.launcher.data.ThemeMode.LIGHT -> LightColors
         com.mcserver.launcher.data.ThemeMode.AMOLED -> AmoledColors
-        else -> DarkColors // DARK
+        else -> darkScheme // DARK
     }
     MaterialTheme(colorScheme = scheme, content = content)
 }

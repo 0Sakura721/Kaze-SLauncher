@@ -51,6 +51,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val message by JreInstaller.message.collectAsState()
     val installedVersions by JreInstaller.installedVersions.collectAsState()
     val themeMode by SettingsStore.themeMode.collectAsState()
+    val darkAmoled by SettingsStore.darkAmoled.collectAsState()
 
     var installing by remember { mutableStateOf<String?>(null) }
     var importing by remember { mutableStateOf<String?>(null) }
@@ -212,6 +213,19 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         )
                     }
                 }
+            }
+            // 深色模式子选项:是否使用 AMOLED 纯黑
+            HorizontalDivider(Modifier.padding(vertical = 6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("深色模式使用 AMOLED 纯黑", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "深色/跟随系统深色时用纯黑背景,更省电",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(checked = darkAmoled, onCheckedChange = { SettingsStore.setDarkAmoled(it) })
             }
         }
         Spacer(Modifier.height(14.dp))

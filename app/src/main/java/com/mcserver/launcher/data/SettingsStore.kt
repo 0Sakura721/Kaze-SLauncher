@@ -47,9 +47,14 @@ object SettingsStore {
     private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
     val themeMode: StateFlow<String> = _themeMode.asStateFlow()
 
+    /** 深色模式下是否使用 AMOLED 纯黑配色 */
+    private val _darkAmoled = MutableStateFlow(true)
+    val darkAmoled: StateFlow<Boolean> = _darkAmoled.asStateFlow()
+
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         _setupCompleted.value = prefs.getBoolean("setup_completed", false)
+        _darkAmoled.value = prefs.getBoolean("dark_amoled", true)
         // 兼容旧版 theme_dark 布尔值
         _themeMode.value = prefs.getString("theme_mode", null) ?: run {
             if (prefs.contains("theme_dark")) {
@@ -68,5 +73,10 @@ object SettingsStore {
     fun setThemeMode(mode: String) {
         prefs.edit().putString("theme_mode", mode).apply()
         _themeMode.value = mode
+    }
+
+    fun setDarkAmoled(amoled: Boolean) {
+        prefs.edit().putBoolean("dark_amoled", amoled).apply()
+        _darkAmoled.value = amoled
     }
 }
