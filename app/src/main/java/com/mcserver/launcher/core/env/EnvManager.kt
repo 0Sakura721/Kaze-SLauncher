@@ -57,6 +57,36 @@ object EnvManager {
     // ── 路径 ──
     private val linuxDir: File get() = File(appContext.filesDir, "linux").apply { mkdirs() }
     private val prootHomeDir: File get() = File(linuxDir, "proot-home").apply { mkdirs() }
+
+    /** 修复 proot 库的 soname 链接:Android 沙箱无法创建符号链接,解压器
+     *  会把 symlink 条目降级为目录,导致 linker 找不到 libtalloc.so.2。
+     *  此处把同名目录替换为真实文件的副本。 */
+    private fun fixProotSonameLinks() {
+        try {
+            val libDir = File(prootHomeDir, "lib")
+            libDir.listFiles()?.forEach { f ->
+                if (f.isDirectory) {
+                    val real = libDir.listFiles()?.firstOrNull {
+                        it.isFile && it.name != f.name && it.name.startsWith(f.name)
+                    }
+                    if (real != null) {
+                        f.deleteRecursively()
+                        real.copyTo(File(libDir, f.name), overwrite = true)
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        // rootfs 内关键符号链接同样会被降级成目录(usrmerge 的 /bin→usr/bin、
+        // sh→dash 等),proot 要求启动程序是真实文件,这里修复最关键的 /usr/bin/sh
+        try {
+            val sh = File(rootfsDir, "usr/bin/sh")
+            val dash = File(rootfsDir, "usr/bin/dash")
+            if (sh.isDirectory && dash.isFile) {
+                sh.deleteRecursively()
+                dash.copyTo(sh, overwrite = true)
+            }
+        } catch (_: Exception) { }
+    }
     private val prootBinary: File get() = File(prootHomeDir, "bin/proot")
     private val prootLoader: File get() = File(prootHomeDir, "libexec/loader")
     private val prootLibDir: File get() = File(prootHomeDir, "lib")
@@ -72,6 +102,8 @@ object EnvManager {
     fun init(context: Context) {
         if (::appContext.isInitialized) return
         appContext = context.applicationContext
+        // 每次启动都修复 proot 库 soname(符号链接被降级为目录会导致 proot 动态链接失败)
+        fixProotSonameLinks()
         _state.value = if (isEnvironmentReady()) EnvState.READY else EnvState.NOT_INITIALIZED
     }
 
@@ -323,10 +355,28 @@ object EnvManager {
         return pb
     }
 
+    /**
+     * 启动 proot 进程。优先直接 exec(模拟器/翻译层兼容),
+     * 若被系统拒绝(Android 15+/厂商 ROM 禁止 exec 应用目录 ELF, execve EACCES),
+     * 自动退回用 /system/bin/linker64 加载(proot 类 App 的标准做法,不触发 exec 限制)。
+     */
+    fun startProot(command: String, workDir: String = "/root", bindExtra: List<Pair<String, String>> = emptyList()): Process {
+        val pb = buildProotCommand(command, workDir, bindExtra)
+        return try {
+            pb.start()
+        } catch (e: java.io.IOException) {
+            android.util.Log.w("KazeSLauncher", "直接 exec proot 失败(${e.message}),退回 linker64 加载")
+            val args = mutableListOf("/system/bin/linker64") + pb.command()
+            val pb2 = ProcessBuilder(args).redirectErrorStream(true)
+            pb2.environment().putAll(pb.environment())
+            pb2.start()
+        }
+    }
+
     /** 在 Ubuntu 内执行命令,收集输出 */
     fun executeCommand(command: String, workDir: String = "/root", timeoutMs: Long = 600_000): Result<String> {
         return try {
-            val proc = buildProotCommand(command, workDir).start()
+            val proc = startProot(command, workDir)
             val output = proc.inputStream.bufferedReader().readText()
             val exited = proc.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
             if (!exited) { proc.destroyForcibly(); Result.failure(RuntimeException("命令超时")) }
@@ -366,6 +416,7 @@ object EnvManager {
                     prootTarball.delete()
                     updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", done = true))
                     log("  ✓ 内置提取成功")
+                    fixProotSonameLinks()
                 } else {
                     // 网络回退:官方 proot 直链
                     val url = if (isAarch64)

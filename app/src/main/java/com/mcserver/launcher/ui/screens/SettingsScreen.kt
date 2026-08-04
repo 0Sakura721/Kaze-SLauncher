@@ -4,10 +4,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
@@ -258,13 +260,13 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     }
 
     if (showAbout) {
-        AboutDialog(onDismiss = { showAbout = false })
+        AboutScreen(onBack = { showAbout = false })
     }
 }
 
-/** 完整关于页(参考 FCL / HMCL / PojavLauncher 关于页结构) */
+/** 完整关于页(全屏可滚动,参考 FCL / HMCL / PojavLauncher 关于页结构) */
 @Composable
-private fun AboutDialog(onDismiss: () -> Unit) {
+private fun AboutScreen(onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val pkg = remember {
         try {
@@ -274,11 +276,16 @@ private fun AboutDialog(onDismiss: () -> Unit) {
     val versionName = pkg?.versionName ?: "1.0.0"
     val versionCode = pkg?.longVersionCode ?: 100L
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("关于 Kaze SLauncher") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxSize()) {
+        // 顶部栏
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "返回") }
+            Text("关于 Kaze SLauncher", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+        }
+        // 内容(整页可滚动,底部信息不会漏)
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
+            item {
+                Column {
                 // ── 应用信息 ──
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     androidx.compose.foundation.Image(
@@ -348,10 +355,10 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                 Text("© 2026 Kaze SLauncher Team", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
-    )
-}
+                }
+            }
+        }
+    }
 
 private val bodySmall: androidx.compose.ui.text.TextStyle
     @Composable get() = MaterialTheme.typography.bodySmall

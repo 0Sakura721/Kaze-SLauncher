@@ -106,8 +106,8 @@ class ServerLauncher(private val context: Context) {
                 File(dir, "start.sh").setExecutable(true)
 
                 // 4) proot 启动
-                val pb = EnvManager.buildProotCommand(File(dir, "start.sh").absolutePath, dir.absolutePath)
-                process = pb.start()
+                val pb = EnvManager.startProot(File(dir, "start.sh").absolutePath, dir.absolutePath)
+                process = pb
                 emit("> 服务器启动中(${instance.name} ${instance.mcVersion} ${instance.coreType.displayName})")
 
                 // 消费 proot 进程的输出(含 stderr 警告/错误),否则管道缓冲会阻塞
@@ -168,7 +168,7 @@ class ServerLauncher(private val context: Context) {
                 "fi\n"
             )
             script.setExecutable(true)
-            EnvManager.buildProotCommand(script.absolutePath, dir.absolutePath).start()
+            EnvManager.startProot(script.absolutePath, dir.absolutePath)
         }
         // 兜底:15 秒后强制收尾
         scope.launch {
