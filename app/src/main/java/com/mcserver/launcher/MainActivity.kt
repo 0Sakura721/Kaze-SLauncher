@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
 import com.mcserver.launcher.data.SettingsStore
 import com.mcserver.launcher.ui.MainApp
@@ -28,9 +29,10 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
 
         setContent {
-            val dark by SettingsStore.themeDark.collectAsState()
+            val themeMode by SettingsStore.themeMode.collectAsState()
+            val systemDark = isSystemInDarkTheme()
             val setupCompleted by SettingsStore.setupCompleted.collectAsState()
-            KazeTheme(dark = dark) {
+            KazeTheme(mode = themeMode, systemDark = systemDark) {
                 if (!setupCompleted) {
                     val scope = rememberCoroutineScope()
                     EnvSetupScreen(

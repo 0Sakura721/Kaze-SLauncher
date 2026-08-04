@@ -2,14 +2,17 @@ package com.mcserver.launcher.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
@@ -47,7 +50,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val busyVersion by JreInstaller.busy.collectAsState()
     val message by JreInstaller.message.collectAsState()
     val installedVersions by JreInstaller.installedVersions.collectAsState()
-    val dark by SettingsStore.themeDark.collectAsState()
+    val themeMode by SettingsStore.themeMode.collectAsState()
 
     var installing by remember { mutableStateOf<String?>(null) }
     var importing by remember { mutableStateOf<String?>(null) }
@@ -181,9 +184,34 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
         // ── 外观 ──
         SectionCard("外观") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("深色主题", Modifier.weight(1f))
-                Switch(checked = dark, onCheckedChange = { SettingsStore.setThemeDark(it) })
+            Text("主题", style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.height(8.dp))
+            com.mcserver.launcher.data.ThemeMode.labels.forEach { (mode, label) ->
+                val selected = themeMode == mode
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.medium)
+                        .clickable { SettingsStore.setThemeMode(mode) }
+                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(label, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            com.mcserver.launcher.data.ThemeMode.descriptions[mode] ?: "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (selected) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Filled.Check,
+                            contentDescription = "已选择",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
             }
         }
         Spacer(Modifier.height(14.dp))

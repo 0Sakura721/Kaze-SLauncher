@@ -5,6 +5,37 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+/** 主题模式 */
+object ThemeMode {
+    const val SYSTEM = "system"   // 跟随系统
+    const val LIGHT = "light"     // 明亮
+    const val DARK = "dark"       // 暗色
+    const val AMOLED = "amoled"   // 纯黑省电
+
+    val labels = mapOf(
+        SYSTEM to "跟随系统",
+        LIGHT to "明亮",
+        DARK to "暗色",
+        AMOLED to "AMOLED 省电"
+    )
+    val descriptions = mapOf(
+        SYSTEM to "自动跟随系统深色模式",
+        LIGHT to "白色主题，适合白天使用",
+        DARK to "深色主题，护眼舒适",
+        AMOLED to "纯黑背景，极致省电"
+    )
+
+    /** 根据模式 + 系统深色状态计算是否使用深色配色 */
+    fun isDark(mode: String, systemDark: Boolean): Boolean = when (mode) {
+        SYSTEM -> systemDark
+        LIGHT -> false
+        else -> true // dark / amoled
+    }
+
+    /** 是否使用纯黑背景(AMOLED) */
+    fun isAmoled(mode: String): Boolean = mode == AMOLED
+}
+
 /** 应用设置(SharedPreferences) */
 object SettingsStore {
     private const val PREFS = "kaze_settings"
@@ -13,13 +44,20 @@ object SettingsStore {
     private val _setupCompleted = MutableStateFlow(false)
     val setupCompleted: StateFlow<Boolean> = _setupCompleted.asStateFlow()
 
-    private val _themeDark = MutableStateFlow(true)
-    val themeDark: StateFlow<Boolean> = _themeDark.asStateFlow()
+    private val _themeMode = MutableStateFlow(ThemeMode.SYSTEM)
+    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         _setupCompleted.value = prefs.getBoolean("setup_completed", false)
-        _themeDark.value = prefs.getBoolean("theme_dark", true)
+        // 兼容旧版 theme_dark 布尔值
+        _themeMode.value = prefs.getString("theme_mode", null) ?: run {
+            if (prefs.contains("theme_dark")) {
+                if (prefs.getBoolean("theme_dark", true)) ThemeMode.DARK else ThemeMode.LIGHT
+            } else {
+                ThemeMode.SYSTEM
+            }
+        }
     }
 
     fun setSetupCompleted() {
@@ -27,8 +65,8 @@ object SettingsStore {
         _setupCompleted.value = true
     }
 
-    fun setThemeDark(dark: Boolean) {
-        prefs.edit().putBoolean("theme_dark", dark).apply()
-        _themeDark.value = dark
+    fun setThemeMode(mode: String) {
+        prefs.edit().putString("theme_mode", mode).apply()
+        _themeMode.value = mode
     }
 }
