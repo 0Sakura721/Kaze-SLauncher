@@ -1,5 +1,7 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -7,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
@@ -19,11 +22,26 @@ import com.mcserver.launcher.core.env.EnvManager
 import com.mcserver.launcher.core.env.EnvState
 import com.mcserver.launcher.core.server.JreInstaller
 import com.mcserver.launcher.data.SettingsStore
+import com.mcserver.launcher.util.FileImporter
+import java.io.File
 import kotlinx.coroutines.launch
+
+/** 递归查找包含 bin/java 的目录(JDK 根) */
+private fun findJdkRoot(dir: File): File? {
+    if (File(dir, "bin/java").exists()) return dir
+    dir.listFiles()?.forEach { child ->
+        if (child.isDirectory) {
+            val found = findJdkRoot(child)
+            if (found != null) return found
+        }
+    }
+    return null
+}
 
 /** 设置页:环境状态 / Java 按需管理 / 主题 */
 @Composable
 fun SettingsScreen(modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val envState by EnvManager.state.collectAsState()
     val busyVersion by JreInstaller.busy.collectAsState()
@@ -31,7 +49,40 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val dark by SettingsStore.themeDark.collectAsState()
 
     var installing by remember { mutableStateOf<String?>(null) }
+    var importing by remember { mutableStateOf<String?>(null) }
     var showEnvSetup by remember { mutableStateOf(false) }
+
+    // SAF:选择本地 JDK 目录进行导入(本地优先,不消耗流量)
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null && importing != null) {
+            val version = importing!!
+            importing = null
+            scope.launch {
+                val importDir = File(context.filesDir, "import_tmp")
+                if (importDir.exists()) importDir.deleteRecursively()
+                FileImporter.copyTree(context, uri, importDir)
+                    .onSuccess { count ->
+                        if (count == 0) {
+                            JreInstaller.notifyMessage("所选目录为空或不可读")
+                            importDir.deleteRecursively()
+                        } else {
+                            val jdkRoot = findJdkRoot(importDir)
+                            if (jdkRoot == null) {
+                                JreInstaller.notifyMessage("所选目录不是有效的 JDK(缺少 bin/java)")
+                                importDir.deleteRecursively()
+                            } else {
+                                JreInstaller.importJdk(jdkRoot, version).onFailure {
+                                    importDir.deleteRecursively()
+                                }
+                            }
+                        }
+                    }
+                    .onFailure { err -> JreInstaller.notifyMessage("导入失败:${err.message}") }
+            }
+        }
+    }
 
     if (showEnvSetup) {
         EnvSetupScreen(onSetupComplete = { showEnvSetup = false })
@@ -90,17 +141,24 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                             scope.launch { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { JreInstaller.delete(version.toString()) } }
                         }) { Icon(Icons.Filled.Delete, "删除", Modifier.size(18.dp)) }
                     } else {
-                        IconButton(onClick = {
-                            installing = version.toString()
-                            scope.launch {
-                                JreInstaller.install(version.toString()).onFailure {
-                                    // 失败信息在 message 中显示
+                        // 本地导入优先(不消耗流量),下载为备选
+                        IconButton(
+                            onClick = {
+                                importing = version.toString()
+                                importLauncher.launch(null)
+                            },
+                            enabled = busyVersion == null
+                        ) { Icon(Icons.Filled.FolderOpen, "从本地导入", Modifier.size(18.dp)) }
+                        IconButton(
+                            onClick = {
+                                installing = version.toString()
+                                scope.launch {
+                                    JreInstaller.install(version.toString()).onFailure { }
+                                    installing = null
                                 }
-                                installing = null
-                            }
-                        }, enabled = busyVersion == null) {
-                            Icon(Icons.Filled.Download, "安装", Modifier.size(18.dp))
-                        }
+                            },
+                            enabled = busyVersion == null
+                        ) { Icon(Icons.Filled.Download, "下载", Modifier.size(18.dp)) }
                     }
                 }
             }
@@ -110,7 +168,12 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.primary)
             }
             if (installing != null && busyVersion == null) {
-                Text("正在安装 Java $installing...", style = MaterialTheme.typography.bodySmall)
+                Text("正在下载 Java $installing...", style = MaterialTheme.typography.bodySmall)
+            }
+            if (importing != null) {
+                Text("请选择包含 bin/java 的 JDK 目录(本地导入,不消耗流量)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Spacer(Modifier.height(14.dp))

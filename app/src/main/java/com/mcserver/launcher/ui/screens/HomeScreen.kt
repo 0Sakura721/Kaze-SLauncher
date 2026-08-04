@@ -15,8 +15,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
 import com.mcserver.launcher.core.env.EnvManager
 import com.mcserver.launcher.core.server.InstanceStore
 import com.mcserver.launcher.data.InstanceStatus
@@ -27,6 +29,7 @@ import kotlinx.coroutines.launch
 /** 首页:实例列表 + 新建入口 */
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val instances by InstanceStore.instances.collectAsState()
     val envReady = EnvManager.isEnvironmentReady()
@@ -90,7 +93,9 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         InstanceCard(instance, onClick = { showConsole = true }, onStart = {
                             scope.launch {
                                 val result = com.mcserver.launcher.core.server.ServerManager.start(instance)
-                                if (result.isFailure) Logger.w(result.exceptionOrNull()?.message ?: "启动失败")
+                                if (result.isFailure) {
+                                    Toast.makeText(context, result.exceptionOrNull()?.message ?: "启动失败", Toast.LENGTH_LONG).show()
+                                }
                             }
                         }, onStop = {
                             scope.launch { com.mcserver.launcher.core.server.ServerManager.stop() }

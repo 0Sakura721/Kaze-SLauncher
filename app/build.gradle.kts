@@ -239,6 +239,7 @@ dependencies {
     implementation("androidx.datastore:datastore-preferences:1.1.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("io.coil-kt.coil3:coil-compose:3.1.0")
     implementation("io.coil-kt.coil3:coil-core:3.1.0")
     debugImplementation("androidx.compose.ui:ui-tooling")

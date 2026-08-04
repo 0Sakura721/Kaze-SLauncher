@@ -111,8 +111,9 @@ object DownloadCenter {
                     }
                     // 校验非空后落盘
                     if (partFile.length() > 0) {
+                        val finalSize = partFile.length()
                         partFile.renameTo(task.destFile)
-                        update(id) { it.copy(status = DownloadStatus.COMPLETED, progress = 1f, downloadedBytes = partFile.length(), totalBytes = partFile.length()) }
+                        update(id) { it.copy(status = DownloadStatus.COMPLETED, progress = 1f, downloadedBytes = finalSize, totalBytes = finalSize) }
                         Logger.i("下载完成: ${task.title}")
                         running.decrementAndGet()
                         return
@@ -148,6 +149,7 @@ object DownloadCenter {
         conn.instanceFollowRedirects = true
         conn.connectTimeout = 15000
         conn.readTimeout = 60000
+        conn.setRequestProperty("User-Agent", "KazeSLauncher/2.0 (Android; Minecraft Server Launcher)")
         if (initialOffset > 0) {
             conn.setRequestProperty("Range", "bytes=$initialOffset-")
         }
@@ -159,6 +161,7 @@ object DownloadCenter {
             conn.instanceFollowRedirects = true
             conn.connectTimeout = 15000
             conn.readTimeout = 60000
+            conn.setRequestProperty("User-Agent", "KazeSLauncher/2.0 (Android; Minecraft Server Launcher)")
             if (initialOffset > 0) conn.setRequestProperty("Range", "bytes=$initialOffset-")
             redirects++
         }

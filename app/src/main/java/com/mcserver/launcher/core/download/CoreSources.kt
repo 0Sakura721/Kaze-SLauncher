@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 data class CoreVersion(val id: String, val isStable: Boolean = true)
 
 /** 构建条目 */
-data class CoreBuild(val id: String, val name: String, val fileName: String? = null)
+data class CoreBuild(val id: String, val name: String, val fileName: String? = null, val url: String = "")
 
 /** 下载结果:URL + 建议文件名 */
 data class CoreDownload(val url: String, val fileName: String)
@@ -28,6 +28,7 @@ object CoreSources {
         conn.instanceFollowRedirects = true
         conn.connectTimeout = 15000
         conn.readTimeout = 30000
+        conn.setRequestProperty("User-Agent", "KazeSLauncher/2.0 (Android; Minecraft Server Launcher)")
         var redirects = 0
         while (redirects < 5 && conn.responseCode in listOf(301, 302, 303, 307, 308)) {
             val loc = conn.getHeaderField("Location") ?: break
@@ -36,6 +37,7 @@ object CoreSources {
             conn.instanceFollowRedirects = true
             conn.connectTimeout = 15000
             conn.readTimeout = 30000
+            conn.setRequestProperty("User-Agent", "KazeSLauncher/2.0 (Android; Minecraft Server Launcher)")
             redirects++
         }
         if (conn.responseCode != HttpURLConnection.HTTP_OK) throw RuntimeException("HTTP ${conn.responseCode}")
@@ -70,31 +72,53 @@ object CoreSources {
         } catch (e: Exception) { Result.failure(e) }
     }
 
-    // ── Paper ──
+    // ── Paper(v3 API, 新域名 fill.papermc.io; 旧 api.papermc.io 已被 Cloudflare 拦截) ──
+    private const val PAPER_API = "https://fill.papermc.io/v3/projects/paper"
+
     suspend fun fetchPaperVersions(): Result<List<CoreVersion>> = withContext(Dispatchers.IO) {
         try {
-            val json = JSONObject(httpGet("https://api.papermc.io/v2/projects/paper"))
-            val arr = json.getJSONArray("versions")
-            Result.success((0 until arr.length()).map { CoreVersion(arr.getString(it)) })
+            val body = httpGet("$PAPER_API/versions")
+            val arr = JSONObject(body).getJSONArray("versions")
+            val list = (0 until arr.length()).map {
+                arr.getJSONObject(it).getJSONObject("version").getString("id")
+            }
+            Result.success(list.map { CoreVersion(it) })
         } catch (e: Exception) { Result.failure(e) }
     }
 
     suspend fun fetchPaperBuilds(version: String): Result<List<CoreBuild>> = withContext(Dispatchers.IO) {
         try {
-            val json = JSONObject(httpGet("https://api.papermc.io/v2/projects/paper/versions/$version/builds"))
-            val arr = json.getJSONArray("builds")
+            val body = httpGet("$PAPER_API/versions/$version/builds")
+            val arr = if (body.trimStart().startsWith("[")) JSONArray(body)
+                      else JSONObject(body).getJSONArray("builds")
             val list = (0 until arr.length()).map {
                 val b = arr.getJSONObject(it)
-                val name = b.optJSONObject("downloads")?.optJSONObject("application")?.optString("name")
-                    ?: "paper-$version-${b.getInt("build")}.jar"
-                CoreBuild(b.getInt("build").toString(), "build #${b.getInt("build")}", name)
+                val buildId = b.getInt("id")
+                val dl = b.optJSONObject("downloads")?.optJSONObject("server:default")
+                CoreBuild(
+                    id = buildId.toString(),
+                    name = "build #$buildId",
+                    fileName = dl?.optString("name") ?: "paper-$version-$buildId.jar",
+                    url = dl?.optString("url") ?: ""
+                )
             }
             Result.success(list.reversed())
         } catch (e: Exception) { Result.failure(e) }
     }
 
-    fun getPaperDownload(version: String, buildId: String, fileName: String): CoreDownload =
-        CoreDownload("https://api.papermc.io/v2/projects/paper/versions/$version/builds/$buildId/downloads/$fileName", fileName)
+    suspend fun getPaperDownload(version: String, buildId: String): Result<CoreDownload> = withContext(Dispatchers.IO) {
+        try {
+            val builds = fetchPaperBuilds(version).getOrNull()
+                ?: return@withContext Result.failure(RuntimeException("获取构建列表失败"))
+            // buildId 为空或 "latest" 时自动使用最新构建(简化用户操作)
+            val build = (
+                if (buildId.isBlank() || buildId == "latest") builds.firstOrNull()
+                else builds.firstOrNull { it.id == buildId }
+            ) ?: return@withContext Result.failure(RuntimeException("构建 $buildId 不存在"))
+            if (build.url.isBlank()) return@withContext Result.failure(RuntimeException("该构建没有可下载文件"))
+            Result.success(CoreDownload(build.url, build.fileName ?: "paper-$version-$buildId.jar"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
 
     // ── Purpur ──
     suspend fun fetchPurpurVersions(): Result<List<CoreVersion>> = withContext(Dispatchers.IO) {
@@ -208,10 +232,7 @@ object CoreSources {
     suspend fun resolveDownload(type: CoreType, mcVersion: String, buildId: String = "", fileName: String? = null): Result<CoreDownload> =
         when (type) {
             CoreType.VANILLA -> getVanillaDownload(mcVersion)
-            CoreType.PAPER -> {
-                if (buildId.isBlank()) Result.failure(RuntimeException("Paper 需要选择构建"))
-                else Result.success(getPaperDownload(mcVersion, buildId, fileName ?: "paper-$mcVersion-$buildId.jar"))
-            }
+            CoreType.PAPER -> getPaperDownload(mcVersion, buildId)
             CoreType.PURPUR -> Result.success(getPurpurDownload(mcVersion))
             CoreType.SPIGOT -> Result.success(getSpigotDownload(mcVersion))
             CoreType.FABRIC -> getFabricDownload(mcVersion)

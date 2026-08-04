@@ -1,5 +1,7 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -7,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,7 +21,23 @@ import com.mcserver.launcher.core.download.DownloadCenter
 import com.mcserver.launcher.core.server.InstanceStore
 import com.mcserver.launcher.data.CoreType
 import com.mcserver.launcher.data.InstanceConfig
+import com.mcserver.launcher.util.FileImporter
 import kotlinx.coroutines.launch
+
+/** 从文件名猜测核心类型与 MC 版本(导入本地 JAR 用) */
+private fun guessFromFileName(name: String): Pair<CoreType, String> {
+    val lower = name.lowercase()
+    val type = when {
+        lower.contains("spigot") -> CoreType.SPIGOT
+        lower.contains("paper") || lower.contains("purpur") -> CoreType.PAPER
+        lower.contains("fabric") -> CoreType.FABRIC
+        lower.contains("forge") -> CoreType.FORGE
+        lower.contains("neoforge") -> CoreType.NEOFORGE
+        else -> CoreType.VANILLA
+    }
+    val version = Regex("(\\d+\\.\\d+(\\.\\d+)?)").find(name)?.groupValues?.get(1) ?: "导入"
+    return type to version
+}
 
 /**
  * 新建实例向导:选择核心类型 → MC 版本 → 创建实例并加入下载中心。
@@ -26,6 +45,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun NewInstanceScreen(onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
     var step by remember { mutableStateOf(1) }
     var coreType by remember { mutableStateOf(CoreType.PAPER) }
     var versions by remember { mutableStateOf<List<com.mcserver.launcher.core.download.CoreVersion>>(emptyList()) }
@@ -33,6 +53,39 @@ fun NewInstanceScreen(onDone: () -> Unit) {
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+
+    // SAF:选择本地服务端 JAR(本地导入优先,不消耗流量)
+    val importJarLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            importing = true
+            scope.launch {
+                // 先建临时目录复制,再创建实例
+                val importDir = java.io.File(com.mcserver.launcher.KazeApp.instance.filesDir, "import_jar")
+                if (importDir.exists()) importDir.deleteRecursively()
+                FileImporter.copyFile(context, uri, importDir)
+                    .onSuccess { jarFile ->
+                        val (type, version) = guessFromFileName(jarFile.name)
+                        val instance = InstanceStore.create(
+                            name = jarFile.name.removeSuffix(".jar"),
+                            coreType = type,
+                            mcVersion = version
+                        )
+                        // 移动 jar 到实例目录
+                        jarFile.copyTo(java.io.File(instance.dir(InstanceStore.instancesDir), jarFile.name), overwrite = true)
+                        importDir.deleteRecursively()
+                        importing = false
+                        onDone()
+                    }
+                    .onFailure { err ->
+                        importing = false
+                        error = "导入失败:${err.message}"
+                    }
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -47,6 +100,20 @@ fun NewInstanceScreen(onDone: () -> Unit) {
 
         when (step) {
             1 -> {
+                // 本地导入优先入口(不消耗流量)
+                Button(
+                    onClick = { importJarLauncher.launch(arrayOf("application/java-archive", "application/octet-stream")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (importing) "正在导入..." else "从本地导入服务端 JAR(推荐,不消耗流量)")
+                }
+                Spacer(Modifier.height(16.dp))
+                Text("或从以下来源下载:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
                 // 核心类型网格
                 val types = CoreType.entries
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
