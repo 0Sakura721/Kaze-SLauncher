@@ -27,7 +27,7 @@
     </queries>
 
     <application
-        android:name=".McApplication"
+        android:name=".KazeApp"
         android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -52,12 +52,7 @@
         </activity>
 
         <service
-            android:name=".server.ServerForegroundService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
-        <service
-            android:name=".server.DownloadForegroundService"
+            android:name=".core.download.DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 

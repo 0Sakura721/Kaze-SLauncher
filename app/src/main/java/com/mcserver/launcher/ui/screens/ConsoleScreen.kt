@@ -1,717 +1,127 @@
 package com.mcserver.launcher.ui.screens
 
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mcserver.launcher.data.ServerState
-import com.mcserver.launcher.server.ServerManager
-import com.mcserver.launcher.ui.theme.ExtendedColorScheme
-import com.mcserver.launcher.ui.theme.extendedColorScheme
-import androidx.compose.runtime.derivedStateOf
+import com.mcserver.launcher.core.server.ServerManager
 import kotlinx.coroutines.launch
 
+/**
+ * 控制台:实时日志 + 命令输入 + 启动/停止 + 在线玩家。
+ */
 @Composable
-fun ConsoleScreen() {
-    val serverManager = ServerManager.instance
-    val serverStatus by serverManager.serverStatus.collectAsState()
-    val consoleMessages = remember { mutableStateListOf<String>() }
-    var commandInput by remember { mutableStateOf("") }
-    var stickToBottom by remember { mutableStateOf(true) }
-
-    val listState = rememberLazyListState()
+fun ConsoleScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val snackbarHostState = remember { SnackbarHostState() }
-    val extendedColors = extendedColorScheme()
+    val status by ServerManager.status.collectAsState()
+    val players by ServerManager.players.collectAsState()
+    val uptime by ServerManager.uptimeSec.collectAsState()
 
-    val commandHistory = remember { mutableStateListOf<String>() }
-    var historyIndex by remember { mutableIntStateOf(-1) }
-    var savedInputBeforeHistory by remember { mutableStateOf("") }
-
-    var showSearch by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
-    var filterLevel by remember { mutableStateOf("all") }
-
-    var showQuickCommands by remember { mutableStateOf(false) }
-    var showHistory by remember { mutableStateOf(false) }
-
-    var showExportDialog by remember { mutableStateOf(false) }
-    var exportType by remember { mutableStateOf("console") }
-    var exportFilter by remember { mutableStateOf("all") }
-    var exportFromLine by remember { mutableStateOf("0") }
-    var exportToLine by remember { mutableStateOf("") }
-    var exporting by remember { mutableStateOf(false) }
-
+    var command by remember { mutableStateOf("") }
+    // 收集控制台日志(SharedFlow 回放最近记录)
+    val logLines = remember { mutableStateListOf<String>() }
     LaunchedEffect(Unit) {
-        serverManager.consoleOutput.collect { line ->
-            consoleMessages.add(line)
-            if (consoleMessages.size > 2000) {
-                consoleMessages.removeRange(0, 500)
+        ServerManager.console.collect { line ->
+            logLines.add(line)
+            if (logLines.size > 1000) logLines.removeRange(0, logLines.size - 1000)
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        // 顶部栏
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "返回") }
+            Column(Modifier.weight(1f)) {
+                Text("服务器控制台", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Text(
+                    "${status.name} · 玩家 ${players.size} · 运行 ${uptime / 60}分${uptime % 60}秒",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-        }
-    }
-
-    val stickToBottomState = remember {
-        derivedStateOf {
-            val idx = listState.firstVisibleItemIndex
-            val total = listState.layoutInfo.totalItemsCount
-            total == 0 || idx >= total - 3
-        }
-    }
-    LaunchedEffect(stickToBottomState.value) {
-        stickToBottom = stickToBottomState.value
-    }
-
-    LaunchedEffect(consoleMessages.size) {
-        if (consoleMessages.isNotEmpty() && stickToBottom) {
-            listState.animateScrollToItem(consoleMessages.size - 1)
-        }
-    }
-
-    val filteredMessages = remember(consoleMessages, filterLevel, searchQuery) {
-        derivedStateOf {
-            consoleMessages.filter { msg ->
-                val levelMatch = when (filterLevel) {
-                    "all" -> true
-                    "error" -> msg.contains("ERROR") || msg.contains("FATAL") || msg.contains("Exception")
-                    "warn" -> msg.contains("WARN")
-                    "info" -> msg.contains("INFO")
-                    "chat" -> (msg.contains("joined") || msg.contains("left") || msg.contains("<"))
-                    "command" -> msg.startsWith("> ")
-                    else -> true
+            val running = status == com.mcserver.launcher.data.InstanceStatus.RUNNING
+            if (running) {
+                Button(onClick = { scope.launch { ServerManager.stop() } },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                    Icon(Icons.Filled.Stop, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("停止")
                 }
-                val searchMatch = searchQuery.isBlank() || msg.contains(searchQuery, ignoreCase = true)
-                levelMatch && searchMatch
-            }
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("控制台") },
-            actions = {
-                IconButton(onClick = { showQuickCommands = !showQuickCommands }) {
-                    Icon(Icons.Filled.SmartButton, contentDescription = "快速命令")
-                }
-                IconButton(onClick = {
-                    showSearch = !showSearch
-                    if (!showSearch) { searchQuery = ""; filterLevel = "all" }
+            } else {
+                Button(onClick = {
+                    val instance = com.mcserver.launcher.core.server.ServerManager.currentInstanceId
+                        ?.let { com.mcserver.launcher.core.server.InstanceStore.instance(it) }
+                    if (instance != null) scope.launch { ServerManager.start(instance) }
                 }) {
-                    Icon(
-                        if (showSearch) Icons.Filled.SearchOff else Icons.Filled.Search,
-                        contentDescription = "搜索"
-                    )
-                }
-                IconButton(onClick = {
-                    val text = consoleMessages.joinToString("\n")
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("console", text))
-                    scope.launch { snackbarHostState.showSnackbar("已复制 ${consoleMessages.size} 行日志") }
-                }) {
-                    Icon(Icons.Filled.ContentCopy, contentDescription = "复制日志")
-                }
-                IconButton(onClick = {
-                    exportToLine = consoleMessages.size.toString()
-                    showExportDialog = true
-                }) {
-                    Icon(Icons.Filled.FileDownload, contentDescription = "导出日志")
-                }
-                IconButton(onClick = { consoleMessages.clear() }) {
-                    Icon(Icons.Filled.DeleteSweep, contentDescription = "清除")
-                }
-                if (serverStatus.state == ServerState.RUNNING) {
-                    IconButton(onClick = { serverManager.stopServer() }) {
-                        Icon(
-                            Icons.Filled.Stop,
-                            contentDescription = "停止",
-                            tint = extendedColors.warning
-                        )
-                    }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)
-            )
-        )
-
-        SnackbarHost(hostState = snackbarHostState)
-
-        if (showSearch) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                tonalElevation = 2.dp
-            ) {
-                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("搜索日志...") },
-                            leadingIcon = { Icon(Icons.Filled.Search, null, Modifier.size(20.dp)) },
-                            trailingIcon = {
-                                if (searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = { searchQuery = "" }) {
-                                        Icon(Icons.Filled.Clear, "清除", Modifier.size(18.dp))
-                                    }
-                                }
-                            },
-                            modifier = Modifier.weight(1f).height(52.dp),
-                            singleLine = true,
-                            textStyle = TextStyle(fontSize = 14.sp)
-                        )
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val levels = listOf(
-                            "all" to "全部", "error" to "错误", "warn" to "警告",
-                            "info" to "信息", "chat" to "聊天", "command" to "命令"
-                        )
-                        levels.forEach { (key, label) ->
-                            FilterChip(
-                                selected = filterLevel == key,
-                                onClick = { filterLevel = key },
-                                label = { Text(label, style = MaterialTheme.typography.labelSmall) }
-                            )
-                        }
-                    }
-                    Text(
-                        "显示 ${filteredMessages.value.size} / ${consoleMessages.size} 条",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
+                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("启动")
                 }
             }
         }
 
-        if (showQuickCommands && serverStatus.state == ServerState.RUNNING) {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                tonalElevation = 2.dp
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        "快速命令",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        val quickCommands = listOf(
-                            "list" to "在线列表",
-                            "stop" to "停止",
-                            "save-all" to "保存",
-                            "say Hello!" to "广播",
-                            "op " to "OP",
-                            "deop " to "取消OP",
-                            "whitelist add " to "加白",
-                            "whitelist remove " to "移白",
-                            "ban " to "封禁",
-                            "pardon " to "解封",
-                            "gamemode creative " to "创造",
-                            "gamemode survival " to "生存",
-                            "time set day" to "白天",
-                            "weather clear" to "晴天",
-                            "difficulty peaceful" to "和平",
-                            "difficulty hard" to "困难",
-                            "tp " to "传送",
-                            "give @a diamond 64" to "钻石"
-                        )
-                        quickCommands.forEach { (cmd, label) ->
-                            SuggestionChip(
-                                onClick = {
-                                    if (cmd.endsWith(" ")) {
-                                        commandInput = cmd
-                                    } else {
-                                        serverManager.sendCommand(cmd)
-                                    }
-                                    showQuickCommands = false
-                                },
-                                label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                                icon = {
-                                    Icon(
-                                        if (cmd.endsWith(" ")) Icons.Filled.Edit else Icons.AutoMirrored.Filled.Send,
-                                        null,
-                                        Modifier.size(14.dp)
-                                    )
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
+        // 日志区
+        LazyColumn(
+            Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp)
+                .padding(horizontal = 8.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                .padding(8.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF0D1117))
-                    .padding(12.dp)
-            ) {
-                if (filteredMessages.value.isEmpty() && consoleMessages.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "控制台输出将显示在这里",
-                                style = TextStyle(
-                                    color = Color(0xFF666666),
-                                    fontSize = 14.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            )
-                            Text(
-                                text = "启动服务器以查看日志",
-                                style = TextStyle(
-                                    color = Color(0xFF555555),
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            )
-                        }
-                    }
-                } else if (filteredMessages.value.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "没有匹配的日志",
-                            style = TextStyle(
-                                color = Color(0xFF666666),
-                                fontSize = 14.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        )
-                    }
-                } else {
-                    LazyColumn(state = listState) {
-                        items(filteredMessages.value.size) { index ->
-                            val message = filteredMessages.value[index]
-                            val color = getConsoleLineColor(message, extendedColors)
-                            val background = if (index % 2 == 0) Color.Transparent else Color(0xFF161B22)
-                            Text(
-                                text = message,
-                                style = TextStyle(
-                                    color = color,
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    lineHeight = 17.sp
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(background)
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
-            }
-            if (!stickToBottom && filteredMessages.value.isNotEmpty()) {
-                FloatingActionButton(
-                    onClick = {
-                        stickToBottom = true
-                        scope.launch { listState.animateScrollToItem(filteredMessages.value.size - 1) }
-                    },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(12.dp),
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                ) {
-                    Icon(
-                        Icons.Filled.ArrowDownward,
-                        contentDescription = "回到底部"
-                    )
-                }
+            items(logLines.takeLast(500)) { line ->
+                Text(
+                    line,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    color = if (line.contains("ERROR") || line.contains("Exception"))
+                        MaterialTheme.colorScheme.error
+                    else if (line.startsWith(">"))
+                        MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 1.dp)
+                )
             }
         }
 
-        if (serverStatus.state == ServerState.RUNNING) {
-            if (showHistory && commandHistory.isNotEmpty()) {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp),
-                    tonalElevation = 2.dp,
-                    shadowElevation = 4.dp
-                ) {
-                    LazyColumn(modifier = Modifier.padding(4.dp)) {
-                        items(commandHistory.reversed().take(20)) { cmd ->
-                            Surface(
-                                onClick = {
-                                    commandInput = cmd
-                                    showHistory = false
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                color = MaterialTheme.colorScheme.surface
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Filled.History,
-                                        null,
-                                        Modifier.size(16.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        cmd,
-                                        style = TextStyle(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 13.sp
-                                        ),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                tonalElevation = 3.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = { showHistory = !showHistory },
-                        enabled = commandHistory.isNotEmpty()
-                    ) {
-                        Icon(
-                            Icons.Filled.History,
-                            contentDescription = "历史",
-                            tint = if (commandHistory.isNotEmpty())
-                                MaterialTheme.colorScheme.primary
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Icon(
-                        Icons.Filled.ChevronRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    BasicTextField(
-                        value = commandInput,
-                        onValueChange = { commandInput = it },
-                        modifier = Modifier.weight(1f),
-                        textStyle = TextStyle(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        singleLine = true,
-                        decorationBox = { innerTextField ->
-                            Box {
-                                if (commandInput.isEmpty()) {
-                                    Text(
-                                        "输入服务器命令...",
-                                        style = TextStyle(
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 14.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        }
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    IconButton(
-                        onClick = {
-                            if (commandInput.isNotBlank()) {
-                                val cmd = commandInput.trim()
-                                serverManager.sendCommand(cmd)
-                                commandHistory.removeAll { it == cmd }
-                                commandHistory.add(cmd)
-                                if (commandHistory.size > 100) {
-                                    commandHistory.removeAt(0)
-                                }
-                                historyIndex = -1
-                                commandInput = ""
-                            }
-                        }
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "发送",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-        } else {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                tonalElevation = 3.dp
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Filled.Info,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        "启动服务器后即可输入命令",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        if (showExportDialog) {
-            AlertDialog(
-                onDismissRequest = { showExportDialog = false },
-                icon = {
-                    Icon(
-                        Icons.Filled.FileDownload,
-                        null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                },
-                title = { Text("导出") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("导出类型：", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(
-                                "console" to "控制台日志",
-                                "server" to "服务器日志",
-                                "diagnostic" to "诊断报告"
-                            ).forEach { (k, v) ->
-                                FilterChip(
-                                    selected = exportType == k,
-                                    onClick = { exportType = k },
-                                    label = { Text(v, style = MaterialTheme.typography.labelSmall) }
-                                )
-                            }
-                        }
-
-                        when (exportType) {
-                            "console" -> {
-                                Text(
-                                    "将控制台日志导出为 .log 文件到下载目录。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("日志级别过滤：", style = MaterialTheme.typography.bodySmall)
-                                    Spacer(Modifier.width(8.dp))
-                                    Row(
-                                        Modifier.horizontalScroll(rememberScrollState()),
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        listOf("all" to "全部", "error" to "错误", "warn" to "警告", "info" to "信息", "chat" to "聊天").forEach { (k, v) ->
-                                            FilterChip(
-                                                selected = exportFilter == k,
-                                                onClick = { exportFilter = k },
-                                                label = { Text(v, style = MaterialTheme.typography.labelSmall) }
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedTextField(
-                                        value = exportFromLine,
-                                        onValueChange = { exportFromLine = it.filter { c -> c.isDigit() } },
-                                        label = { Text("起始行") },
-                                        modifier = Modifier.weight(1f),
-                                        singleLine = true,
-                                        enabled = !exporting
-                                    )
-                                    OutlinedTextField(
-                                        value = exportToLine,
-                                        onValueChange = { exportToLine = it.filter { c -> c.isDigit() } },
-                                        label = { Text("结束行") },
-                                        modifier = Modifier.weight(1f),
-                                        singleLine = true,
-                                        enabled = !exporting
-                                    )
-                                }
-                                Text(
-                                    "共 ${consoleMessages.size} 行日志",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            "server" -> {
-                                Text(
-                                    "导出服务器原始日志文件（server.log、latest.log、崩溃报告等）。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    "导出路径: /mcserver/exports/",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
-                            }
-                            "diagnostic" -> {
-                                Text(
-                                    "生成完整的系统诊断报告，包含设备信息、服务器配置、健康检查结果等。",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    "导出路径: /mcserver/diagnostics/",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.tertiary
-                                )
-                            }
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                exporting = true
-                                try {
-                                    when (exportType) {
-                                        "console" -> {
-                                            val from = exportFromLine.toIntOrNull()?.coerceAtLeast(0) ?: 0
-                                            val to = exportToLine.toIntOrNull()?.coerceAtMost(consoleMessages.size) ?: consoleMessages.size
-                                            val filtered = consoleMessages.subList(from, to).filter { msg ->
-                                                when (exportFilter) {
-                                                    "all" -> true
-                                                    "error" -> msg.contains("ERROR") || msg.contains("FATAL") || msg.contains("Exception")
-                                                    "warn" -> msg.contains("WARN")
-                                                    "info" -> msg.contains("INFO")
-                                                    "chat" -> msg.contains("joined") || msg.contains("left") || msg.contains("<")
-                                                    else -> true
-                                                }
-                                            }
-                                            val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
-                                                .format(java.util.Date())
-                                            val fileName = "mcserver_console_$timestamp.log"
-                                            val downloadsDir = context.getExternalFilesDir(
-                                                android.os.Environment.DIRECTORY_DOWNLOADS)
-                                                ?: throw Exception("无法获取下载目录")
-                                            downloadsDir.mkdirs()
-                                            val logFile = java.io.File(downloadsDir, fileName)
-                                            logFile.writeText(filtered.joinToString("\n"))
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar("已导出 ${filtered.size} 行日志到 ${logFile.absolutePath}")
-                                            }
-                                        }
-                                        "server" -> {
-                                            val path = ServerManager.instance.prootServerManager.exportLogs()
-                                            if (path != null) {
-                                                scope.launch { snackbarHostState.showSnackbar("服务器日志已导出到 $path") }
-                                            } else {
-                                                scope.launch { snackbarHostState.showSnackbar("导出失败：无法读取日志文件") }
-                                            }
-                                        }
-                                        "diagnostic" -> {
-                                            val config = ServerManager.instance.currentConfig
-                                                ?: com.mcserver.launcher.data.ServerConfig(
-                                                    jarPath = "",
-                                                    allocatedMemoryMB = 2048,
-                                                    serverPort = 25565
-                                                )
-                                            val reportFile = com.mcserver.launcher.server.HealthChecker.exportDiagnosticReport(config)
-                                            scope.launch { snackbarHostState.showSnackbar("诊断报告已导出到 ${reportFile.absolutePath}") }
-                                        }
-                                    }
-                                    showExportDialog = false
-                                } catch (e: Exception) {
-                                    scope.launch { snackbarHostState.showSnackbar("导出失败：${e.message}") }
-                                }
-                                exporting = false
-                            }
-                        },
-                        enabled = !exporting
-                    ) {
-                        if (exporting) {
-                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Text("导出")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showExportDialog = false }) { Text("取消") }
-                }
+        // 命令输入
+        Row(
+            Modifier.fillMaxWidth().padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = command,
+                onValueChange = { command = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("输入命令,如: say hello / op Steve / list") },
+                singleLine = true
             )
+            Spacer(Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    if (command.isNotBlank()) {
+                        ServerManager.sendCommand(command.trim())
+                        command = ""
+                    }
+                },
+                enabled = status == com.mcserver.launcher.data.InstanceStatus.RUNNING
+            ) { Text("发送") }
         }
-    }
-}
-
-private fun getConsoleLineColor(message: String, colors: ExtendedColorScheme): Color {
-    return when {
-        message.startsWith("> ") -> Color(0xFF58A6FF)
-        message.contains("FATAL") || message.contains("Exception") -> Color(0xFFF85149)
-        message.contains("ERROR") || message.contains("Error") -> Color(0xFFF85149)
-        message.contains("WARN") || message.contains("Warn") -> colors.warning
-        message.contains("INFO") || message.contains("Info") -> Color(0xFF58A6FF)
-        message.contains("DEBUG") || message.contains("Debug") -> Color(0xFF8B949E)
-        message.contains("joined the game") -> colors.success
-        message.contains("left the game") -> Color(0xFFF85149)
-        message.contains("<") && message.contains(">") -> Color(0xFFE6EDF3)
-        message.contains("Done") || message.contains("done") -> colors.success
-        message.contains("Starting") || message.contains("Loading") -> Color(0xFF79C0FF)
-        message.contains("Saved") || message.contains("saved") -> Color(0xFFA5D6FF)
-        else -> Color(0xFFC9D1D9)
     }
 }

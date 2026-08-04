@@ -1,125 +1,100 @@
 package com.mcserver.launcher.ui.screens
 
-import androidx.compose.animation.core.*
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.mcserver.launcher.data.ServerConfig
-import com.mcserver.launcher.data.ServerState
-import com.mcserver.launcher.utils.NetworkUtils
-import com.mcserver.launcher.server.PerformanceMonitor
-import com.mcserver.launcher.server.ServerManager
-import com.mcserver.launcher.ui.theme.McColors
-import kotlin.math.roundToInt
+import com.mcserver.launcher.core.env.EnvManager
+import com.mcserver.launcher.core.server.InstanceStore
+import com.mcserver.launcher.data.InstanceStatus
+import com.mcserver.launcher.data.ServerInstance
+import com.mcserver.launcher.util.Logger
+import kotlinx.coroutines.launch
 
+/** 首页:实例列表 + 新建入口 */
 @Composable
-fun HomeScreen(
-    config: ServerConfig,
-    onNavigateToConfig: () -> Unit,
-    onNavigateToConsole: () -> Unit,
-    onNavigateToManagement: () -> Unit,
-    onNavigateToServerList: () -> Unit,
-    onNavigateToTerminal: () -> Unit
-) {
-    val serverManager = ServerManager.instance
-    val serverStatus by serverManager.serverStatus.collectAsState()
-    val perfMetrics by PerformanceMonitor.instance.metrics.collectAsState()
-    val context = LocalContext.current
-    var localIp by remember { mutableStateOf<String?>(null) }
+fun HomeScreen(modifier: Modifier = Modifier) {
+    val scope = rememberCoroutineScope()
+    val instances by InstanceStore.instances.collectAsState()
+    val envReady = EnvManager.isEnvironmentReady()
+    var showNew by remember { mutableStateOf(false) }
+    var showConsole by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        localIp = NetworkUtils.getLocalIpAddress()
+    if (showConsole) {
+        ConsoleScreen(onBack = { showConsole = false })
+        return
     }
 
-    val isRunning = serverStatus.state == ServerState.RUNNING
-    val isStarting = serverStatus.state == ServerState.STARTING
+    if (showNew) {
+        NewInstanceScreen(onDone = { showNew = false })
+        return
+    }
 
-    Scaffold(containerColor = Color(0xFF0A0E17)) { padding ->
-        Column(
-            Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            StatusCard(serverStatus, config, isRunning, isStarting)
-            RingRow(perfMetrics, isRunning, config)
-            DetailGrid(localIp, config.serverPort, perfMetrics)
-            ActionRow(onNavigateToConsole, onNavigateToManagement, onNavigateToConfig, onNavigateToServerList)
+    Scaffold(
+        modifier = modifier,
+        floatingActionButton = {
+            FloatingActionButton(onClick = { showNew = true }) {
+                Icon(Icons.Filled.Add, "新建服务端")
+            }
         }
-    }
-}
-
-@Composable
-private fun StatusCard(
-    status: com.mcserver.launcher.data.ServerStatus,
-    config: ServerConfig,
-    isRunning: Boolean,
-    isStarting: Boolean
-) {
-    val c = if (isRunning) McColors.Success else if (isStarting) McColors.Warning else McColors.Offline
-    val t = if (isRunning) "\u8FD0\u884C\u4E2D" else if (isStarting) "\u542F\u52A8\u4E2D..." else "\u5DF2\u505C\u6B62"
-    val pulse by rememberInfiniteTransition().animateFloat(0.3f, 0.8f, infiniteRepeatable(tween(1500), RepeatMode.Reverse))
-
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = McColors.Surface)) {
-        Box(Modifier.fillMaxWidth().padding(20.dp)) {
-            if (isRunning) Canvas(Modifier.matchParentSize()) { drawCircle(Color(0xFF66DE7B).copy(alpha = pulse * 0.12f), size.minDimension, Offset(size.width * 0.85f, size.height * 0.2f)) }
-            Column(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column {
-                        Text(config.name.ifEmpty { "Minecraft Server" }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = McColors.OnSurface)
-                        Spacer(Modifier.height(4.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(8.dp).clip(CircleShape).background(c.copy(alpha = if (isRunning) pulse else 1f)))
-                            Spacer(Modifier.width(6.dp))
-                            Text(t, style = MaterialTheme.typography.bodySmall, color = c)
-                        }
-                    }
-                    FilledIconButton(
-                        onClick = { if (isRunning) ServerManager.instance.stopServer() else ServerManager.instance.startServer(config) },
-                        modifier = Modifier.size(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (isRunning) McColors.ErrorContainer.copy(0.3f) else McColors.PrimaryContainer, contentColor = if (isRunning) McColors.Error else McColors.Primary),
-                        enabled = !isStarting
-                    ) {
-                        Icon(if (isRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow, if (isRunning) "\u505C\u6B62" else "\u542F\u52A8", Modifier.size(28.dp))
+    ) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            Text(
+                "我的服务端",
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+            )
+            if (!envReady) {
+                Surface(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer
+                ) {
+                    Text(
+                        "Linux 环境未就绪,请先在设置页重新部署",
+                        Modifier.padding(12.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            if (instances.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("还没有服务端实例", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Text("点击右下角 + 新建:选择核心类型与 MC 版本,自动下载",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                if (isRunning) {
-                    Spacer(Modifier.height(12.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.People, null, Modifier.size(14.dp), tint = McColors.OnSurfaceVariant)
-                            Spacer(Modifier.width(4.dp))
-                            Text("${status.playerCount}/${config.maxPlayers}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = McColors.OnSurface)
-                            Spacer(Modifier.width(4.dp))
-                            Text("\u73A9\u5BB6", style = MaterialTheme.typography.bodySmall, color = McColors.OnSurfaceVariant)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Timer, null, Modifier.size(14.dp), tint = McColors.OnSurfaceVariant)
-                            Spacer(Modifier.width(4.dp))
-                            Text(fmtUptime(status.uptimeSeconds), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = McColors.OnSurface)
-                            Spacer(Modifier.width(4.dp))
-                            Text("\u8FD0\u884C", style = MaterialTheme.typography.bodySmall, color = McColors.OnSurfaceVariant)
-                        }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(instances, key = { it.id }) { instance ->
+                        InstanceCard(instance, onClick = { showConsole = true }, onStart = {
+                            scope.launch {
+                                val result = com.mcserver.launcher.core.server.ServerManager.start(instance)
+                                if (result.isFailure) Logger.w(result.exceptionOrNull()?.message ?: "启动失败")
+                            }
+                        }, onStop = {
+                            scope.launch { com.mcserver.launcher.core.server.ServerManager.stop() }
+                        })
                     }
                 }
             }
@@ -128,86 +103,65 @@ private fun StatusCard(
 }
 
 @Composable
-private fun RingRow(m: com.mcserver.launcher.server.PerformanceMonitor.Metrics, isRunning: Boolean, config: ServerConfig) {
-    val memMax = if (isRunning) m.memoryTotalMB else config.allocatedMemoryMB.toLong()
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = McColors.Surface)) {
-        Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            Ring("CPU", m.cpuPercent / 100f, "${m.cpuPercent.roundToInt()}%", McColors.Accent)
-            Ring("\u5185\u5B58", if (memMax > 0) m.memoryUsedMB.toFloat() / memMax else 0f, "${m.memoryUsedMB}MB", McColors.Primary)
-            Ring("TPS", (m.tps / 20.0).toFloat().coerceIn(0f, 1f), String.format("%.1f", m.tps), if (m.tps >= 19) McColors.Success else McColors.Warning)
-        }
-    }
-}
+private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onStart: () -> Unit, onStop: () -> Unit) {
+    val status by com.mcserver.launcher.core.server.ServerManager.status.collectAsState()
+    val running = com.mcserver.launcher.core.server.ServerManager.isRunningFor(instance.id)
 
-@Composable
-private fun Ring(label: String, fraction: Float, value: String, color: Color) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(72.dp)) {
-            val f by animateFloatAsState(fraction, tween(600))
-            Canvas(Modifier.size(72.dp)) {
-                val s = 6.dp.toPx()
-                drawArc(color = color.copy(0.15f), startAngle = 135f, sweepAngle = 270f, useCenter = false, style = Stroke(width = s, cap = StrokeCap.Round))
-                drawArc(color = color, startAngle = 135f, sweepAngle = 270f * f, useCenter = false, style = Stroke(width = s, cap = StrokeCap.Round))
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(instance.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "${instance.coreType.displayName} ${instance.mcVersion}${if (instance.buildId.isNotBlank()) " (build ${instance.buildId})" else ""}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                StatusBadge(if (running) status else InstanceStatus.STOPPED)
             }
-            Text(value, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = McColors.OnSurface, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-        }
-        Spacer(Modifier.height(4.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = McColors.OnSurfaceVariant)
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun DetailGrid(ip: String?, port: Int, m: com.mcserver.launcher.server.PerformanceMonitor.Metrics) {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = McColors.Surface)) {
-        FlowRow(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Chip(Icons.Filled.Language, "${ip ?: "-"}:$port", "\u5730\u5740")
-            Chip(Icons.Filled.Speed, String.format("%.1f", m.tps), "TPS")
-            Chip(Icons.Filled.TrendingDown, String.format("%.1fms", m.mspt), "MSPT")
-            Chip(Icons.Filled.Memory, "${m.threadCount}", "\u7EBF\u7A0B")
-        }
-    }
-}
-
-@Composable
-private fun Chip(icon: ImageVector, value: String, label: String) {
-    Surface(Modifier, RoundedCornerShape(12.dp), color = McColors.SurfaceVariant) {
-        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, Modifier.size(14.dp), tint = McColors.Primary)
-            Spacer(Modifier.width(6.dp))
-            Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = McColors.OnSurface)
-            Spacer(Modifier.width(4.dp))
-            Text(label, style = MaterialTheme.typography.bodySmall, color = McColors.OnSurfaceVariant)
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("端口 ${instance.config.serverPort}", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                if (running) {
+                    Button(onClick = onStop, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                        Icon(Icons.Filled.Stop, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("停止")
+                    }
+                } else {
+                    Button(onClick = onStart) {
+                        Icon(Icons.Filled.PlayArrow, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("启动")
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun ActionRow(console: () -> Unit, mgmt: () -> Unit, config: () -> Unit, server: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = McColors.Surface)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-            ActBtn(Icons.Filled.Terminal, "\u63A7\u5236\u53F0", console)
-            ActBtn(Icons.Filled.Widgets, "\u7BA1\u7406", mgmt)
-            ActBtn(Icons.Filled.Tune, "\u914D\u7F6E", config)
-            ActBtn(Icons.Filled.Storage, "\u670D\u52A1\u5668", server)
-        }
+private fun StatusBadge(status: InstanceStatus) {
+    val (text, color) = when (status) {
+        InstanceStatus.RUNNING -> "运行中" to Color(0xFF4CAF50)
+        InstanceStatus.STARTING -> "启动中" to Color(0xFFFFA726)
+        InstanceStatus.STOPPING -> "停止中" to Color(0xFFFFA726)
+        InstanceStatus.ERROR -> "错误" to MaterialTheme.colorScheme.error
+        InstanceStatus.STOPPED -> "已停止" to MaterialTheme.colorScheme.onSurfaceVariant
     }
-}
-
-@Composable
-private fun ActBtn(icon: ImageVector, label: String, onClick: () -> Unit) {
-    TextButton(onClick) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, label, Modifier.size(24.dp), tint = McColors.Primary)
-            Spacer(Modifier.height(2.dp))
-            Text(label, style = MaterialTheme.typography.labelSmall, color = McColors.OnSurfaceVariant)
-        }
+    Surface(shape = RoundedCornerShape(50), color = color.copy(alpha = 0.15f)) {
+        Text(text, Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+            color = color, style = MaterialTheme.typography.labelSmall)
     }
-}
-
-private fun fmtUptime(s: Long): String {
-    if (s < 60) return "${s}s"
-    val m = s / 60
-    val h = m / 60
-    return if (h > 0) "${h}h ${m % 60}m" else "${m}m ${s % 60}s"
 }
