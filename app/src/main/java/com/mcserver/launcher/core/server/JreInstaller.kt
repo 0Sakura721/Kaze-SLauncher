@@ -27,6 +27,14 @@ object JreInstaller {
     private val _message = MutableStateFlow("")
     val message: StateFlow<String> = _message.asStateFlow()
 
+    /** 已安装 Java 版本列表(导入/下载完成后刷新,驱动 UI) */
+    private val _installedVersions = MutableStateFlow(EnvManager.installedJdkVersions())
+    val installedVersions: StateFlow<List<Int>> = _installedVersions.asStateFlow()
+
+    private fun refreshInstalled() {
+        _installedVersions.value = EnvManager.installedJdkVersions()
+    }
+
     /** 显示提示消息(UI 调用) */
     fun notifyMessage(msg: String) { _message.value = msg }
 
@@ -113,6 +121,7 @@ object JreInstaller {
             val synced = EnvManager.syncJavaToRootfs(version, targetDir)
             _message.value = if (synced) "Java $version 安装完成并已同步到服务器环境"
                              else "Java $version 已安装(环境未就绪,未同步)"
+            refreshInstalled()
             Logger.i("Java $version installed, synced=$synced")
             Result.success(Unit)
         } catch (e: Exception) {
@@ -179,6 +188,7 @@ object JreInstaller {
             val synced = EnvManager.syncJavaToRootfs(version, targetDir)
             _message.value = if (synced) "Java $version 导入完成并已同步到服务器环境"
                              else "Java $version 已导入(环境未就绪,未同步)"
+            refreshInstalled()
             Logger.i("Java $version imported locally, synced=$synced")
             Result.success(Unit)
         } catch (e: Exception) {

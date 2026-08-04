@@ -46,6 +46,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val envState by EnvManager.state.collectAsState()
     val busyVersion by JreInstaller.busy.collectAsState()
     val message by JreInstaller.message.collectAsState()
+    val installedVersions by JreInstaller.installedVersions.collectAsState()
     val dark by SettingsStore.themeDark.collectAsState()
 
     var installing by remember { mutableStateOf<String?>(null) }
@@ -111,7 +112,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 Text(label, color = color, style = MaterialTheme.typography.labelLarge)
             }
             Spacer(Modifier.height(6.dp))
-            Text("已安装 Java:${EnvManager.installedJdkVersions().ifEmpty { listOf("无") }.joinToString(", ")}",
+            Text("已安装 Java:${installedVersions.ifEmpty { listOf("无") }.joinToString(", ")}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
