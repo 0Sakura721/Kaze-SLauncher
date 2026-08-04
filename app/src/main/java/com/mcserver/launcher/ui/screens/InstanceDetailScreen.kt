@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mcserver.launcher.core.download.DownloadCenter
 import com.mcserver.launcher.core.download.ModrinthApi
+import com.mcserver.launcher.ui.components.ModrinthSearchDialog
 import com.mcserver.launcher.core.server.PluginManager
 import com.mcserver.launcher.core.server.ServerManager
 import com.mcserver.launcher.data.ServerInstance
@@ -276,93 +277,6 @@ private fun AddonTab(instance: ServerInstance) {
     }
 }
 
-/** Modrinth 在线搜索对话框(备选) */
-@Composable
-private fun ModrinthSearchDialog(
-    instance: ServerInstance,
-    onDismiss: () -> Unit,
-    onInstalled: () -> Unit
-) {
-    val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf("") }
-    var results by remember { mutableStateOf<List<com.mcserver.launcher.core.download.ModrinthHit>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf("") }
-
-    // 加载器:模组核心 fabric/forge/neoforge,插件核心 paper
-    val loader = when (instance.coreType) {
-        com.mcserver.launcher.data.CoreType.FABRIC -> "fabric"
-        com.mcserver.launcher.data.CoreType.FORGE -> "forge"
-        com.mcserver.launcher.data.CoreType.NEOFORGE -> "neoforge"
-        else -> "paper"
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("搜索 ${PluginManager.dirLabel(instance)}") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("名称,如: EssentialsX / Lithium") },
-                    singleLine = true
-                )
-                Spacer(Modifier.height(8.dp))
-                Button(onClick = {
-                    if (query.isBlank()) return@Button
-                    loading = true; error = ""
-                    scope.launch {
-                        ModrinthApi.search(query, instance.mcVersion, loader)
-                            .onSuccess { results = it }
-                            .onFailure { error = "搜索失败:${it.message}" }
-                        loading = false
-                    }
-                }, modifier = Modifier.fillMaxWidth()) { Text("搜索(需网络,${instance.mcVersion} ${loader})") }
-                Spacer(Modifier.height(8.dp))
-                if (loading) {
-                    CircularProgressIndicator(Modifier.size(24.dp))
-                } else if (error.isNotBlank()) {
-                    Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                } else {
-                    LazyColumn(Modifier.heightIn(max = 260.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        items(results) { hit ->
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    loading = true
-                                    scope.launch {
-                                        ModrinthApi.resolveDownload(hit.projectId, instance.mcVersion, loader)
-                                            .onSuccess { dl ->
-                                                DownloadCenter.enqueue(
-                                                    id = "addon-${hit.projectId}",
-                                                    title = hit.title,
-                                                    urls = listOf(dl.url),
-                                                    destFile = java.io.File(PluginManager.addonDir(instance), dl.fileName)
-                                                )
-                                                loading = false
-                                                onInstalled()
-                                                onDismiss()
-                                            }
-                                            .onFailure { error = "获取下载失败:${it.message}"; loading = false }
-                                    }
-                                }
-                            ) {
-                                Column(Modifier.padding(10.dp)) {
-                                    Text(hit.title, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
-                                    Text(hit.description.take(60), style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
-    )
-}
 
 // ═══════════ 配置 ═══════════
 
