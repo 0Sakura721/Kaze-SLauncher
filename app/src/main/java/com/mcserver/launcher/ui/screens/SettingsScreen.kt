@@ -52,6 +52,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val installedVersions by JreInstaller.installedVersions.collectAsState()
     val themeMode by SettingsStore.themeMode.collectAsState()
     val darkAmoled by SettingsStore.darkAmoled.collectAsState()
+    var showAbout by remember { mutableStateOf(false) }
 
     var installing by remember { mutableStateOf<String?>(null) }
     var importing by remember { mutableStateOf<String?>(null) }
@@ -231,10 +232,143 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         Spacer(Modifier.height(14.dp))
 
         SectionCard("关于") {
-            Text("Kaze SLauncher v2.0", style = MaterialTheme.typography.bodyMedium)
-            Text("在 Android 上运行 Minecraft Java 服务端",
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(com.mcserver.launcher.R.drawable.ic_launcher_background),
+                    contentDescription = "Kaze SLauncher",
+                    modifier = Modifier.size(52.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text("Kaze SLauncher", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text("v2.0 · 在 Android 上运行 Minecraft Java 服务端",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("Kaze SLauncher 是一个在 Android 设备上运行 Minecraft Java 版服务端的启动器:基于 proot + Ubuntu 24.04 虚拟环境,支持多实例、多核心、统一下载中心与本地资源导入。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = { showAbout = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("查看完整关于 · 版本历史 · 许可致谢")
+            }
+        }
+    }
+
+    if (showAbout) {
+        AboutDialog(onDismiss = { showAbout = false })
+    }
+}
+
+/** 完整关于页(参考 FCL / HMCL / PojavLauncher 关于页结构) */
+@Composable
+private fun AboutDialog(onDismiss: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pkg = remember {
+        try {
+            context.packageManager.getPackageInfo(context.packageName, 0)
+        } catch (e: Exception) { null }
+    }
+    val versionName = pkg?.versionName ?: "1.0.0"
+    val versionCode = pkg?.longVersionCode ?: 100L
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("关于 Kaze SLauncher") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                // ── 应用信息 ──
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.foundation.Image(
+                        painter = androidx.compose.ui.res.painterResource(com.mcserver.launcher.R.drawable.ic_launcher_background),
+                        contentDescription = "图标",
+                        modifier = Modifier.size(56.dp)
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text("Kaze SLauncher", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("v2.0 (${versionName} · ${versionCode})", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("在 Android 上运行 Minecraft Java 版服务端,无需 ROOT,基于 proot 虚拟化 Ubuntu 环境。",
+                    style = MaterialTheme.typography.bodySmall)
+
+                Spacer(Modifier.height(14.dp))
+                AboutSection("核心特性") {
+                    FeatureLine("多实例管理", "每个服务端独立目录/配置/世界,互不干扰")
+                    FeatureLine("多核心支持", "Vanilla / Paper / Purpur / Spigot / Fabric / Forge / NeoForge")
+                    FeatureLine("统一下载中心", "全局队列、断点续传、暂停/恢复/取消")
+                    FeatureLine("本地资源导入", "Java / 服务端 JAR / 插件模组 / 世界,优先本地,省流量")
+                    FeatureLine("Java 按需安装", "8 / 11 / 17 / 21 可选,自动同步服务器环境")
+                    FeatureLine("插件/模组管理", "Modrinth 在线搜索 + 本地导入,一键启用禁用")
+                    FeatureLine("服务器控制台", "实时日志、命令输入、状态监控")
+                }
+
+                Spacer(Modifier.height(14.dp))
+                AboutSection("v2.0 重写更新") {
+                    Text("· 全新架构:多实例 + 版本隔离,告别单服务器时代", style = bodySmall)
+                    Text("· 环境部署零下载:proot + Ubuntu 24.04 内置,开箱即用", style = bodySmall)
+                    Text("· 手写 tar 解压引擎,带实时进度与速度显示", style = bodySmall)
+                    Text("· 文件导入走系统文件选择器,ELF 架构自动校验", style = bodySmall)
+                }
+
+                Spacer(Modifier.height(14.dp))
+                AboutSection("技术栈") {
+                    Text("Kotlin · Jetpack Compose · Material 3 · proot · Ubuntu 24.04", style = bodySmall)
+                }
+
+                Spacer(Modifier.height(14.dp))
+                AboutSection("开源许可") {
+                    Text("本项目基于 MIT License 开源。", style = bodySmall)
+                    Text("proot © Cédric VINCENT / STMicroelectronics, GPL v2", style = bodySmall)
+                    Text("Ubuntu base © Canonical Ltd.", style = bodySmall)
+                }
+
+                Spacer(Modifier.height(14.dp))
+                AboutSection("致谢") {
+                    Text("项目参考与灵感:", style = bodySmall)
+                    Text("· FCL (Fold Craft Launcher) —— Android 端 MC 启动器先驱", style = bodySmall)
+                    Text("· HMCL (Hello Minecraft! Launcher) —— 多版本/多加载器管理范式", style = bodySmall)
+                    Text("· PojavLauncher —— proot 环境方案", style = bodySmall)
+                    Text("· PaperMC / PurpurMC —— 高性能服务端", style = bodySmall)
+                    Text("· Modrinth —— 模组/插件搜索 API", style = bodySmall)
+                    Text("· Adoptium (Eclipse Temurin) —— JDK 发行", style = bodySmall)
+                }
+
+                Spacer(Modifier.height(14.dp))
+                AboutSection("相关链接") {
+                    Text("GitHub: github.com/0Sakura721/Kaze-SLauncher", style = bodySmall)
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text("© 2026 Kaze SLauncher Team", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+    )
+}
+
+private val bodySmall: androidx.compose.ui.text.TextStyle
+    @Composable get() = MaterialTheme.typography.bodySmall
+
+@Composable
+private fun ColumnScope.AboutSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(4.dp))
+    content()
+}
+
+@Composable
+private fun FeatureLine(name: String, desc: String) {
+    Row {
+        Text("· ", style = bodySmall)
+        Column {
+            Text("$name — $desc", style = bodySmall)
         }
     }
 }
