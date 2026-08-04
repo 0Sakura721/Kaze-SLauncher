@@ -71,24 +71,43 @@ fun EnvSetupScreen(onSetupComplete: () -> Unit) {
             )
             Spacer(Modifier.height(20.dp))
 
-            // 部署项进度
+            // 部署项进度(带进度条与数据)
             items.forEach { item ->
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (item.done) {
-                        Icon(Icons.Filled.Check, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(18.dp))
-                    } else {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (item.done) {
+                            Icon(Icons.Filled.Check, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(18.dp))
+                        } else {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(item.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (item.done) "完成"
+                            else if (item.phase.isNotBlank()) item.phase
+                            else "等待中",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (item.done) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.weight(1f))
+                        // 数据:已处理 / 总大小 / 速度
+                        if (item.processedBytes > 0 || item.totalBytes > 0) {
+                            Text(
+                                "${formatSize(item.processedBytes)} / ${formatSize(item.totalBytes)}" +
+                                    if (item.speedBytes > 0) " · ${formatSize(item.speedBytes)}/s" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                    Spacer(Modifier.width(10.dp))
-                    Text(item.name, style = MaterialTheme.typography.bodyMedium)
-                    Spacer(Modifier.width(8.dp))
-                    Text(item.desc, style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (!item.done && item.totalBytes > 0) {
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { item.progress.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth().height(6.dp)
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(16.dp))

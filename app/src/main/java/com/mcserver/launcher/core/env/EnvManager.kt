@@ -9,7 +9,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.util.zip.GZIPInputStream
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
@@ -36,7 +38,17 @@ object EnvManager {
     val log: StateFlow<List<String>> = _log.asStateFlow()
 
     /** 单个部署项(进度列表) */
-    data class SetupItem(val id: String, val name: String, val desc: String, val done: Boolean = false)
+    data class SetupItem(
+        val id: String,
+        val name: String,
+        val desc: String,
+        val done: Boolean = false,
+        val phase: String = "",               // 等待中/提取中/下载中/解压中/安装中
+        val progress: Float = 0f,             // 0..1
+        val processedBytes: Long = 0,         // 已处理字节(下载或解压)
+        val totalBytes: Long = 0,             // 总字节
+        val speedBytes: Long = 0              // 处理速度(字节/秒)
+    )
     private val _items = MutableStateFlow<List<SetupItem>>(emptyList())
     val items: StateFlow<List<SetupItem>> = _items.asStateFlow()
 
@@ -107,19 +119,127 @@ object EnvManager {
         return false
     }
 
-    /** tar 解压,自动识别 gzip */
-    private fun extractTar(tarFile: File, destDir: File) {
+    /** 更新单个部署项 */
+    private fun updateItem(itemId: String, transform: (SetupItem) -> SetupItem) {
+        _items.value = _items.value.map { if (it.id == itemId) transform(it) else it }
+    }
+
+    private fun updateItem(itemId: String, newItem: SetupItem) {
+        _items.value = _items.value.map { if (it.id == itemId) newItem else it }
+    }
+
+    // ── tar 解压(手写解析,带进度/速度回调) ──
+    /**
+     * 解压 tar/tar.gz 到 destDir,实时上报进度与速度。
+     * 手写 tar 格式解析(512 字节头 + 数据),不依赖第三方库。
+     * @param onProgress (processedBytes, totalBytes, speedBytesPerSec)
+     */
+    private fun extractTarWithProgress(
+        tarFile: File,
+        destDir: File,
+        onProgress: (Long, Long, Long) -> Unit
+    ) {
         destDir.mkdirs()
+        val total = tarFile.length()
+        val startTime = System.currentTimeMillis()
+        var processed = 0L
+        var lastUpdate = startTime
+        var lastBytes = 0L
+
+        fun report() {
+            val now = System.currentTimeMillis()
+            if (now - lastUpdate >= 150) {
+                val speed = (processed - lastBytes) * 1000 / (now - lastUpdate).coerceAtLeast(1)
+                onProgress(processed, total, speed)
+                lastUpdate = now
+                lastBytes = processed
+            }
+        }
+
         val isGzip = try {
             RandomAccessFile(tarFile, "r").use { it.readUnsignedByte() == 0x1f && it.readUnsignedByte() == 0x8b }
         } catch (_: Exception) { false }
-        val proc = ProcessBuilder()
-            .command("tar", if (isGzip) "xzf" else "xf", tarFile.absolutePath, "-C", destDir.absolutePath)
-            .redirectErrorStream(true).start()
-        val exit = proc.waitFor()
-        if (exit != 0) {
-            throw RuntimeException("解压失败($exit): ${proc.inputStream.bufferedReader().readText().take(200)}")
+
+        // 输入流:gzip 则解包
+        val fileStream = FileInputStream(tarFile)
+        val rawInput = if (isGzip) GZIPInputStream(fileStream) else fileStream
+
+        // tar 头解析
+        val header = ByteArray(512)
+        fun readHeader(): Boolean {
+            var read = 0
+            while (read < 512) {
+                val n = rawInput.read(header, read, 512 - read)
+                if (n == -1) return false
+                read += n
+            }
+            processed += 512
+            // 全零块 = tar 结束
+            return header.any { it != 0.toByte() }
         }
+        fun octal(bytes: ByteArray): Long {
+            var v = 0L
+            for (b in bytes) {
+                if (b.toInt() in '0'.code..'7'.code) v = v * 8 + (b - '0'.code)
+            }
+            return v
+        }
+        fun name(): String {
+            var end = 0
+            while (end < 100 && header[end] != 0.toByte()) end++
+            return String(header, 0, end, Charsets.UTF_8)
+        }
+
+        try {
+            val buffer = ByteArray(64 * 1024)
+            while (readHeader()) {
+                val size = octal(header.copyOfRange(124, 136))
+                val type = header[156].toInt().toChar()
+                val path = name()
+                val target = File(destDir, path)
+                when {
+                    // 目录条目:tar 目录标记,或以 / 结尾,或根路径(./、空名)
+                    type == '5' || path.endsWith("/") || path.isBlank() || path == "." || path == "./" -> {
+                        if (path.isNotBlank() && path != "." && path != "./") target.mkdirs()
+                    }
+                    else -> {
+                        if (path.contains("/")) target.parentFile?.mkdirs()
+                        // 硬链接/符号链接等特殊类型:跳过内容
+                        val dataLen = if (type == '0' || type == '\u0000') size else 0
+                        var remaining = dataLen
+                        FileOutputStream(target).use { out ->
+                            while (remaining > 0) {
+                                val chunk = rawInput.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                                if (chunk == -1) break
+                                out.write(buffer, 0, chunk)
+                                remaining -= chunk
+                            }
+                        }
+                        // 可执行位
+                        if (path.contains("bin/") || path.contains("libexec/")) target.setExecutable(true)
+                    }
+                }
+                // 跳过数据后补齐到 512 对齐
+                val padded = (size + 511) / 512 * 512
+                var skip = padded - size
+                while (skip > 0) {
+                    val n = rawInput.read(buffer, 0, minOf(buffer.size.toLong(), skip).toInt())
+                    if (n == -1) break
+                    skip -= n
+                }
+                processed += padded
+                report()
+            }
+            onProgress(total, total, 0)
+        } finally {
+            rawInput.close()
+            fileStream.close()
+        }
+    }
+
+    /** 简单解压(无进度,内部调用带进度版本) */
+    private fun extractTar(tarFile: File, destDir: File) {
+        extractTarWithProgress(tarFile, destDir) { _, _, _ -> }
     }
 
     // ── proot 命令 ──
@@ -189,12 +309,16 @@ object EnvManager {
         try {
             // 阶段 1:proot
             log(">>> 阶段 1/$totalSteps:获取 proot 运行时($archName)")
-            _items.value = listOf(SetupItem("proot", "proot 运行时", "内置,解压即用"))
+            _items.value = listOf(SetupItem("proot", "proot 运行时", "内置,解压即用", phase = "提取中"))
             val prootTarball = File(linuxDir, "proot.tar.gz")
             if (!prootBinary.exists() || !prootLoader.exists()) {
                 if (extractBundledAsset("proot-$archName.tar.gz", prootTarball)) {
-                    extractTar(prootTarball, prootHomeDir)
+                    updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", phase = "解压中"))
+                    extractTarWithProgress(prootTarball, prootHomeDir) { processed, total, speed ->
+                        updateItem("proot") { it.copy(phase = "解压中", progress = if (total > 0) processed.toFloat() / total else 0f, processedBytes = processed, totalBytes = total, speedBytes = speed) }
+                    }
                     prootTarball.delete()
+                    updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", done = true))
                     log("  ✓ 内置提取成功")
                 } else {
                     // 网络回退:官方 proot 直链
@@ -202,12 +326,20 @@ object EnvManager {
                         "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-aarch64.tar.gz"
                     else "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-armhf.tar.gz"
                     log("  内置不可用,网络下载...")
-                    downloadToFile(url, prootTarball)
+                    updateItem("proot", SetupItem("proot", "proot 运行时", "网络下载,约 1 MB", phase = "下载中"))
+                    downloadToFile(url, prootTarball) { done, total ->
+                        updateItem("proot") { it.copy(phase = "下载中", progress = if (total > 0) done.toFloat() / total else 0f, processedBytes = done, totalBytes = total) }
+                    }
+                    updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", phase = "解压中"))
                     extractTar(prootTarball, prootHomeDir)
                     prootTarball.delete()
+                    updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", done = true))
                     log("  ✓ 网络下载成功")
                 }
-            } else log("  ✓ 已就绪,跳过")
+            } else {
+                updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", done = true))
+                log("  ✓ 已就绪,跳过")
+            }
             prootBinary.setExecutable(true)
             prootLoader.setExecutable(true)
             File(prootHomeDir, "libexec/loader32").takeIf { it.exists() }?.setExecutable(true)
@@ -228,17 +360,31 @@ object EnvManager {
                     downloadToFile("https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-$ubuntuArch.tar.gz", rootfsTarball)
                 }
                 log("  解压 rootfs(~200MB,请耐心等待)...")
-                extractTar(rootfsTarball, rootfsDir)
+                updateItem("rootfs", SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用", phase = "解压中", totalBytes = rootfsTarball.length()))
+                extractTarWithProgress(rootfsTarball, rootfsDir) { processed, total, speed ->
+                    updateItem("rootfs") {
+                        it.copy(
+                            phase = "解压中",
+                            progress = if (total > 0) processed.toFloat() / total else 0f,
+                            processedBytes = processed,
+                            totalBytes = total,
+                            speedBytes = speed
+                        )
+                    }
+                }
                 rootfsTarball.delete()
+                updateItem("rootfs", SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用", done = true))
                 log("  ✓ rootfs 就绪")
             } else log("  ✓ 已就绪,跳过")
 
             // 阶段 3:apt 初始化
             log(">>> 阶段 3/$totalSteps:初始化 apt 包管理器")
             _items.value = _items.value.map { if (it.id == "rootfs") it.copy(done = true) else it }
+            _items.value = _items.value + SetupItem("apt", "apt 包管理器", "初始化中", phase = "初始化中")
             setupAptSources()
             executeCommand("apt-get update -qq")
                 .onFailure { log("  ⚠ apt update 失败:${it.message}") }
+            updateItem("apt", SetupItem("apt", "apt 包管理器", "已就绪", done = true))
             log("  ✓ apt 就绪")
 
             // 阶段 4+:JDK(可选)
@@ -246,10 +392,12 @@ object EnvManager {
                 val step = index + 4
                 _items.value = _items.value + SetupItem("jdk$version", "Java $version", "需下载,按需安装")
                 if (isJdkInstalled(version)) {
+                    updateItem("jdk$version", SetupItem("jdk$version", "Java $version", "需下载,按需安装", done = true))
                     log(">>> 阶段 $step/$totalSteps:Java $version 已安装,跳过")
                     continue
                 }
                 log(">>> 阶段 $step/$totalSteps:在线安装 Java $version(openjdk-$version-jdk-headless)")
+                updateItem("jdk$version", SetupItem("jdk$version", "Java $version", "需下载,按需安装", phase = "安装中"))
                 val result = executeCommand(
                     "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-$version-jdk-headless",
                     timeoutMs = 900_000
@@ -257,6 +405,7 @@ object EnvManager {
                 if (result.isFailure) {
                     log("  ⚠ Java $version 安装失败:${result.exceptionOrNull()?.message}")
                 } else {
+                    updateItem("jdk$version", SetupItem("jdk$version", "Java $version", "需下载,按需安装", done = true))
                     log("  ✓ Java $version 安装完成")
                 }
             }

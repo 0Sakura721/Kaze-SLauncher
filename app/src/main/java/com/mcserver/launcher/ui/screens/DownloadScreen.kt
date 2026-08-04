@@ -68,7 +68,8 @@ private fun DownloadTaskCard(task: DownloadTask) {
                     Text(task.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                     Text(
                         statusText(task) + if (task.totalBytes > 0)
-                            " · ${formatSize(task.downloadedBytes)} / ${formatSize(task.totalBytes)}" else "",
+                            " · 已下载 ${formatSize(task.downloadedBytes)} / 共 ${formatSize(task.totalBytes)}" +
+                                " (${(task.progress * 100).toInt()}%)" else "",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
