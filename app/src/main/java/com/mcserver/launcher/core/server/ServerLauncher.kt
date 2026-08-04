@@ -50,6 +50,7 @@ class ServerLauncher(private val context: Context) {
     private val isLaunching = AtomicBoolean(false)
     private var currentInstance: ServerInstance? = null
     private var manualStop = false
+    private var launchedAtMs = 0L
 
     val isRunning: Boolean get() = process?.isAlive == true
 
@@ -66,6 +67,7 @@ class ServerLauncher(private val context: Context) {
         currentInstance = instance
         manualStop = false
         isLaunching.set(true)
+        launchedAtMs = android.os.SystemClock.elapsedRealtime()
         _status.value = InstanceStatus.STARTING
 
         return kotlinx.coroutines.withContext(Dispatchers.IO) {
@@ -197,13 +199,15 @@ class ServerLauncher(private val context: Context) {
     private fun emit(line: String) { _console.tryEmit(line) }
 
     private fun handleExit() {
+        Logger.w("handleExit: manualStop=$manualStop launchedAtMs=$launchedAtMs now=${android.os.SystemClock.elapsedRealtime()}")
         if (manualStop) {
             finalizeStop()
             return
         }
-        // 自动重启
+        // 自动重启(仅运行稳定后异常退出才重启;启动 30 秒内的退出 = 启动失败,直接提示)
         val instance = currentInstance ?: run { finalizeStop(); return }
-        if (instance.config.autoRestart && restartCount < instance.config.maxRestarts) {
+        val earlyExit = launchedAtMs > 0 && android.os.SystemClock.elapsedRealtime() - launchedAtMs < 30_000
+        if (!earlyExit && instance.config.autoRestart && restartCount < instance.config.maxRestarts) {
             restartCount++
             emit("> 服务器异常退出,第 $restartCount 次自动重启")
             _status.value = InstanceStatus.STARTING
@@ -213,6 +217,16 @@ class ServerLauncher(private val context: Context) {
             }
         } else {
             emit("> 服务器已退出")
+            if (earlyExit) {
+                Logger.w("earlyExit -> Toast 启动失败")
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        context,
+                        "启动失败:进程异常退出(环境或配置问题),请查看控制台日志",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
             finalizeStop()
         }
     }
