@@ -34,10 +34,11 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val instances by InstanceStore.instances.collectAsState()
     val envReady = EnvManager.isEnvironmentReady()
     var showNew by remember { mutableStateOf(false) }
-    var showConsole by remember { mutableStateOf(false) }
+    var selectedInstance by remember { mutableStateOf<ServerInstance?>(null) }
 
-    if (showConsole) {
-        ConsoleScreen(onBack = { showConsole = false })
+    val current = selectedInstance
+    if (current != null) {
+        InstanceDetailScreen(instance = current, onBack = { selectedInstance = null })
         return
     }
 
@@ -90,7 +91,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(instances, key = { it.id }) { instance ->
-                        InstanceCard(instance, onClick = { showConsole = true }, onStart = {
+                        InstanceCard(instance, onClick = { selectedInstance = instance }, onStart = {
                             scope.launch {
                                 val result = com.mcserver.launcher.core.server.ServerManager.start(instance)
                                 if (result.isFailure) {
