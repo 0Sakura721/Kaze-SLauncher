@@ -68,6 +68,9 @@ class ProotServerManager {
     private var rconClient: RconClient? = null
     private var rconReady = false
 
+    /** 自动生成的 RCON 密码，缓存以便写入 server.properties 与连接认证使用同一密码 */
+    private var generatedRconPassword: String? = null
+
     var onServerExited: (() -> Unit)? = null
 
     /** 在线玩家集合，使用 synchronized 保证线程安全 */
@@ -496,7 +499,9 @@ class ProotServerManager {
     private fun prepareServerProperties(dir: File, config: ServerConfig) {
         try {
             val props = File(dir, "server.properties")
-            val rconPwd = config.rconPassword.ifEmpty { RconClient.generatePassword() }
+            val rconPwd = config.rconPassword.ifEmpty {
+                generatedRconPassword ?: RconClient.generatePassword().also { generatedRconPassword = it }
+            }
             val desired = linkedMapOf(
                 "server-port" to config.serverPort.toString(),
                 "motd" to config.motd,
@@ -577,7 +582,9 @@ class ProotServerManager {
             rconReady = false
             return
         }
-        val pwd = config.rconPassword.ifEmpty { RconClient.generatePassword() }
+        val pwd = config.rconPassword.ifEmpty {
+            generatedRconPassword ?: RconClient.generatePassword().also { generatedRconPassword = it }
+        }
         rconClient = RconClient(port = config.rconPort, password = pwd)
         val coroutineScope = effectiveScope
         coroutineScope.launch {

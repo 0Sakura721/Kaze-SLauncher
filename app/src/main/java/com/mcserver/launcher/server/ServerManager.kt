@@ -296,7 +296,9 @@ class ServerManager private constructor(private val context: Context) {
     private fun canTransitionTo(newState: ServerState): Boolean {
         val currentState = _serverStatus.value.state
         return when (newState) {
-            ServerState.STARTING -> currentState == ServerState.STOPPED || currentState == ServerState.ERROR
+            // RUNNING → STARTING 允许：服务器崩溃后自动重启时，进程已退出但状态仍为 RUNNING
+            ServerState.STARTING -> currentState == ServerState.STOPPED || currentState == ServerState.ERROR ||
+                                    currentState == ServerState.RUNNING
             ServerState.RUNNING -> currentState == ServerState.STARTING
             ServerState.STOPPING -> currentState == ServerState.RUNNING
             ServerState.STOPPED -> currentState == ServerState.STARTING || 

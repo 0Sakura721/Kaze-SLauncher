@@ -320,9 +320,19 @@ object ScheduleManager {
                             val config = serverManager.currentConfig
                             serverManager.stopServer()
                             if (config != null) {
-                                delay(3000)
-                                server.notifyConsole("> [定时任务:${task.name}] 正在重新启动服务器...")
-                                serverManager.startServer(config)
+                                // 等待服务器进程完全退出：优雅停止（save + shutdown）通常需数秒，
+                                // 过早调用 startServer 会被其 running 守卫直接跳过，导致停服后不重启
+                                var waitedMs = 0L
+                                while (serverManager.isRunning && waitedMs < 60_000) {
+                                    delay(1000)
+                                    waitedMs += 1000
+                                }
+                                if (serverManager.isRunning) {
+                                    server.notifyConsole("> [定时任务:${task.name}] 重启失败：服务器 60 秒内未完全停止")
+                                } else {
+                                    server.notifyConsole("> [定时任务:${task.name}] 正在重新启动服务器...")
+                                    serverManager.startServer(config)
+                                }
                             } else {
                                 server.notifyConsole("> [定时任务:${task.name}] 重启失败：未找到服务器配置")
                             }

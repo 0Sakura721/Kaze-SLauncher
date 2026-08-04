@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.*
 import java.net.HttpURLConnection
 import java.net.URL
@@ -200,7 +201,10 @@ class JreManager(private val context: Context) {
             connection.connectTimeout = 10000; connection.readTimeout = 10000; connection.connect()
             val json = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
             connection.disconnect()
-            val arr = JSONArray(json)
+            // Adoptium /v3/info/available_releases 返回 JSON 对象:
+            // {"available_releases":[8,11,...],"available_lts_releases":[...],...}
+            val obj = JSONObject(json)
+            val arr = obj.getJSONArray("available_releases")
             val versions = mutableListOf<String>()
             for (i in 0 until arr.length()) versions.add(arr.getInt(i).toString())
             Result.success(versions.sortedByDescending { it.toInt() })

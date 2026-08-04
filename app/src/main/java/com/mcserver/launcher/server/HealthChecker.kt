@@ -303,39 +303,25 @@ object HealthChecker {
     private fun checkMemoryAllocation(config: ServerConfig): HealthCheck {
         val requested = config.allocatedMemoryMB
 
-        // 1) App 堆内存上限
-        val runtime = Runtime.getRuntime()
-        val heapMaxMB = (runtime.maxMemory() / (1024 * 1024)).toInt()
-
-        // 2) 设备物理总内存
+        // 设备物理总内存。服务器 JVM 运行在 proot 内的独立进程中，
+        // 其 -Xmx 分配占用的是设备物理内存，与 App 进程的 Java 堆上限无关。
         val deviceTotalMB = getDeviceTotalMemoryMB().toInt()
 
         return when {
             requested > deviceTotalMB -> HealthCheck(
                 "内存分配", false,
                 "请求内存 ${requested}MB 超过设备总内存 ${deviceTotalMB}MB",
-                detail = "App 堆内存上限约 ${heapMaxMB}MB，设备物理内存约 ${deviceTotalMB}MB。请将分配降至 ${deviceTotalMB}MB 以下。"
-            )
-            requested > heapMaxMB -> HealthCheck(
-                "内存分配", false,
-                "请求内存 ${requested}MB 超过应用堆内存上限 ${heapMaxMB}MB",
-                detail = "Android 给本应用分配的 Java 堆上限为 ${heapMaxMB}MB，设备物理内存为 ${deviceTotalMB}MB。请降低至 ${heapMaxMB}MB 以下，或在 AndroidManifest 中启用 largeHeap。"
+                detail = "请将分配降至 ${deviceTotalMB}MB 以下。"
             )
             requested > deviceTotalMB * 0.8 -> HealthCheck(
                 "内存分配", true,
-                "内存分配 ${requested}MB 偏高（设备 ${deviceTotalMB}MB / 堆上限 ${heapMaxMB}MB）",
+                "内存分配 ${requested}MB 偏高（设备总内存 ${deviceTotalMB}MB）",
                 Severity.WARNING,
                 detail = "建议分配不超过设备物理内存的 70%，避免影响系统稳定性。"
             )
-            requested > heapMaxMB * 0.8 -> HealthCheck(
-                "内存分配", true,
-                "内存分配 ${requested}MB 接近应用堆上限 ${heapMaxMB}MB",
-                Severity.WARNING,
-                detail = "建议预留 20% 堆内存给 JVM 元数据、JIT 和 Native 开销。"
-            )
             else -> HealthCheck(
                 "内存分配", true,
-                "内存分配 ${requested}MB 合理（堆上限 ${heapMaxMB}MB / 设备 ${deviceTotalMB}MB）",
+                "内存分配 ${requested}MB 合理（设备总内存 ${deviceTotalMB}MB）",
                 Severity.INFO
             )
         }
