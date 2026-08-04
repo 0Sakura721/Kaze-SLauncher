@@ -30,12 +30,12 @@ object PluginManager {
         return File(dir, sub).apply { mkdirs() }
     }
 
-    /** 列出已安装的插件/模组 */
+    /** 列出已安装的插件/模组(含禁用文件 .jar.disabled) */
     suspend fun list(instance: ServerInstance): List<InstalledAddon> = withContext(Dispatchers.IO) {
         addonDir(instance).listFiles()
-            ?.filter { it.isFile && it.name.endsWith(".jar") }
+            ?.filter { it.isFile && (it.name.endsWith(".jar") || it.name.endsWith(".jar.disabled")) }
             ?.sortedBy { it.name.lowercase() }
-            ?.map { InstalledAddon(it.name.removeSuffix(".jar"), it) } ?: emptyList()
+            ?.map { InstalledAddon(it.name.removeSuffix(".jar").removeSuffix(".disabled"), it) } ?: emptyList()
     }
 
     /** 删除插件/模组 */

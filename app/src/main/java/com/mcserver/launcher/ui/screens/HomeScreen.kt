@@ -38,7 +38,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 
     val current = selectedInstance
     if (current != null) {
-        InstanceDetailScreen(instance = current, onBack = { selectedInstance = null })
+        InstanceDetailScreen(instance = current, onBack = { selectedInstance = null }, modifier = modifier)
         return
     }
 

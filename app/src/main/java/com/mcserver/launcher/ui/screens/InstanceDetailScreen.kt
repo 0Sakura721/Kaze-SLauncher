@@ -41,13 +41,13 @@ import java.io.File
  * 实例详情:控制台(日志/命令)+ 插件模组管理(本地导入优先 + Modrinth 搜索)。
  */
 @Composable
-fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit) {
+fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(0) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -70,11 +70,14 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit) {
             Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("配置") })
             Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("世界") })
         }
-        when (tab) {
-            0 -> ConsoleTab()
-            1 -> AddonTab(instance)
-            2 -> ConfigTab(instance)
-            3 -> WorldTab(instance)
+        // 内容区固定高度(weight 1f),内部页面各自滚动
+        Box(Modifier.weight(1f)) {
+            when (tab) {
+                0 -> ConsoleTab()
+                1 -> AddonTab(instance)
+                2 -> ConfigTab(instance)
+                3 -> WorldTab(instance)
+            }
         }
     }
 
@@ -378,7 +381,9 @@ private fun ConfigTab(instance: ServerInstance) {
     var gamemode by remember { mutableStateOf(cfg.gamemode) }
     var difficulty by remember { mutableStateOf(cfg.difficulty) }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+    Column(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp)) {
+        item {
         Text("服务器配置(保存后重启生效)", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         Spacer(Modifier.height(12.dp))
 
@@ -424,22 +429,25 @@ private fun ConfigTab(instance: ServerInstance) {
             }
         }
 
-        Spacer(Modifier.height(20.dp))
-        Button(onClick = {
-            val newCfg = cfg.copy(
-                serverPort = port.toIntOrNull() ?: cfg.serverPort,
-                maxRamMB = maxRam.toIntOrNull()?.coerceAtLeast(512) ?: cfg.maxRamMB,
-                maxPlayers = maxPlayers.toIntOrNull() ?: cfg.maxPlayers,
-                motd = motd,
-                onlineMode = onlineMode,
-                whiteList = whiteList,
-                pvp = pvp,
-                gamemode = gamemode,
-                difficulty = difficulty
-            )
-            com.mcserver.launcher.core.server.InstanceStore.update(instance.copy(config = newCfg))
-            android.widget.Toast.makeText(context, "配置已保存,重启服务器后生效", android.widget.Toast.LENGTH_SHORT).show()
-        }, modifier = Modifier.fillMaxWidth()) { Text("保存配置") }
+        }
+    }
+
+    // 保存按钮固定在底部,不受滚动影响
+    Button(onClick = {
+        val newCfg = cfg.copy(
+            serverPort = port.toIntOrNull() ?: cfg.serverPort,
+            maxRamMB = maxRam.toIntOrNull()?.coerceAtLeast(512) ?: cfg.maxRamMB,
+            maxPlayers = maxPlayers.toIntOrNull() ?: cfg.maxPlayers,
+            motd = motd,
+            onlineMode = onlineMode,
+            whiteList = whiteList,
+            pvp = pvp,
+            gamemode = gamemode,
+            difficulty = difficulty
+        )
+        com.mcserver.launcher.core.server.InstanceStore.update(instance.copy(config = newCfg))
+        android.widget.Toast.makeText(context, "配置已保存,重启服务器后生效", android.widget.Toast.LENGTH_SHORT).show()
+    }, modifier = Modifier.fillMaxWidth().padding(16.dp)) { Text("保存配置") }
     }
 }
 
