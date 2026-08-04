@@ -16,6 +16,16 @@ data class ModrinthHit(
     val versionType: String
 )
 
+/** Modrinth 项目版本(下载前可选) */
+data class ModrinthVersion(
+    val id: String,
+    val name: String,
+    val versionNumber: String,
+    val fileName: String,
+    val url: String,
+    val datePublished: String
+)
+
 /**
  * Modrinth 模组/插件搜索(在线备选;默认引导本地导入)。
  * API 免费无需 key: https://docs.modrinth.com/api
@@ -58,6 +68,29 @@ object ModrinthApi {
                         title = o.optString("title", ""),
                         description = o.optString("description", ""),
                         versionType = o.optString("project_type", "")
+                    )
+                })
+            } catch (e: Exception) { Result.failure(e) }
+        }
+
+    /** 获取项目指定 MC 版本+加载器的可用版本列表(供用户选择下载) */
+    suspend fun fetchVersions(projectId: String, mcVersion: String, loader: String): Result<List<ModrinthVersion>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val url = "https://api.modrinth.com/v2/project/$projectId/version?game_versions=%5B%22$mcVersion%22%5D" +
+                    "&loaders=%5B%22$loader%22%5D"
+                val arr = JSONArray(httpGet(url))
+                Result.success((0 until arr.length()).map { i ->
+                    val o = arr.getJSONObject(i)
+                    val files = o.getJSONArray("files")
+                    val file = if (files.length() > 0) files.getJSONObject(0) else JSONObject()
+                    ModrinthVersion(
+                        id = o.optString("id", ""),
+                        name = o.optString("name", ""),
+                        versionNumber = o.optString("version_number", ""),
+                        fileName = file.optString("filename", ""),
+                        url = file.optString("url", ""),
+                        datePublished = o.optString("date_published", "").take(10)
                     )
                 })
             } catch (e: Exception) { Result.failure(e) }

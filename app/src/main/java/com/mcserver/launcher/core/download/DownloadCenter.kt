@@ -68,6 +68,11 @@ object DownloadCenter {
         cancelFlags.remove(id)
     }
 
+    /** 清空已完成/失败/已取消的历史记录 */
+    fun clearFinished() {
+        _tasks.value = _tasks.value.filter { it.status == DownloadStatus.PENDING || it.status == DownloadStatus.DOWNLOADING || it.status == DownloadStatus.PAUSED }
+    }
+
     private fun update(id: String, transform: (DownloadTask) -> DownloadTask) {
         _tasks.value = _tasks.value.map { if (it.id == id) transform(it) else it }
     }

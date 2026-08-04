@@ -1,7 +1,6 @@
 package com.mcserver.launcher.ui.screens
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -9,8 +8,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
@@ -26,21 +27,25 @@ import com.mcserver.launcher.core.server.InstanceStore
 import com.mcserver.launcher.core.server.PluginManager
 import com.mcserver.launcher.data.DownloadStatus
 import com.mcserver.launcher.data.DownloadTask
-import com.mcserver.launcher.ui.components.AddonManageDialog
-import kotlinx.coroutines.launch
+import com.mcserver.launcher.ui.components.AddonManageScreen
 
-/** 下载中心:全局任务队列 + 插件/模组管理入口 */
+/** 下载中心:全局任务队列(可删历史)+ 插件/模组管理(全屏页) */
 @Composable
 fun DownloadScreen(modifier: Modifier = Modifier) {
     val tasks by DownloadCenter.tasks.collectAsState()
     val instances by InstanceStore.instances.collectAsState()
     var manageInstance by remember { mutableStateOf<com.mcserver.launcher.data.ServerInstance?>(null) }
 
+    manageInstance?.let { inst ->
+        AddonManageScreen(instance = inst, onBack = { manageInstance = null }, modifier = modifier)
+        return
+    }
+
     Column(modifier) {
         Text("下载中心", style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
 
-        // ── 插件/模组管理入口(全局,免进详情页) ──
+        // ── 插件/模组管理入口(全局,进独立页面) ──
         if (instances.isNotEmpty()) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -56,7 +61,7 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
                         Text("插件/模组管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     }
                     Spacer(Modifier.height(6.dp))
-                    Text("选择实例后导入本地插件/模组(不耗流量)或在线搜索(Modrinth)",
+                    Text("选择实例:本地导入(不耗流量)、在线搜索(Modrinth,可选 MC 版本和加载器)",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.height(8.dp))
@@ -66,7 +71,7 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
                             color = MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier.fillMaxWidth()
                                 .padding(vertical = 3.dp)
-                                .clickableNoRipple { manageInstance = inst }
+                                .clickable { manageInstance = inst }
                         ) {
                             Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
@@ -80,6 +85,21 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // ── 下载历史 ──
+        if (tasks.isNotEmpty()) {
+            val doneCount = tasks.count { it.status in listOf(DownloadStatus.COMPLETED, DownloadStatus.FAILED, DownloadStatus.CANCELED) }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("下载历史(${tasks.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                if (doneCount > 0) {
+                    TextButton(onClick = { DownloadCenter.clearFinished() }) { Text("清空已完成($doneCount)") }
                 }
             }
         }
@@ -99,10 +119,6 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
             }
         }
     }
-
-    manageInstance?.let { inst ->
-        AddonManageDialog(instance = inst, onDismiss = { manageInstance = null })
-    }
 }
 
 /** 字节数格式化:KB/MB/GB */
@@ -111,16 +127,6 @@ fun formatSize(bytes: Long): String = when {
     bytes >= 1024L * 1024 -> String.format("%.1f MB", bytes / 1024.0 / 1024)
     bytes >= 1024L -> String.format("%.1f KB", bytes / 1024.0)
     else -> "$bytes B"
-}
-
-@Composable
-private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier {
-    val interactionSource = remember { MutableInteractionSource() }
-    return this.clickable(
-        interactionSource = interactionSource,
-        indication = null,
-        onClick = onClick
-    )
 }
 
 @Composable
@@ -139,6 +145,7 @@ private fun DownloadTaskCard(task: DownloadTask) {
                         tint = Color(0xFF4CAF50))
                     DownloadStatus.FAILED -> Icon(Icons.Filled.Error, null, Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.error)
+                    DownloadStatus.PENDING -> Icon(Icons.Filled.HourglassEmpty, null, Modifier.size(18.dp))
                     else -> {}
                 }
                 Spacer(Modifier.width(8.dp))
@@ -162,6 +169,13 @@ private fun DownloadTaskCard(task: DownloadTask) {
                 } else if (task.status == DownloadStatus.PAUSED) {
                     IconButton(onClick = { DownloadCenter.resume(task.id) }) {
                         Icon(Icons.Filled.PlayArrow, "继续", Modifier.size(18.dp))
+                    }
+                }
+                // 已完成/失败/取消:可删除历史
+                if (task.status in listOf(DownloadStatus.COMPLETED, DownloadStatus.FAILED, DownloadStatus.CANCELED)) {
+                    IconButton(onClick = { DownloadCenter.remove(task.id) }) {
+                        Icon(Icons.Filled.Delete, "删除记录", Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
