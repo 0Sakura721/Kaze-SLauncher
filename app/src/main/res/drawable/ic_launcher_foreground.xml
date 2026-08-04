@@ -4,41 +4,5 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-
-    <!-- 草方块底色 -->
-    <path
-        android:fillColor="#4CAF50"
-        android:pathData="M24,54 L84,54 L84,84 L24,84 Z" />
-
-    <!-- 草方块天空 -->
-    <path
-        android:fillColor="#8BC34A"
-        android:pathData="M24,24 L84,24 L84,54 L24,54 Z" />
-
-    <!-- 泥土纹路 -->
-    <path
-        android:fillColor="#795548"
-        android:strokeWidth="0"
-        android:pathData="M24,54 L54,54 L54,84 L24,84 Z" />
-    <path
-        android:fillColor="#6D4C41"
-        android:strokeWidth="0"
-        android:pathData="M54,54 L84,54 L84,84 L54,84 Z" />
-
-    <!-- Java 咖啡杯图标 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46,39 L58,39 C58,39 58,41 58,42 C58,43 56,45 54,45 C52,45 50,43 49,42 C48,41 46,39 46,39 Z M47,40 L57,40 L57,42 C57,42 55,44 53,44 C51,44 50,42 50,41 Z" />
-
-    <!-- 蒸汽线条 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:strokeWidth="1.5"
-        android:strokeColor="#FFFFFF"
-        android:pathData="M45,36 Q47,32 49,36" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:strokeWidth="1.5"
-        android:strokeColor="#FFFFFF"
-        android:pathData="M51,34 Q53,30 55,34" />
+    <!-- 图标内容已包含在背景图层中，前景留空 -->
 </vector>

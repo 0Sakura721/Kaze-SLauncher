@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#1B5E20</color>
+    <!-- 图标背景已改用 @drawable/ic_launcher_background 位图，此颜色不再使用 -->
 </resources>
