@@ -84,6 +84,7 @@ object EnvManager {
             if (sh.isDirectory && dash.isFile) {
                 sh.deleteRecursively()
                 dash.copyTo(sh, overwrite = true)
+                sh.setExecutable(true, false)
             }
         } catch (_: Exception) { }
     }
@@ -94,10 +95,14 @@ object EnvManager {
     val javaHomeDir: File get() = File(rootfsDir, "usr/lib/jvm")
     private val serverBaseDir: File get() = File(appContext.getExternalFilesDir(null), "instances").apply { mkdirs() }
 
-    private val isAarch64: Boolean
-        get() = Build.SUPPORTED_ABIS.any { it.contains("arm64-v8a", ignoreCase = true) || it.contains("aarch64", ignoreCase = true) }
-    private val archName: String get() = if (isAarch64) "aarch64" else "armhf"
-    private val jdkArchSuffix: String get() = if (isAarch64) "arm64" else "armhf"
+    /** 架构判定:优先原生 64 位 ABI。x86_64 设备(MuMu 等模拟器)用 amd64,
+     *  arm64 设备(真机)用 aarch64,其余回退 armhf。不再依赖 ARM 翻译层。 */
+    private val primaryAbi: String
+        get() = Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: (Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a")
+    private val isAarch64: Boolean get() = primaryAbi.contains("arm64") || primaryAbi.contains("aarch64")
+    private val isX8664: Boolean get() = primaryAbi.contains("x86_64")
+    private val archName: String get() = if (isX8664) "x86_64" else if (isAarch64) "aarch64" else "armhf"
+    private val jdkArchSuffix: String get() = if (isX8664) "amd64" else if (isAarch64) "arm64" else "armhf"
 
     fun init(context: Context) {
         if (::appContext.isInitialized) return
@@ -342,6 +347,9 @@ object EnvManager {
             args.add("-b"); args.add("${File(rootfsDir, "usr/bin").absolutePath}:/bin")
             args.add("-b"); args.add("${File(rootfsDir, "usr/lib").absolutePath}:/lib")
             args.add("-b"); args.add("${File(rootfsDir, "usr/sbin").absolutePath}:/sbin")
+            if (File(rootfsDir, "usr/lib64").exists()) {
+                args.add("-b"); args.add("${File(rootfsDir, "usr/lib64").absolutePath}:/lib64")
+            }
         }
         bindExtra.forEach { (host, guest) ->
             args.add("-b")
@@ -419,9 +427,11 @@ object EnvManager {
                     fixProotSonameLinks()
                 } else {
                     // 网络回退:官方 proot 直链
-                    val url = if (isAarch64)
-                        "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-aarch64.tar.gz"
-                    else "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-armhf.tar.gz"
+                    val url = when {
+                        isX8664 -> "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-x86_64.tar.gz"
+                        isAarch64 -> "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-aarch64.tar.gz"
+                        else -> "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-armhf.tar.gz"
+                    }
                     log("  内置不可用,网络下载...")
                     updateItem("proot", SetupItem("proot", "proot 运行时", "网络下载,约 1 MB", phase = "下载中"))
                     downloadToFile(url, prootTarball) { done, total ->
@@ -447,7 +457,7 @@ object EnvManager {
                 SetupItem("proot", "proot 运行时", "内置,解压即用", done = true),
                 SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用")
             )
-            val ubuntuArch = if (isAarch64) "arm64" else "armhf"
+            val ubuntuArch = if (isX8664) "amd64" else if (isAarch64) "arm64" else "armhf"
             val rootfsTarball = File(linuxDir, "rootfs.tar.gz")
             if (!File(rootfsDir, "usr/bin/dash").exists()) {
                 if (extractBundledAsset("ubuntu-base-24.04-$ubuntuArch.tar.gz", rootfsTarball)) {
@@ -531,7 +541,6 @@ object EnvManager {
     private fun setupAptSources() {
         val sourceFile = File(rootfsDir, "etc/apt/sources.list.d/ubuntu.sources")
         if (!sourceFile.exists()) {
-            val arch = if (isAarch64) "arm64" else "armhf"
             sourceFile.parentFile?.mkdirs()
             sourceFile.writeText(
                 "Types: deb\n" +

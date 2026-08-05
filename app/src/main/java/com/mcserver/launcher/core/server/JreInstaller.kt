@@ -43,7 +43,20 @@ object JreInstaller {
     private fun jreDirFor(version: String): File = File(appContext.filesDir, "java_$version")
 
     private val isAarch64: Boolean
-        get() = android.os.Build.SUPPORTED_ABIS.any { it.contains("arm64-v8a") || it.contains("aarch64") }
+        get() {
+            val primary = android.os.Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: (android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a")
+            return primary.contains("arm64") || primary.contains("aarch64")
+        }
+    private val isX8664: Boolean
+        get() = (android.os.Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: "").contains("x86_64")
+
+    /** Adoptium 架构名:arm64 → aarch64;x86_64 → x64;armhf → arm */
+    private val adoptiumArch: String
+        get() = when {
+            isX8664 -> "x64"
+            isAarch64 -> "aarch64"
+            else -> "arm"
+        }
 
     /** App 私有目录中已安装的版本 */
     fun installedLocalVersions(): List<String> =
@@ -56,20 +69,18 @@ object JreInstaller {
         _busy.value = version
         _message.value = "准备下载 Java $version..."
         try {
-            // Adoptium 架构:arm64 → aarch64;其余(armhf rootfs)→ arm 32 位(仅 Java 8/11)
-            val arch = if (isAarch64) {
-                "aarch64"
-            } else {
+            // Adoptium 架构按设备原生 ABI
+            val arch = adoptiumArch
+            if (arch == "arm") {
                 val v = version.toIntOrNull() ?: 0
                 if (v > 11) {
                     _message.value = "当前设备为 32 位 ARM 架构,仅支持安装 Java 8/11(Adoptium 无 17/21 的 32 位构建);请使用 arm64 设备"
                     return@withContext Result.failure(RuntimeException("32 位 ARM 不支持 Java $version"))
                 }
-                "arm"
             }
             val official = "https://api.adoptium.net/v3/binary/latest/$version/ga/linux/$arch/$pkg/hotspot/normal/eclipse"
             // 阿里云镜像备选(Adoptium 二进制镜像)
-            val aliyunArch = if (arch == "aarch64") "aarch64" else "arm"
+            val aliyunArch = adoptiumArch
             val aliyun = "https://mirrors.aliyun.com/adoptium/$version/$pkg/$aliyunArch/linux/${version}u-latest_${pkg}_linux-${aliyunArch}_bin.tar.gz"
             val partFile = File(appContext.cacheDir, "java_${version}_$pkg.partial")
             val tarFile = File(appContext.cacheDir, "java_${version}_$pkg.tar.gz")
@@ -137,7 +148,7 @@ object JreInstaller {
         val dir = jreDirFor(version)
         if (dir.exists()) dir.deleteRecursively()
         // 同时移除 rootfs 中的副本
-        val suffix = if (isAarch64) "arm64" else "armhf"
+        val suffix = if (isX8664) "amd64" else if (isAarch64) "arm64" else "armhf"
         val rootfsJdk = File(EnvManager.javaHomeDir, "java-$version-openjdk-$suffix")
         if (rootfsJdk.exists()) rootfsJdk.deleteRecursively()
         _message.value = "已删除 Java $version"
@@ -173,7 +184,7 @@ object JreInstaller {
         try {
             // ELF 架构校验:导入的 JDK 必须与 rootfs 架构一致
             val elfArch = detectElfArch(javaBin)
-            val expected = if (isAarch64) "aarch64" else "arm"
+            val expected = if (isX8664) "x86_64" else if (isAarch64) "aarch64" else "arm"
             if (elfArch != null && elfArch != expected) {
                 _message.value = "JDK 架构($elfArch)与设备($expected)不匹配,无法用于服务器"
                 return@withContext Result.failure(RuntimeException("架构不匹配: $elfArch != $expected"))
