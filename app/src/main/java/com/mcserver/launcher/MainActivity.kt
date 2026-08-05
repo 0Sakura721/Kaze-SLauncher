@@ -116,23 +116,11 @@ class MainActivity : ComponentActivity() {
                         painter = painterResource(com.mcserver.launcher.R.drawable.ic_launcher_background),
                         contentDescription = null,
                         modifier = Modifier
-                            .size(120.dp)
+                            .size(140.dp)
                             .graphicsLayer {
                                 scaleX = scale
                                 scaleY = scale
                             }
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "Kaze SLauncher",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "Minecraft 服务器启动器",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
