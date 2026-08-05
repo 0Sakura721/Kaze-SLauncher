@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import com.mcserver.launcher.ui.screens.DownloadScreen
 import com.mcserver.launcher.ui.screens.HomeScreen
 import com.mcserver.launcher.ui.screens.SettingsScreen
+import com.mcserver.launcher.ui.components.PageTransition
 
 private enum class Tab(val label: String, val icon: ImageVector) {
     HOME("首页", Icons.Filled.Home),
@@ -47,10 +48,12 @@ fun MainApp() {
             }
         }
     ) { padding ->
-        when (tab) {
-            Tab.HOME -> HomeScreen(Modifier.padding(padding))
-            Tab.DOWNLOADS -> DownloadScreen(Modifier.padding(padding))
-            Tab.SETTINGS -> SettingsScreen(Modifier.padding(padding))
+        PageTransition(tab, Modifier.padding(padding)) { t ->
+            when (t) {
+                Tab.HOME -> HomeScreen()
+                Tab.DOWNLOADS -> DownloadScreen()
+                Tab.SETTINGS -> SettingsScreen()
+            }
         }
     }
 }

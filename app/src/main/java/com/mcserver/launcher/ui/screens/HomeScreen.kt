@@ -1,6 +1,7 @@
 package com.mcserver.launcher.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +20,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import android.widget.Toast
+import com.mcserver.launcher.ui.components.PageTransition
+import com.mcserver.launcher.ui.components.pressScale
 import com.mcserver.launcher.core.env.EnvManager
 import com.mcserver.launcher.core.server.InstanceStore
 import com.mcserver.launcher.data.InstanceStatus
@@ -37,20 +40,45 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     var selectedInstance by remember { mutableStateOf<ServerInstance?>(null) }
 
     val current = selectedInstance
-    if (current != null) {
-        InstanceDetailScreen(instance = current, onBack = { selectedInstance = null }, modifier = modifier)
-        return
+    val navTarget = when {
+        current != null -> 1
+        showNew -> 2
+        else -> 0
     }
 
-    if (showNew) {
-        NewInstanceScreen(onDone = { showNew = false })
-        return
+    PageTransition(navTarget, modifier) { target ->
+        when (target) {
+            1 -> InstanceDetailScreen(instance = current!!, onBack = { selectedInstance = null })
+            2 -> NewInstanceScreen(onDone = { showNew = false })
+            else -> HomeContent(
+                instances = instances,
+                envReady = envReady,
+                onNew = { showNew = true },
+                onOpen = { selectedInstance = it },
+                onStart = { scope.launch {
+                    val result = com.mcserver.launcher.core.server.ServerManager.start(it)
+                    if (result.isFailure) {
+                        Toast.makeText(context, result.exceptionOrNull()?.message ?: "启动失败", Toast.LENGTH_LONG).show()
+                    }
+                } },
+                onStop = { scope.launch { com.mcserver.launcher.core.server.ServerManager.stop() } }
+            )
+        }
     }
+}
 
+@Composable
+private fun HomeContent(
+    instances: List<ServerInstance>,
+    envReady: Boolean,
+    onNew: () -> Unit,
+    onOpen: (ServerInstance) -> Unit,
+    onStart: (ServerInstance) -> Unit,
+    onStop: (ServerInstance) -> Unit
+) {
     Scaffold(
-        modifier = modifier,
         floatingActionButton = {
-            FloatingActionButton(onClick = { showNew = true }) {
+            FloatingActionButton(onClick = onNew) {
                 Icon(Icons.Filled.Add, "新建服务端")
             }
         }
@@ -91,16 +119,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(instances, key = { it.id }) { instance ->
-                        InstanceCard(instance, onClick = { selectedInstance = instance }, onStart = {
-                            scope.launch {
-                                val result = com.mcserver.launcher.core.server.ServerManager.start(instance)
-                                if (result.isFailure) {
-                                    Toast.makeText(context, result.exceptionOrNull()?.message ?: "启动失败", Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }, onStop = {
-                            scope.launch { com.mcserver.launcher.core.server.ServerManager.stop() }
-                        })
+                        InstanceCard(
+                            instance,
+                            onClick = { onOpen(instance) },
+                            onStart = { onStart(instance) },
+                            onStop = { onStop(instance) }
+                        )
                     }
                 }
             }
@@ -112,6 +136,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onStart: () -> Unit, onStop: () -> Unit) {
     val status by com.mcserver.launcher.core.server.ServerManager.status.collectAsState()
     val running = com.mcserver.launcher.core.server.ServerManager.isRunningFor(instance.id)
+    val interaction = remember { MutableInteractionSource() }
 
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -119,7 +144,8 @@ private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onStart:
         tonalElevation = 2.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .pressScale(interaction)
+            .clickable(interactionSource = interaction, indication = ripple(), onClick = onClick)
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
