@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.core.download.CoreSources
 import com.mcserver.launcher.core.download.DownloadCenter
+import com.mcserver.launcher.ui.components.PageTransition
 import com.mcserver.launcher.ui.components.pressScale
 import com.mcserver.launcher.ui.components.pressSource
 import com.mcserver.launcher.core.server.InstanceStore
@@ -102,8 +103,9 @@ fun NewInstanceScreen(onDone: () -> Unit) {
         }
         Spacer(Modifier.height(16.dp))
 
-        when (step) {
-            1 -> {
+        PageTransition(step) { s ->
+            when (s) {
+                1 -> {
                 // 本地导入优先入口(不消耗流量)
                 val (pressImport, srcImport) = pressSource()
                 Button(
@@ -238,6 +240,7 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                         }
                     }
                 }
+            }
             }
         }
         if (creating) {

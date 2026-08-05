@@ -2,6 +2,11 @@ package com.mcserver.launcher.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -93,11 +98,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    if (showEnvSetup) {
-        EnvSetupScreen(onSetupComplete = { showEnvSetup = false })
-        return
-    }
-
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier
             .fillMaxSize()
@@ -269,8 +270,24 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    if (showAbout) {
-        AboutScreen(onBack = { showAbout = false })
+    AnimatedVisibility(
+        visible = showEnvSetup,
+        enter = slideInHorizontally { it } + fadeIn(),
+        exit = slideOutHorizontally { it } + fadeOut()
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            EnvSetupScreen(onSetupComplete = { showEnvSetup = false })
+        }
+    }
+    AnimatedVisibility(
+        visible = showAbout,
+        enter = slideInHorizontally { it } + fadeIn(),
+        exit = slideOutHorizontally { it } + fadeOut()
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            AboutScreen(onBack = { showAbout = false })
+        }
+    }
     }
 }
 
