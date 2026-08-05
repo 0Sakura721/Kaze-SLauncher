@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import com.mcserver.launcher.core.download.DownloadCenter
 import com.mcserver.launcher.core.download.ModrinthApi
 import com.mcserver.launcher.ui.components.ModrinthSearchDialog
+import com.mcserver.launcher.ui.components.pressSource
 import com.mcserver.launcher.core.server.PluginManager
 import com.mcserver.launcher.core.server.ServerManager
 import com.mcserver.launcher.data.ServerInstance
@@ -56,11 +57,13 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "返回") }
+            val (pressBack, srcBack) = pressSource()
+            IconButton(onClick = onBack, interactionSource = srcBack, modifier = pressBack) { Icon(Icons.Filled.ArrowBack, "返回") }
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(currentName, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-                    IconButton(onClick = { showRename = true }, modifier = Modifier.size(28.dp)) {
+                    val (pressRename, srcRename) = pressSource()
+                    IconButton(onClick = { showRename = true }, interactionSource = srcRename, modifier = pressRename.then(Modifier.size(28.dp))) {
                         Icon(Icons.Filled.Edit, "重命名", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -71,7 +74,8 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
                 )
             }
             ServerControlButton(instance)
-            IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Filled.Delete, "删除实例") }
+            val (pressDel, srcDel) = pressSource()
+            IconButton(onClick = { showDeleteConfirm = true }, interactionSource = srcDel, modifier = pressDel) { Icon(Icons.Filled.Delete, "删除实例") }
         }
 
         if (showRename) {
@@ -83,10 +87,16 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
             )
         }
         TabRow(selectedTabIndex = tab) {
-            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("控制台") })
-            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("插件/模组") })
-            Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("配置") })
-            Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("世界") })
+            listOf("控制台", "插件/模组", "配置", "世界").forEachIndexed { index, label ->
+                val (pressTab, srcTab) = pressSource()
+                Tab(
+                    selected = tab == index,
+                    onClick = { tab = index },
+                    interactionSource = srcTab,
+                    modifier = pressTab,
+                    text = { Text(label) }
+                )
+            }
         }
         // 内容区固定高度(weight 1f),内部页面各自滚动
         Box(Modifier.weight(1f)) {
@@ -126,17 +136,21 @@ private fun ServerControlButton(instance: ServerInstance) {
     val status by ServerManager.status.collectAsState()
     val running = ServerManager.isRunningFor(instance.id) && status == com.mcserver.launcher.data.InstanceStatus.RUNNING
     if (running) {
+        val (press, src) = pressSource()
         Button(onClick = { scope.launch { ServerManager.stop() } },
+            interactionSource = src,
+            modifier = press,
             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
             Icon(Icons.Filled.Stop, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("停止")
         }
     } else {
+        val (press, src) = pressSource()
         Button(onClick = {
             scope.launch {
                 val r = ServerManager.start(instance)
                 if (r.isFailure) android.widget.Toast.makeText(context, r.exceptionOrNull()?.message ?: "启动失败", android.widget.Toast.LENGTH_LONG).show()
             }
-        }) {
+        }, interactionSource = src, modifier = press) {
             Icon(Icons.Filled.PlayArrow, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("启动")
         }
     }

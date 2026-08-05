@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import android.widget.Toast
 import com.mcserver.launcher.ui.components.PageTransition
 import com.mcserver.launcher.ui.components.pressScale
+import com.mcserver.launcher.ui.components.pressSource
 import com.mcserver.launcher.core.env.EnvManager
 import com.mcserver.launcher.core.server.InstanceStore
 import com.mcserver.launcher.data.InstanceStatus
@@ -78,7 +79,8 @@ private fun HomeContent(
 ) {
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = onNew) {
+            val (pressFab, srcFab) = pressSource()
+            FloatingActionButton(onClick = onNew, interactionSource = srcFab, modifier = pressFab) {
                 Icon(Icons.Filled.Add, "新建服务端")
             }
         }

@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.core.env.EnvManager
+import com.mcserver.launcher.ui.components.pressSource
 import com.mcserver.launcher.core.env.EnvState
 import com.mcserver.launcher.core.server.JreInstaller
 import com.mcserver.launcher.data.SettingsStore
@@ -123,7 +124,8 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
-            OutlinedButton(onClick = { showEnvSetup = true }) { Text("重新部署环境") }
+            val (pressEnv, srcEnv) = pressSource()
+            OutlinedButton(onClick = { showEnvSetup = true }, interactionSource = srcEnv, modifier = pressEnv) { Text("重新部署环境") }
         }
         Spacer(Modifier.height(14.dp))
 
@@ -145,18 +147,23 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     if (busyVersion == version.toString()) {
                         CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else if (installed) {
+                        val (pressD, srcD) = pressSource()
                         IconButton(onClick = {
                             scope.launch { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { JreInstaller.delete(version.toString()) } }
-                        }) { Icon(Icons.Filled.Delete, "删除", Modifier.size(18.dp)) }
+                        }, interactionSource = srcD, modifier = pressD) { Icon(Icons.Filled.Delete, "删除", Modifier.size(18.dp)) }
                     } else {
                         // 本地导入优先(不消耗流量),下载为备选
+                        val (pressI, srcI) = pressSource()
                         IconButton(
                             onClick = {
                                 importing = version.toString()
                                 importLauncher.launch(null)
                             },
-                            enabled = busyVersion == null
+                            enabled = busyVersion == null,
+                            interactionSource = srcI,
+                            modifier = pressI
                         ) { Icon(Icons.Filled.FolderOpen, "从本地导入", Modifier.size(18.dp)) }
+                        val (pressW, srcW) = pressSource()
                         IconButton(
                             onClick = {
                                 installing = version.toString()
@@ -165,7 +172,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                                     installing = null
                                 }
                             },
-                            enabled = busyVersion == null
+                            enabled = busyVersion == null,
+                            interactionSource = srcW,
+                            modifier = pressW
                         ) { Icon(Icons.Filled.Download, "下载", Modifier.size(18.dp)) }
                     }
                 }
@@ -253,8 +262,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { showAbout = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("查看完整关于 · 版本历史 · 许可致谢")
+            val (pressAbout, srcAbout) = pressSource()
+            OutlinedButton(onClick = { showAbout = true }, interactionSource = srcAbout, modifier = pressAbout.then(Modifier.fillMaxWidth())) {
+                Text("关于 · 版本历史 · 许可致谢")
             }
         }
     }
@@ -279,7 +289,8 @@ private fun AboutScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         // 顶部栏
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "返回") }
+            val (pressBack, srcBack) = pressSource()
+            IconButton(onClick = onBack, interactionSource = srcBack, modifier = pressBack) { Icon(Icons.Filled.ArrowBack, "返回") }
             Text("关于 Kaze SLauncher", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
         }
         // 内容(整页可滚动,底部信息不会漏)

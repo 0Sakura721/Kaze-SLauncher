@@ -14,6 +14,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 
@@ -33,6 +34,18 @@ fun Modifier.pressScale(interactionSource: MutableInteractionSource): Modifier {
         scaleX = scale
         scaleY = scale
     }
+}
+
+/**
+ * 便捷创建按压效果:(Modifier, MutableInteractionSource)
+ * 与 Material 组件的 interactionSource 参数配合:
+ *   val (press, source) = pressSource()
+ *   Button(onClick = ..., interactionSource = source, modifier = press) { ... }
+ */
+@Composable
+fun pressSource(): Pair<Modifier, MutableInteractionSource> {
+    val source = remember { MutableInteractionSource() }
+    return Modifier.pressScale(source) to source
 }
 
 /**

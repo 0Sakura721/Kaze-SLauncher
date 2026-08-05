@@ -3,6 +3,7 @@ package com.mcserver.launcher.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,6 +19,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.core.download.CoreSources
 import com.mcserver.launcher.core.download.DownloadCenter
+import com.mcserver.launcher.ui.components.pressScale
+import com.mcserver.launcher.ui.components.pressSource
 import com.mcserver.launcher.core.server.InstanceStore
 import com.mcserver.launcher.data.CoreType
 import com.mcserver.launcher.data.InstanceConfig
@@ -89,7 +92,8 @@ fun NewInstanceScreen(onDone: () -> Unit) {
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { if (step > 1) step-- else onDone() }) {
+            val (pressBack, srcBack) = pressSource()
+            IconButton(onClick = { if (step > 1) step-- else onDone() }, interactionSource = srcBack, modifier = pressBack) {
                 Icon(Icons.Filled.ArrowBack, "返回")
             }
             Spacer(Modifier.width(8.dp))
@@ -101,9 +105,11 @@ fun NewInstanceScreen(onDone: () -> Unit) {
         when (step) {
             1 -> {
                 // 本地导入优先入口(不消耗流量)
+                val (pressImport, srcImport) = pressSource()
                 Button(
                     onClick = { importJarLauncher.launch(arrayOf("application/java-archive", "application/octet-stream")) },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = pressImport.then(Modifier.fillMaxWidth()),
+                    interactionSource = srcImport
                 ) {
                     Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
@@ -122,17 +128,20 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                             shape = RoundedCornerShape(12.dp),
                             color = if (type == coreType) MaterialTheme.colorScheme.primaryContainer
                                     else MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.fillMaxWidth().clickable {
-                                coreType = type
-                                loading = true
-                                error = ""
-                                scope.launch {
-                                    CoreSources.fetchVersions(type)
-                                        .onSuccess { versions = it; loading = false }
-                                        .onFailure { error = "获取版本列表失败:${it.message}"; loading = false }
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .pressScale(remember { MutableInteractionSource() })
+                                .clickable {
+                                    coreType = type
+                                    loading = true
+                                    error = ""
+                                    scope.launch {
+                                        CoreSources.fetchVersions(type)
+                                            .onSuccess { versions = it; loading = false }
+                                            .onFailure { error = "获取版本列表失败:${it.message}"; loading = false }
+                                    }
+                                    step = 2
                                 }
-                                step = 2
-                            }
                         ) {
                             Column(Modifier.padding(16.dp)) {
                                 Text(type.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

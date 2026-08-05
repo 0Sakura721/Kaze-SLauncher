@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.core.download.DownloadCenter
+import com.mcserver.launcher.ui.components.pressSource
 import com.mcserver.launcher.core.server.InstanceStore
 import com.mcserver.launcher.core.server.PluginManager
 import com.mcserver.launcher.data.DownloadStatus
@@ -81,7 +82,8 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                TextButton(onClick = { manageInstance = inst }) { Text("管理") }
+                                val (pressM, srcM) = pressSource()
+                                TextButton(onClick = { manageInstance = inst }, interactionSource = srcM, modifier = pressM) { Text("管理") }
                             }
                         }
                     }
@@ -99,7 +101,8 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
                 Text("下载历史(${tasks.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.weight(1f))
                 if (doneCount > 0) {
-                    TextButton(onClick = { DownloadCenter.clearFinished() }) { Text("清空已完成($doneCount)") }
+                    val (pressC, srcC) = pressSource()
+                    TextButton(onClick = { DownloadCenter.clearFinished() }, interactionSource = srcC, modifier = pressC) { Text("清空已完成($doneCount)") }
                 }
             }
         }
@@ -160,20 +163,24 @@ private fun DownloadTaskCard(task: DownloadTask) {
                 if (task.status == DownloadStatus.DOWNLOADING) {
                     Text("${task.speedBytesPerSec / 1024} KB/s", style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary)
-                    IconButton(onClick = { DownloadCenter.pause(task.id) }) {
+                    val (pressP, srcP) = pressSource()
+                    IconButton(onClick = { DownloadCenter.pause(task.id) }, interactionSource = srcP, modifier = pressP) {
                         Icon(Icons.Filled.Pause, "暂停", Modifier.size(18.dp))
                     }
-                    IconButton(onClick = { DownloadCenter.cancel(task.id) }) {
+                    val (pressX, srcX) = pressSource()
+                    IconButton(onClick = { DownloadCenter.cancel(task.id) }, interactionSource = srcX, modifier = pressX) {
                         Icon(Icons.Filled.Close, "取消", Modifier.size(18.dp))
                     }
                 } else if (task.status == DownloadStatus.PAUSED) {
-                    IconButton(onClick = { DownloadCenter.resume(task.id) }) {
+                    val (pressR, srcR) = pressSource()
+                    IconButton(onClick = { DownloadCenter.resume(task.id) }, interactionSource = srcR, modifier = pressR) {
                         Icon(Icons.Filled.PlayArrow, "继续", Modifier.size(18.dp))
                     }
                 }
                 // 已完成/失败/取消:可删除历史
                 if (task.status in listOf(DownloadStatus.COMPLETED, DownloadStatus.FAILED, DownloadStatus.CANCELED)) {
-                    IconButton(onClick = { DownloadCenter.remove(task.id) }) {
+                    val (pressD, srcD) = pressSource()
+                    IconButton(onClick = { DownloadCenter.remove(task.id) }, interactionSource = srcD, modifier = pressD) {
                         Icon(Icons.Filled.Delete, "删除记录", Modifier.size(18.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
