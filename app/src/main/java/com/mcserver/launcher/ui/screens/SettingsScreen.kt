@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -275,7 +276,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         enter = slideInHorizontally { it } + fadeIn(),
         exit = slideOutHorizontally { it } + fadeOut()
     ) {
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             EnvSetupScreen(onSetupComplete = { showEnvSetup = false })
         }
     }
@@ -284,7 +285,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         enter = slideInHorizontally { it } + fadeIn(),
         exit = slideOutHorizontally { it } + fadeOut()
     ) {
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             AboutScreen(onBack = { showAbout = false })
         }
     }
@@ -303,7 +304,7 @@ private fun AboutScreen(onBack: () -> Unit) {
     val versionName = pkg?.versionName ?: "1.0.0"
     val versionCode = pkg?.longVersionCode ?: 100L
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // 顶部栏
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             val (pressBack, srcBack) = pressSource()

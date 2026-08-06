@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -129,7 +130,7 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
         enter = slideInHorizontally { it } + fadeIn(),
         exit = slideOutHorizontally { it } + fadeOut()
     ) {
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             manageInstance?.let { inst ->
                 AddonManageScreen(instance = inst, onBack = { manageInstance = null }, modifier = modifier)
             }
