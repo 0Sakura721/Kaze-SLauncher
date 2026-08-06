@@ -1,5 +1,10 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,11 +42,7 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
     val instances by InstanceStore.instances.collectAsState()
     var manageInstance by remember { mutableStateOf<com.mcserver.launcher.data.ServerInstance?>(null) }
 
-    manageInstance?.let { inst ->
-        AddonManageScreen(instance = inst, onBack = { manageInstance = null }, modifier = modifier)
-        return
-    }
-
+    Box(Modifier.fillMaxSize()) {
     Column(modifier) {
         Text("下载中心", style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
@@ -121,6 +122,19 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
                 }
             }
         }
+    }
+
+    AnimatedVisibility(
+        visible = manageInstance != null,
+        enter = slideInHorizontally { it } + fadeIn(),
+        exit = slideOutHorizontally { it } + fadeOut()
+    ) {
+        Box(Modifier.fillMaxSize()) {
+            manageInstance?.let { inst ->
+                AddonManageScreen(instance = inst, onBack = { manageInstance = null }, modifier = modifier)
+            }
+        }
+    }
     }
 }
 
