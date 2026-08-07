@@ -35,11 +35,14 @@ object PluginManager {
         addonDir(instance).listFiles()
             ?.filter { it.isFile && (it.name.endsWith(".jar") || it.name.endsWith(".jar.disabled")) }
             ?.sortedBy { it.name.lowercase() }
-            ?.map { InstalledAddon(it.name.removeSuffix(".disabled").removeSuffix(".jar"), it) } ?: emptyList()
+            ?.map {
+                val enabled = !it.name.endsWith(".disabled")
+                InstalledAddon(it.name.removeSuffix(".disabled").removeSuffix(".jar"), it, enabled)
+            } ?: emptyList()
     }
 
     /** 删除插件/模组 */
-    suspend fun delete(instance: ServerInstance, fileName: String) = withContext(Dispatchers.IO) {
+    suspend fun delete(instance: ServerInstance, fileName: String): Boolean = withContext(Dispatchers.IO) {
         File(addonDir(instance), fileName).delete()
     }
 
@@ -50,11 +53,9 @@ object PluginManager {
         if (fileName.endsWith(".disabled")) {
             val target = File(addonDir(instance), fileName.removeSuffix(".disabled"))
             file.renameTo(target)
-            true
         } else {
             val target = File(addonDir(instance), fileName + ".disabled")
             file.renameTo(target)
-            true
         }
     }
 

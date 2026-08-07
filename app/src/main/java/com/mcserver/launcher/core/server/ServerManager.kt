@@ -13,16 +13,16 @@ object ServerManager {
     private lateinit var appContext: Context
     private lateinit var launcher: ServerLauncher
 
-    @Volatile
-    var currentInstanceId: String? = null
-        private set
-
     val status: StateFlow<com.mcserver.launcher.data.InstanceStatus>
         get() = launcher.status
 
     val console get() = launcher.console
     val players get() = launcher.players
     val uptimeSec get() = launcher.uptimeSec
+    val runningInstanceId get() = launcher.runningInstanceId
+
+    /** 当前运行的实例 ID(停止后自动重置为 null) */
+    val currentInstanceId: String? get() = launcher.runningInstanceId.value
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -61,7 +61,6 @@ object ServerManager {
     }
 
     suspend fun start(instance: ServerInstance): Result<Unit> {
-        currentInstanceId = instance.id
         return launcher.start(instance)
     }
 

@@ -14,6 +14,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -22,7 +23,6 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 object DownloadCenter {
 
-    private const val TAG = "DownloadCenter"
     private const val MAX_CONCURRENT = 2
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -30,7 +30,7 @@ object DownloadCenter {
     val tasks: StateFlow<List<DownloadTask>> = _tasks.asStateFlow()
 
     private val running = AtomicInteger(0)
-    private val cancelFlags = mutableMapOf<String, AtomicBoolean>()
+    private val cancelFlags = ConcurrentHashMap<String, AtomicBoolean>()
 
     /** 正在进行的任务数(UI 角标) */
     val activeCount: Int get() = _tasks.value.count { it.isActive }
@@ -74,8 +74,8 @@ object DownloadCenter {
         if (task != null) {
             try {
                 if (task.destFile.exists()) task.destFile.delete()
-                // 清理可能残留的断点文件
-                val partial = File(task.destFile.parentFile, task.destFile.name + ".partial")
+                // 清理可能残留的断点文件(与 download() 中 .part 扩展名一致)
+                val partial = File(task.destFile.parentFile, task.destFile.name + ".part")
                 if (partial.exists()) partial.delete()
             } catch (_: Exception) { }
         }
@@ -97,10 +97,23 @@ object DownloadCenter {
             val next = _tasks.value.firstOrNull {
                 it.status == DownloadStatus.PENDING
             } ?: break
+            // 原子地标记为 DOWNLOADING,防止 pump() 重入导致重复下载
+            var claimed = false
+            update(next.id) {
+                if (it.status == DownloadStatus.PENDING) {
+                    claimed = true
+                    it.copy(status = DownloadStatus.DOWNLOADING)
+                } else {
+                    it
+                }
+            }
+            if (!claimed) continue
             if (running.incrementAndGet() <= MAX_CONCURRENT) {
                 scope.launch { download(next.id) }
             } else {
                 running.decrementAndGet()
+                // 回退为 PENDING,等下次 pump
+                update(next.id) { if (it.status == DownloadStatus.DOWNLOADING) it.copy(status = DownloadStatus.PENDING) else it }
                 break
             }
         }
@@ -200,7 +213,7 @@ object DownloadCenter {
             FileOutputStream(partFile, initialOffset > 0).use { out ->
                 var read: Int
                 while (input.read(buffer).also { read = it } != -1) {
-                    if (cancel.get()) throw CancellationException()
+                    if (cancel.get()) throw DownloadCancelSignal()
                     out.write(buffer, 0, read)
                     downloaded += read
                     val now = System.currentTimeMillis()
@@ -225,5 +238,5 @@ object DownloadCenter {
         return if (cancel.get()) downloaded else partFile.length()
     }
 
-    private class CancellationException : Exception()
+    private class DownloadCancelSignal : Exception()
 }

@@ -48,7 +48,7 @@ import com.mcserver.launcher.core.download.DownloadCenter
 import com.mcserver.launcher.core.download.ModrinthApi
 import com.mcserver.launcher.ui.components.ModrinthSearchDialog
 import com.mcserver.launcher.ui.components.pressSource
-import com.mcserver.launcher.ui.theme.badgeColor
+import com.mcserver.launcher.ui.theme.badgeGradient
 import com.mcserver.launcher.ui.theme.badgeLetter
 import com.mcserver.launcher.core.server.BackupManager
 import com.mcserver.launcher.core.server.PluginManager
@@ -83,7 +83,7 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
             IconButton(onClick = onBack, interactionSource = srcBack, modifier = pressBack) { Icon(Icons.Filled.ArrowBack, "返回") }
             // 核心类型徽标(FCL 式)
             Box(
-                Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).background(instance.coreType.badgeColor()),
+                Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).background(instance.coreType.badgeGradient()),
                 contentAlignment = Alignment.Center
             ) {
                 Text(instance.coreType.badgeLetter(),

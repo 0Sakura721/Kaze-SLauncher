@@ -28,7 +28,7 @@ import com.mcserver.launcher.ui.components.PageTransition
 import com.mcserver.launcher.ui.components.pressScale
 import com.mcserver.launcher.ui.components.pressSource
 import com.mcserver.launcher.core.server.InstanceStore
-import com.mcserver.launcher.ui.theme.badgeColor
+import com.mcserver.launcher.ui.theme.badgeGradient
 import com.mcserver.launcher.ui.theme.badgeLetter
 import com.mcserver.launcher.data.CoreType
 import com.mcserver.launcher.data.InstanceConfig
@@ -248,7 +248,7 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                                 Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                                     // 核心类型徽标(FCL 式)
                                     Box(
-                                        Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(type.badgeColor()),
+                                        Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(type.badgeGradient()),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(type.badgeLetter(),

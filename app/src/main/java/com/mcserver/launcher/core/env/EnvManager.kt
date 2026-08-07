@@ -13,8 +13,6 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.zip.GZIPInputStream
 import java.io.RandomAccessFile
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** 环境状态 */
@@ -465,11 +463,6 @@ object EnvManager {
         }
     }
 
-    /** 简单解压(无进度,内部调用带进度版本) */
-    private fun extractTar(tarFile: File, destDir: File) {
-        extractTarWithProgress(tarFile, destDir) { _, _, _ -> }
-    }
-
     // ── proot 命令 ──
     private fun prootEnvironment(): Map<String, String> {
         val env = mutableMapOf<String, String>()
@@ -563,18 +556,6 @@ object EnvManager {
         return pb.start()
     }
 
-    /** 在 Ubuntu 内执行命令,收集输出 */
-    fun executeCommand(command: String, workDir: String = "/root", timeoutMs: Long = 600_000): Result<String> {
-        return try {
-            val proc = startProot(command, workDir)
-            val output = proc.inputStream.bufferedReader().readText()
-            val exited = proc.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-            if (!exited) { proc.destroyForcibly(); Result.failure(RuntimeException("命令超时")) }
-            else if (proc.exitValue() == 0) Result.success(output)
-            else Result.failure(RuntimeException("退出码 ${proc.exitValue()}: ${output.take(300)}"))
-        } catch (e: Exception) { Result.failure(e) }
-    }
-
     // ── 部署 ──
     /**
      * 全量部署。
@@ -637,142 +618,6 @@ object EnvManager {
             }
             // 分架构 APK 无内置 JRE:明确报错,绝不静默网络下载(用户流量)
             error("当前 APK 不含内置 Java 运行时,请安装完整版 arm64v8 安装包,或在设置页本地导入 Android 版 JRE")
-
-            // ── 旧架构(proot + Ubuntu rootfs)── 保留兼容,不再主动触发 ──
-            val jdkList = jdkVersions.distinct().sorted()
-            val totalSteps = 3 + jdkList.size
-            if (_state.value == EnvState.READY && jdkVersions.all { isJdkInstalled(it) }) {
-                return@withContext Result.success(Unit)
-            }
-            // 阶段 1:proot
-            log(">>> 阶段 1/$totalSteps:获取 proot 运行时($archName)")
-            _items.value = listOf(SetupItem("proot", "proot 运行时", "内置,解压即用", phase = "提取中"))
-            val prootTarball = File(linuxDir, "proot.tar.gz")
-            if (!prootBinary.exists() || !prootLoader.exists()) {
-                if (extractBundledAsset("proot-$archName.tar.gz", prootTarball)) {
-                    updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", phase = "解压中"))
-                    extractTarWithProgress(prootTarball, prootHomeDir) { processed, total, speed ->
-                        updateItem("proot") { it.copy(phase = "解压中", progress = if (total > 0) processed.toFloat() / total else 0f, processedBytes = processed, totalBytes = total, speedBytes = speed) }
-                    }
-                    prootTarball.delete()
-                    updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", done = true))
-                    log("  ✓ 内置提取成功")
-                    fixProotSonameLinks()
-                } else {
-                    // 网络回退:官方 proot 直链
-                    val url = when {
-                        isX8664 -> "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-x86_64.tar.gz"
-                        isAarch64 -> "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-aarch64.tar.gz"
-                        else -> "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-armhf.tar.gz"
-                    }
-                    log("  内置不可用,网络下载...")
-                    updateItem("proot", SetupItem("proot", "proot 运行时", "网络下载,约 1 MB", phase = "下载中"))
-                    downloadToFile(url, prootTarball) { done, total ->
-                        updateItem("proot") { it.copy(phase = "下载中", progress = if (total > 0) done.toFloat() / total else 0f, processedBytes = done, totalBytes = total) }
-                    }
-                    updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", phase = "解压中"))
-                    extractTar(prootTarball, prootHomeDir)
-                    prootTarball.delete()
-                    updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", done = true))
-                    log("  ✓ 网络下载成功")
-                }
-            } else {
-                updateItem("proot", SetupItem("proot", "proot 运行时", "内置,解压即用", done = true))
-                log("  ✓ 已就绪,跳过")
-            }
-            prootBinary.setExecutable(true)
-            prootLoader.setExecutable(true)
-            File(prootHomeDir, "libexec/loader32").takeIf { it.exists() }?.setExecutable(true)
-
-            // 阶段 2:Ubuntu rootfs
-            log(">>> 阶段 2/$totalSteps:获取 Ubuntu 24.04 rootfs")
-            _items.value = listOf(
-                SetupItem("proot", "proot 运行时", "内置,解压即用", done = true),
-                SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用")
-            )
-            val ubuntuArch = if (isX8664) "amd64" else if (isAarch64) "arm64" else "armhf"
-            val rootfsTarball = File(linuxDir, "rootfs.tar.gz")
-            if (!File(rootfsDir, "usr/bin/dash").exists()) {
-                if (extractBundledAsset("ubuntu-base-24.04-$ubuntuArch.tar.gz", rootfsTarball)) {
-                    log("  ✓ 内置提取成功")
-                } else if (!assetExists("ubuntu-base-24.04-$ubuntuArch.tar.gz")) {
-                    // 分架构 APK:当前设备架构的 rootfs 不在包里,直接明确报错,
-                    // 绝不静默走网络下载(用户流量)
-                    val pkgLabel = when (ubuntuArch) {
-                        "amd64" -> "x86_64 设备(模拟器/PC 端)"
-                        "arm64" -> "arm64 设备"
-                        else -> "armv7 设备"
-                    }
-                    error("当前 APK 不含 $ubuntuArch ($pkgLabel) 的 Ubuntu rootfs,请安装 universal 版本")
-                } else {
-                    log("  内置不可用,网络下载...")
-                    downloadToFile("https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-$ubuntuArch.tar.gz", rootfsTarball)
-                }
-                log("  解压 rootfs(~200MB,请耐心等待)...")
-                // 清理可能残留的不完整解压
-                if (rootfsDir.exists()) rootfsDir.deleteRecursively()
-                rootfsDir.mkdirs()
-                updateItem("rootfs", SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用", phase = "解压中", totalBytes = rootfsTarball.length()))
-                extractTarWithProgress(rootfsTarball, rootfsDir) { processed, total, speed ->
-                    updateItem("rootfs") {
-                        it.copy(
-                            phase = "解压中",
-                            progress = if (total > 0) processed.toFloat() / total else 0f,
-                            processedBytes = processed,
-                            totalBytes = total,
-                            speedBytes = speed
-                        )
-                    }
-                }
-                rootfsTarball.delete()
-                if (!File(rootfsDir, "usr/bin/dash").exists()) {
-                    throw RuntimeException("rootfs 解压不完整(usr/bin/dash 缺失),请重试")
-                }
-                // rootfs 解压后关键符号链接可能被降级成目录(usr/bin/sh→dash),
-                // 必须立即修复,否则 proot 启动报 "Is a directory"
-                fixProotSonameLinks()
-                try { File(rootfsDir, "tmp").mkdirs() } catch (_: Exception) { }
-                updateItem("rootfs", SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用", done = true))
-                log("  ✓ rootfs 就绪")
-            } else log("  ✓ 已就绪,跳过")
-
-            // 阶段 3:apt 初始化
-            log(">>> 阶段 3/$totalSteps:初始化 apt 包管理器")
-            _items.value = _items.value.map { if (it.id == "rootfs") it.copy(done = true) else it }
-            _items.value = _items.value + SetupItem("apt", "apt 包管理器", "初始化中", phase = "初始化中")
-            setupAptSources()
-            executeCommand("apt-get update -qq")
-                .onFailure { log("  ⚠ apt update 失败:${it.message}") }
-            updateItem("apt", SetupItem("apt", "apt 包管理器", "已就绪", done = true))
-            log("  ✓ apt 就绪")
-
-            // 阶段 4+:JDK(可选)
-            for ((index, version) in jdkList.withIndex()) {
-                val step = index + 4
-                _items.value = _items.value + SetupItem("jdk$version", "Java $version", "需下载,按需安装")
-                if (isJdkInstalled(version)) {
-                    updateItem("jdk$version", SetupItem("jdk$version", "Java $version", "需下载,按需安装", done = true))
-                    log(">>> 阶段 $step/$totalSteps:Java $version 已安装,跳过")
-                    continue
-                }
-                log(">>> 阶段 $step/$totalSteps:在线安装 Java $version(openjdk-$version-jdk-headless)")
-                updateItem("jdk$version", SetupItem("jdk$version", "Java $version", "需下载,按需安装", phase = "安装中"))
-                val result = executeCommand(
-                    "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-$version-jdk-headless",
-                    timeoutMs = 900_000
-                )
-                if (result.isFailure) {
-                    log("  ⚠ Java $version 安装失败:${result.exceptionOrNull()?.message}")
-                } else {
-                    updateItem("jdk$version", SetupItem("jdk$version", "Java $version", "需下载,按需安装", done = true))
-                    log("  ✓ Java $version 安装完成")
-                }
-            }
-
-            _items.value = _items.value.map { it.copy(done = true) }
-            _state.value = EnvState.READY
-            log(">>> 环境初始化完成!已安装 ${installedJdkVersions().size} 个 Java 版本")
-            Result.success(Unit)
         } catch (e: Exception) {
             Logger.e("runFullSetup failed", e)
             _state.value = EnvState.ERROR
@@ -781,71 +626,5 @@ object EnvManager {
         } finally {
             isSetupRunning.set(false)
         }
-    }
-
-    /** Ubuntu 24.04 使用 deb822 源格式 */
-    private fun setupAptSources() {
-        val sourceFile = File(rootfsDir, "etc/apt/sources.list.d/ubuntu.sources")
-        if (!sourceFile.exists()) {
-            sourceFile.parentFile?.mkdirs()
-            sourceFile.writeText(
-                "Types: deb\n" +
-                "URIs: http://ports.ubuntu.com/ubuntu-ports/\n" +
-                "Suites: noble noble-updates noble-backports\n" +
-                "Components: main universe\n" +
-                "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
-            )
-        }
-    }
-
-    // ── 设置页 Java 同步到 rootfs ──
-    fun syncJavaToRootfs(version: String, sourceJdkRoot: File): Boolean {
-        if (!isEnvironmentReady() || !sourceJdkRoot.exists() || !File(sourceJdkRoot, "bin/java").exists()) return false
-        return try {
-            val destDir = File(javaHomeDir, "java-$version-openjdk-$jdkArchSuffix")
-            if (destDir.exists()) destDir.deleteRecursively()
-            destDir.parentFile?.mkdirs()
-            sourceJdkRoot.copyRecursively(destDir)
-            File(destDir, "bin/java").setExecutable(true)
-            Logger.i("Java $version 已同步到 Ubuntu 环境")
-            true
-        } catch (e: Exception) { Logger.w("syncJavaToRootfs failed", e); false }
-    }
-
-    /** 简单下载(带重定向),返回字节数 */
-    private fun downloadToFile(urlStr: String, dest: File, onProgress: ((Long, Long) -> Unit)? = null): Long {
-        dest.parentFile?.mkdirs()
-        var conn = URL(urlStr).openConnection() as HttpURLConnection
-        conn.instanceFollowRedirects = true
-        conn.connectTimeout = 15000
-        conn.readTimeout = 60000
-        var redirects = 0
-        while (redirects < 5 && conn.responseCode in listOf(301, 302, 303, 307, 308)) {
-            val loc = conn.getHeaderField("Location") ?: break
-            conn.disconnect()
-            conn = URL(loc).openConnection() as HttpURLConnection
-            conn.instanceFollowRedirects = true
-            conn.connectTimeout = 15000
-            conn.readTimeout = 60000
-            redirects++
-        }
-        if (conn.responseCode != HttpURLConnection.HTTP_OK) {
-            throw RuntimeException("HTTP ${conn.responseCode}")
-        }
-        val total = conn.contentLengthLong
-        val buffer = ByteArray(64 * 1024)
-        var downloaded = 0L
-        conn.inputStream.use { input ->
-            FileOutputStream(dest).use { out ->
-                var read: Int
-                while (input.read(buffer).also { read = it } != -1) {
-                    out.write(buffer, 0, read)
-                    downloaded += read
-                    onProgress?.invoke(downloaded, total)
-                }
-            }
-        }
-        conn.disconnect()
-        return downloaded
     }
 }

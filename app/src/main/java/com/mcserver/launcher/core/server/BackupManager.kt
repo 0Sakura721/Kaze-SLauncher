@@ -24,8 +24,9 @@ object BackupManager {
     fun backupWorld(instance: ServerInstance): File? {
         return try {
             val dir = instance.dir(InstanceStore.instancesDir)
+            val levelName = instance.config.levelName
             val worldDirs = dir.listFiles()?.filter {
-                it.isDirectory && (it.name == "world" || it.name.startsWith("world_"))
+                it.isDirectory && (it.name == levelName || it.name.startsWith("${levelName}_"))
             } ?: return null
             if (worldDirs.isEmpty()) return null
 
@@ -66,12 +67,14 @@ object BackupManager {
     fun restoreBackup(instance: ServerInstance, zipFile: File): Boolean {
         return try {
             val dir = instance.dir(InstanceStore.instancesDir)
+            val levelName = instance.config.levelName
             val worldDirs = dir.listFiles()?.filter {
-                it.isDirectory && (it.name == "world" || it.name.startsWith("world_"))
+                it.isDirectory && (it.name == levelName || it.name.startsWith("${levelName}_"))
             } ?: emptyList()
+            val restoreTimestamp = System.currentTimeMillis()
             // 旧世界改名保留(防误删)
             worldDirs.forEach { w ->
-                val renamed = File(dir, "${w.name}_old_${System.currentTimeMillis()}")
+                val renamed = File(dir, "${w.name}_old_${restoreTimestamp}")
                 w.renameTo(renamed)
             }
             java.util.zip.ZipInputStream(zipFile.inputStream().buffered()).use { zin ->
@@ -85,6 +88,11 @@ object BackupManager {
                     zin.closeEntry()
                     entry = zin.nextEntry
                 }
+            }
+            // 清理旧世界备份目录(还原成功后才删除)
+            worldDirs.forEach { w ->
+                val renamed = File(dir, "${w.name}_old_${restoreTimestamp}")
+                if (renamed.exists()) renamed.deleteRecursively()
             }
             Logger.i("备份还原完成: ${zipFile.name}")
             true

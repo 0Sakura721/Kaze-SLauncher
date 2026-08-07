@@ -42,6 +42,9 @@ class ServerLauncher(private val context: Context) {
     private val _players = MutableStateFlow<List<String>>(emptyList())
     val players: StateFlow<List<String>> = _players.asStateFlow()
 
+    private val _runningInstanceId = MutableStateFlow<String?>(null)
+    val runningInstanceId: StateFlow<String?> = _runningInstanceId.asStateFlow()
+
     private var process: Process? = null
     private var tailJob: Job? = null
     private var uptimeJob: Job? = null
@@ -55,9 +58,6 @@ class ServerLauncher(private val context: Context) {
 
     val isRunning: Boolean get() = process?.isAlive == true
 
-    /** 控制台日志(供 UI 一次性加载) */
-    fun snapshotConsole(): List<String> = emptyList()
-
     // ── 启动 ──
     suspend fun start(instance: ServerInstance): Result<Unit> {
         if (isRunning || isLaunching.get()) return Result.failure(RuntimeException("服务器已在运行"))
@@ -70,6 +70,7 @@ class ServerLauncher(private val context: Context) {
         isLaunching.set(true)
         launchedAtMs = android.os.SystemClock.elapsedRealtime()
         _status.value = InstanceStatus.STARTING
+        _runningInstanceId.value = instance.id
 
         return kotlinx.coroutines.withContext(Dispatchers.IO) {
             try {
@@ -202,6 +203,7 @@ class ServerLauncher(private val context: Context) {
         isLaunching.set(false)
         launchedAtMs = android.os.SystemClock.elapsedRealtime()
         _status.value = InstanceStatus.RUNNING
+        _runningInstanceId.value = instance.id
         emit("> 检测到服务器仍在运行(孤儿进程),已接管监控")
         val dir = instance.dir(InstanceStore.instancesDir)
         // 轮询检测进程退出(无法 waitFor 外部进程)
@@ -261,6 +263,8 @@ class ServerLauncher(private val context: Context) {
             }
         }
         stopJobs += stopJob
+        // 清理已完成的 stopJob,防止列表无限增长
+        stopJobs.removeAll { it.isCompleted }
     }
 
     // ── 控制台 ──
@@ -282,10 +286,18 @@ class ServerLauncher(private val context: Context) {
                 try {
                     val client = RconClient(port = port, password = pwd)
                     if (client.connect(2000)) {
-                        client.command(cmd)
+                        val response = client.command(cmd)
                         client.close()
+                        // 显示 RCON 响应(如 list/seed 等命令的输出)
+                        if (!response.isNullOrEmpty()) {
+                            emit(response.trim())
+                        }
+                    } else {
+                        emit("> RCON 连接失败,命令未送达")
                     }
-                } catch (_: Exception) { }
+                } catch (e: Exception) {
+                    emit("> RCON 错误:${e.message}")
+                }
             }.start()
             return
         }
@@ -350,6 +362,7 @@ class ServerLauncher(private val context: Context) {
         }
         _status.value = InstanceStatus.STOPPED
         _players.value = emptyList()
+        _runningInstanceId.value = null
         tailJob?.cancel()
         uptimeJob?.cancel()
         autoBackupJob?.cancel()
@@ -390,7 +403,7 @@ class ServerLauncher(private val context: Context) {
                         }
                         leftover = if (endsWithNl) byteArrayOf() else parts.last().toByteArray(Charsets.UTF_8)
                     } else if (size < lastSize) { lastSize = 0; leftover = byteArrayOf() }
-                } catch (_: Exception) {}
+                } catch (e: Exception) { Logger.w("日志 tail 异常: ${e.message}") }
                 delay(300)
             }
         }
