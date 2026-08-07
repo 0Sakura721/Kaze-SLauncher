@@ -58,6 +58,17 @@ object EnvManager {
     private val linuxDir: File get() = File(appContext.filesDir, "linux").apply { mkdirs() }
     private val prootHomeDir: File get() = File(linuxDir, "proot-home").apply { mkdirs() }
 
+    /**
+     * 环境自愈(public):修复符号链接降级 + 补 tmp 目录。
+     * 服务器启动前与 startProot 内部都会调用,防御 rootfs 损坏/旧部署。
+     */
+    fun selfHeal() {
+        fixProotSonameLinks()
+        try {
+            File(rootfsDir, "tmp").mkdirs()
+        } catch (_: Exception) { }
+    }
+
     /** 修复 proot 库的 soname 链接:Android 沙箱无法创建符号链接,解压器
      *  会把 symlink 条目降级为目录,导致 linker 找不到 libtalloc.so.2。
      *  此处把同名目录替换为真实文件的副本。 */
@@ -383,8 +394,7 @@ object EnvManager {
         // 启动前自愈(可能在上次部署后 rootfs 被降级/损坏):
         // 1) usr/bin/sh 若被解压成目录 → 用 dash 副本修复(否则 proot 报 Is a directory)
         // 2) rootfs/tmp 必须存在(proot 的 glue/f2fs 探测临时文件,否则 chmod 报错)
-        fixProotSonameLinks()
-        try { File(rootfsDir, "tmp").mkdirs() } catch (_: Exception) { }
+        selfHeal()
         val pb = buildProotCommand(command, workDir, bindExtra)
         return try {
             pb.start()

@@ -75,6 +75,10 @@ class ServerLauncher(private val context: Context) {
                 val dir = instance.dir(InstanceStore.instancesDir)
                 dir.mkdirs()
 
+                // 环境自愈:修复符号链接降级(usr/bin/sh)与缺失的 tmp 目录,
+                // 旧版本部署的环境可能存在这两处损坏,必须在启动前修复
+                EnvManager.selfHeal()
+
                 // 1) 核心 jar
                 val jarFile = dir.listFiles()?.firstOrNull { it.name.endsWith(".jar") && !it.name.contains("installer") }
                     ?: return@withContext Result.failure(RuntimeException("实例目录中没有服务端核心,请先下载"))
