@@ -118,8 +118,9 @@ object EnvManager {
     fun init(context: Context) {
         if (::appContext.isInitialized) return
         appContext = context.applicationContext
-        // 每次启动都修复 proot 库 soname(符号链接被降级为目录会导致 proot 动态链接失败)
-        fixProotSonameLinks()
+        // 每次启动都自愈环境:修复符号链接降级(usr/bin/sh→dash、proot 库 soname)
+        // 并补齐 rootfs/tmp(proot 临时文件目录,缺失则启动即失败)
+        selfHeal()
         _state.value = if (isEnvironmentReady()) EnvState.READY else EnvState.NOT_INITIALIZED
     }
 
