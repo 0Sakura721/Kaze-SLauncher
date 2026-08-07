@@ -35,7 +35,7 @@ object PluginManager {
         addonDir(instance).listFiles()
             ?.filter { it.isFile && (it.name.endsWith(".jar") || it.name.endsWith(".jar.disabled")) }
             ?.sortedBy { it.name.lowercase() }
-            ?.map { InstalledAddon(it.name.removeSuffix(".jar").removeSuffix(".disabled"), it) } ?: emptyList()
+            ?.map { InstalledAddon(it.name.removeSuffix(".disabled").removeSuffix(".jar"), it) } ?: emptyList()
     }
 
     /** 删除插件/模组 */

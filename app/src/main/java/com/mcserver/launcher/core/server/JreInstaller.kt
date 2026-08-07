@@ -27,13 +27,16 @@ object JreInstaller {
     private val _message = MutableStateFlow("")
     val message: StateFlow<String> = _message.asStateFlow()
 
-    /** 已安装 Java 版本列表(导入/下载完成后刷新,驱动 UI) */
-    private val _installedVersions = MutableStateFlow(EnvManager.installedJdkVersions())
-    val installedVersions: StateFlow<List<Int>> = _installedVersions.asStateFlow()
+    /** 已安装 Java 运行时清单(内置 + 导入,驱动 UI) */
+    private val _installedJavas = MutableStateFlow(EnvManager.installedJavas())
+    val installedJavas: StateFlow<List<EnvManager.InstalledJava>> = _installedJavas.asStateFlow()
 
     private fun refreshInstalled() {
-        _installedVersions.value = EnvManager.installedJdkVersions()
+        _installedJavas.value = EnvManager.installedJavas()
     }
+
+    /** 兼容旧引用:返回版本号列表(含内置 21) */
+    fun installedVersions(): List<String> = EnvManager.installedJavas().map { it.version }.distinct()
 
     /** 显示提示消息(UI 调用) */
     fun notifyMessage(msg: String) { _message.value = msg }
@@ -108,10 +111,15 @@ object JreInstaller {
             targetDir.mkdirs()
 
             // tar 解压(自动检测 gzip),Adoptium 顶层带版本目录
-            val isGzip = tarFile.readBytes().take(2).toByteArray().let { it.size == 2 && it[0] == 0x1f.toByte() && it[1] == 0x8b.toByte() }
+            val isGzip = java.io.RandomAccessFile(tarFile, "r").use { raf ->
+                val head = ByteArray(2); raf.readFully(head)
+                head[0] == 0x1f.toByte() && head[1] == 0x8b.toByte()
+            }
             val proc = ProcessBuilder()
                 .command("tar", if (isGzip) "xzf" else "xf", tarFile.absolutePath, "-C", targetDir.absolutePath)
                 .redirectErrorStream(true).start()
+            // 消费输出防管道阻塞
+            proc.inputStream.bufferedReader().use { it.readText() }
             val exit = proc.waitFor()
             tarFile.delete()
             if (exit != 0) return@withContext Result.failure(RuntimeException("解压失败"))
@@ -128,12 +136,15 @@ object JreInstaller {
             }
             File(targetDir, "bin/java").setExecutable(true)
 
-            // 同步到 rootfs,服务器才能真正使用
-            val synced = EnvManager.syncJavaToRootfs(version, targetDir)
-            _message.value = if (synced) "Java $version 安装完成并已同步到服务器环境"
-                             else "Java $version 已安装(环境未就绪,未同步)"
+            // 类型检测:Adoptium 是 Linux glibc 版,Android 16 上无法直接运行
+            val kind = EnvManager.detectJavaKind(File(targetDir, "bin/java"))
+            _message.value = if (kind == "android") {
+                "Java $version 安装完成,可直接运行"
+            } else {
+                "Java $version 已下载(Adoptium Linux 版)。注意:Android 16 系统限制无法直接运行 glibc 程序,推荐使用内置 Java 21 或本地导入 Android 版 JRE"
+            }
             refreshInstalled()
-            Logger.i("Java $version installed, synced=$synced")
+            Logger.i("Java $version installed, kind=$kind")
             Result.success(Unit)
         } catch (e: Exception) {
             Logger.e("install failed", e)
@@ -145,13 +156,14 @@ object JreInstaller {
     }
 
     fun delete(version: String) {
-        val dir = jreDirFor(version)
-        if (dir.exists()) dir.deleteRecursively()
-        // 同时移除 rootfs 中的副本
-        val suffix = if (isX8664) "amd64" else if (isAarch64) "arm64" else "armhf"
-        val rootfsJdk = File(EnvManager.javaHomeDir, "java-$version-openjdk-$suffix")
-        if (rootfsJdk.exists()) rootfsJdk.deleteRecursively()
-        _message.value = "已删除 Java $version"
+        // 内置 JRE 不允许删除(重新部署即可恢复),只删导入的
+        if (version == "21" && EnvManager.isJreReady()) {
+            _message.value = "内置 Java 21 为 APK 自带运行时,不可删除(重新部署可恢复)"
+            return
+        }
+        val ok = EnvManager.deleteImportedJava(version)
+        _message.value = if (ok) "已删除 Java $version" else "Java $version 不存在"
+        refreshInstalled()
     }
 
     private fun findJdkRoot(dir: File): File? {
@@ -182,12 +194,19 @@ object JreInstaller {
         _busy.value = "import:$version"
         _message.value = "正在导入 Java $version(本地文件,不消耗流量)..."
         try {
-            // ELF 架构校验:导入的 JDK 必须与 rootfs 架构一致
+            // ELF 架构校验:导入的 JDK 必须与设备架构一致
             val elfArch = detectElfArch(javaBin)
             val expected = if (isX8664) "x86_64" else if (isAarch64) "aarch64" else "arm"
             if (elfArch != null && elfArch != expected) {
                 _message.value = "JDK 架构($elfArch)与设备($expected)不匹配,无法用于服务器"
                 return@withContext Result.failure(RuntimeException("架构不匹配: $elfArch != $expected"))
+            }
+            // 类型检测:仅 Android 版(interpreter=宿主 linker64)可在 Android 16 直接运行
+            val kind = EnvManager.detectJavaKind(javaBin)
+            if (kind == "glibc") {
+                _message.value = "检测到这是 Linux glibc 版 JDK:Android 16 系统限制无法直接运行 glibc 程序。" +
+                        "请导入 Android 版 JRE(如 Termux 的 openjdk、FCL/Pojav 运行时),或使用内置 Java 21"
+                return@withContext Result.failure(RuntimeException("glibc 版 JDK 无法在 Android 16 直接运行"))
             }
             // 复制到 App 私有目录
             val targetDir = jreDirFor(version)
@@ -195,12 +214,13 @@ object JreInstaller {
             targetDir.mkdirs()
             sourceDir.copyRecursively(targetDir)
             File(targetDir, "bin/java").setExecutable(true)
-            // 同步到 rootfs,服务器启动才能真正使用
-            val synced = EnvManager.syncJavaToRootfs(version, targetDir)
-            _message.value = if (synced) "Java $version 导入完成并已同步到服务器环境"
-                             else "Java $version 已导入(环境未就绪,未同步)"
+            _message.value = if (kind == "android") {
+                "Java $version 导入完成,可直接运行"
+            } else {
+                "Java $version 已导入(未能确认运行时类型,若启动失败请改用 Android 版 JRE)"
+            }
             refreshInstalled()
-            Logger.i("Java $version imported locally, synced=$synced")
+            Logger.i("Java $version imported locally, kind=$kind")
             Result.success(Unit)
         } catch (e: Exception) {
             Logger.e("importJdk failed", e)

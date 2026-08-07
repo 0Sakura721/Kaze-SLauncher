@@ -78,7 +78,15 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                             mcVersion = version
                         )
                         // 移动 jar 到实例目录
-                        jarFile.copyTo(java.io.File(instance.dir(InstanceStore.instancesDir), jarFile.name), overwrite = true)
+                        try {
+                            jarFile.copyTo(java.io.File(instance.dir(InstanceStore.instancesDir), jarFile.name), overwrite = true)
+                        } catch (e: Exception) {
+                            importDir.deleteRecursively()
+                            InstanceStore.delete(instance.id)
+                            importing = false
+                            error = "复制核心失败:${e.message}"
+                            return@launch
+                        }
                         importDir.deleteRecursively()
                         importing = false
                         onDone()

@@ -79,9 +79,17 @@ class ServerLauncher(private val context: Context) {
                 val jreOk = EnvManager.isJreReady()
                 emit("> 环境自检:Java 运行时=${if (jreOk) "OK(${EnvManager.jreHomeDir.name})" else "缺失(请到设置页部署/导入)"}")
 
-                // 1) 核心 jar
+                // 1) 核心 jar(排除 installer:Forge/NeoForge 下载的是安装器,需先运行安装)
                 val jarFile = dir.listFiles()?.firstOrNull { it.name.endsWith(".jar") && !it.name.contains("installer") }
-                    ?: return@withContext Result.failure(RuntimeException("实例目录中没有服务端核心,请先下载"))
+                    ?: run {
+                        val onlyInstaller = dir.listFiles()?.any { it.name.endsWith(".jar") && it.name.contains("installer") } == true
+                        if (onlyInstaller) {
+                            return@withContext Result.failure(
+                                RuntimeException("检测到 Forge/NeoForge 安装器(installer.jar)。本启动器暂不支持自动运行安装器,请下载已安装完成的服务端核心(如 ${instance.coreType.displayName} 的 server 版),或改用 Paper/Vanilla 核心")
+                            )
+                        }
+                        return@withContext Result.failure(RuntimeException("实例目录中没有服务端核心,请先下载"))
+                    }
                 val jarName = jarFile.name
 
                 // 2) eula + server.properties
@@ -175,9 +183,47 @@ class ServerLauncher(private val context: Context) {
     }
 
     // ── 停止 ──
+    private val stopJobs = mutableListOf<kotlinx.coroutines.Job>()
+    private var stopInstanceId: String? = null
+
+    /**
+     * 接管孤儿服务器进程(App 曾被系统杀死,服务器仍在运行)。
+     * 通过轮询 /proc/<pid> 检测退出,恢复状态与日志监控。
+     */
+    fun adoptOrphan(instance: ServerInstance, pid: Int): Boolean {
+        if (isRunning || isLaunching.get()) return false
+        if (!File("/proc/$pid").exists()) return false
+        currentInstance = instance
+        manualStop = false
+        isLaunching.set(false)
+        launchedAtMs = android.os.SystemClock.elapsedRealtime()
+        _status.value = InstanceStatus.RUNNING
+        emit("> 检测到服务器仍在运行(孤儿进程),已接管监控")
+        val dir = instance.dir(InstanceStore.instancesDir)
+        // 轮询检测进程退出(无法 waitFor 外部进程)
+        processWaitJob?.cancel()
+        processWaitJob = scope.launch {
+            while (File("/proc/$pid").exists()) {
+                kotlinx.coroutines.delay(3000)
+            }
+            handleExit()
+        }
+        startTail(File(dir, "server.log"))
+        startUptime()
+        try {
+            ServerKeepAliveService.update(
+                com.mcserver.launcher.KazeApp.instance,
+                instance.name,
+                instance.mcVersion
+            )
+        } catch (_: Exception) { }
+        return true
+    }
+
     suspend fun stop() {
         if (!isRunning) { _status.value = InstanceStatus.STOPPED; return }
         manualStop = true
+        stopInstanceId = currentInstance?.id
         _status.value = InstanceStatus.STOPPING
         emit("> 正在停止服务器...")
         sendCommand("stop")
@@ -198,15 +244,18 @@ class ServerLauncher(private val context: Context) {
             script.setExecutable(true)
             EnvManager.startShell(script.absolutePath)
         }
-        // 兜底:15 秒后强制收尾
-        scope.launch {
+        // 兜底:15 秒后强制收尾(仅当仍是本次停止的进程,防止误杀新启动的服务器)
+        val stopProcessRef = process
+        val stopJob = scope.launch {
             delay(15000)
-            if (isRunning) {
+            // 校验:期间没有重新启动(process 引用变化 = 新进程)
+            if (isRunning && process === stopProcessRef && currentInstance?.id == stopInstanceId) {
                 process?.destroy()
                 processWaitJob?.cancel()
                 finalizeStop()
             }
         }
+        stopJobs += stopJob
     }
 
     // ── 控制台 ──
@@ -235,18 +284,23 @@ class ServerLauncher(private val context: Context) {
             }.start()
             return
         }
-        // 2) FIFO 后备
+        // 2) FIFO 后备(线程化:文件写端打开在无读者时阻塞,不能占用 UI 线程)
         val pipe = File(EnvManager.appTmpDir, "cmdpipe-${currentInstance?.id}")
         if (pipe.exists()) {
-            try {
-                pipe.appendText(cmd + "\n")
-            } catch (e: Exception) {
-                emit("> 命令发送失败:${e.message}")
-            }
+            Thread {
+                try {
+                    pipe.appendText(cmd + "\n")
+                } catch (e: Exception) {
+                    emit("> 命令发送失败:${e.message}")
+                }
+            }.start()
         }
     }
 
-    private fun emit(line: String) { _console.tryEmit(line) }
+    private fun emit(line: String) {
+        // 行前缀携带实例 id,UI 按实例过滤,防止多实例控制台串台
+        _console.tryEmit("${currentInstance?.id ?: ""}|$line")
+    }
 
     private fun handleExit() {
         Logger.w("handleExit: manualStop=$manualStop launchedAtMs=$launchedAtMs now=${android.os.SystemClock.elapsedRealtime()}")
@@ -282,6 +336,13 @@ class ServerLauncher(private val context: Context) {
     }
 
     private fun finalizeStop() {
+        // 停止时自动备份(配置开启时)
+        val stopInstance = currentInstance
+        if (stopInstance != null && stopInstance.config.backupOnStop) {
+            emit("> 正在备份世界...")
+            val backupFile = BackupManager.backupWorld(stopInstance)
+            emit(if (backupFile != null) "> 备份完成:${backupFile.name}" else "> 无世界数据,跳过备份")
+        }
         _status.value = InstanceStatus.STOPPED
         _players.value = emptyList()
         tailJob?.cancel()

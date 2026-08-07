@@ -22,19 +22,20 @@ class RconClient(private val host: String = "127.0.0.1", private val port: Int, 
 
     /** 连接并认证,成功返回 true */
     fun connect(timeoutMs: Int = 3000): Boolean {
+        var s: Socket? = null
         try {
-            val s = Socket()
+            s = Socket()
             s.connect(InetSocketAddress(host, port), timeoutMs)
             s.soTimeout = 5000
             val out = DataOutputStream(s.getOutputStream())
             val input = DataInputStream(s.getInputStream())
             writePacket(out, 3, password)
-            val (_, type) = readPacket(input) ?: run { s.close(); return false }
-            if (type != 2) { s.close(); return false } // SERVERDATA_AUTH_RESPONSE
+            val (_, type) = readPacket(input) ?: run { s.close(); socket = null; return false }
+            if (type != 2) { s.close(); socket = null; return false } // SERVERDATA_AUTH_RESPONSE
             socket = s
             return true
         } catch (_: Exception) {
-            try { socket?.close() } catch (_: Exception) { }
+            try { s?.close() } catch (_: Exception) { }
             socket = null
             return false
         }

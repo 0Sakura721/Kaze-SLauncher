@@ -97,7 +97,11 @@ object InstanceStore {
                     }
                 )
             }
-            prefsFile.writeText(arr.toString(2))
+            // 原子写:先写临时文件再 rename,避免进程被杀时配置损坏
+            val tmp = File(prefsFile.parentFile, prefsFile.name + ".tmp")
+            tmp.writeText(arr.toString(2))
+            if (prefsFile.exists()) prefsFile.delete()
+            tmp.renameTo(prefsFile)
         } catch (e: Exception) {
             Logger.e("save instances failed", e)
         }
@@ -123,7 +127,7 @@ object InstanceStore {
                         gamemode = c.optString("gamemode", "survival"),
                         difficulty = c.optString("difficulty", "normal"),
                         pvp = c.optBoolean("pvp", true),
-                        onlineMode = c.optBoolean("onlineMode", true),
+                        onlineMode = c.optBoolean("onlineMode", false),
                         whiteList = c.optBoolean("whiteList", false),
                         motd = c.optString("motd", "A Minecraft Server"),
                         maxRamMB = c.optInt("maxRamMB", 2048),

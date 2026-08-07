@@ -27,7 +27,7 @@ data class InstanceConfig(
     val gamemode: String = "survival",
     val difficulty: String = "normal",
     val pvp: Boolean = true,
-    val onlineMode: Boolean = true,
+    val onlineMode: Boolean = false,
     val whiteList: Boolean = false,
     val motd: String = "A Minecraft Server",
     val maxRamMB: Int = 2048,

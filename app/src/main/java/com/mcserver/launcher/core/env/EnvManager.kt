@@ -195,10 +195,60 @@ object EnvManager {
 
     /** 任意可用 Java(优先 JRE 直跑,其次 rootfs 内的 JDK) */
     fun resolveJavaPath(preferred: Int?): String? {
+        // 指定版本:优先已导入的 Android 版 JRE(java_<version>)
+        preferred?.let { v ->
+            val dir = File(appContext.filesDir, "java_$v")
+            val bin = File(dir, "bin/java")
+            if (bin.exists() && detectJavaKind(bin) == "android") return bin.absolutePath
+        }
         if (isJreReady()) return File(jreHomeDir, "bin/java").absolutePath
         val candidates = (listOfNotNull(preferred) + listOf(21, 17, 11, 8)).distinct()
         for (v in candidates) if (isJdkInstalled(v)) return getJavaPath(v)
         return null
+    }
+
+    /** Java 运行时类型检测:android(可直接运行)/ glibc(需旧 proot 环境)/ unknown */
+    fun detectJavaKind(javaBin: File): String {
+        return try {
+            val bytes = javaBin.inputStream().use { it.readBytes() }.take(2 * 1024 * 1024)
+            val text = String(bytes.toByteArray(), Charsets.ISO_8859_1)
+            when {
+                text.contains("/system/bin/linker64") -> "android"
+                text.contains("ld-linux") -> "glibc"
+                else -> "unknown"
+            }
+        } catch (_: Exception) { "unknown" }
+    }
+
+    /** 已安装 Java 运行时清单(Android JRE 直跑模式) */
+    data class InstalledJava(
+        val id: String,          // 唯一标识,如 "builtin-21" / "import-17"
+        val name: String,        // 显示名,如 "Java 21(内置)"
+        val version: String,     // 版本号字符串
+        val home: File,          // JRE 根目录
+        val isBuiltin: Boolean,  // 是否 APK 内置
+        val kind: String         // android / glibc / unknown
+    )
+
+    fun installedJavas(): List<InstalledJava> {
+        val result = mutableListOf<InstalledJava>()
+        if (isJreReady()) {
+            result += InstalledJava("builtin-21", "Java 21(内置)", "21", jreHomeDir, true, "android")
+        }
+        appContext.filesDir.listFiles()?.filter { it.name.startsWith("java_") }?.sortedByDescending { it.name }?.forEach { dir ->
+            val bin = File(dir, "bin/java")
+            if (bin.exists()) {
+                val version = dir.name.removePrefix("java_")
+                result += InstalledJava("import-$version", "Java $version(导入)", version, dir, false, detectJavaKind(bin))
+            }
+        }
+        return result
+    }
+
+    /** 删除导入的 Java 运行时(内置不可删)。返回是否成功 */
+    fun deleteImportedJava(version: String): Boolean {
+        val dir = File(appContext.filesDir, "java_$version")
+        return if (dir.exists()) dir.deleteRecursively() else false
     }
 
     fun isJdkInstalled(version: Int): Boolean {
@@ -537,6 +587,10 @@ object EnvManager {
      */
     suspend fun runFullSetup(jdkVersions: List<Int> = listOf(21)): Result<Unit> = withContext(Dispatchers.IO) {
         if (isSetupRunning.get()) return@withContext Result.failure(RuntimeException("部署正在进行中"))
+        // 服务器运行中禁止重新部署(会删除正在使用的 JRE)
+        if (com.mcserver.launcher.core.server.ServerManager.isRunning) {
+            return@withContext Result.failure(RuntimeException("服务器运行中,请先停止服务器再重新部署"))
+        }
         isSetupRunning.set(true)
         _state.value = EnvState.SETTING_UP
 

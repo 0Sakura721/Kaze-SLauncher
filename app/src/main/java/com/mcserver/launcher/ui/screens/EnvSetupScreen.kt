@@ -65,7 +65,7 @@ fun EnvSetupScreen(onSetupComplete: () -> Unit) {
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                "自动解压内置的 proot 与 Ubuntu 24.04(不消耗流量);Java 不需要在这里安装,之后在「设置」中按需导入或下载",
+                "自动部署内置的 Java 21 运行时(不消耗流量);不需要额外安装,开箱即用",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -144,6 +144,10 @@ fun EnvSetupScreen(onSetupComplete: () -> Unit) {
                         scope.launch { EnvManager.runFullSetup(emptyList()) }
                     }, modifier = Modifier.fillMaxWidth()) {
                         Text("重试部署")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = onSetupComplete, modifier = Modifier.fillMaxWidth()) {
+                        Text("跳过,直接进入主界面(稍后在设置中处理)")
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("部署失败:${logs.lastOrNull() ?: "未知错误"}",

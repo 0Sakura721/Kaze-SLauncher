@@ -58,7 +58,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val envState by EnvManager.state.collectAsState()
     val busyVersion by JreInstaller.busy.collectAsState()
     val message by JreInstaller.message.collectAsState()
-    val installedVersions by JreInstaller.installedVersions.collectAsState()
+    val installedJavas by JreInstaller.installedJavas.collectAsState()
     val themeMode by SettingsStore.themeMode.collectAsState()
     val darkAmoled by SettingsStore.darkAmoled.collectAsState()
     var showAbout by remember { mutableStateOf(false) }
@@ -76,7 +76,12 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
-        if (uri != null && importing != null) {
+        // 用户取消选择时也要重置导入状态
+        if (uri == null) {
+            importing = null
+            return@rememberLauncherForActivityResult
+        }
+        if (importing != null) {
             val version = importing!!
             importing = null
             scope.launch {
@@ -127,7 +132,10 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 Text(label, color = color, style = MaterialTheme.typography.labelLarge)
             }
             Spacer(Modifier.height(6.dp))
-            Text("已安装 Java:${installedVersions.ifEmpty { listOf("无") }.joinToString(", ")}",
+            val javaNames = EnvManager.installedJavas().map {
+                if (it.isBuiltin) "21(内置)" else "${it.version}${if (it.kind == "android") "" else "(受限)"}"
+            }
+            Text("已安装 Java:${if (javaNames.isEmpty()) "无" else javaNames.joinToString(", ")}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(10.dp))
@@ -138,54 +146,71 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 
         // ── Java 管理 ──
         SectionCard("Java 运行时(按需安装)") {
-            Text("不同 MC 版本需要不同 Java,按需安装,不强制全部。",
+            Text("不同 MC 版本需要不同 Java;内置 Java 21 开箱即用,其他版本本地导入或下载。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
-            listOf(8, 11, 17, 21).forEach { version ->
-                val installed = EnvManager.isJdkInstalled(version)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                    Text("Java $version", Modifier.weight(1f))
-                    Text(
-                        if (installed) "已安装" else "未安装",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (installed) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (busyVersion == version.toString()) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    } else if (installed) {
-                        val (pressD, srcD) = pressSource()
-                        IconButton(onClick = {
-                            scope.launch { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { JreInstaller.delete(version.toString()) } }
-                        }, interactionSource = srcD, modifier = pressD) { Icon(Icons.Filled.Delete, "删除", Modifier.size(18.dp)) }
-                    } else {
-                        // 本地导入优先(不消耗流量),下载为备选
-                        val (pressI, srcI) = pressSource()
-                        IconButton(
-                            onClick = {
-                                importing = version.toString()
-                                importLauncher.launch(null)
+            // 内置版本(21)
+            val builtin21 = EnvManager.isJreReady()
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                Text("Java 21", Modifier.weight(1f))
+                Text(if (builtin21) "内置 · 已就绪" else "未部署",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (builtin21) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // 已导入的版本(去重,排除 21 内置)
+            val imported = EnvManager.installedJavas().filter { it.version != "21" }
+            if (imported.isEmpty()) {
+                Text("暂无其他导入版本", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                imported.forEach { java ->
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                        Text("Java ${java.version}", Modifier.weight(1f))
+                        Text(
+                            when (java.kind) {
+                                "android" -> "已导入 · 可用"
+                                "glibc" -> "已导入 · 兼容受限"
+                                else -> "已导入"
                             },
-                            enabled = busyVersion == null,
-                            interactionSource = srcI,
-                            modifier = pressI
-                        ) { Icon(Icons.Filled.FolderOpen, "从本地导入", Modifier.size(18.dp)) }
-                        val (pressW, srcW) = pressSource()
-                        IconButton(
-                            onClick = {
-                                installing = version.toString()
-                                scope.launch {
-                                    JreInstaller.install(version.toString()).onFailure { }
-                                    installing = null
-                                }
-                            },
-                            enabled = busyVersion == null,
-                            interactionSource = srcW,
-                            modifier = pressW
-                        ) { Icon(Icons.Filled.Download, "下载", Modifier.size(18.dp)) }
+                            style = MaterialTheme.typography.labelSmall,
+                            color = when (java.kind) {
+                                "android" -> Color(0xFF4CAF50)
+                                "glibc" -> Color(0xFFFFA726)
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                        if (busyVersion == java.version) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            val (pressD, srcD) = pressSource()
+                            IconButton(onClick = {
+                                scope.launch { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { JreInstaller.delete(java.version) } }
+                            }, interactionSource = srcD, modifier = pressD) { Icon(Icons.Filled.Delete, "删除", Modifier.size(18.dp)) }
+                        }
                     }
                 }
             }
+            // 导入/下载入口(选择版本后操作)
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(8, 11, 17).forEach { version ->
+                    val (pressI, srcI) = pressSource()
+                    OutlinedButton(
+                        onClick = {
+                            importing = version.toString()
+                            importLauncher.launch(null)
+                        },
+                        enabled = busyVersion == null,
+                        interactionSource = srcI,
+                        modifier = pressI,
+                        contentPadding = PaddingValues(horizontal = 8.dp)
+                    ) { Text("导入 Java $version", style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+            Text("提示:导入 Android 版 JRE(Termux openjdk / FCL 运行时等)可直接运行;Adoptium 等 Linux glibc 版在 Android 16 上受系统限制。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (message.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(message, style = MaterialTheme.typography.bodySmall,

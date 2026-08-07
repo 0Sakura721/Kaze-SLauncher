@@ -3,7 +3,7 @@ package com.mcserver.launcher.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,10 +14,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Backup
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
@@ -35,6 +37,7 @@ import com.mcserver.launcher.core.download.DownloadCenter
 import com.mcserver.launcher.core.download.ModrinthApi
 import com.mcserver.launcher.ui.components.ModrinthSearchDialog
 import com.mcserver.launcher.ui.components.pressSource
+import com.mcserver.launcher.core.server.BackupManager
 import com.mcserver.launcher.core.server.PluginManager
 import com.mcserver.launcher.core.server.ServerManager
 import com.mcserver.launcher.data.ServerInstance
@@ -103,7 +106,7 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
         // 内容区固定高度(weight 1f),内部页面各自滚动
         Box(Modifier.weight(1f)) {
             when (tab) {
-                0 -> ConsoleTab()
+                0 -> ConsoleTab(instance)
                 1 -> AddonTab(instance)
                 2 -> ConfigTab(instance)
                 3 -> WorldTab(instance)
@@ -120,6 +123,13 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
                 TextButton(onClick = {
                     showDeleteConfirm = false
                     scope.launch {
+                        // 运行中禁止删除(避免删掉正在运行的服务器文件)
+                        if (com.mcserver.launcher.core.server.ServerManager.isRunningFor(instance.id)) {
+                            android.widget.Toast.makeText(
+                                context, "服务器运行中,请先停止再删除", android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                            return@launch
+                        }
                         com.mcserver.launcher.core.server.InstanceStore.delete(instance.id)
                         onBack()
                     }
@@ -161,11 +171,15 @@ private fun ServerControlButton(instance: ServerInstance) {
 // ═══════════ 控制台 ═══════════
 
 @androidx.compose.runtime.Immutable
-private data class ConsoleLogLine(val text: String, val color: androidx.compose.ui.graphics.Color)
+private data class ConsoleLogLine(
+    val key: Long,
+    val text: String,
+    val color: androidx.compose.ui.graphics.Color
+)
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun ConsoleTab() {
+private fun ConsoleTab(instance: ServerInstance) {
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
@@ -204,24 +218,35 @@ private fun ConsoleTab() {
         }
     }
 
+    // 日志计数(触发自动滚动;logLines 满 1000 裁剪后 size 不变,需独立计数器)
+    var logCounter by remember { mutableStateOf(0) }
+    var logSeq by remember { mutableStateOf(0L) }
+
     LaunchedEffect(Unit) {
-        ServerManager.console.collect { line ->
+        ServerManager.console.collect { raw ->
+            // 按实例过滤:行前缀为实例 id,防止多实例串台
+            val sep = raw.indexOf('|')
+            val instId = if (sep > 0) raw.substring(0, sep) else ""
+            if (instId != instance.id) return@collect
+            val line = if (sep > 0) raw.substring(sep + 1) else raw
             // 自动输出关闭时暂停接收(恢复后从当前继续)
             if (!autoOutput) return@collect
             logLines.add(
                 ConsoleLogLine(
+                    key = logSeq++,
                     text = line,
                     color = if (line.contains("ERROR") || line.contains("Exception")) errColor
                             else if (line.startsWith(">")) primaryColor
                             else textColor
                 )
             )
+            logCounter++
             if (logLines.size > 1000) logLines.removeRange(0, logLines.size - 1000)
         }
     }
 
     // 自动滚动:新日志到达时滚到底部
-    LaunchedEffect(logLines.size, autoScroll) {
+    LaunchedEffect(logCounter, autoScroll) {
         if (autoScroll && logLines.isNotEmpty()) {
             listState.scrollToItem((logLines.size - 1).coerceAtLeast(0))
         }
@@ -283,24 +308,23 @@ private fun ConsoleTab() {
                     color = if (autoScroll) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-                .padding(8.dp)
-        ) {
-            items(logLines.takeLast(500)) { entry ->
-                Text(entry.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                    color = entry.color,
-                    modifier = Modifier
-                        .padding(vertical = 1.dp)
-                        .combinedClickable(
-                            onClick = {},
-                            onLongClick = { copyToClipboard(entry.text, "已复制该行日志") }
-                        ))
+        // Termux 式:SelectionContainer 自由选择日志文本(长按拖动选择,复制按钮),
+        // 取消逐行长按复制
+        SelectionContainer {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                    .padding(8.dp)
+            ) {
+                items(logLines.takeLast(500), key = { it.key }) { entry ->
+                    Text(entry.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                        color = entry.color,
+                        modifier = Modifier.padding(vertical = 1.dp))
+                }
             }
         }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -517,6 +541,7 @@ private fun WorldTab(instance: ServerInstance) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var worlds by remember { mutableStateOf<List<File>>(emptyList()) }
+    var backups by remember { mutableStateOf<List<File>>(emptyList()) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -544,39 +569,101 @@ private fun WorldTab(instance: ServerInstance) {
         }
     }
 
-    LaunchedEffect(instance.id) { worlds = listWorlds(instance) }
+    LaunchedEffect(instance.id) {
+        worlds = listWorlds(instance)
+        backups = BackupManager.backupsFor(instance.id)
+    }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("世界管理", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         Spacer(Modifier.height(4.dp))
         Text("导入本地世界目录(优先本地,不耗流量);导入后可在配置页将 level-name 设为该目录名", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(12.dp))
-        Button(onClick = { importLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("从本地导入世界(不耗流量)")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { importLauncher.launch(null) }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("导入世界")
+            }
+            OutlinedButton(onClick = {
+                scope.launch {
+                    val f = BackupManager.backupWorld(instance)
+                    backups = BackupManager.backupsFor(instance.id)
+                    android.widget.Toast.makeText(
+                        context,
+                        if (f != null) "备份完成:${f.name}" else "无世界数据,未备份",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.Backup, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("立即备份")
+            }
         }
         Spacer(Modifier.height(12.dp))
+
+        // ── 备份列表 ──
+        Text("世界备份(停止时自动备份:配置页开启)", style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        if (backups.isEmpty()) {
+            Text("暂无备份", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            LazyColumn {
+                items(backups, key = { it.name }) { backup ->
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 1.dp, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(backup.name, style = MaterialTheme.typography.labelMedium)
+                                Text(formatSize(backup.length()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            val (pr, sr) = pressSource()
+                            IconButton(onClick = {
+                                scope.launch {
+                                    val ok = BackupManager.restoreBackup(instance, backup)
+                                    worlds = listWorlds(instance)
+                                    android.widget.Toast.makeText(context, if (ok) "已还原,旧世界保留为 *_old_*" else "还原失败", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }, interactionSource = sr, modifier = pr) { Icon(Icons.Filled.Restore, "还原", Modifier.size(18.dp)) }
+                            val (pd, sd) = pressSource()
+                            IconButton(onClick = {
+                                scope.launch {
+                                    BackupManager.deleteBackup(instance.id, backup.name)
+                                    backups = BackupManager.backupsFor(instance.id)
+                                }
+                            }, interactionSource = sd, modifier = pd) { Icon(Icons.Filled.Delete, "删除备份", Modifier.size(18.dp)) }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // ── 世界列表 ──
+        Text("当前世界", style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
         if (worlds.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 Text("还没有世界,点上方导入", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
                 items(worlds, key = { it.name }) { world ->
                     Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface,
                         tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(world.name, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
-                                Text(formatSize(world.length()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(formatSize(dirSize(world)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                            val (pd, sd) = pressSource()
                             IconButton(onClick = {
                                 scope.launch {
                                     world.deleteRecursively()
                                     worlds = listWorlds(instance)
                                 }
-                            }) { Icon(Icons.Filled.Delete, "删除世界", Modifier.size(18.dp)) }
+                            }, interactionSource = sd, modifier = pd) { Icon(Icons.Filled.Delete, "删除世界", Modifier.size(18.dp)) }
                         }
                     }
                 }
@@ -584,6 +671,10 @@ private fun WorldTab(instance: ServerInstance) {
         }
     }
 }
+
+/** 递归计算目录大小 */
+private fun dirSize(dir: File): Long =
+    dir.listFiles()?.sumOf { if (it.isDirectory) dirSize(it) else it.length() } ?: 0L
 
 /** 列出实例中的世界目录(含 level.dat 或 data/ 的目录) */
 private fun listWorlds(instance: ServerInstance): List<File> =

@@ -50,20 +50,35 @@ object DownloadCenter {
     }
 
     fun pause(id: String) {
+        cancelFlags[id]?.set(true)
         update(id) { it.copy(status = DownloadStatus.PAUSED) }
     }
 
+    /** 恢复:重新入队,从 .part 断点续传 */
     fun resume(id: String) {
+        cancelFlags.remove(id)
         update(id) { it.copy(status = DownloadStatus.PENDING) }
         pump()
     }
 
+    /** 取消:停止下载并清理任务(删除任务与文件用 remove) */
     fun cancel(id: String) {
         cancelFlags[id]?.set(true)
+        update(id) { it.copy(status = DownloadStatus.CANCELED) }
     }
 
+    /** 删除任务记录,并同时删除已下载的文件(释放空间) */
     fun remove(id: String) {
         cancel(id)
+        val task = _tasks.value.firstOrNull { it.id == id }
+        if (task != null) {
+            try {
+                if (task.destFile.exists()) task.destFile.delete()
+                // 清理可能残留的断点文件
+                val partial = File(task.destFile.parentFile, task.destFile.name + ".partial")
+                if (partial.exists()) partial.delete()
+            } catch (_: Exception) { }
+        }
         _tasks.value = _tasks.value.filterNot { it.id == id }
         cancelFlags.remove(id)
     }
@@ -92,47 +107,45 @@ object DownloadCenter {
     }
 
     private suspend fun download(id: String) {
-        val task = _tasks.value.firstOrNull { it.id == id } ?: run { running.decrementAndGet(); return }
-        val cancel = cancelFlags[id] ?: AtomicBoolean(false)
-        task.destFile.parentFile?.mkdirs()
-
         try {
+            val task = _tasks.value.firstOrNull { it.id == id } ?: return
+            val cancel = cancelFlags[id] ?: AtomicBoolean(false)
+            task.destFile.parentFile?.mkdirs()
+
             // 断点续传:读取 .part 文件已有大小
             val partFile = File(task.destFile.parentFile, task.destFile.name + ".part")
             var offset = partFile.length()
-            if (offset > 0) update(id) { it.copy(status = DownloadStatus.DOWNLOADING, downloadedBytes = offset) }
-            else update(id) { it.copy(status = DownloadStatus.DOWNLOADING) }
+            update(id) { it.copy(status = DownloadStatus.DOWNLOADING, downloadedBytes = offset) }
 
             var lastError: Exception? = null
+            var completed = false
             for (url in task.urls) {
                 if (cancel.get()) break
                 try {
                     offset = downloadFromUrl(id, url, partFile, offset, cancel)
-                    // 全部下载完成
-                    if (cancel.get()) {
-                        update(id) { it.copy(status = DownloadStatus.CANCELED) }
-                        running.decrementAndGet()
-                        return
-                    }
+                    if (cancel.get()) break
                     // 校验非空后落盘
                     if (partFile.length() > 0) {
                         val finalSize = partFile.length()
                         partFile.renameTo(task.destFile)
                         update(id) { it.copy(status = DownloadStatus.COMPLETED, progress = 1f, downloadedBytes = finalSize, totalBytes = finalSize) }
+                        completed = true
                         Logger.i("下载完成: ${task.title}")
-                        running.decrementAndGet()
-                        return
+                        break
                     }
                 } catch (e: Exception) {
+                    if (cancel.get()) break
                     lastError = e
                     Logger.w("下载失败 $url: ${e.message}")
                     // 切换源时从头开始
                     offset = 0
                     if (partFile.exists()) partFile.delete()
                 }
-                if (cancel.get()) break
             }
-            update(id) { it.copy(status = DownloadStatus.FAILED, error = lastError?.message) }
+            // 未完成且未取消 → 失败;取消状态由 cancel() 标记
+            if (!completed && !cancel.get()) {
+                update(id) { it.copy(status = DownloadStatus.FAILED, error = lastError?.message) }
+            }
         } catch (e: Exception) {
             Logger.e("download failed", e)
             update(id) { it.copy(status = DownloadStatus.FAILED, error = e.message) }
