@@ -25,6 +25,7 @@ private enum class Tab(val label: String, val icon: ImageVector) {
 }
 
 /** 主界面:首页(仪表盘)/下载中心/设置 */
+@androidx.compose.foundation.ExperimentalFoundationApi
 @Composable
 fun MainApp() {
     var tab by remember { mutableStateOf(Tab.HOME) }

@@ -41,11 +41,11 @@ import com.mcserver.launcher.ui.theme.KazeTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
-
     private val notificationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    @androidx.compose.foundation.ExperimentalFoundationApi
     override fun onCreate(savedInstanceState: Bundle?) {
         // 让系统启动画面与窗口背景跟随应用内主题设置
         // (SYSTEM 模式不动,由 values-night 自动适配)
