@@ -78,6 +78,10 @@ class ServerLauncher(private val context: Context) {
                 // 环境自愈:修复符号链接降级(usr/bin/sh)与缺失的 tmp 目录,
                 // 旧版本部署的环境可能存在这两处损坏,必须在启动前修复
                 EnvManager.selfHeal()
+                // 自检诊断(控制台可见,便于定位环境问题)
+                val shFile = java.io.File(EnvManager.rootfsDir, "usr/bin/sh")
+                val tmpDir = java.io.File(EnvManager.rootfsDir, "tmp")
+                emit("> 环境自检:usr/bin/sh=${if (shFile.isFile) "OK(文件)" else if (shFile.exists()) "异常(非文件)" else "缺失"} tmp=${if (tmpDir.isDirectory) "OK" else "缺失"}")
 
                 // 1) 核心 jar
                 val jarFile = dir.listFiles()?.firstOrNull { it.name.endsWith(".jar") && !it.name.contains("installer") }

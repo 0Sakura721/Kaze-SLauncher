@@ -281,6 +281,14 @@ object EnvManager {
                             read += n
                         }
                         if (path.contains("/")) target.parentFile?.mkdirs()
+                        // 关键:先清理已存在的 target(重新部署时旧目录可能残留,
+                        // 不删会导致 createSymbolicLink 报 FileAlreadyExists,
+                        // 兜底复制到"已存在的目录"也会失败 → 符号链接降级成目录残留)
+                        try {
+                            if (target.exists()) {
+                                if (target.isDirectory) target.deleteRecursively() else target.delete()
+                            }
+                        } catch (_: Exception) { }
                         try {
                             java.nio.file.Files.createSymbolicLink(
                                 target.toPath(),
@@ -292,7 +300,9 @@ object EnvManager {
                             try {
                                 val linkTarget = String(linkBytes, 0, read, Charsets.UTF_8)
                                 val resolved = File(target.parentFile ?: File("."), linkTarget)
-                                if (resolved.exists()) resolved.copyTo(target, overwrite = true)
+                                if (resolved.exists() && !target.exists()) {
+                                    resolved.copyTo(target, overwrite = true)
+                                }
                             } catch (_: Exception) { }
                         }
                     }
