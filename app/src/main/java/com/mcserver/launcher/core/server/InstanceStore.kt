@@ -98,6 +98,7 @@ object InstanceStore {
                             put("maxWorldSize", inst.config.maxWorldSize)
                             put("jvmArgs", inst.config.jvmArgs)
                             put("rconEnabled", inst.config.rconEnabled)
+                            put("autoBackupHours", inst.config.autoBackupHours)
                             put("rconPassword", inst.config.rconPassword)
                             put("rconPort", inst.config.rconPort)
                             put("autoRestart", inst.config.autoRestart)
@@ -155,6 +156,7 @@ object InstanceStore {
                         maxWorldSize = c.optInt("maxWorldSize", 29999984),
                         jvmArgs = c.optString("jvmArgs", ""),
                         rconEnabled = c.optBoolean("rconEnabled", true),
+                        autoBackupHours = c.optInt("autoBackupHours", 0),
                         rconPassword = c.optString("rconPassword", ""),
                         rconPort = c.optInt("rconPort", 25575),
                         autoRestart = c.optBoolean("autoRestart", true),

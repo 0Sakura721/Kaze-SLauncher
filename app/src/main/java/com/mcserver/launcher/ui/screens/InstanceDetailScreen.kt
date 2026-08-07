@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
@@ -56,6 +57,10 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var currentName by remember { mutableStateOf(instance.name) }
+    var checkCoreUpdate by remember { mutableStateOf(false) }
+    var upgradeInfo by remember { mutableStateOf<com.mcserver.launcher.core.download.CoreDownload?>(null) }
+    var upgrading by remember { mutableStateOf(false) }
+    var upgradeMsg by remember { mutableStateOf<String?>(null) }
 
     Column(modifier.fillMaxSize()) {
         Row(
@@ -79,6 +84,13 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
                 )
             }
             ServerControlButton(instance)
+            // 核心升级入口
+            val (pressUp, srcUp) = pressSource()
+            IconButton(
+                onClick = { checkCoreUpdate = true },
+                interactionSource = srcUp,
+                modifier = pressUp
+            ) { Icon(Icons.Filled.SystemUpdate, "升级核心") }
             val (pressDel, srcDel) = pressSource()
             IconButton(onClick = { showDeleteConfirm = true }, interactionSource = srcDel, modifier = pressDel) { Icon(Icons.Filled.Delete, "删除实例") }
         }
@@ -137,6 +149,99 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
             },
             dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") } }
         )
+    }
+
+    // ── 核心升级 ──
+    if (checkCoreUpdate) {
+        AlertDialog(
+            onDismissRequest = { checkCoreUpdate = false },
+            title = { Text("升级核心") },
+            text = {
+                Column {
+                    Text("当前:${instance.coreType.displayName} ${instance.mcVersion}", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    if (upgradeInfo == null && upgradeMsg == null) {
+                        Text("正在检查最新版本...", style = MaterialTheme.typography.bodySmall)
+                    } else if (upgradeMsg != null) {
+                        Text(upgradeMsg ?: "", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        val info = upgradeInfo
+                        if (info != null) {
+                            Text("发现新版本:${info.fileName}", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text("下载后将备份当前核心并替换,重启服务器生效。", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    if (upgrading) {
+                        Spacer(Modifier.height(8.dp))
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                }
+            },
+            confirmButton = {
+                if (upgradeInfo != null && !upgrading) {
+                    TextButton(onClick = {
+                        val info = upgradeInfo ?: return@TextButton
+                        upgrading = true
+                        scope.launch {
+                            val dir = instance.dir(com.mcserver.launcher.core.server.InstanceStore.instancesDir)
+                            val oldJar = dir.listFiles()?.firstOrNull { it.extension == "jar" }
+                            // 备份旧核心
+                            if (oldJar != null) {
+                                val bak = java.io.File(dir, "${oldJar.name}.bak")
+                                oldJar.copyTo(bak, overwrite = true)
+                            }
+                            val result = runCatching {
+                                // 下载到实例目录
+                                val target = java.io.File(dir, info.fileName)
+                                target.outputStream().use { out ->
+                                    val conn = java.net.URL(info.url).openConnection()
+                                    conn.setRequestProperty("User-Agent", "Kaze-SLauncher/1.0")
+                                    conn.connectTimeout = 15000
+                                    conn.readTimeout = 30000
+                                    conn.getInputStream().copyTo(out)
+                                }
+                                // 删除旧 jar(保留 .bak)
+                                oldJar?.delete()
+                                target
+                            }
+                            upgrading = false
+                            if (result.isSuccess) {
+                                upgradeMsg = "升级完成:${result.getOrNull()?.name}。重启服务器生效。"
+                                upgradeInfo = null
+                            } else {
+                                upgradeMsg = "升级失败:${result.exceptionOrNull()?.message}"
+                            }
+                        }
+                    }) { Text("下载并替换") }
+                } else if (upgradeInfo == null && upgradeMsg == null) {
+                    TextButton(onClick = { checkCoreUpdate = false }) { Text("取消") }
+                } else {
+                    TextButton(onClick = { checkCoreUpdate = false }) { Text("关闭") }
+                }
+            },
+            dismissButton = {
+                if (upgradeInfo != null || upgradeMsg != null) {
+                    TextButton(onClick = { checkCoreUpdate = false }) { Text("取消") }
+                }
+            }
+        )
+        // 触发检查
+        androidx.compose.runtime.LaunchedEffect(Unit) {
+            val r = runCatching {
+                val versions = com.mcserver.launcher.core.download.CoreSources.fetchVersions(instance.coreType).getOrThrow()
+                val latest = versions.firstOrNull() ?: return@runCatching null
+                com.mcserver.launcher.core.download.CoreSources.resolveDownload(
+                    instance.coreType, latest.id, "", null
+                ).getOrNull()
+            }.getOrNull()
+            if (r == null) {
+                upgradeMsg = "未找到可用的更新(或已是最新)。"
+            } else {
+                upgradeInfo = r
+            }
+        }
     }
 }
 
@@ -620,6 +725,7 @@ private fun WorldTab(instance: ServerInstance) {
     val scope = rememberCoroutineScope()
     var worlds by remember { mutableStateOf<List<File>>(emptyList()) }
     var backups by remember { mutableStateOf<List<File>>(emptyList()) }
+    var autoBackupHours by remember { mutableStateOf(instance.config.autoBackupHours) }
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -677,6 +783,27 @@ private fun WorldTab(instance: ServerInstance) {
                 Icon(Icons.Filled.Backup, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("立即备份")
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+
+        // ── 自动备份间隔 ──
+        Text("自动备份(服务器运行期间)", style = MaterialTheme.typography.labelMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(4.dp))
+        Row {
+            listOf(0 to "关闭", 1 to "每 1 小时", 6 to "每 6 小时", 12 to "每 12 小时", 24 to "每天").forEach { (h, label) ->
+                FilterChip(
+                    selected = autoBackupHours == h,
+                    onClick = {
+                        autoBackupHours = h
+                        com.mcserver.launcher.core.server.InstanceStore.update(
+                            instance.copy(config = instance.config.copy(autoBackupHours = h))
+                        )
+                        android.widget.Toast.makeText(context, "已${if (h == 0) "关闭" else "设置每 $h 小时自动备份"},重启服务器后生效", android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    label = { Text(label) },
+                    modifier = Modifier.padding(end = 6.dp)
+                )
             }
         }
         Spacer(Modifier.height(12.dp))

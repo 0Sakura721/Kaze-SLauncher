@@ -55,7 +55,8 @@ data class InstanceConfig(
     // ── 运维 ──
     val autoRestart: Boolean = true,
     val maxRestarts: Int = 3,
-    val backupOnStop: Boolean = true
+    val backupOnStop: Boolean = true,
+    val autoBackupHours: Int = 0
 )
 
 /** 服务器实例(一个实例 = 一个目录 + 独立配置 + 独立状态) */

@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -59,6 +60,7 @@ fun NewInstanceScreen(onDone: () -> Unit) {
     var error by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
+    var showDownloadedCores by remember { mutableStateOf(false) }
 
     // SAF:选择本地服务端 JAR(本地导入优先,不消耗流量)
     val importJarLauncher = rememberLauncherForActivityResult(
@@ -197,6 +199,19 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                         Spacer(Modifier.width(8.dp))
                         Text(if (importing) "正在导入..." else "导入整合包 / 外部包(zip,不耗流量)")
                     }
+                    Spacer(Modifier.height(8.dp))
+                    // 从已下载核心创建(不重复下载)
+                    val (pressDl, srcDl) = pressSource()
+                    OutlinedButton(
+                        onClick = { showDownloadedCores = true },
+                        modifier = pressDl.then(Modifier.fillMaxWidth()),
+                        interactionSource = srcDl,
+                        enabled = !importing
+                    ) {
+                        Icon(Icons.Filled.CheckCircle, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("从已下载核心创建(不重复下载)")
+                    }
                     Spacer(Modifier.height(16.dp))
                     Text("或从以下来源下载:",
                         style = MaterialTheme.typography.bodySmall,
@@ -330,6 +345,74 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+
+    // ── 从已下载核心创建 ──
+    if (showDownloadedCores) {
+        // 数据源:下载中心已完成任务 + 扫描所有实例目录里的核心 jar(内存任务重启会丢,实例 jar 更可靠)
+        val downloaded = buildList {
+            com.mcserver.launcher.core.download.DownloadCenter.tasks.value
+                .filter { it.status == com.mcserver.launcher.data.DownloadStatus.COMPLETED && it.destFile.exists() && it.destFile.extension == "jar" }
+                .forEach { add(it.destFile) }
+            // 所有实例目录的 jar(排除 .bak 与 installer)
+            com.mcserver.launcher.core.server.InstanceStore.instancesDir.listFiles()?.forEach { instDir ->
+                instDir.listFiles()?.filter {
+                    it.extension == "jar" && !it.name.contains("installer") && !it.name.endsWith(".bak")
+                }?.forEach { add(it) }
+            }
+        }.distinctBy { it.absolutePath }
+        AlertDialog(
+            onDismissRequest = { showDownloadedCores = false },
+            title = { Text("从已下载核心创建") },
+            text = {
+                if (downloaded.isEmpty()) {
+                    Text("暂无已下载的核心文件。先到下载中心下载,或从本地导入 JAR。", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                        items(downloaded, key = { it.absolutePath }) { jar ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                                    .clickable {
+                                        showDownloadedCores = false
+                                        importing = true
+                                        scope.launch {
+                                            val (type, version) = guessFromFileName(jar.name)
+                                            val instance = InstanceStore.create(
+                                                name = jar.name.removeSuffix(".jar"),
+                                                coreType = type,
+                                                mcVersion = version
+                                            )
+                                            try {
+                                                jar.copyTo(
+                                                    java.io.File(instance.dir(InstanceStore.instancesDir), jar.name),
+                                                    overwrite = true
+                                                )
+                                                importing = false
+                                                onDone()
+                                            } catch (e: Exception) {
+                                                importing = false
+                                                InstanceStore.delete(instance.id)
+                                                error = "创建失败:${e.message}"
+                                            }
+                                        }
+                                    }
+                            ) {
+                                Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                    Text(jar.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                                    Text("${formatSize(jar.length())} · 点击创建实例",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showDownloadedCores = false }) { Text("关闭") } }
+        )
     }
 }
 /** 解压 zip 到目标目录(防路径穿越) */

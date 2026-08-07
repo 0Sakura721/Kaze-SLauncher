@@ -45,6 +45,7 @@ class ServerLauncher(private val context: Context) {
     private var process: Process? = null
     private var tailJob: Job? = null
     private var uptimeJob: Job? = null
+    private var autoBackupJob: Job? = null
     private var processWaitJob: Job? = null
     private var restartCount = 0
     private val isLaunching = AtomicBoolean(false)
@@ -165,7 +166,7 @@ class ServerLauncher(private val context: Context) {
                 startUptime()
 
                 _status.value = InstanceStatus.RUNNING
-                // 保活:服务已常驻(App 启动时拉起),这里只更新通知为实例信息
+                startAutoBackup(instance)
                 try {
                     ServerKeepAliveService.update(
                         com.mcserver.launcher.KazeApp.instance,
@@ -213,6 +214,7 @@ class ServerLauncher(private val context: Context) {
         }
         startTail(File(dir, "server.log"))
         startUptime()
+        startAutoBackup(instance)
         try {
             ServerKeepAliveService.update(
                 com.mcserver.launcher.KazeApp.instance,
@@ -350,6 +352,7 @@ class ServerLauncher(private val context: Context) {
         _players.value = emptyList()
         tailJob?.cancel()
         uptimeJob?.cancel()
+        autoBackupJob?.cancel()
         process = null
         restartCount = 0
         currentInstance = null
@@ -400,6 +403,32 @@ class ServerLauncher(private val context: Context) {
             while (isActive) {
                 _uptimeSec.value = (System.currentTimeMillis() - start) / 1000
                 delay(1000)
+            }
+        }
+    }
+
+    /**
+     * 定时自动备份:每 5 分钟检查一次,累计到 autoBackupHours 小时执行一次世界备份。
+     * 仅世界目录存在且有变化时备份;关闭(autoBackupHours=0)不启动。
+     */
+    private fun startAutoBackup(instance: ServerInstance) {
+        autoBackupJob?.cancel()
+        val hours = instance.config.autoBackupHours
+        if (hours <= 0) return
+        autoBackupJob = scope.launch {
+            // 以服务器启动时间为基准计时
+            val checkEveryMs = 5 * 60 * 1000L
+            val intervalMs = hours * 60 * 60 * 1000L
+            var lastBackup = System.currentTimeMillis()
+            while (isActive && isRunning) {
+                delay(checkEveryMs)
+                if (!isRunning) break
+                if (System.currentTimeMillis() - lastBackup >= intervalMs) {
+                    lastBackup = System.currentTimeMillis()
+                    emit("> 定时自动备份(每 $hours 小时)...")
+                    val ok = BackupManager.backupWorld(instance)
+                    emit(if (ok != null) "> 自动备份完成:${ok.name}" else "> 自动备份:无世界数据,跳过")
+                }
             }
         }
     }
