@@ -34,9 +34,15 @@ val downloadBundledAssets by tasks.registering {
         listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz", "proot-x86_64.tar.gz")
             .forEach { check(file("src/main/assets/bundled"), it) }
         if (missing.isNotEmpty()) {
-            throw GradleException("缺少内置资源: ${missing.joinToString()}（JRE 资源从设备提取或 GitHub Release 获取）")
+            // CI 环境无 JRE 资源(160MB 不入 Git):警告不失败,产物为"无运行时调试版"
+            if (System.getenv("GITHUB_ACTIONS") == "true") {
+                println("⚠ CI 缺少内置资源: ${missing.joinToString()} —— 产物为无运行时调试版;完整 APK 需本地构建(带 jre21-arm64.tar)")
+            } else {
+                throw GradleException("缺少内置资源: ${missing.joinToString()}（JRE 资源从设备提取或 GitHub Release 获取）")
+            }
+        } else {
+            println("✓ 内置资源完整（Android JRE + proot 兼容层）")
         }
-        println("✓ 内置资源完整（Android JRE + proot 兼容层）")
     }
 }
 
