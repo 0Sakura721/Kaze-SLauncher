@@ -2,12 +2,14 @@ package com.mcserver.launcher.ui.screens
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -36,6 +38,8 @@ import com.mcserver.launcher.core.server.InstanceStore
 import com.mcserver.launcher.data.InstanceStatus
 import com.mcserver.launcher.data.ServerInstance
 import com.mcserver.launcher.util.Logger
+import com.mcserver.launcher.ui.theme.badgeColor
+import com.mcserver.launcher.ui.theme.badgeLetter
 import kotlinx.coroutines.launch
 
 /** 首页:实例列表 + 新建入口(FCL 式:长按卡片弹出操作菜单) */
@@ -279,6 +283,21 @@ private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onLongCl
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // 核心类型徽标(FCL 式色块)
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(instance.coreType.badgeColor()),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        instance.coreType.badgeLetter(),
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(instance.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))

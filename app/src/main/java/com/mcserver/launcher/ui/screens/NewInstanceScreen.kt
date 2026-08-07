@@ -3,11 +3,14 @@ package com.mcserver.launcher.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Archive
@@ -25,6 +28,8 @@ import com.mcserver.launcher.ui.components.PageTransition
 import com.mcserver.launcher.ui.components.pressScale
 import com.mcserver.launcher.ui.components.pressSource
 import com.mcserver.launcher.core.server.InstanceStore
+import com.mcserver.launcher.ui.theme.badgeColor
+import com.mcserver.launcher.ui.theme.badgeLetter
 import com.mcserver.launcher.data.CoreType
 import com.mcserver.launcher.data.InstanceConfig
 import com.mcserver.launcher.util.FileImporter
@@ -240,21 +245,33 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                                         step = 2
                                     }
                             ) {
-                                Column(Modifier.padding(16.dp)) {
-                                    Text(type.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        when (type) {
-                                            CoreType.VANILLA -> "官方原版服务端"
-                                            CoreType.PAPER -> "高性能,插件生态最丰富(推荐)"
-                                            CoreType.PURPUR -> "Paper 分支,更多自定义"
-                                            CoreType.SPIGOT -> "经典 Bukkit 分支"
-                                            CoreType.FABRIC -> "模组向,轻量"
-                                            CoreType.FORGE -> "经典模组加载器"
-                                            CoreType.NEOFORGE -> "Forge 继任者,现代模组"
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
+                                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    // 核心类型徽标(FCL 式)
+                                    Box(
+                                        Modifier.size(36.dp).clip(RoundedCornerShape(9.dp)).background(type.badgeColor()),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(type.badgeLetter(),
+                                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = Color.White)
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column {
+                                        Text(type.displayName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            when (type) {
+                                                CoreType.VANILLA -> "官方原版服务端"
+                                                CoreType.PAPER -> "高性能,插件生态最丰富(推荐)"
+                                                CoreType.PURPUR -> "Paper 分支,更多自定义"
+                                                CoreType.SPIGOT -> "经典 Bukkit 分支"
+                                                CoreType.FABRIC -> "模组向,轻量"
+                                                CoreType.FORGE -> "经典模组加载器"
+                                                CoreType.NEOFORGE -> "Forge 继任者,现代模组"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }

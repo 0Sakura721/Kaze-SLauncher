@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.*
@@ -32,12 +34,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mcserver.launcher.core.download.DownloadCenter
 import com.mcserver.launcher.core.download.ModrinthApi
 import com.mcserver.launcher.ui.components.ModrinthSearchDialog
 import com.mcserver.launcher.ui.components.pressSource
+import com.mcserver.launcher.ui.theme.badgeColor
+import com.mcserver.launcher.ui.theme.badgeLetter
 import com.mcserver.launcher.core.server.BackupManager
 import com.mcserver.launcher.core.server.PluginManager
 import com.mcserver.launcher.core.server.ServerManager
@@ -69,6 +74,16 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
         ) {
             val (pressBack, srcBack) = pressSource()
             IconButton(onClick = onBack, interactionSource = srcBack, modifier = pressBack) { Icon(Icons.Filled.ArrowBack, "返回") }
+            // 核心类型徽标(FCL 式)
+            Box(
+                Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)).background(instance.coreType.badgeColor()),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(instance.coreType.badgeLetter(),
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                    color = Color.White)
+            }
+            Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(currentName, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
@@ -869,8 +884,28 @@ private fun WorldTab(instance: ServerInstance) {
                         tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(world.name, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(world.name, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                                    // 主世界标识
+                                    val isMain = world.name == instance.config.levelName
+                                    if (isMain) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("主世界", style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
                                 Text(formatSize(dirSize(world)), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            // 设为主世界(FCL 式快捷操作)
+                            val (ps, ss) = pressSource()
+                            IconButton(onClick = {
+                                val newCfg = instance.config.copy(levelName = world.name)
+                                com.mcserver.launcher.core.server.InstanceStore.update(instance.copy(config = newCfg))
+                                android.widget.Toast.makeText(context, "已设「${world.name}」为主世界(重启生效)", android.widget.Toast.LENGTH_SHORT).show()
+                            }, interactionSource = ss, modifier = ps) {
+                                Icon(Icons.Filled.Star, "设为主世界", Modifier.size(18.dp),
+                                    tint = if (world.name == instance.config.levelName) MaterialTheme.colorScheme.primary
+                                           else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             val (pd, sd) = pressSource()
                             IconButton(onClick = {
