@@ -44,11 +44,11 @@ jobs:
       - name: Run lint
         run: ./gradlew :app:lintDebug --stacktrace
 
-      - name: Build Debug APK
+      - name: Build Debug APKs (arm64-v8a / armeabi-v7a / universal)
         id: debug-build
         run: |
           set -uxo pipefail
-          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee /tmp/build-debug.log
+          ./gradlew :app:assembleArm64v8Debug :app:assembleArmv7Debug :app:assembleUniversalDebug --stacktrace 2>&1 | tee /tmp/build-debug.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Upload Debug build log
@@ -59,12 +59,15 @@ jobs:
           path: /tmp/build-debug.log
           if-no-files-found: ignore
 
-      - name: Upload Debug APK as artifact
+      - name: Upload Debug APKs as artifacts
         if: steps.debug-build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v7
         with:
-          name: debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: debug-apks
+          path: |
+            app/build/outputs/apk/arm64v8/debug/*-arm64v8-debug.apk
+            app/build/outputs/apk/armv7/debug/*-armv7-debug.apk
+            app/build/outputs/apk/universal/debug/*-universal-debug.apk
           if-no-files-found: ignore
 
       - name: Build and Upload Release APK (tag only)
@@ -118,11 +121,11 @@ jobs:
               echo "keyAlias=$KEY_ALIAS" >> local.properties
               echo "keyPassword=$KEY_PASSWORD" >> local.properties
             fi
-            if ! ./gradlew :app:assembleRelease --stacktrace; then
+            if ! ./gradlew :app:assembleUniversalRelease --stacktrace; then
               echo "ERROR: Release build failed, aborting release"
               exit 1
             fi
-            SOURCE_APK=$(find app/build/outputs/apk/release -maxdepth 1 -name '*.apk' -print -quit)
+            SOURCE_APK=$(find app/build/outputs/apk/universal/release -maxdepth 1 -name '*.apk' -print -quit)
             APK_NAME="Kaze-SLauncher-${TAG}-release.apk"
             if [ -z "$SOURCE_APK" ] || [ ! -f "$SOURCE_APK" ]; then
               echo "ERROR: no APK found at expected path"

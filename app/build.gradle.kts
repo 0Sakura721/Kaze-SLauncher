@@ -1,142 +1,44 @@
-import java.net.HttpURLConnection
-import java.net.URL
-import java.io.FileOutputStream
-import java.io.File
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  内置资源任务 — CI 自动运行，首次启动零下载
-//
-//  说明：
-//  - proot-{aarch64,armhf}.tar.gz（含 proot 二进制 + loader + libtalloc +
-//    libandroid-shmem）已 commit 到 git（共约 228 KB），无需 task 下载
-//  - Ubuntu 24.04 rootfs（arm64 + armhf，约 55 MB）太大，由本 task 在 CI
-//    上下载到 assets/bundled/，避免 git 仓库膨胀
-// ═══════════════════════════════════════════════════════════════
-val bundledAssetsDir = layout.projectDirectory.dir("src/main/assets/bundled")
+import java.io.File
+import java.util.Properties
 
+// ═══════════════════════════════════════════════════════════════
+//  内置资源校验任务 — 全部资源已 commit 到 git，无需网络下载
+//
+//  布局（按 flavor 分架构，APK 只含对应架构的 rootfs）：
+//  - src/main/assets/bundled/          proot 三架构（通用，共约 0.4MB）
+//  - src/arm64v8/assets/bundled/       ubuntu arm64 rootfs（28.5MB）
+//  - src/armv7/assets/bundled/         ubuntu armhf rootfs（25.8MB）
+//  - src/universal/assets/bundled/     三个 rootfs（arm64+armhf+amd64）
+//  注：Java 不再内置（按需本地导入/在线下载，JreInstaller 负责）
+// ═══════════════════════════════════════════════════════════════
 val downloadBundledAssets by tasks.registering {
     group = "bundled"
-    description = "下载 Ubuntu 24.04 rootfs 和所有 Java 版本到 assets/bundled/（proot 已内置 commit）"
-
-    val ubuntuVersion = "24.04.4"
-    // 内置全部 Java 版本（8/11/17/21）+ JDK/JRE + aarch64/armhf
-    // 命名约定：java-{version}-{jdk|jre}-{arch}.tar.gz
-    val javaVersions = listOf(21, 17, 11, 8)
-    val javaFiles = linkedMapOf<String, List<String>>()
-    javaVersions.forEach { ver ->
-        val adoptiumArch = { arch: String ->
-            when (arch) {
-                "aarch64" -> "aarch64"
-                "armhf" -> "arm"
-                else -> arch
-            }
-        }
-        listOf("jdk" to "jdk", "jre" to "jre").forEach { (pkg, apiPkg) ->
-            listOf("aarch64", "armhf").forEach { arch ->
-                // Adoptium 仅对 ARM 32-bit 提供 Java 8/11 的构建，17/21 会 404
-                if (arch == "armhf" && ver !in listOf(8, 11)) return@forEach
-                val adoptiumArchName = adoptiumArch(arch)
-                javaFiles["java-$ver-$pkg-$arch.tar.gz"] = listOf(
-                    "https://api.adoptium.net/v3/binary/latest/$ver/ga/linux/$adoptiumArchName/$apiPkg/hotspot/normal/eclipse",
-                    "https://mirrors.aliyun.com/adoptium/$ver/$pkg/$adoptiumArchName/linux/${ver}u-latest_${pkg}_linux-${adoptiumArchName}_bin.tar.gz"
-                )
-            }
-        }
-    }
-
-    val files = linkedMapOf(
-        "ubuntu-base-24.04-arm64.tar.gz" to listOf(
-            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-arm64.tar.gz"
-        ),
-        "ubuntu-base-24.04-armhf.tar.gz" to listOf(
-            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-armhf.tar.gz"
-        ),
-    )
-    files.putAll(javaFiles)
-
+    description = "校验内置资源完整性（proot/rootfs 均已 commit，无需下载）"
     doLast {
-        val destDir = bundledAssetsDir.asFile
-        destDir.mkdirs()
-
-        fun downloadOne(urlStr: String, dest: File): Boolean {
-            if (dest.exists() && dest.length() > 0) { println("  ⏭ ${dest.name}"); return true }
-            try {
-                println("  ⬇ ${dest.name} (via ${urlStr.take(60)}...)")
-                val conn = URL(urlStr).openConnection() as HttpURLConnection
-                conn.connectTimeout = 60000; conn.readTimeout = 300000
-                conn.instanceFollowRedirects = true
-                var c = conn
-                for (i in 1..5) {
-                    val code = c.responseCode
-                    if (code in listOf(301, 302, 307, 308)) {
-                        val loc = c.getHeaderField("Location") ?: break
-                        c.disconnect()
-                        c = URL(loc).openConnection() as HttpURLConnection
-                        c.connectTimeout = 60000; c.readTimeout = 300000
-                    } else break
-                }
-                check(c.responseCode == 200) { "HTTP ${c.responseCode}" }
-                val total = c.contentLengthLong
-                FileOutputStream(dest).use { out ->
-                    c.inputStream.use { inp ->
-                        val buf = ByteArray(8192); var read: Int; var d = 0L
-                        while (inp.read(buf).also { read = it } != -1) {
-                            out.write(buf, 0, read); d += read
-                            if (total > 0 && d % (5 * 1024 * 1024) == 0L)
-                                print("\r    ${d * 100 / total}%")
-                        }
-                    }
-                }
-                c.disconnect()
-                println("\r  ✓ ${dest.name} (${dest.length() / 1024 / 1024} MB)")
-                return true
-            } catch (e: Exception) {
-                System.err.println("  ✗ ${dest.name}: ${e.message}")
-                dest.delete(); return false
-            }
+        val missing = mutableListOf<String>()
+        fun check(dir: File, name: String) {
+            val f = File(dir, name)
+            if (!f.exists() || f.length() == 0L) missing += "$dir/$name"
         }
-
-        fun download(urls: List<String>, dest: File): Boolean {
-            for (url in urls) {
-                if (downloadOne(url, dest)) return true
-            }
-            return false
+        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz", "proot-x86_64.tar.gz")
+            .forEach { check(file("src/main/assets/bundled"), it) }
+        check(file("src/arm64v8/assets/bundled"), "ubuntu-base-24.04-arm64.tar.gz")
+        check(file("src/armv7/assets/bundled"), "ubuntu-base-24.04-armhf.tar.gz")
+        listOf(
+            "ubuntu-base-24.04-arm64.tar.gz",
+            "ubuntu-base-24.04-armhf.tar.gz",
+            "ubuntu-base-24.04-amd64.tar.gz"
+        ).forEach { check(file("src/universal/assets/bundled"), it) }
+        if (missing.isNotEmpty()) {
+            throw GradleException("缺少内置资源: ${missing.joinToString()}")
         }
-
-        println("═══ 下载 Ubuntu rootfs ═══")
-        var ok = true
-        files.forEach { (name, urls) ->
-            if (!download(urls, File(destDir, name))) ok = false
-        }
-        // 验证 proot tarball 已 commit
-        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz").forEach { name ->
-            val f = File(destDir, name)
-            if (!f.exists() || f.length() == 0L) {
-                System.err.println("  ✗ 缺少内置资源 $name（应已 commit 到 git）")
-                ok = false
-            } else {
-                println("  ✓ $name (${f.length() / 1024} KB, 内置)")
-            }
-        }
-        // 验证 Java 资源
-        val javaAssetNames = javaFiles.keys.toList()
-        javaAssetNames.forEach { name ->
-            val f = File(destDir, name)
-            if (!f.exists() || f.length() == 0L) {
-                System.err.println("  ✗ 缺少 Java 资源 $name")
-                ok = false
-            } else {
-                println("  ✓ $name (${f.length() / 1024 / 1024} MB)")
-            }
-        }
-        println("═══ 完成 ${if (ok) "✓" else "(有失败项)"} ═══")
+        println("✓ 内置资源完整（proot 三架构 + rootfs 按 flavor 就位）")
     }
 }
 
@@ -153,6 +55,25 @@ android {
         buildConfigField("String", "GIT_COMMIT", "\"${try {
             ProcessBuilder("git", "rev-parse", "--short", "HEAD").start().inputStream.bufferedReader().readText().trim()
         } catch (_: Exception) { "unknown" }}\"")
+    }
+
+    // 架构维度：arm64v8 / armv7 / universal
+    // assets 按 flavor 目录拆分（见 src/<flavor>/assets/bundled），
+    // 每个 APK 只打包对应架构的 rootfs，显著减小体积
+    flavorDimensions += "arch"
+    productFlavors {
+        create("arm64v8") {
+            dimension = "arch"
+            versionNameSuffix = "-arm64"
+        }
+        create("armv7") {
+            dimension = "arch"
+            versionNameSuffix = "-armv7"
+        }
+        create("universal") {
+            dimension = "arch"
+            versionNameSuffix = "-universal"
+        }
     }
 
     val localProperties = Properties()

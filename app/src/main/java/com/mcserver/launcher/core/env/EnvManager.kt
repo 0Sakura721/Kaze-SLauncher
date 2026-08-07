@@ -156,6 +156,17 @@ object EnvManager {
         return false
     }
 
+    /** 检查 assets 中是否存在某资源（分架构 APK 可能不含全部架构的 rootfs） */
+    private fun assetExists(assetName: String): Boolean {
+        val candidates = if (assetName.endsWith(".gz")) {
+            listOf(assetName, assetName.removeSuffix(".gz"))
+        } else listOf(assetName)
+        return candidates.any {
+            try { appContext.assets.open("bundled/$it").use { _ -> }; true }
+            catch (_: Exception) { false }
+        }
+    }
+
     /** 更新单个部署项 */
     private fun updateItem(itemId: String, transform: (SetupItem) -> SetupItem) {
         _items.value = _items.value.map { if (it.id == itemId) transform(it) else it }
@@ -462,6 +473,15 @@ object EnvManager {
             if (!File(rootfsDir, "usr/bin/dash").exists()) {
                 if (extractBundledAsset("ubuntu-base-24.04-$ubuntuArch.tar.gz", rootfsTarball)) {
                     log("  ✓ 内置提取成功")
+                } else if (!assetExists("ubuntu-base-24.04-$ubuntuArch.tar.gz")) {
+                    // 分架构 APK:当前设备架构的 rootfs 不在包里,直接明确报错,
+                    // 绝不静默走网络下载(用户流量)
+                    val pkgLabel = when (ubuntuArch) {
+                        "amd64" -> "x86_64 设备(模拟器/PC 端)"
+                        "arm64" -> "arm64 设备"
+                        else -> "armv7 设备"
+                    }
+                    error("当前 APK 不含 $ubuntuArch ($pkgLabel) 的 Ubuntu rootfs,请安装 universal 版本")
                 } else {
                     log("  内置不可用,网络下载...")
                     downloadToFile("https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04-base-$ubuntuArch.tar.gz", rootfsTarball)
