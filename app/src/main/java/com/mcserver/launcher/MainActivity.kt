@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
 import com.mcserver.launcher.data.SettingsStore
+import com.mcserver.launcher.data.ThemeMode
 import com.mcserver.launcher.ui.MainApp
 import com.mcserver.launcher.ui.screens.EnvSetupScreen
 import com.mcserver.launcher.ui.theme.KazeTheme
@@ -46,6 +47,14 @@ class MainActivity : ComponentActivity() {
     ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 让系统启动画面与窗口背景跟随应用内主题设置
+        // (SYSTEM 模式不动,由 values-night 自动适配)
+        when (SettingsStore.themeMode.value) {
+            ThemeMode.DARK, ThemeMode.AMOLED ->
+                setTheme(R.style.Theme_KazeSLauncher_Night)
+            ThemeMode.LIGHT ->
+                setTheme(R.style.Theme_KazeSLauncher)
+        }
         super.onCreate(savedInstanceState)
         requestNotificationPermissionIfNeeded()
 
