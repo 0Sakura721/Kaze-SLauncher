@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -99,6 +100,60 @@ fun NewInstanceScreen(onDone: () -> Unit) {
         }
     }
 
+    // SAF:导入整合包 / 外部包(zip,保留 mods/config/plugins 结构,自动识别核心)
+    val importPackLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            importing = true
+            scope.launch {
+                val tmpDir = java.io.File(com.mcserver.launcher.KazeApp.instance.filesDir, "import_pack")
+                if (tmpDir.exists()) tmpDir.deleteRecursively()
+                FileImporter.copyFile(context, uri, tmpDir)
+                    .onSuccess { zipFile ->
+                        try {
+                            val packDir = java.io.File(tmpDir, "unpacked")
+                            unzipTo(zipFile, packDir)
+                            // 识别主核心 jar(优先含 server 关键字,否则取最大 jar;排除 installer)
+                            val jars = packDir.walkTopDown()
+                                .filter { it.isFile && it.extension == "jar" && !it.name.contains("installer") }
+                                .toList()
+                            val mainJar = jars.firstOrNull { it.name.contains("server", ignoreCase = true) }
+                                ?: jars.maxByOrNull { it.length() }
+                            val (type, version) = mainJar?.let { guessFromFileName(it.name) }
+                                ?: (CoreType.FORGE to "整合包")
+                            val instance = InstanceStore.create(
+                                name = zipFile.name.removeSuffix(".zip").take(40),
+                                coreType = type,
+                                mcVersion = version
+                            )
+                            val instDir = instance.dir(InstanceStore.instancesDir)
+                            // 复制整合包内容(mods/config/plugins 等目录 + 核心 jar)
+                            packDir.listFiles()?.forEach { f ->
+                                if (f.isDirectory) {
+                                    copyTree(f, java.io.File(instDir, f.name))
+                                } else if (f.extension == "jar" && f == mainJar) {
+                                    f.copyTo(java.io.File(instDir, f.name), overwrite = true)
+                                }
+                            }
+                            tmpDir.deleteRecursively()
+                            importing = false
+                            val tip = if (mainJar == null) "整合包已导入(未发现服务端核心,请到实例目录补充核心 jar)" else "整合包导入完成(${mainJar.name})"
+                            android.widget.Toast.makeText(context, tip, android.widget.Toast.LENGTH_LONG).show()
+                            onDone()
+                        } catch (e: Exception) {
+                            importing = false
+                            error = "整合包导入失败:${e.message}"
+                        }
+                    }
+                    .onFailure { err ->
+                        importing = false
+                        error = "导入失败:${err.message}"
+                    }
+            }
+        }
+    }
+
     // 系统返回键:版本页 → 回类型页;类型页 → 关闭新建
     androidx.activity.compose.BackHandler { if (step > 1) step-- else onDone() }
 
@@ -128,6 +183,19 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                         Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text(if (importing) "正在导入..." else "从本地导入服务端 JAR(推荐,不消耗流量)")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    // 整合包导入(外部包:mods/config/plugins 结构)
+                    val (pressPack, srcPack) = pressSource()
+                    OutlinedButton(
+                        onClick = { importPackLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
+                        modifier = pressPack.then(Modifier.fillMaxWidth()),
+                        interactionSource = srcPack,
+                        enabled = !importing
+                    ) {
+                        Icon(Icons.Filled.Archive, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (importing) "正在导入..." else "导入整合包 / 外部包(zip,不耗流量)")
                     }
                     Spacer(Modifier.height(16.dp))
                     Text("或从以下来源下载:",
@@ -262,5 +330,32 @@ fun NewInstanceScreen(onDone: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+/** 解压 zip 到目标目录(防路径穿越) */
+private fun unzipTo(zipFile: java.io.File, destDir: java.io.File) {
+    destDir.mkdirs()
+    java.util.zip.ZipInputStream(zipFile.inputStream().buffered()).use { zin ->
+        var entry = zin.nextEntry
+        while (entry != null) {
+            val name = entry.name
+            // 防路径穿越:跳过 ../ 或绝对路径
+            if (!entry.isDirectory && !name.contains("..") && !name.startsWith("/")) {
+                val dest = java.io.File(destDir, name)
+                dest.parentFile?.mkdirs()
+                dest.outputStream().use { out -> zin.copyTo(out) }
+            }
+            zin.closeEntry()
+            entry = zin.nextEntry
+        }
+    }
+}
+
+/** 递归复制目录 */
+private fun copyTree(src: java.io.File, dst: java.io.File) {
+    dst.mkdirs()
+    src.listFiles()?.forEach { f ->
+        if (f.isDirectory) copyTree(f, java.io.File(dst, f.name))
+        else f.copyTo(java.io.File(dst, f.name), overwrite = true)
     }
 }

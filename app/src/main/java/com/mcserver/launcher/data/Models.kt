@@ -22,6 +22,7 @@ enum class InstanceStatus { STOPPED, STARTING, RUNNING, STOPPING, ERROR }
 
 /** 服务器实例配置(版本隔离:每个实例一份) */
 data class InstanceConfig(
+    // ── 基础 ──
     val serverPort: Int = 25565,
     val maxPlayers: Int = 20,
     val gamemode: String = "survival",
@@ -30,13 +31,28 @@ data class InstanceConfig(
     val onlineMode: Boolean = false,
     val whiteList: Boolean = false,
     val motd: String = "A Minecraft Server",
+    // ── 世界 ──
+    val levelName: String = "world",
+    val levelSeed: String = "",
+    val levelType: String = "default",
+    val hardcore: Boolean = false,
+    val allowNether: Boolean = true,
+    val allowFlight: Boolean = false,
+    val spawnMonsters: Boolean = true,
+    val spawnAnimals: Boolean = true,
+    val maxWorldSize: Int = 29999984,
+    // ── 性能 ──
     val maxRamMB: Int = 2048,
     val viewDistance: Int = 10,
     val spawnProtection: Int = 16,
     val nogui: Boolean = true,
+    // ── JVM ──
+    val jvmArgs: String = "",
+    // ── RCON ──
     val rconEnabled: Boolean = true,
     val rconPassword: String = "",
     val rconPort: Int = 25575,
+    // ── 运维 ──
     val autoRestart: Boolean = true,
     val maxRestarts: Int = 3,
     val backupOnStop: Boolean = true

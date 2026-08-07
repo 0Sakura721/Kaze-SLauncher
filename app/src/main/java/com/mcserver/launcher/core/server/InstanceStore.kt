@@ -87,6 +87,16 @@ object InstanceStore {
                             put("viewDistance", inst.config.viewDistance)
                             put("spawnProtection", inst.config.spawnProtection)
                             put("nogui", inst.config.nogui)
+                            put("levelName", inst.config.levelName)
+                            put("levelSeed", inst.config.levelSeed)
+                            put("levelType", inst.config.levelType)
+                            put("hardcore", inst.config.hardcore)
+                            put("allowNether", inst.config.allowNether)
+                            put("allowFlight", inst.config.allowFlight)
+                            put("spawnMonsters", inst.config.spawnMonsters)
+                            put("spawnAnimals", inst.config.spawnAnimals)
+                            put("maxWorldSize", inst.config.maxWorldSize)
+                            put("jvmArgs", inst.config.jvmArgs)
                             put("rconEnabled", inst.config.rconEnabled)
                             put("rconPassword", inst.config.rconPassword)
                             put("rconPort", inst.config.rconPort)
@@ -134,6 +144,16 @@ object InstanceStore {
                         viewDistance = c.optInt("viewDistance", 10),
                         spawnProtection = c.optInt("spawnProtection", 16),
                         nogui = c.optBoolean("nogui", true),
+                        levelName = c.optString("levelName", "world"),
+                        levelSeed = c.optString("levelSeed", ""),
+                        levelType = c.optString("levelType", "default"),
+                        hardcore = c.optBoolean("hardcore", false),
+                        allowNether = c.optBoolean("allowNether", true),
+                        allowFlight = c.optBoolean("allowFlight", false),
+                        spawnMonsters = c.optBoolean("spawnMonsters", true),
+                        spawnAnimals = c.optBoolean("spawnAnimals", true),
+                        maxWorldSize = c.optInt("maxWorldSize", 29999984),
+                        jvmArgs = c.optString("jvmArgs", ""),
                         rconEnabled = c.optBoolean("rconEnabled", true),
                         rconPassword = c.optString("rconPassword", ""),
                         rconPort = c.optInt("rconPort", 25575),

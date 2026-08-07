@@ -455,6 +455,18 @@ private fun ConfigTab(instance: ServerInstance) {
     var pvp by remember { mutableStateOf(cfg.pvp) }
     var gamemode by remember { mutableStateOf(cfg.gamemode) }
     var difficulty by remember { mutableStateOf(cfg.difficulty) }
+    var levelName by remember { mutableStateOf(cfg.levelName) }
+    var levelSeed by remember { mutableStateOf(cfg.levelSeed) }
+    var levelType by remember { mutableStateOf(cfg.levelType) }
+    var hardcore by remember { mutableStateOf(cfg.hardcore) }
+    var allowNether by remember { mutableStateOf(cfg.allowNether) }
+    var allowFlight by remember { mutableStateOf(cfg.allowFlight) }
+    var spawnMonsters by remember { mutableStateOf(cfg.spawnMonsters) }
+    var spawnAnimals by remember { mutableStateOf(cfg.spawnAnimals) }
+    var viewDistance by remember { mutableStateOf(cfg.viewDistance.toString()) }
+    var spawnProtection by remember { mutableStateOf(cfg.spawnProtection.toString()) }
+    var maxWorldSize by remember { mutableStateOf(cfg.maxWorldSize.toString()) }
+    var jvmArgs by remember { mutableStateOf(cfg.jvmArgs) }
 
     Column(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp)) {
@@ -462,6 +474,9 @@ private fun ConfigTab(instance: ServerInstance) {
         Text("服务器配置(保存后重启生效)", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
         Spacer(Modifier.height(12.dp))
 
+        // ── 基础 ──
+        Text("基础", style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
         OutlinedTextField(value = port, onValueChange = { port = it.filter { c -> c.isDigit() }.take(5) },
             label = { Text("端口") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
@@ -504,6 +519,57 @@ private fun ConfigTab(instance: ServerInstance) {
             }
         }
 
+        // ── 世界 ──
+        Spacer(Modifier.height(16.dp))
+        Text("世界", style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(value = levelName, onValueChange = { levelName = it },
+            label = { Text("世界目录名(level-name),如导入世界名") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = levelSeed, onValueChange = { levelSeed = it },
+            label = { Text("世界种子(留空随机)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        Text("世界类型", style = MaterialTheme.typography.labelMedium)
+        Row {
+            listOf("default", "flat", "large_biomes", "amplified").forEach { lt ->
+                FilterChip(
+                    selected = levelType == lt,
+                    onClick = { levelType = lt },
+                    label = { Text(lt) },
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        SwitchRow("极限模式(Hardcore)", hardcore) { hardcore = it }
+        SwitchRow("允许地狱(下界)", allowNether) { allowNether = it }
+        SwitchRow("允许飞行", allowFlight) { allowFlight = it }
+        SwitchRow("生成怪物", spawnMonsters) { spawnMonsters = it }
+        SwitchRow("生成动物", spawnAnimals) { spawnAnimals = it }
+
+        // ── 性能 ──
+        Spacer(Modifier.height(16.dp))
+        Text("性能", style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(value = viewDistance, onValueChange = { viewDistance = it.filter { c -> c.isDigit() }.take(2) },
+            label = { Text("视距(2-32)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = spawnProtection, onValueChange = { spawnProtection = it.filter { c -> c.isDigit() }.take(3) },
+            label = { Text("出生点保护半径(0=关闭)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = maxWorldSize, onValueChange = { maxWorldSize = it.filter { c -> c.isDigit() }.take(8) },
+            label = { Text("最大世界边界(1-29999984)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+
+        // ── JVM 参数 ──
+        Spacer(Modifier.height(16.dp))
+        Text("JVM 参数(高级)", style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(value = jvmArgs, onValueChange = { jvmArgs = it },
+            label = { Text("附加参数,如 -XX:+UseG1GC -XX:+ParallelRefProcEnabled") },
+            minLines = 2, modifier = Modifier.fillMaxWidth())
+        Text("示例(Paper 推荐):-XX:+UseG1GC -XX:+ParallelRefProcEnabled -XX:MaxGCPauseMillis=200 -XX:+UnlockExperimentalVMOptions -XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:G1HeapRegionSize=8M -XX:G1ReservePercent=20 -XX:G1HeapWastePercent=5 -XX:G1MixedGCCountTarget=4 -XX:InitiatingHeapOccupancyPercent=15 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:SurvivorRatio=32 -XX:+PerfDisableSharedMem -XX:MaxTenuringThreshold=1",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
         }
     }
 
@@ -518,7 +584,19 @@ private fun ConfigTab(instance: ServerInstance) {
             whiteList = whiteList,
             pvp = pvp,
             gamemode = gamemode,
-            difficulty = difficulty
+            difficulty = difficulty,
+            levelName = levelName.ifBlank { "world" },
+            levelSeed = levelSeed,
+            levelType = levelType,
+            hardcore = hardcore,
+            allowNether = allowNether,
+            allowFlight = allowFlight,
+            spawnMonsters = spawnMonsters,
+            spawnAnimals = spawnAnimals,
+            viewDistance = viewDistance.toIntOrNull()?.coerceIn(2, 32) ?: cfg.viewDistance,
+            spawnProtection = spawnProtection.toIntOrNull()?.coerceAtLeast(0) ?: cfg.spawnProtection,
+            maxWorldSize = maxWorldSize.toIntOrNull()?.coerceIn(1, 29999984) ?: cfg.maxWorldSize,
+            jvmArgs = jvmArgs.trim()
         )
         com.mcserver.launcher.core.server.InstanceStore.update(instance.copy(config = newCfg))
         android.widget.Toast.makeText(context, "配置已保存,重启服务器后生效", android.widget.Toast.LENGTH_SHORT).show()

@@ -122,7 +122,10 @@ class ServerLauncher(private val context: Context) {
                     // vivo/Android 16 对 untrusted_app 直接 exec 应用数据目录 ELF 有限制
                     // (Termux 等白名单 App 不受限),linker64 加载不触发 exec 限制,
                     // 与 proot 的 linker64 回退是同一机制,已验证可用
-                    appendLine("/system/bin/linker64 $javaPath -Xmx${instance.config.maxRamMB}M -Xms${(instance.config.maxRamMB / 2).coerceAtLeast(256)}M -Djava.io.tmpdir='$tmpDirPath' -jar '$jarName' ${if (instance.config.nogui) "nogui" else ""} >> '$logPath' 2>&1 < '$pipePath' &")
+                    val jvmArgs = instance.config.jvmArgs.trim()
+                        .replace(Regex("[\"'`;\\\\\\$\\n]"), " ")
+                    val jvmArgsPart = if (jvmArgs.isNotEmpty()) " $jvmArgs" else ""
+                    appendLine("/system/bin/linker64 $javaPath -Xmx${instance.config.maxRamMB}M -Xms${(instance.config.maxRamMB / 2).coerceAtLeast(256)}M$jvmArgsPart -Djava.io.tmpdir='$tmpDirPath' -jar '$jarName' ${if (instance.config.nogui) "nogui" else ""} >> '$logPath' 2>&1 < '$pipePath' &")
                     appendLine("JAVA_PID=\$!")
                     appendLine("echo \$JAVA_PID > '$pidFile'")
                     appendLine("wait \$JAVA_PID")
@@ -435,6 +438,15 @@ class ServerLauncher(private val context: Context) {
             "pvp" to cfg.pvp.toString(),
             "online-mode" to cfg.onlineMode.toString(),
             "white-list" to cfg.whiteList.toString(),
+            "level-name" to cfg.levelName,
+            "level-seed" to cfg.levelSeed,
+            "level-type" to cfg.levelType,
+            "hardcore" to cfg.hardcore.toString(),
+            "allow-nether" to cfg.allowNether.toString(),
+            "allow-flight" to cfg.allowFlight.toString(),
+            "spawn-monsters" to cfg.spawnMonsters.toString(),
+            "spawn-animals" to cfg.spawnAnimals.toString(),
+            "max-world-size" to cfg.maxWorldSize.toString(),
             "spawn-protection" to cfg.spawnProtection.toString(),
             "view-distance" to cfg.viewDistance.toString(),
             "enable-command-block" to "true",
