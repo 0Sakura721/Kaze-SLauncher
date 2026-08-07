@@ -260,22 +260,40 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
                 }
             }
         )
-        // 触发检查
+        // 触发检查(升级 = 同游戏版本的最新构建,不跨大版本)
         androidx.compose.runtime.LaunchedEffect(Unit) {
             val r = runCatching {
                 val versions = com.mcserver.launcher.core.download.CoreSources.fetchVersions(instance.coreType).getOrThrow()
-                val latest = versions.firstOrNull() ?: return@runCatching null
+                // 只找当前游戏版本,避免 1.21.1 被升到 26.1 之类的大版本跳跃
+                val sameVersion = versions.firstOrNull { it.id == instance.mcVersion }
+                    ?: return@runCatching UpgradeResult.VersionGone(instance.mcVersion, versions.firstOrNull()?.id)
                 com.mcserver.launcher.core.download.CoreSources.resolveDownload(
-                    instance.coreType, latest.id, "", null
-                ).getOrNull()
-            }.getOrNull()
-            if (r == null) {
-                upgradeMsg = "未找到可用的更新(或已是最新)。"
-            } else {
-                upgradeInfo = r
+                    instance.coreType, sameVersion.id, "", null
+                ).getOrNull()?.let { dl ->
+                    // 与实例现有 jar 文件名比较:相同 = 已是最新构建
+                    val dir = instance.dir(com.mcserver.launcher.core.server.InstanceStore.instancesDir)
+                    val existing = dir.listFiles()?.firstOrNull {
+                        it.extension == "jar" && !it.name.contains("installer") && !it.name.endsWith(".bak")
+                    }?.name
+                    if (existing == dl.fileName) UpgradeResult.None else UpgradeResult.Found(dl)
+                } ?: UpgradeResult.None
+            }.getOrElse { UpgradeResult.Error(it.message ?: "检查失败") }
+            when (r) {
+                is UpgradeResult.Found -> upgradeInfo = r.download
+                is UpgradeResult.None -> upgradeMsg = "当前版本 ${instance.mcVersion} 已是最新构建,无需升级。"
+                is UpgradeResult.VersionGone -> upgradeMsg = "当前版本 ${instance.mcVersion} 已不再支持;如需新版请新建实例(检测到最新:${r.latest ?: "无"})。"
+                is UpgradeResult.Error -> upgradeMsg = r.msg
             }
         }
     }
+}
+
+/** 升级检查结果:Found=有同版本新构建;None=已最新;VersionGone=当前版本下架 */
+private sealed class UpgradeResult {
+    data class Found(val download: com.mcserver.launcher.core.download.CoreDownload) : UpgradeResult()
+    object None : UpgradeResult()
+    data class VersionGone(val current: String, val latest: String?) : UpgradeResult()
+    data class Error(val msg: String) : UpgradeResult()
 }
 
 /** 启动/停止按钮 */
@@ -460,23 +478,47 @@ private fun ConsoleTab(instance: ServerInstance) {
                 }
             }
         }
-        // 输入行:垫上 imePadding,键盘弹出时不遮挡输入框
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).imePadding(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedTextField(
-                value = command, onValueChange = { command = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("输入命令,如: op Steve / say hi") },
-                singleLine = true,
-                textStyle = LocalTextStyle.current.copy(fontSize = 13.sp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = {
-                if (command.isNotBlank()) { ServerManager.sendCommand(command.trim()); command = "" }
-            }, enabled = status == com.mcserver.launcher.data.InstanceStatus.RUNNING,
-                modifier = Modifier.height(48.dp)) { Text("发送") }
+        // 输入行:仅服务器运行时显示(未启动时隐藏,日志区占满)
+        if (status == com.mcserver.launcher.data.InstanceStatus.RUNNING) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).imePadding(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = command, onValueChange = { command = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("输入命令,如: op Steve / say hi") },
+                    singleLine = true,
+                    textStyle = LocalTextStyle.current.copy(fontSize = 13.sp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = {
+                    if (command.isNotBlank()) { ServerManager.sendCommand(command.trim()); command = "" }
+                }, enabled = status == com.mcserver.launcher.data.InstanceStatus.RUNNING,
+                    modifier = Modifier.height(48.dp)) { Text("发送") }
+            }
+        } else {
+            // 未运行时给一行轻提示(不占空间,可点击启动)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "服务器未运行,启动后可输入命令",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f)
+                )
+                val (pGo, sGo) = pressSource()
+                TextButton(
+                    onClick = { scope.launch {
+                        val r = ServerManager.start(instance)
+                        if (r.isFailure) android.widget.Toast.makeText(context, r.exceptionOrNull()?.message ?: "启动失败", android.widget.Toast.LENGTH_LONG).show()
+                    } },
+                    interactionSource = sGo, modifier = pGo,
+                    contentPadding = PaddingValues(horizontal = 6.dp)
+                ) { Text("启动", style = MaterialTheme.typography.labelMedium) }
+            }
         }
     }
 }
