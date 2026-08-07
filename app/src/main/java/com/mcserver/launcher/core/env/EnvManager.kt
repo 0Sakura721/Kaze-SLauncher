@@ -105,6 +105,45 @@ object EnvManager {
                 }
             }
         } catch (_: Exception) { }
+        // usrmerge 根符号链接(bin→usr/bin 等):降级成空目录后,
+        // 会触发 proot 的 -b 绑定方案,而绑定(glue)在部分设备上
+        // 会导致 proot stat 异常(文件报 Is a directory/No such file)。
+        // 首选方案:直接创建真实符号链接(Android app 目录允许),
+        // 符号链接正常后 usrmerge 绑定条件(bin/sh 不存在)不再满足,
+        // proot 走 22:15 验证过的无绑定路径
+        try {
+            val usrmerge = listOf(
+                "bin" to "usr/bin",
+                "sbin" to "usr/sbin",
+                "lib" to "usr/lib",
+                "lib64" to "usr/lib64"
+            )
+            for ((name, target) in usrmerge) {
+                val f = File(rootfsDir, name)
+                val t = File(rootfsDir, target)
+                if (!t.exists()) continue
+                if (!f.exists()) {
+                    try {
+                        java.nio.file.Files.createSymbolicLink(
+                            f.toPath(),
+                            java.nio.file.Paths.get(target)
+                        )
+                    } catch (_: Exception) { }
+                } else if (f.isDirectory) {
+                    // 空目录降级:删除后重建符号链接;非空目录(有内容)则跳过
+                    if (f.listFiles()?.isEmpty() == true) {
+                        if (f.delete()) {
+                            try {
+                                java.nio.file.Files.createSymbolicLink(
+                                    f.toPath(),
+                                    java.nio.file.Paths.get(target)
+                                )
+                            } catch (_: Exception) { }
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
     }
     private val prootBinary: File get() = File(prootHomeDir, "bin/proot")
     private val prootLoader: File get() = File(prootHomeDir, "libexec/loader")
@@ -271,14 +310,22 @@ object EnvManager {
                     type == '5' || path.endsWith("/") || path.isBlank() || path == "." || path == "./" -> {
                         if (path.isNotBlank() && path != "." && path != "./") target.mkdirs()
                     }
-                    // 符号链接:读链接目标并创建
+                    // 符号链接:目标在 header 的 linkname 字段(offset 157-256),
+                    // 数据区 size=0;老式 tar 才把目标放数据区(兼容读取)
                     type == '2' -> {
-                        val linkBytes = ByteArray(size.toInt().coerceAtMost(4096))
-                        var read = 0
-                        while (read < linkBytes.size) {
-                            val n = rawInput.read(linkBytes, read, linkBytes.size - read)
-                            if (n == -1) break
-                            read += n
+                        var linkEnd = 157
+                        while (linkEnd < 256 && header[linkEnd] != 0.toByte()) linkEnd++
+                        var linkTarget = String(header, 157, linkEnd - 157, Charsets.UTF_8)
+                        if (linkTarget.isBlank() && size > 0) {
+                            // 兼容:目标在数据区
+                            val linkBytes = ByteArray(size.toInt().coerceAtMost(4096))
+                            var read = 0
+                            while (read < linkBytes.size) {
+                                val n = rawInput.read(linkBytes, read, linkBytes.size - read)
+                                if (n == -1) break
+                                read += n
+                            }
+                            linkTarget = String(linkBytes, 0, read, Charsets.UTF_8)
                         }
                         if (path.contains("/")) target.parentFile?.mkdirs()
                         // 关键:先清理已存在的 target(重新部署时旧目录可能残留,
@@ -289,21 +336,23 @@ object EnvManager {
                                 if (target.isDirectory) target.deleteRecursively() else target.delete()
                             }
                         } catch (_: Exception) { }
-                        try {
-                            java.nio.file.Files.createSymbolicLink(
-                                target.toPath(),
-                                java.nio.file.Paths.get(String(linkBytes, 0, read, Charsets.UTF_8))
-                            )
-                        } catch (_: Exception) {
-                            // 符号链接创建失败(沙箱限制)时,复制链接目标文件兜底,
-                            // 保证 soname 链接(如 libtalloc.so.2)存在,否则 proot 无法加载库
+                        if (linkTarget.isNotBlank()) {
                             try {
-                                val linkTarget = String(linkBytes, 0, read, Charsets.UTF_8)
-                                val resolved = File(target.parentFile ?: File("."), linkTarget)
-                                if (resolved.exists() && !target.exists()) {
-                                    resolved.copyTo(target, overwrite = true)
-                                }
-                            } catch (_: Exception) { }
+                                java.nio.file.Files.createSymbolicLink(
+                                    target.toPath(),
+                                    java.nio.file.Paths.get(linkTarget)
+                                )
+                            } catch (e: Exception) {
+                                android.util.Log.w("KazeSLauncher", "symlink 失败 path=$path target=$linkTarget: ${e}")
+                                // 符号链接创建失败(沙箱限制)时,复制链接目标文件兜底,
+                                // 保证 soname 链接(如 libtalloc.so.2)存在,否则 proot 无法加载库
+                                try {
+                                    val resolved = File(target.parentFile ?: File("."), linkTarget)
+                                    if (resolved.isFile && !target.exists()) {
+                                        resolved.copyTo(target, overwrite = true)
+                                    }
+                                } catch (_: Exception) { }
+                            }
                         }
                     }
                     isRegular -> {
@@ -391,10 +440,12 @@ object EnvManager {
                 args.add("-b"); args.add("${File(rootfsDir, "usr/lib64").absolutePath}:/lib64")
             }
         }
-        // 终极兜底:不管 usr/bin/sh 是否被降级成目录(部分设备修复失败),
-        // 直接把真实的 dash 绑定为 /bin/sh,proot 内部 exec /bin/sh 永远可用
+        // 终极兜底:仅当 usr/bin/sh 仍是目录(修复失败)时,
+        // 才把真实 dash 绑定为 /bin/sh;正常情况下(sh 已是文件)
+        // 不加此绑定,避免 proot 文件绑定在部分设备上异常
+        val shCheck = File(rootfsDir, "usr/bin/sh")
         val dash = File(rootfsDir, "usr/bin/dash")
-        if (dash.isFile) {
+        if (!shCheck.isFile && dash.isFile) {
             args.add("-b"); args.add("${dash.absolutePath}:/bin/sh")
         }
         bindExtra.forEach { (host, guest) ->

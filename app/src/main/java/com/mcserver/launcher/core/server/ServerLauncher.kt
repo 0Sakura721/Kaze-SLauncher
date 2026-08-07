@@ -142,13 +142,13 @@ class ServerLauncher(private val context: Context) {
                 startUptime()
 
                 _status.value = InstanceStatus.RUNNING
-                // 保活:服务器运行期间启用前台服务(常驻通知,防止后台被杀)
+                // 保活:服务已常驻(App 启动时拉起),这里只更新通知为实例信息
                 try {
-                    val ctx = com.mcserver.launcher.KazeApp.instance
-                    val intent = android.content.Intent(ctx, ServerKeepAliveService::class.java)
-                        .putExtra("instanceName", instance.name)
-                        .putExtra("mcVersion", instance.mcVersion)
-                    androidx.core.content.ContextCompat.startForegroundService(ctx, intent)
+                    ServerKeepAliveService.update(
+                        com.mcserver.launcher.KazeApp.instance,
+                        instance.name,
+                        instance.mcVersion
+                    )
                 } catch (_: Exception) { }
                 Result.success(Unit)
             } catch (e: Exception) {
@@ -255,11 +255,9 @@ class ServerLauncher(private val context: Context) {
         process = null
         restartCount = 0
         currentInstance = null
-        // 停止保活前台服务
+        // 保活服务保持常驻,通知内容重置为默认
         try {
-            com.mcserver.launcher.KazeApp.instance.stopService(
-                android.content.Intent(com.mcserver.launcher.KazeApp.instance, ServerKeepAliveService::class.java)
-            )
+            ServerKeepAliveService.update(com.mcserver.launcher.KazeApp.instance, null)
         } catch (_: Exception) { }
     }
 

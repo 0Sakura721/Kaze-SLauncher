@@ -21,5 +21,8 @@ class KazeApp : Application() {
         InstanceStore.init(this)
         JreInstaller.init(this)
         ServerManager.init(this)
+        // 保活前台服务常驻(App 启动即拉起,避免启动服务器时现场创建导致
+        // vivo 等 ROM 服务延迟而闪退 ForegroundServiceDidNotStartInTimeException)
+        com.mcserver.launcher.core.server.ServerKeepAliveService.start(this)
     }
 }
