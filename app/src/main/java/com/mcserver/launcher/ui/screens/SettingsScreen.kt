@@ -302,7 +302,12 @@ private fun AboutScreen(onBack: () -> Unit) {
         } catch (e: Exception) { null }
     }
     val versionName = pkg?.versionName ?: "1.0.0"
-    val versionCode = pkg?.longVersionCode ?: 100L
+    @Suppress("DEPRECATION")
+    val versionCode = if (android.os.Build.VERSION.SDK_INT >= 28) {
+        pkg?.longVersionCode ?: 100L
+    } else {
+        pkg?.versionCode?.toLong() ?: 100L
+    }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // 顶部栏
