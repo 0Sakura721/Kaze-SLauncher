@@ -3,6 +3,7 @@ package com.mcserver.launcher.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -158,29 +159,67 @@ private fun ServerControlButton(instance: ServerInstance) {
 
 // ═══════════ 控制台 ═══════════
 
+@androidx.compose.runtime.Immutable
+private data class ConsoleLogLine(val text: String, val color: androidx.compose.ui.graphics.Color)
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun ConsoleTab() {
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val status by ServerManager.status.collectAsState()
     val players by ServerManager.players.collectAsState()
     val uptime by ServerManager.uptimeSec.collectAsState()
     var command by remember { mutableStateOf("") }
-    val logLines = remember { mutableStateListOf<String>() }
+    val logLines = remember { mutableStateListOf<ConsoleLogLine>() }
+    val errColor = MaterialTheme.colorScheme.error
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    fun copyToClipboard(text: String, hint: String) {
+        if (text.isBlank()) return
+        clipboard.setText(androidx.compose.ui.text.AnnotatedString(text))
+        android.widget.Toast.makeText(context, hint, android.widget.Toast.LENGTH_SHORT).show()
+    }
 
     LaunchedEffect(Unit) {
         ServerManager.console.collect { line ->
-            logLines.add(line)
+            logLines.add(
+                ConsoleLogLine(
+                    text = line,
+                    color = if (line.contains("ERROR") || line.contains("Exception")) errColor
+                            else if (line.startsWith(">")) primaryColor
+                            else textColor
+                )
+            )
             if (logLines.size > 1000) logLines.removeRange(0, logLines.size - 1000)
         }
     }
 
     Column(Modifier.fillMaxSize()) {
-        Text(
-            "${status.name} · 玩家 ${players.size} · 运行 ${uptime / 60}分${uptime % 60}秒",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-        )
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "${status.name} · 玩家 ${players.size} · 运行 ${uptime / 60}分${uptime % 60}秒",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            val (pressCopy, srcCopy) = pressSource()
+            TextButton(
+                onClick = {
+                    copyToClipboard(logLines.joinToString("\n") { it.text }, "已复制全部日志(${logLines.size} 行)")
+                },
+                enabled = logLines.isNotEmpty(),
+                interactionSource = srcCopy,
+                modifier = pressCopy
+            ) {
+                Text("复制日志", style = MaterialTheme.typography.labelSmall)
+            }
+        }
         LazyColumn(
             Modifier
                 .weight(1f)
@@ -189,12 +228,15 @@ private fun ConsoleTab() {
                 .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                 .padding(8.dp)
         ) {
-            items(logLines.takeLast(500)) { line ->
-                Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
-                    color = if (line.contains("ERROR") || line.contains("Exception")) MaterialTheme.colorScheme.error
-                            else if (line.startsWith(">")) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 1.dp))
+            items(logLines.takeLast(500)) { entry ->
+                Text(entry.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                    color = entry.color,
+                    modifier = Modifier
+                        .padding(vertical = 1.dp)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = { copyToClipboard(entry.text, "已复制该行日志") }
+                        ))
             }
         }
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {

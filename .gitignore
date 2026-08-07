@@ -21,3 +21,6 @@ keystore.properties
 app/src/main/assets/bundled/*
 !app/src/main/assets/bundled/proot-aarch64.tar.gz
 !app/src/main/assets/bundled/proot-armhf.tar.gz
+
+# 本地构建产物
+*.apk
