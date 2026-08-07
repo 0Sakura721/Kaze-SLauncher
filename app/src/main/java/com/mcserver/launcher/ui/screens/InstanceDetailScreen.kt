@@ -99,15 +99,26 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
                 )
             }
             ServerControlButton(instance)
-            // 核心升级入口
-            val (pressUp, srcUp) = pressSource()
-            IconButton(
-                onClick = { checkCoreUpdate = true },
-                interactionSource = srcUp,
-                modifier = pressUp
-            ) { Icon(Icons.Filled.SystemUpdate, "升级核心") }
-            val (pressDel, srcDel) = pressSource()
-            IconButton(onClick = { showDeleteConfirm = true }, interactionSource = srcDel, modifier = pressDel) { Icon(Icons.Filled.Delete, "删除实例") }
+            // 更多操作收纳到菜单(升级/删除),顶部保持简洁
+            var showMore by remember { mutableStateOf(false) }
+            val (pressMore, srcMore) = pressSource()
+            Box {
+                IconButton(onClick = { showMore = true }, interactionSource = srcMore, modifier = pressMore) {
+                    Icon(Icons.Filled.MoreVert, "更多操作")
+                }
+                DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
+                    DropdownMenuItem(
+                        text = { Text("升级核心") },
+                        leadingIcon = { Icon(Icons.Filled.SystemUpdate, null, Modifier.size(20.dp)) },
+                        onClick = { showMore = false; checkCoreUpdate = true }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("删除实例", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Filled.Delete, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error) },
+                        onClick = { showMore = false; showDeleteConfirm = true }
+                    )
+                }
+            }
         }
 
         if (showRename) {
@@ -812,11 +823,12 @@ private fun WorldTab(instance: ServerInstance) {
         }
         Spacer(Modifier.height(12.dp))
 
-        // ── 自动备份间隔 ──
-        Text("自动备份(服务器运行期间)", style = MaterialTheme.typography.labelMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-        Spacer(Modifier.height(4.dp))
+        // ── 备份区 ──
+        Text("世界备份", style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(6.dp))
+        // 自动备份间隔
         Row {
-            listOf(0 to "关闭", 1 to "每 1 小时", 6 to "每 6 小时", 12 to "每 12 小时", 24 to "每天").forEach { (h, label) ->
+            listOf(0 to "关闭", 1 to "1h", 6 to "6h", 12 to "12h", 24 to "每天").forEach { (h, label) ->
                 FilterChip(
                     selected = autoBackupHours == h,
                     onClick = {
@@ -831,10 +843,9 @@ private fun WorldTab(instance: ServerInstance) {
                 )
             }
         }
-        Spacer(Modifier.height(12.dp))
-
-        // ── 备份列表 ──
-        Text("世界备份(停止时自动备份:配置页开启)", style = MaterialTheme.typography.labelLarge, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Text("自动备份(运行期间) · 停止时也会自动备份,保留最近 10 份",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(6.dp))
         if (backups.isEmpty()) {
             Text("暂无备份", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
