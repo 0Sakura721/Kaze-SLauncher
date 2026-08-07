@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -176,6 +177,10 @@ private fun ConsoleTab() {
     val errColor = MaterialTheme.colorScheme.error
     val primaryColor = MaterialTheme.colorScheme.primary
     val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+    // 控制台工具状态:自动输出(暂停接收)、自动滚动
+    var autoOutput by remember { mutableStateOf(true) }
+    var autoScroll by remember { mutableStateOf(true) }
+    val listState = rememberLazyListState()
 
     fun copyToClipboard(text: String, hint: String) {
         if (text.isBlank()) return
@@ -183,8 +188,26 @@ private fun ConsoleTab() {
         android.widget.Toast.makeText(context, hint, android.widget.Toast.LENGTH_SHORT).show()
     }
 
+    // 保存日志:SAF 让用户选择保存位置(默认 Download),无需存储权限
+    val saveLogLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri != null) {
+            try {
+                context.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(logLines.joinToString("\n") { it.text }.toByteArray(Charsets.UTF_8))
+                }
+                android.widget.Toast.makeText(context, "日志已保存(${logLines.size} 行)", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                android.widget.Toast.makeText(context, "保存失败:${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         ServerManager.console.collect { line ->
+            // 自动输出关闭时暂停接收(恢复后从当前继续)
+            if (!autoOutput) return@collect
             logLines.add(
                 ConsoleLogLine(
                     text = line,
@@ -194,6 +217,13 @@ private fun ConsoleTab() {
                 )
             )
             if (logLines.size > 1000) logLines.removeRange(0, logLines.size - 1000)
+        }
+    }
+
+    // 自动滚动:新日志到达时滚到底部
+    LaunchedEffect(logLines.size, autoScroll) {
+        if (autoScroll && logLines.isNotEmpty()) {
+            listState.scrollToItem((logLines.size - 1).coerceAtLeast(0))
         }
     }
 
@@ -220,8 +250,43 @@ private fun ConsoleTab() {
                 Text("复制日志", style = MaterialTheme.typography.labelSmall)
             }
         }
+        // 控制台工具行:清空 / 保存 / 自动输出 / 自动滚动
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            val (p1, s1) = pressSource()
+            TextButton(onClick = {
+                logLines.clear()
+                android.widget.Toast.makeText(context, "已清空控制台", android.widget.Toast.LENGTH_SHORT).show()
+            }, enabled = logLines.isNotEmpty(), interactionSource = s1, modifier = p1) {
+                Text("清空", style = MaterialTheme.typography.labelSmall)
+            }
+            val (p2, s2) = pressSource()
+            TextButton(onClick = {
+                val defaultName = "server_log_${java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())}.txt"
+                saveLogLauncher.launch(defaultName)
+            }, enabled = logLines.isNotEmpty(), interactionSource = s2, modifier = p2) {
+                Text("保存", style = MaterialTheme.typography.labelSmall)
+            }
+            val (p3, s3) = pressSource()
+            TextButton(onClick = { autoOutput = !autoOutput }, interactionSource = s3, modifier = p3) {
+                Text(if (autoOutput) "自动输出:开" else "自动输出:关", style = MaterialTheme.typography.labelSmall)
+            }
+            val (p4, s4) = pressSource()
+            TextButton(onClick = { autoScroll = !autoScroll }, interactionSource = s4, modifier = p4) {
+                Text(if (autoScroll) "自动滚动:开" else "自动滚动:关", style = MaterialTheme.typography.labelSmall)
+            }
+            Spacer(Modifier.weight(1f))
+            if (!autoOutput) {
+                Text("已暂停接收", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error)
+            }
+        }
         LazyColumn(
-            Modifier
+            state = listState,
+            modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
                 .padding(horizontal = 8.dp)
