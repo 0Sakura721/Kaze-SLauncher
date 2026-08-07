@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,16 +17,22 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.VerticalAlignBottom
+import androidx.compose.material.icons.filled.VerticalAlignCenter
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
@@ -384,7 +391,7 @@ private fun ConsoleTab(instance: ServerInstance) {
     }
 
     Column(Modifier.fillMaxSize()) {
-        // 紧凑工具行:状态 + 清空/保存/复制/自动输出/自动滚动(一行,日志区最大化)
+        // 紧凑工具行:状态 + 图标按钮(清空/保存/复制/输出/滚动),日志区最大化
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -397,46 +404,41 @@ private fun ConsoleTab(instance: ServerInstance) {
                 modifier = Modifier.weight(1f)
             )
             val (p1, s1) = pressSource()
-            TextButton(onClick = {
+            IconButton(onClick = {
                 logLines.clear()
                 android.widget.Toast.makeText(context, "已清空控制台", android.widget.Toast.LENGTH_SHORT).show()
             }, enabled = logLines.isNotEmpty(), interactionSource = s1,
-                contentPadding = PaddingValues(horizontal = 6.dp),
-                modifier = p1) {
-                Text("清空", style = MaterialTheme.typography.labelSmall)
+                modifier = p1.then(Modifier.size(32.dp))) {
+                Icon(Icons.Filled.Clear, "清空", Modifier.size(16.dp))
             }
             val (p2, s2) = pressSource()
-            TextButton(onClick = {
+            IconButton(onClick = {
                 val defaultName = "server_log_${java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())}.txt"
                 saveLogLauncher.launch(defaultName)
             }, enabled = logLines.isNotEmpty(), interactionSource = s2,
-                contentPadding = PaddingValues(horizontal = 6.dp),
-                modifier = p2) {
-                Text("保存", style = MaterialTheme.typography.labelSmall)
+                modifier = p2.then(Modifier.size(32.dp))) {
+                Icon(Icons.Filled.SaveAlt, "保存日志", Modifier.size(16.dp))
             }
             val (p3, s3) = pressSource()
-            TextButton(onClick = {
+            IconButton(onClick = {
                 copyToClipboard(logLines.joinToString("\n") { it.text }, "已复制全部日志(${logLines.size} 行)")
             }, enabled = logLines.isNotEmpty(), interactionSource = s3,
-                contentPadding = PaddingValues(horizontal = 6.dp),
-                modifier = p3) {
-                Text("复制", style = MaterialTheme.typography.labelSmall)
+                modifier = p3.then(Modifier.size(32.dp))) {
+                Icon(Icons.Filled.Share, "复制日志", Modifier.size(16.dp))
             }
             val (p4, s4) = pressSource()
-            TextButton(onClick = { autoOutput = !autoOutput }, interactionSource = s4,
-                contentPadding = PaddingValues(horizontal = 6.dp),
-                modifier = p4) {
-                Text(if (autoOutput) "输出:开" else "输出:关",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (autoOutput) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            IconButton(onClick = { autoOutput = !autoOutput }, interactionSource = s4,
+                modifier = p4.then(Modifier.size(32.dp))) {
+                Icon(if (autoOutput) Icons.Filled.Pause else Icons.Filled.PlayArrow, "输出:${if (autoOutput) "开" else "关"}",
+                    Modifier.size(16.dp),
+                    tint = if (autoOutput) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             }
             val (p5, s5) = pressSource()
-            TextButton(onClick = { autoScroll = !autoScroll }, interactionSource = s5,
-                contentPadding = PaddingValues(horizontal = 6.dp),
-                modifier = p5) {
-                Text(if (autoScroll) "滚动:开" else "滚动:关",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (autoScroll) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            IconButton(onClick = { autoScroll = !autoScroll }, interactionSource = s5,
+                modifier = p5.then(Modifier.size(32.dp))) {
+                Icon(if (autoScroll) Icons.Filled.VerticalAlignBottom else Icons.Filled.VerticalAlignCenter, "滚动:${if (autoScroll) "开" else "关"}",
+                    Modifier.size(16.dp),
+                    tint = if (autoScroll) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         // Termux 式:SelectionContainer 自由选择日志文本(长按拖动选择,复制按钮),
@@ -451,24 +453,30 @@ private fun ConsoleTab(instance: ServerInstance) {
                     .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                     .padding(8.dp)
             ) {
-                items(logLines.takeLast(500), key = { it.key }) { entry ->
+                items(logLines, key = { it.key }) { entry ->
                     Text(entry.text, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
                         color = entry.color,
                         modifier = Modifier.padding(vertical = 1.dp))
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // 输入行:垫上 imePadding,键盘弹出时不遮挡输入框
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).imePadding(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             OutlinedTextField(
                 value = command, onValueChange = { command = it },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("输入命令,如: op Steve / say hi") },
-                singleLine = true
+                singleLine = true,
+                textStyle = LocalTextStyle.current.copy(fontSize = 13.sp)
             )
             Spacer(Modifier.width(8.dp))
             Button(onClick = {
                 if (command.isNotBlank()) { ServerManager.sendCommand(command.trim()); command = "" }
-            }, enabled = status == com.mcserver.launcher.data.InstanceStatus.RUNNING) { Text("发送") }
+            }, enabled = status == com.mcserver.launcher.data.InstanceStatus.RUNNING,
+                modifier = Modifier.height(48.dp)) { Text("发送") }
         }
     }
 }
