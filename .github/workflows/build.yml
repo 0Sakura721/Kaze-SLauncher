@@ -42,7 +42,7 @@ jobs:
         run: ./gradlew :app:downloadBundledAssets --stacktrace
 
       - name: Run lint
-        run: ./gradlew :app:lintDebug --stacktrace
+        run: ./gradlew :app:lintUniversalDebug --stacktrace
 
       - name: Build Debug APKs (arm64-v8a / armeabi-v7a / universal)
         id: debug-build
