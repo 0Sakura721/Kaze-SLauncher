@@ -44,6 +44,7 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|fontScale"
             android:exported="true"
             android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.KazeSLauncher">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

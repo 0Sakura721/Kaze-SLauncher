@@ -408,7 +408,9 @@ private fun ConsoleTab(instance: ServerInstance) {
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // 根容器 imePadding:edge-to-edge(Android 15 强制)下键盘 insets 必须手动应用,
+    // 键盘弹出时整个内容区上移,底部输入框不被遮挡
+    Column(Modifier.fillMaxSize().imePadding()) {
         // 紧凑工具行:状态 + 图标按钮(清空/保存/复制/输出/滚动),日志区最大化
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
@@ -481,7 +483,7 @@ private fun ConsoleTab(instance: ServerInstance) {
         // 输入行:仅服务器运行时显示(未启动时隐藏,日志区占满)
         if (status == com.mcserver.launcher.data.InstanceStatus.RUNNING) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp).imePadding(),
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedTextField(
