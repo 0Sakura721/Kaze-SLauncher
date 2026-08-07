@@ -94,8 +94,15 @@ object EnvManager {
             val dash = File(rootfsDir, "usr/bin/dash")
             if (sh.isDirectory && dash.isFile) {
                 sh.deleteRecursively()
-                dash.copyTo(sh, overwrite = true)
-                sh.setExecutable(true, false)
+                if (sh.exists()) {
+                    // 删除失败(目录有残留):逐项清空后重删
+                    sh.listFiles()?.forEach { it.deleteRecursively() }
+                    sh.delete()
+                }
+                if (!sh.exists()) {
+                    dash.copyTo(sh, overwrite = true)
+                    sh.setExecutable(true, false)
+                }
             }
         } catch (_: Exception) { }
     }
@@ -373,6 +380,12 @@ object EnvManager {
             if (File(rootfsDir, "usr/lib64").exists()) {
                 args.add("-b"); args.add("${File(rootfsDir, "usr/lib64").absolutePath}:/lib64")
             }
+        }
+        // 终极兜底:不管 usr/bin/sh 是否被降级成目录(部分设备修复失败),
+        // 直接把真实的 dash 绑定为 /bin/sh,proot 内部 exec /bin/sh 永远可用
+        val dash = File(rootfsDir, "usr/bin/dash")
+        if (dash.isFile) {
+            args.add("-b"); args.add("${dash.absolutePath}:/bin/sh")
         }
         bindExtra.forEach { (host, guest) ->
             args.add("-b")
