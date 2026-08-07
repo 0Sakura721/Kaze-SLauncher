@@ -43,6 +43,9 @@ fun DownloadScreen(modifier: Modifier = Modifier) {
     val instances by InstanceStore.instances.collectAsState()
     var manageInstance by remember { mutableStateOf<com.mcserver.launcher.data.ServerInstance?>(null) }
 
+    // 系统返回键:管理页打开时返回关闭管理页
+    androidx.activity.compose.BackHandler(enabled = manageInstance != null) { manageInstance = null }
+
     Box(Modifier.fillMaxSize()) {
     Column(modifier) {
         Text("下载中心", style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),

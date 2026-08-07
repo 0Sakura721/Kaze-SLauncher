@@ -67,6 +67,11 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var importing by remember { mutableStateOf<String?>(null) }
     var showEnvSetup by remember { mutableStateOf(false) }
 
+    // 系统返回键:先关覆盖层(关于页/部署页),再关安装对话框
+    androidx.activity.compose.BackHandler(enabled = showAbout || showEnvSetup) {
+        showAbout = false; showEnvSetup = false
+    }
+
     // SAF:选择本地 JDK 目录进行导入(本地优先,不消耗流量)
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -254,7 +259,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text("Kaze SLauncher", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text("v2.0 · 在 Android 上运行 Minecraft Java 服务端",
+                    Text("v1.0 · 在 Android 上运行 Minecraft Java 服务端",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -330,7 +335,7 @@ private fun AboutScreen(onBack: () -> Unit) {
                     Spacer(Modifier.width(14.dp))
                     Column {
                         Text("Kaze SLauncher", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("v2.0 (${versionName} · ${versionCode})", style = MaterialTheme.typography.bodySmall,
+                        Text("v1.0 (${versionName} · ${versionCode})", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

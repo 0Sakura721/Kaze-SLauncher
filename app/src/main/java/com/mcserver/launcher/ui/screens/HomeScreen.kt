@@ -47,9 +47,21 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         else -> 0
     }
 
+    // 系统返回键:先关详情页/新建页,而不是直接退出 App
+    androidx.activity.compose.BackHandler(enabled = selectedInstance != null) { selectedInstance = null }
+    androidx.activity.compose.BackHandler(enabled = showNew) { showNew = false }
+
     PageTransition(navTarget, modifier) { target ->
         when (target) {
-            1 -> InstanceDetailScreen(instance = current!!, onBack = { selectedInstance = null })
+            1 -> {
+                // 用 remember 固定本次进入详情页的实例:
+                // AnimatedContent 退出动画期间会重组旧 content,
+                // 此时 selectedInstance 已为 null,若直接引用 current!! 会 NPE 崩溃
+                val detail = remember { current }
+                if (detail != null) {
+                    InstanceDetailScreen(instance = detail, onBack = { selectedInstance = null })
+                }
+            }
             2 -> NewInstanceScreen(onDone = { showNew = false })
             else -> HomeContent(
                 instances = instances,

@@ -134,6 +134,14 @@ class ServerLauncher(private val context: Context) {
                 startUptime()
 
                 _status.value = InstanceStatus.RUNNING
+                // 保活:服务器运行期间启用前台服务(常驻通知,防止后台被杀)
+                try {
+                    val ctx = com.mcserver.launcher.KazeApp.instance
+                    val intent = android.content.Intent(ctx, ServerKeepAliveService::class.java)
+                        .putExtra("instanceName", instance.name)
+                        .putExtra("mcVersion", instance.mcVersion)
+                    androidx.core.content.ContextCompat.startForegroundService(ctx, intent)
+                } catch (_: Exception) { }
                 Result.success(Unit)
             } catch (e: Exception) {
                 Logger.e("start failed", e)
@@ -239,6 +247,12 @@ class ServerLauncher(private val context: Context) {
         process = null
         restartCount = 0
         currentInstance = null
+        // 停止保活前台服务
+        try {
+            com.mcserver.launcher.KazeApp.instance.stopService(
+                android.content.Intent(com.mcserver.launcher.KazeApp.instance, ServerKeepAliveService::class.java)
+            )
+        } catch (_: Exception) { }
     }
 
     // ── 日志 tail ──

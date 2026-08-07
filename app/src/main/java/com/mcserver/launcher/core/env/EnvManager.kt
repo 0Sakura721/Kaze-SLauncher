@@ -380,6 +380,11 @@ object EnvManager {
      * 自动退回用 /system/bin/linker64 加载(proot 类 App 的标准做法,不触发 exec 限制)。
      */
     fun startProot(command: String, workDir: String = "/root", bindExtra: List<Pair<String, String>> = emptyList()): Process {
+        // 启动前自愈(可能在上次部署后 rootfs 被降级/损坏):
+        // 1) usr/bin/sh 若被解压成目录 → 用 dash 副本修复(否则 proot 报 Is a directory)
+        // 2) rootfs/tmp 必须存在(proot 的 glue/f2fs 探测临时文件,否则 chmod 报错)
+        fixProotSonameLinks()
+        try { File(rootfsDir, "tmp").mkdirs() } catch (_: Exception) { }
         val pb = buildProotCommand(command, workDir, bindExtra)
         return try {
             pb.start()
@@ -506,6 +511,10 @@ object EnvManager {
                 if (!File(rootfsDir, "usr/bin/dash").exists()) {
                     throw RuntimeException("rootfs 解压不完整(usr/bin/dash 缺失),请重试")
                 }
+                // rootfs 解压后关键符号链接可能被降级成目录(usr/bin/sh→dash),
+                // 必须立即修复,否则 proot 启动报 "Is a directory"
+                fixProotSonameLinks()
+                try { File(rootfsDir, "tmp").mkdirs() } catch (_: Exception) { }
                 updateItem("rootfs", SetupItem("rootfs", "Ubuntu 24.04", "内置,解压即用", done = true))
                 log("  ✓ rootfs 就绪")
             } else log("  ✓ 已就绪,跳过")
