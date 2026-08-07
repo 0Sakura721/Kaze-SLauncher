@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!-- 浅色主题(默认,手动浅色模式) -->
     <style name="Theme.KazeSLauncher" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">#FAF9F6</item>
         <!-- Android 12+ 系统启动画面:跟随主题配色 -->
-        <item name="android:windowSplashScreenBackground">#FAF9F6</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">#FAF9F6</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">#FAF9F6</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="31">#FAF9F6</item>
     </style>
 
     <!-- 深色主题(手动暗色 / AMOLED 模式) -->
@@ -16,8 +16,8 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowBackground">#121212</item>
-        <item name="android:windowSplashScreenBackground">#121212</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">#121212</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">#121212</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="31">#121212</item>
     </style>
 </resources>
