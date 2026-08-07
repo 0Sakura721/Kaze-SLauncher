@@ -75,13 +75,9 @@ class ServerLauncher(private val context: Context) {
                 val dir = instance.dir(InstanceStore.instancesDir)
                 dir.mkdirs()
 
-                // 环境自愈:修复符号链接降级(usr/bin/sh)与缺失的 tmp 目录,
-                // 旧版本部署的环境可能存在这两处损坏,必须在启动前修复
-                EnvManager.selfHeal()
-                // 自检诊断(控制台可见,便于定位环境问题)
-                val shFile = java.io.File(EnvManager.rootfsDir, "usr/bin/sh")
-                val tmpDir = java.io.File(EnvManager.rootfsDir, "tmp")
-                emit("> 环境自检:usr/bin/sh=${if (shFile.isFile) "OK(文件)" else if (shFile.exists()) "异常(非文件)" else "缺失"} tmp=${if (tmpDir.isDirectory) "OK" else "缺失"}")
+                // 环境自检诊断(控制台可见,便于定位环境问题)
+                val jreOk = EnvManager.isJreReady()
+                emit("> 环境自检:Java 运行时=${if (jreOk) "OK(${EnvManager.jreHomeDir.name})" else "缺失(请到设置页部署/导入)"}")
 
                 // 1) 核心 jar
                 val jarFile = dir.listFiles()?.firstOrNull { it.name.endsWith(".jar") && !it.name.contains("installer") }
@@ -92,40 +88,56 @@ class ServerLauncher(private val context: Context) {
                 writeEula(dir)
                 writeServerProperties(dir, instance)
 
-                // 3) 启动脚本
+                // 3) 启动脚本(JRE 直跑:宿主 sh 直接 exec java,不经 proot)
                 val logPath = File(dir, "server.log").absolutePath
-                val pipePath = File(dir, "cmdpipe").absolutePath
+                // FIFO 必须放 App 私有目录:外部存储(FUSE)不支持 mkfifo
+                val pipePath = File(EnvManager.appTmpDir, "cmdpipe-${instance.id}").absolutePath
                 val pidFile = File(dir, "mcserver.pid").absolutePath
+                val tmpDirPath = EnvManager.appTmpDir.absolutePath
                 val script = buildString {
                     appendLine("#!/bin/sh")
                     appendLine("cd '$dir' || exit 1")
                     appendLine("rm -f '$pipePath'")
                     appendLine("mkfifo '$pipePath'")
+                    // 保持 FIFO 写端打开:否则 java 的 stdin 读端 open 会阻塞等待写者,
+                    // 长时间阻塞易被 Android 信号打断(EINTR,启动失败)。
+                    // 后台 sleep 只持有 fd 不写数据,java 的读端 open 立即完成。
+                    appendLine("sleep 100000d > '$pipePath' &")
+                    appendLine("HOLDER_PID=\$!")
+                    // Android linker 不搜 JRE lib 目录,必须显式注入:
+                    // 否则 java 动态链接报 libz.so.1 / libandroid-shmem.so not found
+                    appendLine("export LD_LIBRARY_PATH='${EnvManager.jreLibDir.absolutePath}'")
+                    appendLine("export TMPDIR='$tmpDirPath'")
                     appendLine("echo '--- Server Started ---' > '$logPath'")
                     appendLine(": > '$pidFile'")
-                    appendLine("$javaPath -Xmx${instance.config.maxRamMB}M -Xms${(instance.config.maxRamMB / 2).coerceAtLeast(256)}M -jar '$jarName' ${if (instance.config.nogui) "nogui" else ""} >> '$logPath' 2>&1 < '$pipePath' &")
+                    // 用宿主 linker64 加载 java(而非直接 exec):
+                    // vivo/Android 16 对 untrusted_app 直接 exec 应用数据目录 ELF 有限制
+                    // (Termux 等白名单 App 不受限),linker64 加载不触发 exec 限制,
+                    // 与 proot 的 linker64 回退是同一机制,已验证可用
+                    appendLine("/system/bin/linker64 $javaPath -Xmx${instance.config.maxRamMB}M -Xms${(instance.config.maxRamMB / 2).coerceAtLeast(256)}M -Djava.io.tmpdir='$tmpDirPath' -jar '$jarName' ${if (instance.config.nogui) "nogui" else ""} >> '$logPath' 2>&1 < '$pipePath' &")
                     appendLine("JAVA_PID=\$!")
                     appendLine("echo \$JAVA_PID > '$pidFile'")
                     appendLine("wait \$JAVA_PID")
+                    appendLine("kill \$HOLDER_PID 2>/dev/null")
                     appendLine("echo '--- Server Stopped ---' >> '$logPath'")
                     appendLine("rm -f '$pipePath' '$pidFile'")
                 }
                 File(dir, "start.sh").writeText(script)
                 File(dir, "start.sh").setExecutable(true)
 
-                // 4) proot 启动
-                val pb = EnvManager.startProot(File(dir, "start.sh").absolutePath, dir.absolutePath)
+                // 4) JRE 直跑启动(宿主 sh,不经 proot)
+                val pb = EnvManager.startShell(File(dir, "start.sh").absolutePath)
                 process = pb
                 emit("> 服务器启动中(${instance.name} ${instance.mcVersion} ${instance.coreType.displayName})")
 
-                // 消费 proot 进程的输出(含 stderr 警告/错误),否则管道缓冲会阻塞
+                // 消费启动进程的输出(含 stderr 警告/错误),否则管道缓冲会阻塞
                 // 且失败原因无法查看
                 val procOut = process
                 scope.launch {
                     procOut?.inputStream?.bufferedReader()?.useLines { lines ->
                         lines.forEach { line ->
                             if (line.isNotBlank()) {
-                                Logger.w("proot: $line")
+                                Logger.w("sh: $line")
                                 emit(line)
                             }
                         }
@@ -184,7 +196,7 @@ class ServerLauncher(private val context: Context) {
                 "fi\n"
             )
             script.setExecutable(true)
-            EnvManager.startProot(script.absolutePath, dir.absolutePath)
+            EnvManager.startShell(script.absolutePath)
         }
         // 兜底:15 秒后强制收尾
         scope.launch {
@@ -198,11 +210,33 @@ class ServerLauncher(private val context: Context) {
     }
 
     // ── 控制台 ──
+    /**
+     * 发送控制台指令。优先走 RCON(服务器标准指令通道,稳定可靠);
+     * RCON 不可用时回退 FIFO(stdin 在非 TTY 下可能不被 JLine 读取,仅作后备)。
+     */
     fun sendCommand(cmd: String) {
         if (!isRunning || cmd.isBlank()) return
         emit("> $cmd")
         val dir = currentInstance?.dir(InstanceStore.instancesDir) ?: return
-        val pipe = File(dir, "cmdpipe")
+        val cfg = currentInstance?.config
+        // 1) RCON 通道(后台线程,避免网络超时阻塞 UI)
+        if (cfg?.rconEnabled == true) {
+            val rconFile = File(dir, "rcon.txt")
+            val pwd = if (rconFile.exists()) rconFile.readText().trim() else cfg.rconPassword
+            val port = cfg.rconPort
+            Thread {
+                try {
+                    val client = RconClient(port = port, password = pwd)
+                    if (client.connect(2000)) {
+                        client.command(cmd)
+                        client.close()
+                    }
+                } catch (_: Exception) { }
+            }.start()
+            return
+        }
+        // 2) FIFO 后备
+        val pipe = File(EnvManager.appTmpDir, "cmdpipe-${currentInstance?.id}")
         if (pipe.exists()) {
             try {
                 pipe.appendText(cmd + "\n")
@@ -328,6 +362,9 @@ class ServerLauncher(private val context: Context) {
 
     private fun writeServerProperties(dir: File, instance: ServerInstance) {
         val cfg = instance.config
+        // RCON 密码固定化:空配置时生成随机密码,并写入 rcon.txt 供控制台指令使用
+        val rconPassword = cfg.rconPassword.ifEmpty { "kaze" + (100000..999999).random() }
+        File(dir, "rcon.txt").writeText(rconPassword)
         val desired = linkedMapOf(
             "server-port" to cfg.serverPort.toString(),
             "motd" to cfg.motd,
@@ -342,7 +379,7 @@ class ServerLauncher(private val context: Context) {
             "enable-command-block" to "true",
             "enable-rcon" to cfg.rconEnabled.toString(),
             "rcon.port" to cfg.rconPort.toString(),
-            "rcon.password" to cfg.rconPassword.ifEmpty { "kaze" + (100000..999999).random() }
+            "rcon.password" to rconPassword
         )
         val file = File(dir, "server.properties")
         val lines = if (file.exists()) file.readLines().toMutableList() else mutableListOf()

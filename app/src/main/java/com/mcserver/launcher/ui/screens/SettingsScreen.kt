@@ -117,7 +117,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         // ── 环境 ──
         SectionCard("运行环境") {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Linux 环境(proot + Ubuntu)", Modifier.weight(1f))
+                Text("Java 运行时(Android 版)", Modifier.weight(1f))
                 val (label, color) = when (envState) {
                     EnvState.READY -> "已就绪" to Color(0xFF4CAF50)
                     EnvState.SETTING_UP -> "部署中" to Color(0xFFFFA726)
@@ -265,7 +265,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 }
             }
             Spacer(Modifier.height(10.dp))
-            Text("Kaze SLauncher 是一个在 Android 设备上运行 Minecraft Java 版服务端的启动器:基于 proot + Ubuntu 24.04 虚拟环境,支持多实例、多核心、统一下载中心与本地资源导入。",
+            Text("Kaze SLauncher 是一个在 Android 设备上运行 Minecraft Java 版服务端的启动器:内置 Android 版 Java 21 运行时,无需 ROOT、无需 proot,支持多实例、多核心、统一下载中心与本地资源导入。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
@@ -340,7 +340,7 @@ private fun AboutScreen(onBack: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(12.dp))
-                Text("在 Android 上运行 Minecraft Java 版服务端,无需 ROOT,基于 proot 虚拟化 Ubuntu 环境。",
+                Text("在 Android 上运行 Minecraft Java 版服务端,无需 ROOT,内置 Android 版 Java 运行时,即装即用。",
                     style = MaterialTheme.typography.bodySmall)
 
                 Spacer(Modifier.height(14.dp))
@@ -349,7 +349,7 @@ private fun AboutScreen(onBack: () -> Unit) {
                     FeatureLine("多核心支持", "Vanilla / Paper / Purpur / Spigot / Fabric / Forge / NeoForge")
                     FeatureLine("统一下载中心", "全局队列、断点续传、暂停/恢复/取消")
                     FeatureLine("本地资源导入", "Java / 服务端 JAR / 插件模组 / 世界,优先本地,省流量")
-                    FeatureLine("Java 按需安装", "8 / 11 / 17 / 21 可选,自动同步服务器环境")
+                    FeatureLine("Java 多版本", "内置 21 + 本地导入/在线下载,按需选择")
                     FeatureLine("插件/模组管理", "Modrinth 在线搜索 + 本地导入,一键启用禁用")
                     FeatureLine("服务器控制台", "实时日志、命令输入、状态监控")
                 }
@@ -357,21 +357,21 @@ private fun AboutScreen(onBack: () -> Unit) {
                 Spacer(Modifier.height(14.dp))
                 AboutSection("v2.0 重写更新") {
                     Text("· 全新架构:多实例 + 版本隔离,告别单服务器时代", style = bodySmall)
-                    Text("· 环境部署零下载:proot + Ubuntu 24.04 内置,开箱即用", style = bodySmall)
+                    Text("· 核心引擎:内置 Android 版 Java 21 运行时,零下载开箱即用", style = bodySmall)
+                    Text("· 兼容 Android 16:直接运行,无需 proot/rootfs", style = bodySmall)
                     Text("· 手写 tar 解压引擎,带实时进度与速度显示", style = bodySmall)
                     Text("· 文件导入走系统文件选择器,ELF 架构自动校验", style = bodySmall)
                 }
 
                 Spacer(Modifier.height(14.dp))
                 AboutSection("技术栈") {
-                    Text("Kotlin · Jetpack Compose · Material 3 · proot · Ubuntu 24.04", style = bodySmall)
+                    Text("Kotlin · Jetpack Compose · Material 3 · Android JRE 引擎", style = bodySmall)
                 }
 
                 Spacer(Modifier.height(14.dp))
                 AboutSection("开源许可") {
                     Text("本项目基于 MIT License 开源。", style = bodySmall)
-                    Text("proot © Cédric VINCENT / STMicroelectronics, GPL v2", style = bodySmall)
-                    Text("Ubuntu base © Canonical Ltd.", style = bodySmall)
+                    Text("Java 运行时基于 OpenJDK (GPL v2 + Classpath Exception)", style = bodySmall)
                 }
 
                 Spacer(Modifier.height(14.dp))
@@ -379,7 +379,8 @@ private fun AboutScreen(onBack: () -> Unit) {
                     Text("项目参考与灵感:", style = bodySmall)
                     Text("· FCL (Fold Craft Launcher) —— Android 端 MC 启动器先驱", style = bodySmall)
                     Text("· HMCL (Hello Minecraft! Launcher) —— 多版本/多加载器管理范式", style = bodySmall)
-                    Text("· PojavLauncher —— proot 环境方案", style = bodySmall)
+                    Text("· PojavLauncher —— Android 运行时方案参考", style = bodySmall)
+                    Text("· Termux —— Android 版 OpenJDK 打包方案", style = bodySmall)
                     Text("· PaperMC / PurpurMC —— 高性能服务端", style = bodySmall)
                     Text("· Modrinth —— 模组/插件搜索 API", style = bodySmall)
                     Text("· Adoptium (Eclipse Temurin) —— JDK 发行", style = bodySmall)

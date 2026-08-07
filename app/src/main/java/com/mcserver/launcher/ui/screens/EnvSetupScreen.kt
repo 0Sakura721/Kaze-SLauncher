@@ -22,7 +22,7 @@ import com.mcserver.launcher.core.env.EnvState
 import kotlinx.coroutines.launch
 
 /**
- * 环境初始化:进入即自动部署(解压内置 proot + Ubuntu,零下载零操作)。
+ * 环境初始化:进入即自动部署(解压内置 Android 版 Java 21 运行时,零下载零操作)。
  * Java 不在初始化中下载——按需到设置页本地导入或下载。
  */
 @Composable

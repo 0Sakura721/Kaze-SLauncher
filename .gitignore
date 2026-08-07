@@ -24,3 +24,7 @@ app/src/main/assets/bundled/*
 
 # 本地构建产物
 *.apk
+
+# Android JRE(160MB,本地构建资源,不入库,从设备/Release 获取)
+app/src/*/assets/bundled/jre21-arm64.tar
+app/src/*/assets/bundled/jre21-arm64.tar.gz

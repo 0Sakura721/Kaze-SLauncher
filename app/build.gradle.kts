@@ -8,37 +8,35 @@ import java.io.File
 import java.util.Properties
 
 // ═══════════════════════════════════════════════════════════════
-//  内置资源校验任务 — 全部资源已 commit 到 git，无需网络下载
+//  内置资源校验任务 — 本地构建前校验，全部资源不入 Git
 //
-//  布局（按 flavor 分架构，APK 只含对应架构的 rootfs）：
-//  - src/main/assets/bundled/          proot 三架构（通用，共约 0.4MB）
-//  - src/arm64v8/assets/bundled/       ubuntu arm64 rootfs（28.5MB）
-//  - src/armv7/assets/bundled/         ubuntu armhf rootfs（25.8MB）
-//  - src/universal/assets/bundled/     三个 rootfs（arm64+armhf+amd64）
-//  注：Java 不再内置（按需本地导入/在线下载，JreInstaller 负责）
+//  布局（按 flavor 分架构）：
+//  - src/main/assets/bundled/          proot 三架构（通用，约 0.4MB，兼容旧环境）
+//  - src/arm64v8/assets/bundled/       Android 版 JRE 21（jre21-arm64.tar，~162MB，★核心引擎）
+//  - src/armv7/assets/bundled/         ubuntu armhf rootfs（旧架构，25.8MB）
+//  - src/universal/assets/bundled/     三个 rootfs（旧架构，兼容）
+//  说明：新架构（Android 16 兼容）核心是 Android 版 JRE（interpreter=宿主 linker64，
+//  可直接 exec），proot+rootfs 仅作为旧兼容层保留。JRE 资源 160MB 不入 Git，
+//  由本地构建脚本从设备/Release 放入 src/arm64v8/assets/bundled/。
 // ═══════════════════════════════════════════════════════════════
 val downloadBundledAssets by tasks.registering {
     group = "bundled"
-    description = "校验内置资源完整性（proot/rootfs 均已 commit，无需下载）"
+    description = "校验内置资源完整性（本地构建前检查）"
     doLast {
         val missing = mutableListOf<String>()
         fun check(dir: File, name: String) {
             val f = File(dir, name)
             if (!f.exists() || f.length() == 0L) missing += "$dir/$name"
         }
+        // ★ 新架构核心:arm64v8 必须带 Android JRE
+        check(file("src/arm64v8/assets/bundled"), "jre21-arm64.tar")
+        // 旧兼容资源(缺了也不阻断,只提示)
         listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz", "proot-x86_64.tar.gz")
             .forEach { check(file("src/main/assets/bundled"), it) }
-        check(file("src/arm64v8/assets/bundled"), "ubuntu-base-24.04-arm64.tar.gz")
-        check(file("src/armv7/assets/bundled"), "ubuntu-base-24.04-armhf.tar.gz")
-        listOf(
-            "ubuntu-base-24.04-arm64.tar.gz",
-            "ubuntu-base-24.04-armhf.tar.gz",
-            "ubuntu-base-24.04-amd64.tar.gz"
-        ).forEach { check(file("src/universal/assets/bundled"), it) }
         if (missing.isNotEmpty()) {
-            throw GradleException("缺少内置资源: ${missing.joinToString()}")
+            throw GradleException("缺少内置资源: ${missing.joinToString()}（JRE 资源从设备提取或 GitHub Release 获取）")
         }
-        println("✓ 内置资源完整（proot 三架构 + rootfs 按 flavor 就位）")
+        println("✓ 内置资源完整（Android JRE + proot 兼容层）")
     }
 }
 

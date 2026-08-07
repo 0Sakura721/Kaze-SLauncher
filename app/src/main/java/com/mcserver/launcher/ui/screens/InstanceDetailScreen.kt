@@ -228,60 +228,59 @@ private fun ConsoleTab() {
     }
 
     Column(Modifier.fillMaxSize()) {
+        // 紧凑工具行:状态 + 清空/保存/复制/自动输出/自动滚动(一行,日志区最大化)
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "${status.name} · 玩家 ${players.size} · 运行 ${uptime / 60}分${uptime % 60}秒",
+                "${status.name} · ${players.size}人 · ${uptime / 60}分${uptime % 60}秒",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
                 modifier = Modifier.weight(1f)
             )
-            val (pressCopy, srcCopy) = pressSource()
-            TextButton(
-                onClick = {
-                    copyToClipboard(logLines.joinToString("\n") { it.text }, "已复制全部日志(${logLines.size} 行)")
-                },
-                enabled = logLines.isNotEmpty(),
-                interactionSource = srcCopy,
-                modifier = pressCopy
-            ) {
-                Text("复制日志", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-        // 控制台工具行:清空 / 保存 / 自动输出 / 自动滚动
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
             val (p1, s1) = pressSource()
             TextButton(onClick = {
                 logLines.clear()
                 android.widget.Toast.makeText(context, "已清空控制台", android.widget.Toast.LENGTH_SHORT).show()
-            }, enabled = logLines.isNotEmpty(), interactionSource = s1, modifier = p1) {
+            }, enabled = logLines.isNotEmpty(), interactionSource = s1,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+                modifier = p1) {
                 Text("清空", style = MaterialTheme.typography.labelSmall)
             }
             val (p2, s2) = pressSource()
             TextButton(onClick = {
                 val defaultName = "server_log_${java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())}.txt"
                 saveLogLauncher.launch(defaultName)
-            }, enabled = logLines.isNotEmpty(), interactionSource = s2, modifier = p2) {
+            }, enabled = logLines.isNotEmpty(), interactionSource = s2,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+                modifier = p2) {
                 Text("保存", style = MaterialTheme.typography.labelSmall)
             }
             val (p3, s3) = pressSource()
-            TextButton(onClick = { autoOutput = !autoOutput }, interactionSource = s3, modifier = p3) {
-                Text(if (autoOutput) "自动输出:开" else "自动输出:关", style = MaterialTheme.typography.labelSmall)
+            TextButton(onClick = {
+                copyToClipboard(logLines.joinToString("\n") { it.text }, "已复制全部日志(${logLines.size} 行)")
+            }, enabled = logLines.isNotEmpty(), interactionSource = s3,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+                modifier = p3) {
+                Text("复制", style = MaterialTheme.typography.labelSmall)
             }
             val (p4, s4) = pressSource()
-            TextButton(onClick = { autoScroll = !autoScroll }, interactionSource = s4, modifier = p4) {
-                Text(if (autoScroll) "自动滚动:开" else "自动滚动:关", style = MaterialTheme.typography.labelSmall)
+            TextButton(onClick = { autoOutput = !autoOutput }, interactionSource = s4,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+                modifier = p4) {
+                Text(if (autoOutput) "输出:开" else "输出:关",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (autoOutput) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             }
-            Spacer(Modifier.weight(1f))
-            if (!autoOutput) {
-                Text("已暂停接收", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error)
+            val (p5, s5) = pressSource()
+            TextButton(onClick = { autoScroll = !autoScroll }, interactionSource = s5,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+                modifier = p5) {
+                Text(if (autoScroll) "滚动:开" else "滚动:关",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (autoScroll) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         LazyColumn(

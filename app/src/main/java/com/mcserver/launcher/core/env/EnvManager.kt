@@ -58,6 +58,20 @@ object EnvManager {
     private val linuxDir: File get() = File(appContext.filesDir, "linux").apply { mkdirs() }
     private val prootHomeDir: File get() = File(linuxDir, "proot-home").apply { mkdirs() }
 
+    // ── Android 版 JRE(自包含运行时,核心引擎) ──
+    // 关键:JRE 是 Android ELF(interpreter=/system/bin/linker64),
+    // Android 15+/16 禁止 exec "interpreter 在应用数据目录" 的 ELF(glibc 程序),
+    // 但 interpreter 为宿主 linker64 的 ELF 可以直接 exec —— 这就是
+    // Termux/FCL 在 Android 16 上仍能运行的原因,也是本引擎的根基。
+    // 不再需要 proot + Ubuntu rootfs(旧方案在 Android 16 上被系统 exec 限制封死)。
+    val jreHomeDir: File get() = File(appContext.filesDir, "jre21").apply { mkdirs() }
+    val jreLibDir: File get() = File(jreHomeDir, "lib")
+    val appTmpDir: File get() = File(appContext.filesDir, "tmp").apply { mkdirs() }
+
+    /** JRE 是否就绪:java 可执行 + 模块镜像存在 */
+    fun isJreReady(): Boolean =
+        File(jreHomeDir, "bin/java").exists() && File(jreHomeDir, "lib/modules").exists()
+
     /**
      * 环境自愈(public):修复符号链接降级 + 补 tmp 目录。
      * 服务器启动前与 startProot 内部都会调用,防御 rootfs 损坏/旧部署。
@@ -171,10 +185,21 @@ object EnvManager {
     }
 
     // ── 状态 ──
+    /** 环境就绪:优先 Android JRE 直跑模式;旧 proot+rootfs 环境作为回退 */
     fun isEnvironmentReady(): Boolean =
-        prootBinary.exists() && prootBinary.canExecute() &&
-            prootLoader.exists() && prootLoader.canExecute() &&
-            rootfsDir.exists() && File(rootfsDir, "usr/bin/dash").exists()
+        isJreReady() || (
+            prootBinary.exists() && prootBinary.canExecute() &&
+                prootLoader.exists() && prootLoader.canExecute() &&
+                rootfsDir.exists() && File(rootfsDir, "usr/bin/dash").exists()
+            )
+
+    /** 任意可用 Java(优先 JRE 直跑,其次 rootfs 内的 JDK) */
+    fun resolveJavaPath(preferred: Int?): String? {
+        if (isJreReady()) return File(jreHomeDir, "bin/java").absolutePath
+        val candidates = (listOfNotNull(preferred) + listOf(21, 17, 11, 8)).distinct()
+        for (v in candidates) if (isJdkInstalled(v)) return getJavaPath(v)
+        return null
+    }
 
     fun isJdkInstalled(version: Int): Boolean {
         val javaBin = File(javaHomeDir, "java-$version-openjdk-$jdkArchSuffix/bin/java")
@@ -187,13 +212,6 @@ object EnvManager {
 
     fun getJavaPath(version: Int): String =
         "/usr/lib/jvm/java-$version-openjdk-$jdkArchSuffix/bin/java"
-
-    /** 任意可用 Java(优先偏好版本) */
-    fun resolveJavaPath(preferred: Int?): String? {
-        val candidates = (listOfNotNull(preferred) + listOf(21, 17, 11, 8)).distinct()
-        for (v in candidates) if (isJdkInstalled(v)) return getJavaPath(v)
-        return null
-    }
 
     // ── 资产提取(兼容 AGP 将 .tar.gz 解压为 .tar 的行为) ──
     private fun extractBundledAsset(assetName: String, dest: File): Boolean {
@@ -482,6 +500,19 @@ object EnvManager {
         }
     }
 
+    /**
+     * ★ JRE 直跑模式:用宿主 /system/bin/sh 执行脚本(不经 proot)。
+     * 环境变量注入 Android JRE 的库路径(linker 默认不搜 JRE lib 目录,
+     * 缺 LD_LIBRARY_PATH 会报 libz.so.1 / libandroid-shmem.so not found)。
+     */
+    fun startShell(scriptPath: String): Process {
+        val pb = ProcessBuilder("/system/bin/sh", scriptPath).redirectErrorStream(true)
+        val env = pb.environment()
+        env["LD_LIBRARY_PATH"] = jreLibDir.absolutePath
+        env["TMPDIR"] = appTmpDir.absolutePath
+        return pb.start()
+    }
+
     /** 在 Ubuntu 内执行命令,收集输出 */
     fun executeCommand(command: String, workDir: String = "/root", timeoutMs: Long = 600_000): Result<String> {
         return try {
@@ -496,22 +527,69 @@ object EnvManager {
 
     // ── 部署 ──
     /**
-     * 全量部署:proot + rootfs + apt + 用户选择的 JDK。
-     * @param jdkVersions 需要安装的 Java 版本(可只选需要的)
+     * 全量部署。
+     *
+     * 新架构(Android 16 兼容):优先部署内置 Android 版 JRE 21 —— 解压 assets
+     * 中的 jre21-arm64.tar.gz 到 files/jre21,零下载、即装即用,无需 proot/rootfs。
+     * 旧资源(proot + Ubuntu rootfs)路径保留用于兼容,但已不再是主路径。
+     *
+     * @param jdkVersions 保留参数(旧架构按需安装多个 JDK;新架构 JRE 直跑忽略)
      */
-    suspend fun runFullSetup(jdkVersions: List<Int> = listOf(8, 11, 17, 21)): Result<Unit> = withContext(Dispatchers.IO) {
+    suspend fun runFullSetup(jdkVersions: List<Int> = listOf(21)): Result<Unit> = withContext(Dispatchers.IO) {
         if (isSetupRunning.get()) return@withContext Result.failure(RuntimeException("部署正在进行中"))
-        if (_state.value == EnvState.READY && jdkVersions.all { isJdkInstalled(it) }) {
-            return@withContext Result.success(Unit)
-        }
         isSetupRunning.set(true)
         _state.value = EnvState.SETTING_UP
-        val jdkList = jdkVersions.distinct().sorted()
-        val totalSteps = 3 + jdkList.size
 
         fun log(msg: String) { _log.value = _log.value + msg }
 
         try {
+            // ── ★ JRE 直跑模式(主路径) ──
+            if (isJreReady()) {
+                log("✓ Java 21 运行时已就绪,无需部署")
+                _items.value = listOf(SetupItem("jre", "Java 21 运行时", "已就绪", done = true))
+                _state.value = EnvState.READY
+                return@withContext Result.success(Unit)
+            }
+            val jreAsset = if (assetExists("jre21-arm64.tar.gz")) "jre21-arm64.tar.gz" else if (assetExists("jre21-arm64.tar")) "jre21-arm64.tar" else null
+            if (jreAsset != null) {
+                log(">>> 部署内置 Java 21 运行时(Android 版,~160MB)")
+                _items.value = listOf(SetupItem("jre", "Java 21 运行时", "内置,解压即用", phase = "提取中"))
+                val jreTarball = File(appContext.filesDir, "jre21.tar")
+                if (extractBundledAsset(jreAsset, jreTarball)) {
+                    log("  ✓ 内置提取成功")
+                    if (jreHomeDir.exists()) jreHomeDir.deleteRecursively()
+                    jreHomeDir.mkdirs()
+                    updateItem("jre", SetupItem("jre", "Java 21 运行时", "内置,解压即用", phase = "解压中", totalBytes = jreTarball.length()))
+                    extractTarWithProgress(jreTarball, jreHomeDir) { processed, total, speed ->
+                        updateItem("jre") {
+                            it.copy(
+                                phase = "解压中",
+                                progress = if (total > 0) processed.toFloat() / total else 0f,
+                                processedBytes = processed,
+                                totalBytes = total,
+                                speedBytes = speed
+                            )
+                        }
+                    }
+                    jreTarball.delete()
+                    File(jreHomeDir, "bin/java").setExecutable(true)
+                    if (!isJreReady()) throw RuntimeException("Java 运行时解压不完整(bin/java 或 lib/modules 缺失)")
+                    updateItem("jre", SetupItem("jre", "Java 21 运行时", "已就绪", done = true))
+                    log("  ✓ Java 21 运行时就绪")
+                    _state.value = EnvState.READY
+                    return@withContext Result.success(Unit)
+                }
+                error("内置 Java 运行时提取失败")
+            }
+            // 分架构 APK 无内置 JRE:明确报错,绝不静默网络下载(用户流量)
+            error("当前 APK 不含内置 Java 运行时,请安装完整版 arm64v8 安装包,或在设置页本地导入 Android 版 JRE")
+
+            // ── 旧架构(proot + Ubuntu rootfs)── 保留兼容,不再主动触发 ──
+            val jdkList = jdkVersions.distinct().sorted()
+            val totalSteps = 3 + jdkList.size
+            if (_state.value == EnvState.READY && jdkVersions.all { isJdkInstalled(it) }) {
+                return@withContext Result.success(Unit)
+            }
             // 阶段 1:proot
             log(">>> 阶段 1/$totalSteps:获取 proot 运行时($archName)")
             _items.value = listOf(SetupItem("proot", "proot 运行时", "内置,解压即用", phase = "提取中"))
