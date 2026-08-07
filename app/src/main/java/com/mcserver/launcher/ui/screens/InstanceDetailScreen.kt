@@ -585,8 +585,18 @@ private fun ConfigTab(instance: ServerInstance) {
         OutlinedTextField(value = port, onValueChange = { port = it.filter { c -> c.isDigit() }.take(5) },
             label = { Text("端口") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
-        OutlinedTextField(value = maxRam, onValueChange = { maxRam = it.filter { c -> c.isDigit() }.take(5) },
-            label = { Text("最大内存(MB),如 2048") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        // 内存滑块(FCL 式,含推荐值提示)
+        Text("最大内存:${maxRam.toIntOrNull() ?: 2048} MB", style = MaterialTheme.typography.labelMedium)
+        Slider(
+            value = (maxRam.toIntOrNull() ?: 2048).toFloat().coerceIn(512f, 8192f),
+            onValueChange = { maxRam = it.toInt().toString() },
+            valueRange = 512f..8192f,
+            steps = 14, // 512 起每 512 一档:512..8192
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text("建议:1GB(1024)起步,2-4GB 适合 10-50 人,上限受设备内存限制",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(value = maxPlayers, onValueChange = { maxPlayers = it.filter { c -> c.isDigit() }.take(4) },
             label = { Text("最大玩家数") }, singleLine = true, modifier = Modifier.fillMaxWidth())

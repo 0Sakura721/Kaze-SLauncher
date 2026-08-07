@@ -1,5 +1,7 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -8,8 +10,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
@@ -19,6 +25,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.widget.Toast
 import com.mcserver.launcher.ui.components.PageTransition
 import com.mcserver.launcher.ui.components.pressScale
@@ -30,7 +38,8 @@ import com.mcserver.launcher.data.ServerInstance
 import com.mcserver.launcher.util.Logger
 import kotlinx.coroutines.launch
 
-/** 首页:实例列表 + 新建入口 */
+/** 首页:实例列表 + 新建入口(FCL 式:长按卡片弹出操作菜单) */
+@androidx.compose.foundation.ExperimentalFoundationApi
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -39,6 +48,37 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val envReady = EnvManager.isEnvironmentReady()
     var showNew by remember { mutableStateOf(false) }
     var selectedInstance by remember { mutableStateOf<ServerInstance?>(null) }
+    var menuInstance by remember { mutableStateOf<ServerInstance?>(null) }
+    var showImport by remember { mutableStateOf(false) }
+    var importing by remember { mutableStateOf(false) }
+
+    // SAF:导入实例包(zip)
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            importing = true
+            scope.launch {
+                val tmp = java.io.File(context.filesDir, "import_instance")
+                if (tmp.exists()) tmp.deleteRecursively()
+                com.mcserver.launcher.util.FileImporter.copyFile(context, uri, tmp)
+                    .onSuccess { zipFile ->
+                        val inst = com.mcserver.launcher.core.server.ExportManager.importInstance(zipFile)
+                        tmp.deleteRecursively()
+                        importing = false
+                        if (inst != null) {
+                            Toast.makeText(context, "实例导入完成:${inst.name}", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(context, "导入失败:无法解析实例包", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    .onFailure { err ->
+                        importing = false
+                        Toast.makeText(context, "导入失败:${err.message}", Toast.LENGTH_LONG).show()
+                    }
+            }
+        }
+    }
 
     val current = selectedInstance
     val navTarget = when {
@@ -66,8 +106,11 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             else -> HomeContent(
                 instances = instances,
                 envReady = envReady,
+                importing = importing,
                 onNew = { showNew = true },
+                onImport = { importLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
                 onOpen = { selectedInstance = it },
+                onMenu = { menuInstance = it },
                 onStart = { scope.launch {
                     val result = com.mcserver.launcher.core.server.ServerManager.start(it)
                     if (result.isFailure) {
@@ -78,14 +121,67 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             )
         }
     }
+
+    // ── 长按操作菜单(FCL 式) ──
+    val menuTarget = menuInstance
+    if (menuTarget != null) {
+        DropdownMenu(
+            expanded = true,
+            onDismissRequest = { menuInstance = null }
+        ) {
+            DropdownMenuItem(
+                text = { Text("打开") },
+                leadingIcon = { Icon(Icons.Filled.FolderOpen, null, Modifier.size(20.dp)) },
+                onClick = { menuInstance = null; selectedInstance = menuTarget }
+            )
+            DropdownMenuItem(
+                text = { Text("导出为 zip(备份/迁移)") },
+                leadingIcon = { Icon(Icons.Filled.Share, null, Modifier.size(20.dp)) },
+                onClick = {
+                    menuInstance = null
+                    scope.launch {
+                        val name = menuTarget.name.replace(Regex("[^\\w\\u4e00-\\u9fa5-]"), "_").take(30)
+                        val f = java.io.File(context.getExternalFilesDir(null), "exports")
+                        f.mkdirs()
+                        val dest = java.io.File(f, "$name-${System.currentTimeMillis().toString().takeLast(6)}.zip")
+                        val ok = com.mcserver.launcher.core.server.ExportManager.exportInstance(menuTarget, dest)
+                        Toast.makeText(
+                            context,
+                            if (ok) "已导出:${dest.absolutePath}(可在文件管理器找到)" else "导出失败",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("删除实例", color = MaterialTheme.colorScheme.error) },
+                leadingIcon = { Icon(Icons.Filled.Delete, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error) },
+                onClick = {
+                    menuInstance = null
+                    scope.launch {
+                        if (com.mcserver.launcher.core.server.ServerManager.isRunningFor(menuTarget.id)) {
+                            Toast.makeText(context, "服务器运行中,请先停止", Toast.LENGTH_SHORT).show()
+                            return@launch
+                        }
+                        InstanceStore.delete(menuTarget.id)
+                        Toast.makeText(context, "已删除 ${menuTarget.name}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            )
+        }
+    }
 }
 
+@androidx.compose.foundation.ExperimentalFoundationApi
 @Composable
 private fun HomeContent(
     instances: List<ServerInstance>,
     envReady: Boolean,
+    importing: Boolean,
     onNew: () -> Unit,
+    onImport: () -> Unit,
     onOpen: (ServerInstance) -> Unit,
+    onMenu: (ServerInstance) -> Unit,
     onStart: (ServerInstance) -> Unit,
     onStop: (ServerInstance) -> Unit
 ) {
@@ -98,11 +194,24 @@ private fun HomeContent(
         }
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            Text(
-                "我的服务端",
-                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "我的服务端",
+                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                    modifier = Modifier.weight(1f)
+                )
+                // 导入实例入口(FCL 式导入)
+                val (pressImp, srcImp) = pressSource()
+                IconButton(onClick = onImport, interactionSource = srcImp, modifier = pressImp, enabled = !importing) {
+                    Icon(Icons.Filled.SystemUpdate, "导入实例包(zip)")
+                }
+            }
+            if (importing) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
             if (!envReady) {
                 Surface(
                     Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -136,6 +245,7 @@ private fun HomeContent(
                         InstanceCard(
                             instance,
                             onClick = { onOpen(instance) },
+                            onLongClick = { onMenu(instance) },
                             onStart = { onStart(instance) },
                             onStop = { onStop(instance) }
                         )
@@ -146,8 +256,9 @@ private fun HomeContent(
     }
 }
 
+@androidx.compose.foundation.ExperimentalFoundationApi
 @Composable
-private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onStart: () -> Unit, onStop: () -> Unit) {
+private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onLongClick: () -> Unit, onStart: () -> Unit, onStop: () -> Unit) {
     val status by com.mcserver.launcher.core.server.ServerManager.status.collectAsState()
     val running = com.mcserver.launcher.core.server.ServerManager.isRunningFor(instance.id)
     val interaction = remember { MutableInteractionSource() }
@@ -159,7 +270,12 @@ private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onStart:
         modifier = Modifier
             .fillMaxWidth()
             .pressScale(interaction)
-            .clickable(interactionSource = interaction, indication = ripple(), onClick = onClick)
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = ripple(),
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
