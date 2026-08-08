@@ -53,7 +53,9 @@ object SettingsStore {
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        _setupCompleted.value = prefs.getBoolean("setup_completed", false)
+        // 默认跳过首次环境部署引导:Java 改为在设置页按需下载/导入,
+        // 不强制卡启动页;若用户之前已部署过则保持原值。
+        _setupCompleted.value = prefs.getBoolean("setup_completed", true)
         _darkAmoled.value = prefs.getBoolean("dark_amoled", true)
         // 兼容旧版 theme_dark 布尔值
         _themeMode.value = prefs.getString("theme_mode", null) ?: run {

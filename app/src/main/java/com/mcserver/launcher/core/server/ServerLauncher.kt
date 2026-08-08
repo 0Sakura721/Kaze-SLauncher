@@ -232,7 +232,7 @@ class ServerLauncher(private val context: Context) {
         manualStop = true
         stopInstanceId = currentInstance?.id
         _status.value = InstanceStatus.STOPPING
-        emit("> 正在停止服务器...")
+        emit("> 正在停止服务器…")
         sendCommand("stop")
         val dir = currentInstance?.dir(InstanceStore.instancesDir)
         if (dir != null) {
@@ -356,7 +356,7 @@ class ServerLauncher(private val context: Context) {
         // 停止时自动备份(配置开启时)
         val stopInstance = currentInstance
         if (stopInstance != null && stopInstance.config.backupOnStop) {
-            emit("> 正在备份世界...")
+            emit("> 正在备份世界…")
             val backupFile = BackupManager.backupWorld(stopInstance)
             emit(if (backupFile != null) "> 备份完成:${backupFile.name}" else "> 无世界数据,跳过备份")
         }
@@ -438,7 +438,7 @@ class ServerLauncher(private val context: Context) {
                 if (!isRunning) break
                 if (System.currentTimeMillis() - lastBackup >= intervalMs) {
                     lastBackup = System.currentTimeMillis()
-                    emit("> 定时自动备份(每 $hours 小时)...")
+                    emit("> 定时自动备份(每 $hours 小时)…")
                     val ok = BackupManager.backupWorld(instance)
                     emit(if (ok != null) "> 自动备份完成:${ok.name}" else "> 自动备份:无世界数据,跳过")
                 }

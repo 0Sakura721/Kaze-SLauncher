@@ -7,8 +7,8 @@
     <string name="tab_settings">设置</string>
     <string name="server_not_running">服务器未运行</string>
     <string name="server_running">运行中</string>
-    <string name="server_starting">启动中...</string>
-    <string name="server_stopping">停止中...</string>
+    <string name="server_starting">启动中…</string>
+    <string name="server_stopping">停止中…</string>
     <string name="start_server">启动服务器</string>
     <string name="stop_server">停止服务器</string>
     <string name="select_jar">选择 JAR 文件</string>

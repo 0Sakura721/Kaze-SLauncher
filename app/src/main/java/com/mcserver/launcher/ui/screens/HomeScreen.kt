@@ -1,94 +1,134 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import android.widget.Toast
-import com.mcserver.launcher.ui.components.ArcDashboard
-import com.mcserver.launcher.ui.components.PageTransition
-import com.mcserver.launcher.ui.components.PulseGlow
-import com.mcserver.launcher.ui.components.ResourceRing
-import com.mcserver.launcher.ui.components.pressScale
-import com.mcserver.launcher.ui.components.pressSource
+import androidx.compose.ui.unit.sp
 import com.mcserver.launcher.core.env.EnvManager
+import com.mcserver.launcher.core.server.ExportManager
 import com.mcserver.launcher.core.server.InstanceStore
+import com.mcserver.launcher.core.server.ServerManager
 import com.mcserver.launcher.data.InstanceStatus
 import com.mcserver.launcher.data.ServerInstance
-import com.mcserver.launcher.ui.theme.DashboardGradient
-import com.mcserver.launcher.ui.theme.KazeCyan
-import com.mcserver.launcher.ui.theme.KazeError
+import com.mcserver.launcher.ui.components.CompactGroup
+import com.mcserver.launcher.ui.components.EmptyState
+import com.mcserver.launcher.ui.components.LocalUiMessenger
+import com.mcserver.launcher.ui.components.PageTransition
+import com.mcserver.launcher.ui.components.RowItemDivider
+import com.mcserver.launcher.ui.components.SectionHeader
+import com.mcserver.launcher.ui.screens.home.DashboardHeader
+import com.mcserver.launcher.ui.theme.badgeColor
+import com.mcserver.launcher.ui.theme.badgeLetter
+import com.mcserver.launcher.ui.theme.KazeCorners
+import com.mcserver.launcher.ui.theme.KazeMotion
+import com.mcserver.launcher.ui.theme.KazeSizes
+import com.mcserver.launcher.ui.theme.KazeSpacing
 import com.mcserver.launcher.ui.theme.KazeSuccess
 import com.mcserver.launcher.ui.theme.KazeWarning
-import com.mcserver.launcher.ui.theme.badgeGradient
-import com.mcserver.launcher.ui.theme.badgeLetter
+import com.mcserver.launcher.util.FileImporter
 import kotlinx.coroutines.launch
+import java.io.File
 
-/** 首页:弧形仪表盘 + 资源环 + 实例列表(FCL 式:长按卡片弹出操作菜单) */
-@androidx.compose.foundation.ExperimentalFoundationApi
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(
+    modifier: Modifier = Modifier,
+    onGotoSettings: () -> Unit = {}
+) {
     val context = LocalContext.current
+    val messenger = LocalUiMessenger.current
     val scope = rememberCoroutineScope()
     val instances by InstanceStore.instances.collectAsState()
     val envReady = EnvManager.isEnvironmentReady()
-    val serverStatus by com.mcserver.launcher.core.server.ServerManager.status.collectAsState()
-    val players by com.mcserver.launcher.core.server.ServerManager.players.collectAsState()
-    val uptime by com.mcserver.launcher.core.server.ServerManager.uptimeSec.collectAsState()
+    val serverStatus by ServerManager.status.collectAsState()
+    val players by ServerManager.players.collectAsState()
+    val uptime by ServerManager.uptimeSec.collectAsState()
     var showNew by remember { mutableStateOf(false) }
     var selectedInstance by remember { mutableStateOf<ServerInstance?>(null) }
     var menuInstance by remember { mutableStateOf<ServerInstance?>(null) }
-    var showImport by remember { mutableStateOf(false) }
     var importing by remember { mutableStateOf(false) }
 
-    // SAF:导入实例包(zip)
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             importing = true
             scope.launch {
-                val tmp = java.io.File(context.filesDir, "import_instance")
+                val tmp = File(context.filesDir, "import_instance")
                 if (tmp.exists()) tmp.deleteRecursively()
-                com.mcserver.launcher.util.FileImporter.copyFile(context, uri, tmp)
+                FileImporter.copyFile(context, uri, tmp)
                     .onSuccess { zipFile ->
-                        val inst = com.mcserver.launcher.core.server.ExportManager.importInstance(zipFile)
+                        val inst = ExportManager.importInstance(zipFile)
                         tmp.deleteRecursively()
                         importing = false
-                        if (inst != null) {
-                            Toast.makeText(context, "实例导入完成:${inst.name}", Toast.LENGTH_LONG).show()
-                        } else {
-                            Toast.makeText(context, "导入失败:无法解析实例包", Toast.LENGTH_LONG).show()
-                        }
+                        if (inst != null) messenger.toastSuccess("实例导入完成:${inst.name}")
+                        else messenger.toastError("导入失败:无法解析实例包")
                     }
                     .onFailure { err ->
                         importing = false
-                        Toast.makeText(context, "导入失败:${err.message}", Toast.LENGTH_LONG).show()
+                        messenger.toastError("导入失败:${err.message}")
                     }
             }
         }
@@ -101,17 +141,13 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         else -> 0
     }
 
-    // 系统返回键:先关详情页/新建页,而不是直接退出 App
-    androidx.activity.compose.BackHandler(enabled = selectedInstance != null) { selectedInstance = null }
-    androidx.activity.compose.BackHandler(enabled = showNew) { showNew = false }
+    BackHandler(enabled = selectedInstance != null) { selectedInstance = null }
+    BackHandler(enabled = showNew) { showNew = false }
 
     PageTransition(navTarget, modifier) { target ->
         when (target) {
-            1 -> {
-                val detail = remember { current }
-                if (detail != null) {
-                    InstanceDetailScreen(instance = detail, onBack = { selectedInstance = null })
-                }
+            1 -> current?.let { detail ->
+                InstanceDetailScreen(instance = detail, onBack = { selectedInstance = null })
             }
             2 -> NewInstanceScreen(onDone = { showNew = false })
             else -> HomeContent(
@@ -121,72 +157,54 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 playerCount = players.size,
                 uptimeSec = uptime,
                 importing = importing,
+                onGotoSettings = onGotoSettings,
                 onNew = { showNew = true },
                 onImport = { importLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
                 onOpen = { selectedInstance = it },
                 onMenu = { menuInstance = it },
-                onStart = { scope.launch {
-                    val result = com.mcserver.launcher.core.server.ServerManager.start(it)
-                    if (result.isFailure) {
-                        Toast.makeText(context, result.exceptionOrNull()?.message ?: "启动失败", Toast.LENGTH_LONG).show()
+                onStart = { inst ->
+                    scope.launch {
+                        val result = ServerManager.start(inst)
+                        if (result.isFailure) messenger.toastError(result.exceptionOrNull()?.message ?: "启动失败")
                     }
-                } },
-                onStop = { scope.launch { com.mcserver.launcher.core.server.ServerManager.stop() } }
+                },
+                onStop = { scope.launch { ServerManager.stop() } }
             )
         }
     }
 
-    // ── 长按操作菜单(FCL 式) ──
-    val menuTarget = menuInstance
-    if (menuTarget != null) {
-        DropdownMenu(
-            expanded = true,
-            onDismissRequest = { menuInstance = null }
-        ) {
-            DropdownMenuItem(
-                text = { Text("打开") },
-                leadingIcon = { Icon(Icons.Filled.FolderOpen, null, Modifier.size(20.dp)) },
-                onClick = { menuInstance = null; selectedInstance = menuTarget }
-            )
-            DropdownMenuItem(
-                text = { Text("导出为 zip(备份/迁移)") },
-                leadingIcon = { Icon(Icons.Filled.Share, null, Modifier.size(20.dp)) },
-                onClick = {
-                    menuInstance = null
-                    scope.launch {
-                        val name = menuTarget.name.replace(Regex("[^\\w\\u4e00-\\u9fa5-]"), "_").take(30)
-                        val f = java.io.File(context.getExternalFilesDir(null), "exports")
-                        f.mkdirs()
-                        val dest = java.io.File(f, "$name-${System.currentTimeMillis().toString().takeLast(6)}.zip")
-                        val ok = com.mcserver.launcher.core.server.ExportManager.exportInstance(menuTarget, dest)
-                        Toast.makeText(
-                            context,
-                            if (ok) "已导出:${dest.absolutePath}(可在文件管理器找到)" else "导出失败",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
+    LongPressMenu(
+        menuInstance = menuInstance,
+        onDismiss = { menuInstance = null },
+        onOpen = { menuInstance = null; selectedInstance = it },
+        onExport = { target ->
+            menuInstance = null
+            scope.launch {
+                val name = target.name.replace(Regex("[^\\w\\u4e00-\\u9fa5-]"), "_").take(30)
+                val f = File(context.getExternalFilesDir(null), "exports")
+                f.mkdirs()
+                val dest = File(f, "$name-${System.currentTimeMillis().toString().takeLast(6)}.zip")
+                val ok = ExportManager.exportInstance(target, dest)
+                messenger.toast(
+                    if (ok) "已导出:${dest.absolutePath}" else "导出失败",
+                    long = true
+                )
+            }
+        },
+        onDelete = { target ->
+            menuInstance = null
+            scope.launch {
+                if (ServerManager.isRunningFor(target.id)) {
+                    messenger.toast("服务器运行中,请先停止")
+                    return@launch
                 }
-            )
-            DropdownMenuItem(
-                text = { Text("删除实例", color = MaterialTheme.colorScheme.error) },
-                leadingIcon = { Icon(Icons.Filled.Delete, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error) },
-                onClick = {
-                    menuInstance = null
-                    scope.launch {
-                        if (com.mcserver.launcher.core.server.ServerManager.isRunningFor(menuTarget.id)) {
-                            Toast.makeText(context, "服务器运行中,请先停止", Toast.LENGTH_SHORT).show()
-                            return@launch
-                        }
-                        InstanceStore.delete(menuTarget.id)
-                        Toast.makeText(context, "已删除 ${menuTarget.name}", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            )
+                InstanceStore.delete(target.id)
+                messenger.toastSuccess("已删除 ${target.name}")
+            }
         }
-    }
+    )
 }
 
-@androidx.compose.foundation.ExperimentalFoundationApi
 @Composable
 private fun HomeContent(
     instances: List<ServerInstance>,
@@ -195,6 +213,7 @@ private fun HomeContent(
     playerCount: Int,
     uptimeSec: Long,
     importing: Boolean,
+    onGotoSettings: () -> Unit,
     onNew: () -> Unit,
     onImport: () -> Unit,
     onOpen: (ServerInstance) -> Unit,
@@ -202,370 +221,511 @@ private fun HomeContent(
     onStart: (ServerInstance) -> Unit,
     onStop: (ServerInstance) -> Unit
 ) {
-    Scaffold(
-        floatingActionButton = {
-            val (pressFab, srcFab) = pressSource()
-            FloatingActionButton(onClick = onNew, interactionSource = srcFab, modifier = pressFab) {
-                Icon(Icons.Filled.Add, "新建服务端")
-            }
+    var query by remember { mutableStateOf("") }
+    val filteredInstances = remember(instances, query) {
+        val q = query.trim()
+        if (q.isEmpty()) instances
+        else instances.filter {
+            it.name.contains(q, ignoreCase = true) ||
+                it.coreType.displayName.contains(q, ignoreCase = true) ||
+                it.coreType.name.contains(q, ignoreCase = true) ||
+                it.mcVersion.contains(q, ignoreCase = true)
         }
-    ) { padding ->
-        LazyColumn(Modifier.padding(padding).fillMaxSize()) {
-            // ── 弧形仪表盘头部 ──
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                top = KazeSpacing.sm,
+                bottom = KazeSpacing.xxxl + KazeSizes.buttonHeight + KazeSpacing.lg
+            )
+        ) {
             item {
-                DashboardHeader(
-                    status = serverStatus,
+                CompactTopBar(
                     instanceCount = instances.size,
+                    envReady = envReady,
+                    status = serverStatus,
                     playerCount = playerCount,
-                    uptimeSec = uptimeSec,
-                    envReady = envReady
+                    uptimeSec = uptimeSec
                 )
             }
 
-            // ── 环境警告 ──
             if (!envReady) {
                 item {
-                    Surface(
-                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.errorContainer
-                    ) {
-                        Text(
-                            "Linux 环境未就绪,请先在设置页重新部署",
-                            Modifier.padding(14.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
-                    }
+                    EnvNotReadyBanner(onGotoSettings = onGotoSettings)
                 }
+                item { Spacer(Modifier.height(KazeSpacing.sm)) }
             }
 
-            // ── 导入进度 ──
             if (importing) {
-                item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            }
-
-            // ── 标题行 ──
-            item {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "我的服务端",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        modifier = Modifier.weight(1f)
-                    )
-                    val (pressImp, srcImp) = pressSource()
-                    IconButton(onClick = onImport, interactionSource = srcImp, modifier = pressImp, enabled = !importing) {
-                        Icon(Icons.Filled.SystemUpdate, "导入实例包(zip)")
-                    }
-                }
-            }
-
-            // ── 实例列表 / 空状态 ──
-            if (instances.isEmpty()) {
                 item {
-                    Box(
-                        Modifier.fillMaxWidth().height(280.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("还没有服务端实例", style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(8.dp))
-                            Text("点击右下角 + 新建:选择核心类型与 MC 版本,自动下载",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            } else {
-                items(instances, key = { it.id }) { instance ->
-                    InstanceCard(
-                        instance,
-                        onClick = { onOpen(instance) },
-                        onLongClick = { onMenu(instance) },
-                        onStart = { onStart(instance) },
-                        onStop = { onStop(instance) }
-                    )
-                }
-                item { Spacer(Modifier.height(16.dp)) }
-            }
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-//  弧形仪表盘头部:半圆弧 + 资源环 + 脉冲光圈
-// ═══════════════════════════════════════════════════════════
-
-@Composable
-private fun DashboardHeader(
-    status: InstanceStatus,
-    instanceCount: Int,
-    playerCount: Int,
-    uptimeSec: Long,
-    envReady: Boolean
-) {
-    val isRunning = status == InstanceStatus.RUNNING
-    val isStarting = status == InstanceStatus.STARTING
-
-    // 仪表盘进度:运行中=满,启动中=动画感,其他=空
-    val arcProgress = when (status) {
-        InstanceStatus.RUNNING -> 1f
-        InstanceStatus.STARTING -> 0.6f
-        InstanceStatus.STOPPING -> 0.3f
-        else -> 0f
-    }
-
-    // 状态色
-    val statusColor = when (status) {
-        InstanceStatus.RUNNING -> KazeSuccess
-        InstanceStatus.STARTING, InstanceStatus.STOPPING -> KazeWarning
-        InstanceStatus.ERROR -> KazeError
-        InstanceStatus.STOPPED -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 4.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(Modifier.padding(20.dp)) {
-                // ── 顶部:弧形仪表盘 + 状态信息 ──
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(140.dp),
-                    contentAlignment = Alignment.BottomCenter
-                ) {
-                    // 脉冲光圈(运行中时)
-                    if (isRunning) {
-                        PulseGlow(
-                            modifier = Modifier.size(160.dp).align(Alignment.Center),
-                            color = statusColor,
-                            active = true
-                        )
-                    }
-                    // 弧形仪表盘
-                    ArcDashboard(
-                        progress = arcProgress,
+                    LinearProgressIndicator(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(120.dp),
-                        gradient = DashboardGradient,
-                        backgroundColor = MaterialTheme.colorScheme.surfaceVariant,
-                        strokeWidth = 14.dp
+                            .padding(horizontal = KazeSpacing.pageHorizontal, vertical = KazeSpacing.xs)
                     )
-                    // 中央状态文字
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    ) {
-                        Text(
-                            when (status) {
-                                InstanceStatus.RUNNING -> "运行中"
-                                InstanceStatus.STARTING -> "启动中"
-                                InstanceStatus.STOPPING -> "停止中"
-                                InstanceStatus.ERROR -> "错误"
-                                InstanceStatus.STOPPED -> "已停止"
-                            },
-                            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                            color = statusColor
-                        )
-                        if (isRunning) {
-                            Text(
-                                "${playerCount} 人在线 · ${uptimeSec / 60}m ${uptimeSec % 60}s",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                }
+            }
+
+            item {
+                SectionHeader(
+                    title = "实例",
+                    count = instances.size,
+                    subtitle = "选择实例管理你的服务器",
+                    trailing = {
+                        if (instances.isNotEmpty()) {
+                            FilledTonalButton(
+                                onClick = onImport,
+                                enabled = !importing,
+                                contentPadding = PaddingValues(horizontal = KazeSpacing.md, vertical = 2.dp)
+                            ) {
+                                Icon(Icons.Filled.SystemUpdate, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(KazeSpacing.xxs))
+                                Text("导入", style = MaterialTheme.typography.labelMedium)
+                            }
                         }
                     }
-                }
+                )
+            }
 
-                Spacer(Modifier.height(16.dp))
-
-                // ── 资源环行:实例数 / 环境 / 状态 ──
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    // 实例数
-                    ResourceRingItem(
-                        icon = Icons.Filled.Memory,
-                        label = "实例",
-                        value = "$instanceCount",
-                        progress = if (instanceCount == 0) 0f else (instanceCount.toFloat() / 10f).coerceIn(0f, 1f),
-                        color = KazeCyan
-                    )
-                    // 环境状态
-                    ResourceRingItem(
-                        icon = Icons.Filled.Speed,
-                        label = "环境",
-                        value = if (envReady) "就绪" else "未部署",
-                        progress = if (envReady) 1f else 0f,
-                        color = if (envReady) KazeSuccess else KazeError
-                    )
-                    // 服务器状态
-                    ResourceRingItem(
-                        icon = Icons.Filled.PlayArrow,
-                        label = "服务",
-                        value = when (status) {
-                            InstanceStatus.RUNNING -> "在线"
-                            InstanceStatus.STARTING -> "启动"
-                            InstanceStatus.STOPPING -> "停止"
-                            InstanceStatus.ERROR -> "错误"
-                            InstanceStatus.STOPPED -> "离线"
-                        },
-                        progress = arcProgress,
-                        color = statusColor
+            if (instances.isEmpty()) {
+                item {
+                    EmptyState(
+                        title = "暂无实例",
+                        description = "点击右下角新建实例，选择核心类型与 MC 版本，快速创建服务器",
+                        icon = Icons.Filled.Add,
+                        action = {
+                            ExtendedFloatingActionButton(
+                                onClick = onNew,
+                                icon = { Icon(Icons.Filled.Add, null) },
+                                text = { Text("新建实例") }
+                            )
+                        }
                     )
                 }
+            } else {
+                item {
+                    CompactGroup {
+                        InstanceSearchField(
+                            query = query,
+                            onQueryChange = { query = it },
+                            resultCount = filteredInstances.size,
+                            totalCount = instances.size
+                        )
+                        if (filteredInstances.isNotEmpty()) {
+                            RowItemDivider(indent = KazeSpacing.xxxl)
+                            filteredInstances.forEachIndexed { idx, instance ->
+                                InstanceCardRow(
+                                    instance = instance,
+                                    onClick = { onOpen(instance) },
+                                    onLongClick = { onMenu(instance) },
+                                    onStart = { onStart(instance) },
+                                    onStop = { onStop(instance) }
+                                )
+                                if (idx < filteredInstances.size - 1) {
+                                    RowItemDivider(indent = KazeSpacing.xxxl)
+                                }
+                            }
+                        }
+                    }
+                    if (filteredInstances.isEmpty()) {
+                        EmptyState(
+                            title = "无匹配实例",
+                            description = "没有找到含「$query」的实例,换个关键词试试",
+                            icon = Icons.Filled.Search
+                        )
+                    }
+                }
+                item { Spacer(Modifier.height(KazeSpacing.sm)) }
+            }
+        }
+
+        ExtendedFloatingActionButton(
+            text = { Text("新建实例") },
+            icon = { Icon(Icons.Filled.Add, contentDescription = "新建实例") },
+            onClick = onNew,
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = KazeSpacing.pageHorizontal, bottom = KazeSpacing.lg)
+        )
+    }
+}
+
+@Composable
+private fun CompactTopBar(
+    instanceCount: Int,
+    envReady: Boolean,
+    status: InstanceStatus,
+    playerCount: Int,
+    uptimeSec: Long
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = KazeSpacing.pageHorizontal, vertical = KazeSpacing.sm)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Kaze 服务端",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Spacer(Modifier.width(KazeSpacing.sm))
+            val statusColor = when (status) {
+                InstanceStatus.RUNNING -> KazeSuccess
+                InstanceStatus.STARTING, InstanceStatus.STOPPING -> KazeWarning
+                InstanceStatus.ERROR -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            }
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(statusColor)
+            )
+            Spacer(Modifier.width(KazeSpacing.xs))
+            Text(
+                when (status) {
+                    InstanceStatus.RUNNING -> "运行中"
+                    InstanceStatus.STARTING -> "启动中"
+                    InstanceStatus.STOPPING -> "停止中"
+                    InstanceStatus.ERROR -> "错误"
+                    else -> "待机"
+                },
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                color = statusColor
+            )
+        }
+
+        Spacer(Modifier.height(KazeSpacing.sm))
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(KazeSpacing.xs)
+        ) {
+            StatChip(label = "实例", value = "$instanceCount")
+            StatChip(label = "在线", value = if (status == InstanceStatus.RUNNING) "$playerCount" else "-")
+            StatChip(
+                label = "Java",
+                value = if (envReady) "就绪" else "待配",
+                color = if (envReady) KazeSuccess else KazeWarning
+            )
+            StatChip(
+                label = "时长",
+                value = formatUptime(uptimeSec)
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatChip(
+    label: String,
+    value: String,
+    color: Color = MaterialTheme.colorScheme.primary
+) {
+    Row(
+        Modifier
+            .height(KazeSizes.compactButtonHeight)
+            .clip(KazeCorners.tiny)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+            .padding(horizontal = KazeSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(Modifier.width(KazeSpacing.xxs))
+        Text(
+            value,
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+private fun InstanceSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    resultCount: Int,
+    totalCount: Int
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(KazeSpacing.searchFieldH)
+            .padding(horizontal = KazeSpacing.rowHorizPad),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(Icons.Filled.Search, null,
+            Modifier.size(KazeSizes.iconSmall),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.width(KazeSpacing.sm))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) {
+                Text(
+                    "搜索实例名称 / 核心 / 版本",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
+            androidx.compose.foundation.text.BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        }
+        if (query.isNotEmpty()) {
+            if (resultCount < totalCount) {
+                Text(
+                    "$resultCount/$totalCount",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(KazeSpacing.xs))
+            }
+            IconButton(
+                onClick = { onQueryChange("") },
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(Icons.Filled.Close, "清除",
+                    Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
 }
 
-/** 资源环项:图标 + 环 + 数值 + 标签 */
 @Composable
-private fun ResourceRingItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    value: String,
-    progress: Float,
-    color: Color
-) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(64.dp)) {
-            ResourceRing(
-                progress = progress,
-                modifier = Modifier.fillMaxSize(),
-                color = color,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                strokeWidth = 5.dp
+private fun EnvNotReadyBanner(onGotoSettings: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = KazeSpacing.pageHorizontal, vertical = KazeSpacing.xs)
+            .clip(KazeCorners.medium)
+            .background(KazeWarning.copy(alpha = 0.1f))
+            .border(
+                KazeSizes.strokeThin,
+                KazeWarning.copy(alpha = 0.3f),
+                KazeCorners.medium
             )
-            Icon(icon, null, Modifier.size(24.dp), tint = color)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onGotoSettings
+            )
+            .padding(horizontal = KazeSpacing.md, vertical = KazeSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Filled.Info,
+            null,
+            Modifier.size(20.dp),
+            tint = KazeWarning
+        )
+        Spacer(Modifier.width(KazeSpacing.sm))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "需要 Java 运行时",
+                style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                "点击前往设置下载或导入 JDK",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
-        Spacer(Modifier.height(4.dp))
-        Text(value, style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface)
-        Text(label, style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = onGotoSettings) {
+            Text("设置", style = MaterialTheme.typography.labelLarge, color = KazeWarning)
+        }
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  实例卡片:渐变徽标 + 状态指示 + 启停按钮
-// ═══════════════════════════════════════════════════════════
+private fun formatUptime(sec: Long): String = when {
+    sec <= 0 -> "-"
+    sec < 3600 -> "${sec / 60}分"
+    else -> "${sec / 3600}时${(sec % 3600) / 60}分"
+}
 
-@androidx.compose.foundation.ExperimentalFoundationApi
 @Composable
-private fun InstanceCard(instance: ServerInstance, onClick: () -> Unit, onLongClick: () -> Unit, onStart: () -> Unit, onStop: () -> Unit) {
-    val status by com.mcserver.launcher.core.server.ServerManager.status.collectAsState()
-    val running = com.mcserver.launcher.core.server.ServerManager.isRunningFor(instance.id)
-    val interaction = remember { MutableInteractionSource() }
+private fun LongPressMenu(
+    menuInstance: ServerInstance?,
+    onDismiss: () -> Unit,
+    onOpen: (ServerInstance) -> Unit,
+    onExport: (ServerInstance) -> Unit,
+    onDelete: (ServerInstance) -> Unit
+) {
+    val target = menuInstance ?: return
+    DropdownMenu(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        shape = KazeCorners.medium,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        DropdownMenuItem(
+            text = { Text("打开", style = MaterialTheme.typography.bodyLarge) },
+            leadingIcon = { Icon(Icons.Filled.FolderOpen, null, Modifier.size(20.dp)) },
+            onClick = { onOpen(target) }
+        )
+        DropdownMenuItem(
+            text = { Text("导出备份", style = MaterialTheme.typography.bodyLarge) },
+            leadingIcon = { Icon(Icons.Filled.Share, null, Modifier.size(20.dp)) },
+            onClick = { onExport(target) }
+        )
+        DropdownMenuItem(
+            text = {
+                Text(
+                    "删除实例",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            },
+            leadingIcon = {
+                Icon(Icons.Filled.Delete, null, Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.error)
+            },
+            onClick = { onDelete(target) }
+        )
+    }
+}
 
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 2.dp,
-        modifier = Modifier
+// ═══════════════════════════════════════════════════════════════
+//  实例行卡片(紧凑列表版)——放在 CompactGroup 分组容器内使用
+//  无独立背景/边框,仅由分组外框提供边界
+// ═══════════════════════════════════════════════════════════════
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun InstanceCardRow(
+    instance: ServerInstance,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    val status by ServerManager.status.collectAsState()
+    val running = ServerManager.isRunningFor(instance.id)
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        if (pressed) 0.99f else 1f,
+        spring(KazeMotion.springDamping, KazeMotion.springStiff),
+        label = "rowScale"
+    )
+
+    Row(
+        Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 5.dp)
-            .pressScale(interaction)
+            .height(KazeSpacing.rowItemH)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .combinedClickable(
                 interactionSource = interaction,
-                indication = ripple(),
+                indication = null,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
+            .padding(horizontal = KazeSpacing.rowHorizPad),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(Modifier.padding(16.dp)) {
+        // 左侧:统一尺寸小徽标
+        Box(
+            Modifier
+                .size(KazeSizes.badgeSmall)
+                .clip(KazeCorners.tiny)
+                .background(instance.coreType.badgeColor()),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                instance.coreType.badgeLetter(),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White
+            )
+        }
+        Spacer(Modifier.width(KazeSpacing.md))
+
+        // 中间:名称 + 副信息
+        Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 核心类型渐变徽标(FCL 式)
-                Box(
-                    Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(instance.coreType.badgeGradient()),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        instance.coreType.badgeLetter(),
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = Color.White
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(instance.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "${instance.coreType.displayName} ${instance.mcVersion}${if (instance.buildId.isNotBlank()) " (build ${instance.buildId})" else ""}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                // 脉冲状态点(运行中)
+                Text(
+                    instance.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.width(KazeSpacing.xs))
                 if (running && status == InstanceStatus.RUNNING) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.size(16.dp)) {
-                        PulseGlow(
-                            modifier = Modifier.size(16.dp),
-                            color = KazeSuccess,
-                            active = true
-                        )
-                        Box(
-                            Modifier
-                                .size(8.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(KazeSuccess)
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        Modifier
+                            .size(6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(KazeSuccess)
+                    )
                 }
-                StatusBadge(if (running) status else InstanceStatus.STOPPED)
             }
-            Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("端口 ${instance.config.serverPort} · 最多 ${instance.config.maxPlayers} 人",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.weight(1f))
-                if (running) {
-                    Button(onClick = onStop, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
-                        Icon(Icons.Filled.Stop, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("停止")
-                    }
-                } else {
-                    Button(onClick = onStart) {
-                        Icon(Icons.Filled.PlayArrow, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("启动")
-                    }
-                }
+            Spacer(Modifier.height(KazeSpacing.xxs))
+            Text(
+                "${instance.coreType.displayName} ${instance.mcVersion} · :${instance.config.serverPort}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(KazeSpacing.sm))
+
+        // 右侧:启停方形按钮(40dp,紧凑)
+        val actionSize = 40.dp
+        if (running) {
+            Box(
+                Modifier
+                    .size(actionSize)
+                    .clip(KazeCorners.tiny)
+                    .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
+                    .clickable(onClick = onStop),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Stop, "停止",
+                    Modifier.size(KazeSizes.iconSmall),
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+        } else {
+            Box(
+                Modifier
+                    .size(actionSize)
+                    .clip(KazeCorners.tiny)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    .clickable(onClick = onStart),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.PlayArrow, "启动",
+                    Modifier.size(KazeSizes.iconSmall),
+                    tint = MaterialTheme.colorScheme.primary
+                )
             }
         }
-    }
-}
-
-@Composable
-private fun StatusBadge(status: InstanceStatus) {
-    val (text, color) = when (status) {
-        InstanceStatus.RUNNING -> "运行中" to KazeSuccess
-        InstanceStatus.STARTING -> "启动中" to KazeWarning
-        InstanceStatus.STOPPING -> "停止中" to KazeWarning
-        InstanceStatus.ERROR -> "错误" to MaterialTheme.colorScheme.error
-        InstanceStatus.STOPPED -> "已停止" to MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Surface(shape = RoundedCornerShape(50), color = color.copy(alpha = 0.15f)) {
-        Text(text, Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
-            color = color, style = MaterialTheme.typography.labelSmall)
     }
 }

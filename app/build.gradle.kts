@@ -8,40 +8,36 @@ import java.io.File
 import java.util.Properties
 
 // ═══════════════════════════════════════════════════════════════
-//  内置资源校验任务 — 本地构建前校验，全部资源不入 Git
+//  内置资源校验任务 —— ★ 本地无内置 JRE 资源也允许打包 ★
 //
-//  布局（按 flavor 分架构）：
-//  - src/main/assets/bundled/          proot 三架构（通用，约 0.4MB，兼容旧环境）
-//  - src/arm64v8/assets/bundled/       Android 版 JRE 21（jre21-arm64.tar，~162MB，★核心引擎）
-//  - src/armv7/assets/bundled/         ubuntu armhf rootfs（旧架构，25.8MB）
-//  - src/universal/assets/bundled/     三个 rootfs（旧架构，兼容）
-//  说明：新架构（Android 16 兼容）核心是 Android 版 JRE（interpreter=宿主 linker64，
-//  可直接 exec），proot+rootfs 仅作为旧兼容层保留。JRE 资源 160MB 不入 Git，
-//  由本地构建脚本从设备/Release 放入 src/arm64v8/assets/bundled/。
+//  Java 运行时改为用户按需:
+//    - 在设置页「本地导入 JDK 目录」(不耗流量,推荐)
+//    - 或在设置页「在线下载」(Adoptium glibc 版,兼容老环境)
+//  Android 版 JRE 21 体积 ~160MB 不入 Git/APK,避免安装包过大。
+//  proot 三架构兼容层(~0.4MB)缺省时也只警告不阻断,回退到纯 JRE 直跑模式。
 // ═══════════════════════════════════════════════════════════════
 val downloadBundledAssets by tasks.registering {
     group = "bundled"
-    description = "校验内置资源完整性（本地构建前检查）"
+    description = "校验内置资源完整性(缺 JRE 仅警告,不阻断构建——Java 按需导入/下载)"
     doLast {
         val missing = mutableListOf<String>()
-        fun check(dir: File, name: String) {
+        fun check(dir: File, name: String, required: Boolean = false) {
             val f = File(dir, name)
-            if (!f.exists() || f.length() == 0L) missing += "$dir/$name"
-        }
-        // ★ 新架构核心:arm64v8 必须带 Android JRE
-        check(file("src/arm64v8/assets/bundled"), "jre21-arm64.tar")
-        // 旧兼容资源(缺了也不阻断,只提示)
-        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz", "proot-x86_64.tar.gz")
-            .forEach { check(file("src/main/assets/bundled"), it) }
-        if (missing.isNotEmpty()) {
-            // CI 环境无 JRE 资源(160MB 不入 Git):警告不失败,产物为"无运行时调试版"
-            if (System.getenv("GITHUB_ACTIONS") == "true") {
-                println("⚠ CI 缺少内置资源: ${missing.joinToString()} —— 产物为无运行时调试版;完整 APK 需本地构建(带 jre21-arm64.tar)")
-            } else {
-                throw GradleException("缺少内置资源: ${missing.joinToString()}（JRE 资源从设备提取或 GitHub Release 获取）")
+            if (!f.exists() || f.length() == 0L) {
+                if (required) missing += "$dir/$name"
+                else println("⚠ 可选内置资源缺失: $dir/$name (可跳过,用户会在设置页按需获取)")
             }
+        }
+        // ★ JRE 不再内置,用户按需获取;缺失不阻断,只提示
+        check(file("src/arm64v8/assets/bundled"), "jre21-arm64.tar", required = false)
+        check(file("src/arm64v8/assets/bundled"), "jre21-arm64.tar.gz", required = false)
+        // 旧兼容资源(proot 三架构),缺了只提示
+        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz", "proot-x86_64.tar.gz")
+            .forEach { check(file("src/main/assets/bundled"), it, required = false) }
+        if (missing.isNotEmpty()) {
+            println("⚠ 必需内置资源缺失(CI 环境可忽略): ${missing.joinToString()}")
         } else {
-            println("✓ 内置资源完整（Android JRE + proot 兼容层）")
+            println("✓ 内置资源完整")
         }
     }
 }
@@ -88,7 +84,7 @@ android {
 
     signingConfigs {
         // 优先用项目内置的 release keystore（app/release-keystore.jks，已 commit 到 git）
-        // 这样本地和 CI 用同一份签名，覆盖安装不会因签名不一致而失败
+        // debug 和 release 共用同一份签名 → 覆盖安装不会因签名不一致而失败
         // 可通过 local.properties 的 storeFile/storePassword/keyAlias/keyPassword 覆盖
         val projectKeystore = file("release-keystore.jks")
         val overrideStoreFile = localProperties.getProperty("storeFile")
@@ -96,27 +92,33 @@ android {
             localProperties.getProperty("storePassword") != null &&
             localProperties.getProperty("keyAlias") != null &&
             localProperties.getProperty("keyPassword") != null
-        if (hasOverride) {
-            create("release") {
-                storeFile = rootProject.file(overrideStoreFile)
-                storePassword = localProperties.getProperty("storePassword")
-                keyAlias = localProperties.getProperty("keyAlias")
-                keyPassword = localProperties.getProperty("keyPassword")
+        when {
+            hasOverride -> {
+                create("release") {
+                    storeFile = rootProject.file(overrideStoreFile)
+                    storePassword = localProperties.getProperty("storePassword")
+                    keyAlias = localProperties.getProperty("keyAlias")
+                    keyPassword = localProperties.getProperty("keyPassword")
+                }
             }
-        } else if (projectKeystore.exists()) {
-            create("release") {
-                storeFile = projectKeystore
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                    ?: localProperties.getProperty("storePassword")
-                    ?: "kaze_slauncher_2026"
-                keyAlias = System.getenv("KEY_ALIAS")
-                    ?: localProperties.getProperty("keyAlias")
-                    ?: "kaze_slauncher"
-                keyPassword = System.getenv("KEY_PASSWORD")
-                    ?: localProperties.getProperty("keyPassword")
-                    ?: "kaze_slauncher_2026"
+            projectKeystore.exists() -> {
+                create("release") {
+                    storeFile = projectKeystore
+                    storePassword = System.getenv("KEYSTORE_PASSWORD")
+                        ?: localProperties.getProperty("storePassword")
+                        ?: "kaze_slauncher_2026"
+                    keyAlias = System.getenv("KEY_ALIAS")
+                        ?: localProperties.getProperty("keyAlias")
+                        ?: "kaze_slauncher"
+                    keyPassword = System.getenv("KEY_PASSWORD")
+                        ?: localProperties.getProperty("keyPassword")
+                        ?: "kaze_slauncher_2026"
+                }
             }
+            else -> { /* 无可用签名配置：使用 AGP 默认 debug keystore */ }
         }
+        // 注意：AGP 已默认创建名为 debug 的 SigningConfig（指向 SDK 的 debug.keystore），
+        // 在 buildTypes 里直接复用 release 的 signingConfig 即可统一签名。
     }
 
     buildTypes {
@@ -124,13 +126,16 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (signingConfigs.findByName("release") != null) {
-                signingConfig = signingConfigs.getByName("release")
-            }
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
         debug {
             isMinifyEnabled = false
             isDebuggable = true
+            // debug 包名加后缀 → 可与正式版共存安装（同时装两个版本对比）
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-DEBUG"
+            signingConfigs.findByName("debug")?.let { signingConfig = it }
+                ?: signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 

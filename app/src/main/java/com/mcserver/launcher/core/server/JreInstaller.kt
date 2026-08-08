@@ -70,7 +70,7 @@ object JreInstaller {
     suspend fun install(version: String, pkg: String = "jdk"): Result<Unit> = withContext(Dispatchers.IO) {
         if (_busy.value != null) return@withContext Result.failure(RuntimeException("已有安装任务进行中"))
         _busy.value = version
-        _message.value = "准备下载 Java $version..."
+        _message.value = "准备下载 Java $version…"
         try {
             // Adoptium 架构按设备原生 ABI
             val arch = adoptiumArch
@@ -105,7 +105,7 @@ object JreInstaller {
                 }
             }
 
-            _message.value = "解压 Java $version..."
+            _message.value = "解压 Java $version…"
             val targetDir = jreDirFor(version)
             if (targetDir.exists()) targetDir.deleteRecursively()
             targetDir.mkdirs()
@@ -192,7 +192,7 @@ object JreInstaller {
             return@withContext Result.failure(RuntimeException("缺少 bin/java"))
         }
         _busy.value = "import:$version"
-        _message.value = "正在导入 Java $version(本地文件,不消耗流量)..."
+        _message.value = "正在导入 Java $version(本地文件,不消耗流量)…"
         try {
             // ELF 架构校验:导入的 JDK 必须与设备架构一致
             val elfArch = detectElfArch(javaBin)

@@ -36,7 +36,6 @@ import androidx.core.content.ContextCompat
 import com.mcserver.launcher.data.SettingsStore
 import com.mcserver.launcher.data.ThemeMode
 import com.mcserver.launcher.ui.MainApp
-import com.mcserver.launcher.ui.screens.EnvSetupScreen
 import com.mcserver.launcher.ui.theme.KazeTheme
 import kotlinx.coroutines.launch
 
@@ -62,27 +61,18 @@ class MainActivity : ComponentActivity() {
             val themeMode by SettingsStore.themeMode.collectAsState()
             val systemDark = isSystemInDarkTheme()
             val darkAmoled by SettingsStore.darkAmoled.collectAsState()
-            val setupCompleted by SettingsStore.setupCompleted.collectAsState()
             var splashDone by remember { mutableStateOf(false) }
 
             KazeTheme(mode = themeMode, systemDark = systemDark, darkAmoled = darkAmoled) {
                 Box(Modifier.fillMaxSize()) {
-                    // 主界面(闪屏结束后显示)
+                    // 主界面(闪屏结束后显示)——不再强制首次部署 Java,
+                    // 直接进入主页;环境没就绪时在主页顶部提示用户去设置页导入/下载。
                     AnimatedVisibility(
                         visible = splashDone,
                         enter = fadeIn(),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        if (!setupCompleted) {
-                            val scope = rememberCoroutineScope()
-                            EnvSetupScreen(
-                                onSetupComplete = {
-                                    scope.launch { SettingsStore.setSetupCompleted() }
-                                }
-                            )
-                        } else {
-                            MainApp()
-                        }
+                        MainApp()
                     }
                     // 启动闪屏:软件图标 + 名称,短暂展示后淡出
                     if (!splashDone) {
@@ -122,7 +112,7 @@ class MainActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Image(
-                        painter = painterResource(com.mcserver.launcher.R.drawable.ic_launcher_background),
+                        painter = painterResource(com.mcserver.launcher.R.drawable.ic_launcher_foreground),
                         contentDescription = null,
                         modifier = Modifier
                             .size(140.dp)
