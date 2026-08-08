@@ -63,15 +63,28 @@ jobs:
           path: /tmp/build-debug.log
           if-no-files-found: ignore
 
-      - name: Upload Debug APKs as artifacts
+      - name: Upload arm64-v8a Debug APK
         if: steps.debug-build.outputs.exit_code == '0'
         uses: actions/upload-artifact@v7
         with:
-          name: debug-apks
-          path: |
-            app/build/outputs/apk/arm64v8/debug/*-arm64v8-debug.apk
-            app/build/outputs/apk/armv7/debug/*-armv7-debug.apk
-            app/build/outputs/apk/universal/debug/*-universal-debug.apk
+          name: apk-arm64-v8a-debug
+          path: app/build/outputs/apk/arm64v8/debug/*-arm64v8-debug.apk
+          if-no-files-found: ignore
+
+      - name: Upload armeabi-v7a Debug APK
+        if: steps.debug-build.outputs.exit_code == '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apk-armeabi-v7a-debug
+          path: app/build/outputs/apk/armv7/debug/*-armv7-debug.apk
+          if-no-files-found: ignore
+
+      - name: Upload universal Debug APK
+        if: steps.debug-build.outputs.exit_code == '0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apk-universal-debug
+          path: app/build/outputs/apk/universal/debug/*-universal-debug.apk
           if-no-files-found: ignore
 
       - name: Build and Upload Release APK (tag only)
