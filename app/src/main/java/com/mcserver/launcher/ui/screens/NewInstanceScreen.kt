@@ -571,22 +571,34 @@ private fun StepOne(
                 )
             }
             item {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
-                    modifier = Modifier
+                // CoreType 只有 7 个，用普通 Column+Row 排版，避免 LazyVerticalGrid 嵌套 LazyColumn 崩溃
+                val entries = CoreType.entries
+                val rows = entries.chunked(2)
+                Column(
+                    Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 320.dp),
-                    contentPadding = PaddingValues(vertical = KazeSpacing.xs),
-                    horizontalArrangement = Arrangement.spacedBy(KazeSpacing.sm),
-                    verticalArrangement = Arrangement.spacedBy(KazeSpacing.sm),
-                    userScrollEnabled = false
+                        .padding(vertical = KazeSpacing.xs),
+                    verticalArrangement = Arrangement.spacedBy(KazeSpacing.sm)
                 ) {
-                    items(CoreType.entries, key = { it.name }) { type ->
-                        CoreGridItem(
-                            type = type,
-                            selected = coreType == type,
-                            onClick = { onCorePick(type) }
-                        )
+                    rows.forEach { rowItems ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(KazeSpacing.sm)
+                        ) {
+                            rowItems.forEach { type ->
+                                Box(Modifier.weight(1f)) {
+                                    CoreGridItem(
+                                        type = type,
+                                        selected = coreType == type,
+                                        onClick = { onCorePick(type) }
+                                    )
+                                }
+                            }
+                            // 如果是最后一行且只有一个元素，补一个空位占位
+                            if (rowItems.size == 1) {
+                                Spacer(Modifier.weight(1f))
+                            }
+                        }
                     }
                 }
             }

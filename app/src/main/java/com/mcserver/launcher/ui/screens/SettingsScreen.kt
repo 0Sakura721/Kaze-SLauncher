@@ -114,6 +114,11 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     var showUninstallConfirm by remember { mutableStateOf<Int?>(null) }
     var showEnvSetup by remember { mutableStateOf(false) }
 
+    val pkg = remember {
+        try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (e: Exception) { null }
+    }
+    val versionName = pkg?.versionName ?: "1.0.0"
+
     BackHandler(enabled = showAbout || showEnvSetup) {
         showAbout = false; showEnvSetup = false
     }
@@ -156,14 +161,16 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = KazeSpacing.xl)
+            contentPadding = PaddingValues(bottom = KazeSpacing.xxl)
         ) {
+            // ── 应用头部卡片 ──
             item {
-                SettingsHeader(title = "设置", subtitle = "运行环境、Java 管理、主题外观")
+                AppProfileHeader(versionName = versionName)
             }
 
+            // ── 环境状态 ──
             item {
-                SettingsGroup(title = "环境状态") {
+                SettingsGroup(title = "运行环境") {
                     EnvStatusRow(
                         envState = envState,
                         onRedeploy = { showEnvSetup = true }
@@ -172,8 +179,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             }
             item { Spacer(Modifier.height(KazeSpacing.groupGap)) }
 
+            // ── Java 运行时 ──
             item {
-                SettingsGroup(title = "Java 运行时", subtitle = "按需安装：本地导入不耗流量，在线下载走 Adoptium") {
+                SettingsGroup(title = "Java 运行时", subtitle = "按需安装或导入，不内置 Java") {
                     listOf(8, 11, 17, 21).forEachIndexed { index, version ->
                         val java = installedJavas.firstOrNull { it.version == version.toString() }
                         val isBuiltin = java?.isBuiltin == true
@@ -210,18 +218,21 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         )
                     }
                 }
-                Spacer(Modifier.height(KazeSpacing.md))
-                SettingsTipCard(
-                    message = message,
-                    installing = installing,
-                    busyVersion = busyVersion,
-                    importing = importing
-                )
+                if (message.isNotBlank() || installing != null || importing != null) {
+                    Spacer(Modifier.height(KazeSpacing.sm))
+                    SettingsTipCard(
+                        message = message,
+                        installing = installing,
+                        busyVersion = busyVersion,
+                        importing = importing
+                    )
+                }
             }
             item { Spacer(Modifier.height(KazeSpacing.groupGap)) }
 
+            // ── 外观 ──
             item {
-                SettingsGroup(title = "外观", subtitle = "主题配色偏好") {
+                SettingsGroup(title = "外观", subtitle = "主题与显示偏好") {
                     val modes = com.mcserver.launcher.data.ThemeMode.labels.toList()
                     modes.forEachIndexed { index, (mode, label) ->
                         val selected = themeMode == mode
@@ -239,21 +250,22 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                             showDivider = index < modes.size - 1
                         )
                     }
+                    RowItemDivider(indent = KazeSpacing.xxxl)
                     ThemeSwitchRow(
                         icon = Icons.Filled.DarkMode,
-                        title = "AMOLED 纯黑模式",
-                        subtitle = "深色模式下使用纯黑背景，更省电且对比度更高",
+                        title = "AMOLED 纯黑",
+                        subtitle = "深色模式下纯黑背景，更省电",
                         checked = darkAmoled,
-                        onCheckedChange = { SettingsStore.setDarkAmoled(it) },
-                        showDivider = false
+                        onCheckedChange = { SettingsStore.setDarkAmoled(it) }
                     )
                 }
             }
             item { Spacer(Modifier.height(KazeSpacing.groupGap)) }
 
+            // ── 关于 ──
             item {
                 SettingsGroup(title = "关于") {
-                    AboutRow(onShow = { showAbout = true })
+                    AboutRow(versionName = versionName, onShow = { showAbout = true })
                 }
             }
             item { Spacer(Modifier.height(KazeSpacing.xxxl)) }
@@ -314,20 +326,40 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SettingsHeader(title: String, subtitle: String) {
-    Column(
+private fun AppProfileHeader(versionName: String) {
+    Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = KazeSpacing.pageHorizontal)
-            .padding(top = KazeSpacing.pageTop, bottom = KazeSpacing.md)
+            .padding(top = KazeSpacing.xxl, bottom = KazeSpacing.lg),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(title, style = KazeType.hero, color = MaterialTheme.colorScheme.onBackground)
-        Spacer(Modifier.height(KazeSpacing.xs))
-        Text(
-            subtitle,
-            style = KazeType.subtitle,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Box(
+            Modifier
+                .size(56.dp)
+                .clip(KazeCorners.medium)
+                .background(MaterialTheme.colorScheme.primary),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "K",
+                style = androidx.compose.ui.text.TextStyle(
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+            )
+        }
+        Spacer(Modifier.width(KazeSpacing.lg))
+        Column {
+            Text("Kaze SLauncher", style = KazeType.hero, color = MaterialTheme.colorScheme.onBackground)
+            Spacer(Modifier.height(KazeSpacing.xxs))
+            Text(
+                "v$versionName · Minecraft Java 服务端启动器",
+                style = KazeType.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
@@ -645,39 +677,35 @@ private fun ThemeSwitchRow(
     title: String,
     subtitle: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    showDivider: Boolean
+    onCheckedChange: (Boolean) -> Unit
 ) {
-    Column {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable { onCheckedChange(!checked) }
-                .padding(horizontal = KazeSpacing.md, vertical = KazeSpacing.sm),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconBox(
-                icon = icon,
-                bgColor = MaterialTheme.colorScheme.surfaceVariant,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = KazeSpacing.md, vertical = KazeSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconBox(
+            icon = icon,
+            bgColor = MaterialTheme.colorScheme.surfaceVariant,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.width(KazeSpacing.md))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = KazeType.title)
+            Text(
+                subtitle,
+                style = KazeType.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.width(KazeSpacing.md))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = KazeType.title)
-                Text(
-                    subtitle,
-                    style = KazeType.caption,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
-        if (showDivider) SettingDivider()
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 
 @Composable
-private fun AboutRow(onShow: () -> Unit) {
+private fun AboutRow(versionName: String, onShow: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -685,27 +713,16 @@ private fun AboutRow(onShow: () -> Unit) {
             .padding(horizontal = KazeSpacing.md, vertical = KazeSpacing.sm),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier
-                .size(40.dp)
-                .clip(KazeCorners.small)
-                .background(MaterialTheme.colorScheme.primary),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                "K",
-                style = androidx.compose.ui.text.TextStyle(
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            )
-        }
+        IconBox(
+            icon = Icons.Filled.Info,
+            bgColor = MaterialTheme.colorScheme.primaryContainer,
+            tint = MaterialTheme.colorScheme.primary
+        )
         Spacer(Modifier.width(KazeSpacing.md))
         Column(Modifier.weight(1f)) {
-            Text("Kaze SLauncher", style = KazeType.title)
+            Text("关于 Kaze SLauncher", style = KazeType.title)
             Text(
-                "v1.0 · 在 Android 上运行 Minecraft Java 服务端",
+                "v$versionName · 查看详细信息",
                 style = KazeType.caption,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
