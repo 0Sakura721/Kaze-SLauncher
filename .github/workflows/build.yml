@@ -38,17 +38,21 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Build config (disable daemon, cap memory for GH-hosted 7G runner)
+        run: |
+          echo "GRADLE_OPTS=-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8 -XX:+UseG1GC" >> "$GITHUB_ENV"
+
       - name: Download bundled assets (proot + Ubuntu rootfs)
-        run: ./gradlew :app:downloadBundledAssets --stacktrace
+        run: ./gradlew :app:downloadBundledAssets --no-daemon --stacktrace
 
       - name: Run lint
-        run: ./gradlew :app:lintUniversalDebug --stacktrace
+        run: ./gradlew :app:lintUniversalDebug --no-daemon --stacktrace
 
       - name: Build Debug APKs (arm64-v8a / armeabi-v7a / universal)
         id: debug-build
         run: |
           set -uxo pipefail
-          ./gradlew :app:assembleArm64v8Debug :app:assembleArmv7Debug :app:assembleUniversalDebug --stacktrace 2>&1 | tee /tmp/build-debug.log
+          ./gradlew :app:assembleArm64v8Debug :app:assembleArmv7Debug :app:assembleUniversalDebug --no-daemon --stacktrace 2>&1 | tee /tmp/build-debug.log
           echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Upload Debug build log
@@ -121,7 +125,7 @@ jobs:
               echo "keyAlias=$KEY_ALIAS" >> local.properties
               echo "keyPassword=$KEY_PASSWORD" >> local.properties
             fi
-            if ! ./gradlew :app:assembleUniversalRelease --stacktrace; then
+            if ! ./gradlew :app:assembleUniversalRelease --no-daemon --stacktrace; then
               echo "ERROR: Release build failed, aborting release"
               exit 1
             fi
