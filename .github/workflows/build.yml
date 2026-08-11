@@ -17,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
@@ -57,7 +57,7 @@ jobs:
 
       - name: Upload Debug build log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: build-debug-log
           path: /tmp/build-debug.log
@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload arm64-v8a Debug APK
         if: steps.debug-build.outputs.exit_code == '0'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: apk-arm64-v8a-debug
           path: app/build/outputs/apk/arm64v8/debug/*-arm64v8-debug.apk
@@ -73,7 +73,7 @@ jobs:
 
       - name: Upload armeabi-v7a Debug APK
         if: steps.debug-build.outputs.exit_code == '0'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: apk-armeabi-v7a-debug
           path: app/build/outputs/apk/armv7/debug/*-armv7-debug.apk
@@ -81,7 +81,7 @@ jobs:
 
       - name: Upload universal Debug APK
         if: steps.debug-build.outputs.exit_code == '0'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: apk-universal-debug
           path: app/build/outputs/apk/universal/debug/*-universal-debug.apk
@@ -174,7 +174,7 @@ jobs:
 
       - name: Upload Release build log
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: build-release-log
           path: /tmp/build-release.log
