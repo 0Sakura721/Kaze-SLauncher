@@ -51,12 +51,17 @@ object SettingsStore {
     private val _darkAmoled = MutableStateFlow(true)
     val darkAmoled: StateFlow<Boolean> = _darkAmoled.asStateFlow()
 
+    /** 降低动效:v7a 等低端架构默认开启,用户也可手动开启 */
+    private val _reduceMotion = MutableStateFlow(false)
+    val reduceMotion: StateFlow<Boolean> = _reduceMotion.asStateFlow()
+
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         // 默认跳过首次环境部署引导:Java 改为在设置页按需下载/导入,
         // 不强制卡启动页;若用户之前已部署过则保持原值。
         _setupCompleted.value = prefs.getBoolean("setup_completed", true)
         _darkAmoled.value = prefs.getBoolean("dark_amoled", true)
+        _reduceMotion.value = prefs.getBoolean("reduce_motion", false)
         // 兼容旧版 theme_dark 布尔值
         _themeMode.value = prefs.getString("theme_mode", null) ?: run {
             if (prefs.contains("theme_dark")) {
@@ -80,5 +85,10 @@ object SettingsStore {
     fun setDarkAmoled(amoled: Boolean) {
         prefs.edit().putBoolean("dark_amoled", amoled).apply()
         _darkAmoled.value = amoled
+    }
+
+    fun setReduceMotion(reduce: Boolean) {
+        prefs.edit().putBoolean("reduce_motion", reduce).apply()
+        _reduceMotion.value = reduce
     }
 }

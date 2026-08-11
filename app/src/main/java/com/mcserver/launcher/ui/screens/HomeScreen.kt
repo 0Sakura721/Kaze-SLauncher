@@ -7,6 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -60,6 +61,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Stroke
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -87,6 +90,8 @@ import com.mcserver.launcher.ui.theme.KazeSizes
 import com.mcserver.launcher.ui.theme.KazeSpacing
 import com.mcserver.launcher.ui.theme.KazeSuccess
 import com.mcserver.launcher.ui.theme.KazeWarning
+import com.mcserver.launcher.ui.theme.Aurora1
+import com.mcserver.launcher.ui.theme.Aurora2
 import com.mcserver.launcher.util.FileImporter
 import kotlinx.coroutines.launch
 import java.io.File
@@ -371,36 +376,48 @@ private fun CompactTopBar(
             Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "Kaze 服务端",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Spacer(Modifier.width(KazeSpacing.sm))
-            val statusColor = when (status) {
-                InstanceStatus.RUNNING -> KazeSuccess
-                InstanceStatus.STARTING, InstanceStatus.STOPPING -> KazeWarning
-                InstanceStatus.ERROR -> MaterialTheme.colorScheme.error
-                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Kaze 服务端",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Spacer(Modifier.width(KazeSpacing.sm))
+                    val statusColor = when (status) {
+                        InstanceStatus.RUNNING -> KazeSuccess
+                        InstanceStatus.STARTING, InstanceStatus.STOPPING -> KazeWarning
+                        InstanceStatus.ERROR -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(statusColor)
+                    )
+                    Spacer(Modifier.width(KazeSpacing.xs))
+                    Text(
+                        when (status) {
+                            InstanceStatus.RUNNING -> "运行中"
+                            InstanceStatus.STARTING -> "启动中"
+                            InstanceStatus.STOPPING -> "停止中"
+                            InstanceStatus.ERROR -> "错误"
+                            else -> "待机"
+                        },
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                        color = statusColor
+                    )
+                }
             }
-            Box(
-                Modifier
-                    .size(8.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(statusColor)
-            )
-            Spacer(Modifier.width(KazeSpacing.xs))
-            Text(
-                when (status) {
-                    InstanceStatus.RUNNING -> "运行中"
-                    InstanceStatus.STARTING -> "启动中"
-                    InstanceStatus.STOPPING -> "停止中"
-                    InstanceStatus.ERROR -> "错误"
-                    else -> "待机"
-                },
-                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                color = statusColor
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(KazeSpacing.xs)) {
+                MiniGauge(value = (uptimeSec / 3600f).coerceIn(0f, 1f), color = Aurora1, label = "时长")
+                MiniGauge(
+                    value = (playerCount.toFloat() / instanceCount.coerceAtLeast(1)).coerceIn(0f, 1f),
+                    color = Aurora2,
+                    label = "在线"
+                )
+            }
         }
 
         Spacer(Modifier.height(KazeSpacing.sm))
@@ -421,6 +438,36 @@ private fun CompactTopBar(
                 value = formatUptime(uptimeSec)
             )
         }
+    }
+}
+
+/** 迷你弧形仪表:270° 弧 + 中心标签。value 取 0..1。 */
+@Composable
+private fun MiniGauge(
+    value: Float,
+    color: Color,
+    label: String,
+    size: Int = 46
+) {
+    Box(Modifier.size(size.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.size(size.dp)) {
+            val stroke = 5.dp.toPx()
+            drawArc(
+                color = Color.White.copy(alpha = 0.14f),
+                startAngle = 135f,
+                sweepAngle = 270f,
+                useCenter = false,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = color,
+                startAngle = 135f,
+                sweepAngle = 270f * value.coerceIn(0f, 1f),
+                useCenter = false,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+        }
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

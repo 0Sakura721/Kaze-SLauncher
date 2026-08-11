@@ -585,7 +585,17 @@ object EnvManager {
                 _state.value = EnvState.READY
                 return@withContext Result.success(Unit)
             }
-            val jreAsset = if (assetExists("jre21-arm64.tar.gz")) "jre21-arm64.tar.gz" else if (assetExists("jre21-arm64.tar")) "jre21-arm64.tar" else null
+            // 按设备架构动态选择内置 JRE 资源(各自架构优化);
+            // 优先当前架构,回退 arm64(兼容 universal 仅含 arm64 的情况)
+            val jreCandidates = listOf(
+                "jre21-${jdkArchSuffix}.tar.gz",
+                "jre21-${jdkArchSuffix}.tar"
+            ) + if (jdkArchSuffix != "arm64") {
+                listOf("jre21-arm64.tar.gz", "jre21-arm64.tar")
+            } else {
+                emptyList()
+            }
+            val jreAsset = jreCandidates.firstOrNull { assetExists(it) }
             if (jreAsset != null) {
                 log(">>> 部署内置 Java 21 运行时(Android 版,~160MB)")
                 _items.value = listOf(SetupItem("jre", "Java 21 运行时", "内置,解压即用", phase = "提取中"))

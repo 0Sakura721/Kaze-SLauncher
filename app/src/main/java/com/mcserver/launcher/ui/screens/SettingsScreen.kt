@@ -107,6 +107,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val installedJavas by JreInstaller.installedJavas.collectAsState()
     val themeMode by SettingsStore.themeMode.collectAsState()
     val darkAmoled by SettingsStore.darkAmoled.collectAsState()
+    val reduceMotion by SettingsStore.reduceMotion.collectAsState()
     var showAbout by remember { mutableStateOf(false) }
 
     var installing by remember { mutableStateOf<String?>(null) }
@@ -257,6 +258,14 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         subtitle = "深色模式下纯黑背景，更省电",
                         checked = darkAmoled,
                         onCheckedChange = { SettingsStore.setDarkAmoled(it) }
+                    )
+                    RowItemDivider(indent = KazeSpacing.xxxl)
+                    ThemeSwitchRow(
+                        icon = Icons.Filled.Palette,
+                        title = "降低动效",
+                        subtitle = "低端设备自动开启，减少动画更流畅",
+                        checked = reduceMotion,
+                        onCheckedChange = { SettingsStore.setReduceMotion(it) }
                     )
                 }
             }

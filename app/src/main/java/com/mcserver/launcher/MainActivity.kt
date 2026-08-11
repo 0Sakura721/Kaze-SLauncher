@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.ContextCompat
 import com.mcserver.launcher.data.SettingsStore
+import com.mcserver.launcher.core.AbiDetector
 import com.mcserver.launcher.data.ThemeMode
 import com.mcserver.launcher.ui.MainApp
 import com.mcserver.launcher.ui.theme.KazeTheme
@@ -61,9 +62,15 @@ class MainActivity : ComponentActivity() {
             val themeMode by SettingsStore.themeMode.collectAsState()
             val systemDark = isSystemInDarkTheme()
             val darkAmoled by SettingsStore.darkAmoled.collectAsState()
+            val reduceMotionPref by SettingsStore.reduceMotion.collectAsState()
             var splashDone by remember { mutableStateOf(false) }
 
-            KazeTheme(mode = themeMode, systemDark = systemDark, darkAmoled = darkAmoled) {
+            KazeTheme(
+                mode = themeMode,
+                systemDark = systemDark,
+                darkAmoled = darkAmoled,
+                reduceMotion = AbiDetector.shouldReduceMotion(reduceMotionPref)
+            ) {
                 Box(Modifier.fillMaxSize()) {
                     // 主界面(闪屏结束后显示)——不再强制首次部署 Java,
                     // 直接进入主页;环境没就绪时在主页顶部提示用户去设置页导入/下载。

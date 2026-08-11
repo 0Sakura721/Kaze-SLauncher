@@ -149,3 +149,18 @@ val KazeShapes = Shapes(
     large = RoundedCornerShape(16.dp),
     extraLarge = RoundedCornerShape(20.dp)
 )
+
+// ═══════════════════════════════════════════════════════════════
+//  玻璃令牌 Glass Tokens（与 theme/Glass.kt 配套）
+//  透明度 / 描边 / 高光强度；v7a 老机会在 GlassCard 层级自动降级
+// ═══════════════════════════════════════════════════════════════
+object KazeGlass {
+    val cardAlphaDark = 0.08f        // 深色：卡片 8% 白透，轻度磨砂
+    val cardAlphaLight = 0.60f       // 浅色：卡片 60% 白透，明显玻璃
+    val cardBorderAlphaDark = 0.16f  // 深色描边
+    val cardBorderAlphaLight = 0.80f // 浅色描边
+    val highlightAlpha = 0.22f       // 顶部高光带强度（深色）
+    val glowAlphaDark = 0.20f
+    val glowAlphaLight = 0.12f
+    val blurRadius = 22.dp           // 背景模糊半径设计值（参考，v7a 降级 0）
+}

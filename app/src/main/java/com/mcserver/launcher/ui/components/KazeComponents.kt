@@ -60,10 +60,14 @@ import com.mcserver.launcher.ui.theme.KazeSuccess
 import com.mcserver.launcher.ui.theme.KazeType
 import com.mcserver.launcher.ui.theme.KazeWarning
 import com.mcserver.launcher.ui.theme.LocalGlassPalette
+import com.mcserver.launcher.ui.theme.GlassDialog
 import com.mcserver.launcher.ui.theme.PrimaryGradient
+import com.mcserver.launcher.ui.theme.KazeGlass
+import androidx.compose.ui.graphics.luminance
 
 /**
- * 简洁卡片:纯色背景 + 小圆角 + 轻微阴影 + 细描边
+ * 玻璃卡片:半透明填充 + 顶部高光描边 + 细描边。
+ * gradient 非空时覆盖默认玻璃质感（用于强调卡）。
  */
 @Composable
 fun GlassCard(
@@ -75,7 +79,15 @@ fun GlassCard(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit
 ) {
-    val glass = LocalGlassPalette.current
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val fill = gradient ?: Color.White.copy(alpha = if (isDark) KazeGlass.cardAlphaDark else KazeGlass.cardAlphaLight)
+    val borderColor = Color.White.copy(alpha = if (isDark) KazeGlass.cardBorderAlphaDark else KazeGlass.cardBorderAlphaLight)
+    val highlight = Brush.verticalGradient(
+        colors = listOf(
+            Color.White.copy(alpha = if (isDark) KazeGlass.highlightAlpha else 0.5f),
+            Color.Transparent
+        )
+    )
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -87,15 +99,13 @@ fun GlassCard(
         label = "cardScale"
     )
 
-    val base = Modifier
-        .graphicsLayer { scaleX = scale; scaleY = scale }
-        .then(modifier)
-
     Box(
-        modifier = base
+        modifier = Modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .then(modifier)
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surface)
-            .border(BorderStroke(KazeSizes.strokeThin, glass.cardBorder), shape)
+            .background(fill)
+            .border(BorderStroke(KazeSizes.strokeThin, borderColor), shape)
             .then(
                 if (onClick != null) Modifier.clickable(
                     interactionSource = interaction,
@@ -104,6 +114,7 @@ fun GlassCard(
                 ) else Modifier
             )
     ) {
+        Box(Modifier.fillMaxWidth().height(34.dp).background(highlight))
         Box(Modifier.padding(contentPadding)) { content() }
     }
 }
@@ -368,7 +379,7 @@ fun EmptyState(
     }
 }
 
-/** 确认对话框 */
+/** 确认对话框（玻璃容器） */
 @Composable
 fun ConfirmDialog(
     title: String,
@@ -379,25 +390,33 @@ fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = {
-            if (destructive) {
-                Button(
-                    onClick = onConfirm,
-                    colors = ButtonDefaults.buttonColors(containerColor = KazeError)
-                ) { Text(confirmLabel) }
-            } else {
-                Button(onClick = onConfirm) { Text(confirmLabel) }
+    GlassDialog(onDismiss = onDismiss) {
+        Column(Modifier.padding(KazeSpacing.lg)) {
+            Text(title, style = KazeType.title, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(KazeSpacing.sm))
+            Text(
+                message,
+                style = KazeType.body,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(KazeSpacing.lg))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(onClick = onDismiss) { Text(cancelLabel) }
+                Spacer(Modifier.width(KazeSpacing.sm))
+                if (destructive) {
+                    Button(
+                        onClick = onConfirm,
+                        colors = ButtonDefaults.buttonColors(containerColor = KazeError)
+                    ) { Text(confirmLabel) }
+                } else {
+                    Button(onClick = onConfirm) { Text(confirmLabel) }
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(cancelLabel) }
-        },
-        title = { Text(title, style = KazeType.title) },
-        text = { Text(message, style = KazeType.body) },
-        shape = KazeCorners.large
-    )
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -466,22 +485,6 @@ fun StatusBadge(status: com.mcserver.launcher.data.InstanceStatus) {
             .padding(horizontal = KazeSpacing.sm, vertical = KazeSpacing.xxs)
     ) {
         Text(text, style = KazeType.tiny, color = color, fontWeight = FontWeight.SemiBold)
-    }
-}
-
-/** 纯色背景容器 */
-@Composable
-fun AuroraBackground(
-    modifier: Modifier = Modifier,
-    dark: Boolean = true,
-    content: @Composable BoxScope.() -> Unit
-) {
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        content()
     }
 }
 
@@ -561,17 +564,16 @@ fun ListGroup(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val fill = Color.White.copy(alpha = if (isDark) KazeGlass.cardAlphaDark else KazeGlass.cardAlphaLight)
+    val borderColor = Color.White.copy(alpha = if (isDark) KazeGlass.cardBorderAlphaDark else KazeGlass.cardBorderAlphaLight)
     Column(
         modifier
             .fillMaxWidth()
             .padding(horizontal = KazeSpacing.pageHorizontal)
             .clip(KazeCorners.card)
-            .background(MaterialTheme.colorScheme.surface)
-            .border(
-                KazeSizes.groupStroke,
-                MaterialTheme.colorScheme.outlineVariant,
-                KazeCorners.card
-            )
+            .background(fill)
+            .border(KazeSizes.groupStroke, borderColor, KazeCorners.card)
     ) {
         content()
     }
@@ -627,17 +629,16 @@ fun CompactGroup(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val fill = Color.White.copy(alpha = if (isDark) KazeGlass.cardAlphaDark else KazeGlass.cardAlphaLight)
+    val borderColor = Color.White.copy(alpha = if (isDark) KazeGlass.cardBorderAlphaDark else KazeGlass.cardBorderAlphaLight)
     Column(
         modifier
             .fillMaxWidth()
             .padding(horizontal = KazeSpacing.pageHorizontal)
             .clip(KazeCorners.row)
-            .background(MaterialTheme.colorScheme.surface)
-            .border(
-                KazeSizes.groupStroke,
-                MaterialTheme.colorScheme.outlineVariant,
-                KazeCorners.row
-            )
+            .background(fill)
+            .border(KazeSizes.groupStroke, borderColor, KazeCorners.row)
     ) {
         content()
     }

@@ -17,13 +17,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 // ═══════════════════════════════════════════════════════════════
-//  Clean 简洁配色 · 纯色无渐变
+//  Kaze 玻璃拟态 · 冷蓝绿极光
 // ═══════════════════════════════════════════════════════════════
 
 // ── 主色 ──
-val KazeBlue = Color(0xFF2563EB)
-val KazeBlueLight = Color(0xFF3B82F6)
-val KazeBlueDark = Color(0xFF1D4ED8)
+// 主色冷化为冷蓝绿（保留 Kaze 蓝品牌联想，贴合极光主题）
+val KazeBlue = Color(0xFF0EA5E9)
+val KazeBlueLight = Color(0xFF38BDF8)
+val KazeBlueDark = Color(0xFF0369A1)
 
 // ── 语义色 ──
 val KazeSuccess = Color(0xFF22C55E)
@@ -68,8 +69,8 @@ val Mist = LightOutline
 // ═══════════════════════════════════════════════════════════════
 //  渐变别名(统一改为纯色,保持 API 兼容)
 // ═══════════════════════════════════════════════════════════════
-val PrimaryGradient = Brush.linearGradient(listOf(KazeBlue, KazeBlueDark))
-val PrimaryGradientH = Brush.horizontalGradient(listOf(KazeBlue, KazeBlueDark))
+val PrimaryGradient = Brush.linearGradient(listOf(Aurora1, Aurora2))
+val PrimaryGradientH = Brush.horizontalGradient(listOf(Aurora1, Aurora2))
 val GlassHighlight = Brush.linearGradient(
     0f to Color.White.copy(alpha = 0.06f),
     1f to Color.Transparent
@@ -100,18 +101,18 @@ val LocalGlassPalette = staticCompositionLocalOf<GlassPalette> {
 }
 
 private val GlassDark = GlassPalette(
-    cardAlpha = 1f,
-    cardBorder = DarkOutline.copy(alpha = 0.5f),
-    cardGlow = KazeBlue.copy(alpha = 0.1f),
+    cardAlpha = 0.08f,
+    cardBorder = Color.White.copy(alpha = 0.16f),
+    cardGlow = Aurora1.copy(alpha = 0.20f),
     tintAccent = PrimaryGradient,
     overlayStrong = Color.Black.copy(alpha = 0.72f),
     overlaySoft = DarkSurface.copy(alpha = 0.4f)
 )
 
 private val GlassLight = GlassPalette(
-    cardAlpha = 1f,
-    cardBorder = LightOutline,
-    cardGlow = KazeBlue.copy(alpha = 0.06f),
+    cardAlpha = 0.60f,
+    cardBorder = Color.White.copy(alpha = 0.8f),
+    cardGlow = Aurora1.copy(alpha = 0.12f),
     tintAccent = PrimaryGradient,
     overlayStrong = Color.White.copy(alpha = 0.82f),
     overlaySoft = LightSurfaceVariant.copy(alpha = 0.5f)
@@ -205,6 +206,7 @@ fun KazeTheme(
     mode: String,
     systemDark: Boolean,
     darkAmoled: Boolean,
+    reduceMotion: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val isDark = when (mode) {
@@ -221,7 +223,10 @@ fun KazeTheme(
     }
     val glass = if (isDark) GlassDark else GlassLight
 
-    CompositionLocalProvider(LocalGlassPalette provides glass) {
+    CompositionLocalProvider(
+        LocalGlassPalette provides glass,
+        LocalReduceMotion provides reduceMotion
+    ) {
         MaterialTheme(
             colorScheme = scheme,
             typography = CleanTypography,
