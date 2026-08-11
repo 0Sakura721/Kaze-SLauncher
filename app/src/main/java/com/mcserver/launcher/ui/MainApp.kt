@@ -102,15 +102,29 @@ private fun GlassNavBar(
                 Modifier.fillMaxWidth().padding(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                MainTab.entries.forEach { t ->
-                    Box(Modifier.weight(1f)) {
-                        GlassNavItem(
-                            tab = t,
-                            selected = current == t,
-                            onClick = { onSelect(t) },
-                            badge = badge
-                        )
-                    }
+                Box(Modifier.weight(1f)) {
+                    GlassNavItem(
+                        tab = MainTab.HOME,
+                        selected = current == MainTab.HOME,
+                        onClick = { onSelect(MainTab.HOME) },
+                        badge = badge
+                    )
+                }
+                Box(Modifier.weight(1f)) {
+                    GlassNavItem(
+                        tab = MainTab.DOWNLOADS,
+                        selected = current == MainTab.DOWNLOADS,
+                        onClick = { onSelect(MainTab.DOWNLOADS) },
+                        badge = badge
+                    )
+                }
+                Box(Modifier.weight(1f)) {
+                    GlassNavItem(
+                        tab = MainTab.SETTINGS,
+                        selected = current == MainTab.SETTINGS,
+                        onClick = { onSelect(MainTab.SETTINGS) },
+                        badge = badge
+                    )
                 }
             }
         }

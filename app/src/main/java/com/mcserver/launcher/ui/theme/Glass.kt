@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.Shape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -71,6 +71,7 @@ private fun topHighlight(isDark: Boolean): Brush = Brush.verticalGradient(
     )
 )
 
+@Composable
 private fun isDarkTheme(): Boolean =
     MaterialTheme.colorScheme.background.luminance() < 0.5f
 

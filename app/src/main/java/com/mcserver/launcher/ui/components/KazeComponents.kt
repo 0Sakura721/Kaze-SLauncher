@@ -80,7 +80,8 @@ fun GlassCard(
     content: @Composable BoxScope.() -> Unit
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val fill = gradient ?: Color.White.copy(alpha = if (isDark) KazeGlass.cardAlphaDark else KazeGlass.cardAlphaLight)
+    val baseFill = Color.White.copy(alpha = if (isDark) KazeGlass.cardAlphaDark else KazeGlass.cardAlphaLight)
+    val fill: Brush = gradient ?: Brush.solidColor(baseFill)
     val borderColor = Color.White.copy(alpha = if (isDark) KazeGlass.cardBorderAlphaDark else KazeGlass.cardBorderAlphaLight)
     val highlight = Brush.verticalGradient(
         colors = listOf(
