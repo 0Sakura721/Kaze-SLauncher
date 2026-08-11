@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -81,7 +82,7 @@ fun GlassCard(
 ) {
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
     val baseFill = Color.White.copy(alpha = if (isDark) KazeGlass.cardAlphaDark else KazeGlass.cardAlphaLight)
-    val fill: Brush = gradient ?: Brush.solidColor(baseFill)
+    val fill: Brush = gradient ?: SolidColor(baseFill)
     val borderColor = Color.White.copy(alpha = if (isDark) KazeGlass.cardBorderAlphaDark else KazeGlass.cardBorderAlphaLight)
     val highlight = Brush.verticalGradient(
         colors = listOf(

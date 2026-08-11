@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -100,32 +99,26 @@ private fun GlassNavBar(
         ) {
             Row(
                 Modifier.fillMaxWidth().padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.SpaceEvenly
             ) {
-                Box(Modifier.weight(1f)) {
-                    GlassNavItem(
-                        tab = MainTab.HOME,
-                        selected = current == MainTab.HOME,
-                        onClick = { onSelect(MainTab.HOME) },
-                        badge = badge
-                    )
-                }
-                Box(Modifier.weight(1f)) {
-                    GlassNavItem(
-                        tab = MainTab.DOWNLOADS,
-                        selected = current == MainTab.DOWNLOADS,
-                        onClick = { onSelect(MainTab.DOWNLOADS) },
-                        badge = badge
-                    )
-                }
-                Box(Modifier.weight(1f)) {
-                    GlassNavItem(
-                        tab = MainTab.SETTINGS,
-                        selected = current == MainTab.SETTINGS,
-                        onClick = { onSelect(MainTab.SETTINGS) },
-                        badge = badge
-                    )
-                }
+                GlassNavItem(
+                    tab = MainTab.HOME,
+                    selected = current == MainTab.HOME,
+                    onClick = { onSelect(MainTab.HOME) },
+                    badge = badge
+                )
+                GlassNavItem(
+                    tab = MainTab.DOWNLOADS,
+                    selected = current == MainTab.DOWNLOADS,
+                    onClick = { onSelect(MainTab.DOWNLOADS) },
+                    badge = badge
+                )
+                GlassNavItem(
+                    tab = MainTab.SETTINGS,
+                    selected = current == MainTab.SETTINGS,
+                    onClick = { onSelect(MainTab.SETTINGS) },
+                    badge = badge
+                )
             }
         }
     }
