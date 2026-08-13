@@ -50,9 +50,9 @@ object ModrinthApi {
         "22w13oneBlockAtATime", "23w13a_or_b", "24w14potato",
     )
 
-    suspend fun latestRelease(): String? = mojangManifest()?.optJSONObject("latest")?.optString("release").takeIf { it.isNotBlank() }
+    suspend fun latestRelease(): String? = mojangManifest()?.optJSONObject("latest")?.optString("release")?.takeIf { it.isNotBlank() }
 
-    suspend fun latestSnapshot(): String? = mojangManifest()?.optJSONObject("latest")?.optString("snapshot").takeIf { it.isNotBlank() }
+    suspend fun latestSnapshot(): String? = mojangManifest()?.optJSONObject("latest")?.optString("snapshot")?.takeIf { it.isNotBlank() }
 
     private suspend fun mojangManifest(): JSONObject? = withContext(Dispatchers.IO) {
         try {
