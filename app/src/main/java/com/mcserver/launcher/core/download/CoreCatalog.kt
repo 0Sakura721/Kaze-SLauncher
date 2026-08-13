@@ -48,6 +48,7 @@ object CoreCatalog {
             CoreType.PURPUR -> getJson("https://api.purpurmc.org/v2/purpur")
                 ?.optJSONObject("versions")
                 ?.keys()
+                ?.asSequence()
                 ?.toList()
                 ?: emptyList()
 
@@ -104,7 +105,7 @@ object CoreCatalog {
 
             CoreType.PURPUR -> {
                 val builds = getJson("https://api.purpurmc.org/v2/purpur/$version")
-                val build = builds?.optJSONObject("builds")?.keys()?.lastOrNull()
+                val build = builds?.optJSONObject("builds")?.keys()?.asSequence()?.lastOrNull()
                 if (build != null) {
                     CoreInfo(
                         "https://api.purpurmc.org/v2/purpur/$version/$build/download",
