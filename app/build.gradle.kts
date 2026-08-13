@@ -55,11 +55,14 @@ android {
     }
 }
 
-// Force use of ARM64 binaries for AAPT2 in Proot environment
-configurations.all {
-    resolutionStrategy.eachDependency {
-        if (requested.group == "com.android.tools.build" && requested.name == "aapt2") {
-            useTarget("com.android.tools.build:aapt2:${requested.version}:linux-aarch64")
+// Force use of ARM64 binaries for AAPT2 in Proot environment (ARM64 only)
+val isAarch64 = System.getProperty("os.arch")?.contains("aarch64", ignoreCase = true) == true
+if (isAarch64) {
+    configurations.all {
+        resolutionStrategy.eachDependency {
+            if (requested.group == "com.android.tools.build" && requested.name == "aapt2") {
+                useTarget("com.android.tools.build:aapt2:${requested.version}:linux-aarch64")
+            }
         }
     }
 }
