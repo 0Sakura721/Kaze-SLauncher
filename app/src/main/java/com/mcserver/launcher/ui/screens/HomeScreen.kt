@@ -2,7 +2,10 @@ package com.mcserver.launcher.ui.screens
 
 import android.app.ActivityManager
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -290,8 +294,8 @@ private fun EmptyHome(vm: AppViewModel, onOpenInstances: () -> Unit) {
 
 // 小工具：无波纹点击 / 玻璃背景 / 实色背景
 private fun Modifier.clickableNoIndication(onClick: () -> Unit): Modifier =
-    androidx.compose.foundation.clickable(
-        interactionSource = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+    this.clickable(
+        interactionSource = MutableInteractionSource(),
         indication = null,
         onClick = onClick,
     )
@@ -300,4 +304,4 @@ private fun Modifier.glassBg(tokens: com.mcserver.launcher.ui.theme.StyleTokens)
     com.mcserver.launcher.ui.theme.GlassEffects.glassSurface(this, tokens, tokens.cornerMedium, elevation = 8.dp)
 
 private fun Modifier.backgroundSolid(color: Color): Modifier =
-    androidx.compose.foundation.background(color, CircleShape)
+    this.background(color, CircleShape)

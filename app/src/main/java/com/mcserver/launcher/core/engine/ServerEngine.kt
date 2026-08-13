@@ -100,9 +100,9 @@ object ServerEngine {
             process = p
             runningInstanceId = inst.id
             startedAtMs = System.currentTimeMillis()
-            _state.value = ServerState.Running(p.pid()?.toInt() ?: 0)
+            _state.value = ServerState.Running(p.pidCompat())
             _stats.value = RuntimeStats(uptimeMs = 0L)
-            KLog.i("服务端已启动 pid=${p.pid()} cmd=${cmd.joinToString(" ")}")
+            KLog.i("服务端已启动 pid=${p.pidCompat()} cmd=${cmd.joinToString(" ")}")
 
             // 输出泵
             scope.launch {
@@ -130,7 +130,7 @@ object ServerEngine {
 
             // 监控循环
             monitorJob = scope.launch {
-                val pid = p.pid().toInt()
+                val pid = p.pidCompat()
                 var lastTotal = 0L; var lastAt = 0L
                 while (isActive) {
                     delay(1000)
@@ -239,6 +239,16 @@ object ServerEngine {
     fun shutdown() {
         stop(graceMs = 3_000)
         scope.cancel()
+    }
+
+    /** Android 的 java.lang.Process 无 pid()（Java9+ API），通过反射读取 */
+    private fun Process.pidCompat(): Int = try {
+        val f = javaClass.getDeclaredField("pid")
+        f.isAccessible = true
+        f.getInt(this)
+    } catch (e: Exception) {
+        KLog.w("无法获取子进程 pid: ${e.message}")
+        0
     }
 }
 

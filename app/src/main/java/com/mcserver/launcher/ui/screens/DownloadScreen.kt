@@ -1,6 +1,7 @@
 package com.mcserver.launcher.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,7 +96,7 @@ fun DownloadScreen(
                     color = tokens.onSurface.copy(alpha = 0.5f),
                     modifier = Modifier.align(Alignment.Center),
                 )
-            } else if (vm.versions.isEmpty()) {
+            } else if (vm.versions.value.isEmpty()) {
                 Column(
                     Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally,

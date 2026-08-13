@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -82,7 +83,7 @@ fun SettingsScreen(vm: AppViewModel) {
                     val tmp = File(AppPaths.runtimeDir, "jre-import-tmp")
                     tmp.deleteRecursively()
                     tmp.mkdirs()
-                    copyDocTree(ctx, doc, tmp)
+                    doc?.let { copyDocTree(ctx, it, tmp) }
                     val r = JreManager.importFromDir(tmp)
                     tmp.deleteRecursively()
                     vm.showToast(if (r.isSuccess) "JRE 导入成功" else "导入失败: ${r.exceptionOrNull()?.message}")

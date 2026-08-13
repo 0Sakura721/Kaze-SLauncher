@@ -40,6 +40,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -256,7 +257,7 @@ fun SegmentRail(
                     .clip(RoundedCornerShape(tokens.cornerSmall - 4.dp))
                     .background(
                         if (isSel) Brush.linearGradient(listOf(tokens.primary, tokens.secondary))
-                        else Color.Transparent
+                        else SolidColor(Color.Transparent)
                     )
                     .clickable { onSelect(value) }
                     .padding(vertical = 10.dp),
@@ -291,7 +292,7 @@ fun SideRail(
                     .clip(RoundedCornerShape(50))
                     .background(
                         if (isSel) Brush.linearGradient(listOf(tokens.primary, tokens.secondary))
-                        else tokens.surfaceVariant
+                        else SolidColor(tokens.surfaceVariant)
                     )
                     .clickable { onSelect(key) }
                     .padding(horizontal = 14.dp, vertical = 10.dp),
@@ -353,7 +354,7 @@ private fun TrayItem(
             .clip(RoundedCornerShape(18.dp))
             .background(
                 if (selected) Brush.linearGradient(listOf(tokens.primary, tokens.secondary))
-                else Color.Transparent
+                else SolidColor(Color.Transparent)
             )
             .clickable { onClick() }
             .padding(12.dp),

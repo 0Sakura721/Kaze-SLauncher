@@ -34,8 +34,9 @@ import androidx.compose.ui.unit.dp
  */
 object GlassEffects {
 
-    /** 玻璃卡表面 */
-    fun Modifier.glassSurface(
+    /** 玻璃卡表面（普通成员函数，外部以 GlassEffects.glassSurface(modifier, ...) 调用） */
+    fun glassSurface(
+        modifier: Modifier,
         tokens: StyleTokens,
         corner: Dp = tokens.cornerMedium,
         elevation: Dp = 10.dp,
@@ -43,7 +44,7 @@ object GlassEffects {
         val shape = RoundedCornerShape(corner)
         val base = tokens.surface
         val alpha = if (tokens.glassEnabled) 0.72f else 1f
-        var m = this
+        var m = modifier
             .shadow(elevation, shape, clip = false)
             .clip(shape)
             .background(base.copy(alpha = alpha))
