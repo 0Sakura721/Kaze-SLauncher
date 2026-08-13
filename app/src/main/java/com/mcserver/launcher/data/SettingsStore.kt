@@ -68,7 +68,7 @@ object SettingsStore {
             val am = context.getSystemService(android.app.ActivityManager::class.java)
             val mi = android.app.ActivityManager.MemoryInfo()
             am.getMemoryInfo(mi)
-            mi.totalMem / 1024 / 1024
+            (mi.totalMem / 1024 / 1024).toInt()
         } catch (_: Exception) {
             4096
         }
