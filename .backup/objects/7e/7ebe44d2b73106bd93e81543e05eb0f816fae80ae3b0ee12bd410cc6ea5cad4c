@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="kaze_window_bg">#F3F5F9</color>
+    <color name="kaze_blue">#00A1D6</color>
+    <color name="kaze_pink">#FB7299</color>
+    <color name="kaze_cyan">#0AC8B9</color>
+    <color name="kaze_dark_bg">#0E1014</color>
+    <color name="ic_launcher_background">#00A1D6</color>
+</resources>
