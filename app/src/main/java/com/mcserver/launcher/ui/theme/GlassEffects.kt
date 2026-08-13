@@ -10,7 +10,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.align
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
@@ -74,35 +73,38 @@ object GlassEffects {
     @Composable
     fun HighlightOverlay(tokens: StyleTokens) {
         if (!tokens.glassEnabled) return
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.22f),
-                            Color.White.copy(alpha = 0.05f),
-                            Color.Transparent,
-                            Color.Transparent,
-                        ),
-                        start = Offset.Zero,
-                        end = Offset(720f, 420f),
+        Box(Modifier.fillMaxSize()) {
+            // 斜向主光
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.22f),
+                                Color.White.copy(alpha = 0.05f),
+                                Color.Transparent,
+                                Color.Transparent,
+                            ),
+                            start = Offset.Zero,
+                            end = Offset(720f, 420f),
+                        )
                     )
-                )
-        )
-        // 右上柔光斑（bilipai 式玻璃受光点）
-        Box(
-            Modifier
-                .align(androidx.compose.ui.Alignment.TopEnd)
-                .size(120.dp)
-                .offset(x = 36.dp, y = (-46).dp)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(Color.White.copy(alpha = 0.18f), Color.Transparent),
-                        radius = 300f,
+            )
+            // 右上柔光斑（bilipai 式玻璃受光点）
+            Box(
+                Modifier
+                    .align(androidx.compose.ui.Alignment.TopEnd)
+                    .size(120.dp)
+                    .offset(x = 36.dp, y = (-46).dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(Color.White.copy(alpha = 0.18f), Color.Transparent),
+                            radius = 300f,
+                        )
                     )
-                )
-        )
+            )
+        }
     }
 }
 
