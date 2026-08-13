@@ -6,6 +6,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -125,9 +127,38 @@ fun MetricRing(
     modifier: Modifier = Modifier,
     size: Dp = 92.dp,
     strokeWidth: Dp = 9.dp,
+    glassDisc: Boolean = false,   // 液态玻璃底盘（bilipai 式仪表）
 ) {
     val tokens = LocalKazeTokens.current
     Box(modifier.size(size), contentAlignment = Alignment.Center) {
+        if (glassDisc && tokens.glassEnabled) {
+            // 圆形玻璃底盘：半透底 + 顶部受光
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .shadow(10.dp, CircleShape, clip = false)
+                    .clip(CircleShape)
+                    .background(tokens.surface.copy(alpha = 0.55f))
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(Color.White.copy(alpha = 0.10f), Color.Transparent),
+                            radius = 900f,
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.5f),
+                                Color.White.copy(alpha = 0.06f),
+                            ),
+                            start = Offset.Zero,
+                            end = Offset(0f, 400f),
+                        ),
+                        shape = CircleShape,
+                    )
+            )
+        }
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
             val stroke = Stroke(strokeWidth.toPx(), cap = StrokeCap.Round)
             // 底环

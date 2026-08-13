@@ -3,6 +3,7 @@ package com.mcserver.launcher.ui.screens
 import android.app.ActivityManager
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -35,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -84,7 +86,12 @@ fun HomeScreen(
         // ── 大标题 + 风格快捷键 ──
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("Kaze", style = MaterialTheme.typography.headlineLarge, color = tokens.onBackground)
+                Text(
+                    "Kaze",
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        brush = Brush.linearGradient(listOf(tokens.primary, tokens.secondary, tokens.accent))
+                    ),
+                )
                 Text(
                     SimpleDateFormat("M月d日 · EEEE", Locale.getDefault()).format(Date()),
                     fontSize = 12.sp,
@@ -137,7 +144,7 @@ fun HomeScreen(
                             color = tokens.onSurface,
                         )
                         Text(
-                            "proot + Alpine + JDK 21，软件内独立运行全部 MC 服务端",
+                            "proot + Alpine 已内置 APK，部署后经 apk 装 JDK 即可驱动全部 MC 服务端",
                             fontSize = 11.sp,
                             color = tokens.onSurface.copy(alpha = 0.55f),
                         )
@@ -171,12 +178,38 @@ fun HomeScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        // ── 三环交叠仪表组（错位破界） ──
+        // ── 三环交叠仪表组（液态玻璃圆盘 + 错位破界） ──
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(220.dp)
+                .height(240.dp)
         ) {
+            // 大玻璃圆盘底：液态表面承载仪表
+            if (tokens.glassEnabled) {
+                Box(
+                    Modifier
+                        .size(252.dp)
+                        .align(Alignment.Center)
+                        .offset(y = 10.dp)
+                        .clip(CircleShape)
+                        .background(tokens.surface.copy(alpha = 0.30f))
+                        .background(
+                            Brush.radialGradient(
+                                listOf(Color.White.copy(alpha = 0.08f), Color.Transparent),
+                                radius = 1100f,
+                            )
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(
+                                listOf(Color.White.copy(alpha = 0.4f), Color.White.copy(alpha = 0.05f)),
+                                start = Offset.Zero,
+                                end = Offset(0f, 480f),
+                            ),
+                            shape = CircleShape,
+                        )
+                )
+            }
             val memPercent = if (totalMemMb > 0) stats.memMb.toFloat() / totalMemMb else 0f
             val tpsPercent = stats.tps.coerceIn(0f, 20f) / 20f
             MetricRing(
@@ -184,24 +217,27 @@ fun HomeScreen(
                 label = "CPU",
                 valueText = "${stats.cpuPercent.toInt()}%",
                 color = tokens.primary,
-                size = 104.dp,
-                modifier = Modifier.offset(x = 6.dp, y = 26.dp),
+                size = 108.dp,
+                glassDisc = true,
+                modifier = Modifier.offset(x = 6.dp, y = 30.dp),
             )
             MetricRing(
                 value = memPercent,
                 label = "内存",
                 valueText = "${stats.memMb}MB",
                 color = tokens.secondary,
-                size = 104.dp,
-                modifier = Modifier.offset(x = 116.dp, y = 78.dp),
+                size = 108.dp,
+                glassDisc = true,
+                modifier = Modifier.offset(x = 116.dp, y = 88.dp),
             )
             MetricRing(
                 value = tpsPercent,
                 label = "TPS",
                 valueText = if (stats.tps > 0) "%.1f".format(stats.tps) else "--",
                 color = tokens.accent,
-                size = 104.dp,
-                modifier = Modifier.offset(x = 226.dp, y = 22.dp),
+                size = 108.dp,
+                glassDisc = true,
+                modifier = Modifier.offset(x = 226.dp, y = 26.dp),
             )
         }
 

@@ -14,6 +14,7 @@ import com.mcserver.launcher.core.engine.ServerEngine
 import com.mcserver.launcher.core.instance.CoreType
 import com.mcserver.launcher.core.instance.EulaManager
 import com.mcserver.launcher.core.instance.InstanceStore
+import com.mcserver.launcher.core.linux.JdkManager
 import com.mcserver.launcher.core.linux.LinuxEnv
 import com.mcserver.launcher.core.linux.LinuxStatus
 import com.mcserver.launcher.core.service.ServerService
@@ -38,6 +39,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val linuxStatus get() = LinuxEnv.status
     val linuxProgress get() = LinuxEnv.progress
     val linuxDetail get() = LinuxEnv.detail
+    val jdks get() = JdkManager.jdks
 
     /** 当前实例的 EULA 状态（供 UI 展示签署条） */
     val eulaExists = mutableStateOf(false)
@@ -54,6 +56,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshInstances()
         JreManager.refresh()
         LinuxEnv.refresh()
+        JdkManager.refresh()
         refreshEula()
     }
 
@@ -63,14 +66,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         eulaAgreed.value = inst?.let { EulaManager.isAgreed(it.id) } ?: false
     }
 
-    /** 安装内置 Linux 环境（proot + rootfs + JDK） */
+    /** 部署内置 Linux 环境（从 APK assets 解包，无需下载） */
     fun installLinuxEnv() {
         viewModelScope.launch {
-            val r = LinuxEnv.install()
+            val r = LinuxEnv.setup(getApplication())
             showToast(
-                if (r.isSuccess) "Linux 环境就绪"
-                else "环境安装失败: ${r.exceptionOrNull()?.message}"
+                if (r.isSuccess) {
+                    JdkManager.refresh()
+                    "Linux 环境就绪"
+                } else "环境部署失败: ${r.exceptionOrNull()?.message}"
             )
+        }
+    }
+
+    /** 在 Linux 环境内在线安装 JDK/JRE */
+    fun installJdk(feature: Int, jdk: Boolean = false) {
+        viewModelScope.launch {
+            val r = JdkManager.install(feature, jdk) { line ->
+                if (line.length < 120) showToast(line)
+            }
+            showToast(if (r.isSuccess) "JDK$feature 安装完成" else "安装失败: ${r.exceptionOrNull()?.message}")
+        }
+    }
+
+    /** 在 Linux 环境内卸载 JDK/JRE */
+    fun uninstallJdk(feature: Int) {
+        viewModelScope.launch {
+            val r = JdkManager.uninstall(feature)
+            showToast(if (r.isSuccess) "JDK$feature 已卸载" else "卸载失败: ${r.exceptionOrNull()?.message}")
         }
     }
 
@@ -128,15 +151,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             showToast("请先创建服务器实例")
             return
         }
-        // Java 环境：优先内置 Linux（proot + Linux JDK），回退 Android 直跑 JRE
-        val guestJava = com.mcserver.launcher.core.linux.LinuxEnv.javaBinaryInGuest()
+        // Java 环境：优先内置 Linux（proot + rootfs 内 apk 安装的 JDK），回退 Android 直跑 JRE
+        val guestJava = com.mcserver.launcher.core.linux.JdkManager.pickJavaInGuest()
         val fallbackJava = JreManager.currentJavaPath()
         val javaPath: String = if (guestJava != null && LinuxEnv.isReady()) {
             guestJava
         } else if (fallbackJava != null) {
             fallbackJava
         } else {
-            showToast("请先安装 Java 环境（设置页：内置 Linux 环境 或 JRE）")
+            showToast("请先部署 Linux 环境并安装 JDK（设置页），或安装 JRE")
             return
         }
         val ok = ServerEngine.start(getApplication(), inst, javaPath)

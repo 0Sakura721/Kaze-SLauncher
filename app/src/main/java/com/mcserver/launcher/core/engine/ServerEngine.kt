@@ -93,12 +93,19 @@ object ServerEngine {
             logBuffer.clear()
             val javaArgs = mutableListOf<String>()
             inst.jvmArgs.split(" ").filter { it.isNotBlank() }.forEach(javaArgs::add)
+            // FCL 式内存预设：实例未写 -Xmx 时按全局预设附加（自动档按设备内存推荐）
+            if (javaArgs.none { it.startsWith("-Xmx") }) {
+                val mb = com.mcserver.launcher.data.SettingsStore.resolveMemoryMb()
+                javaArgs.add(0, "-Xms${mb / 2}M")
+                javaArgs.add(1, "-Xmx${mb}M")
+                KLog.i("内存预设: -Xms${mb / 2}M -Xmx${mb}M (auto=${com.mcserver.launcher.data.SettingsStore.memoryPresetMbSync == com.mcserver.launcher.data.SettingsStore.MEM_AUTO})")
+            }
             val cmd = mutableListOf<String>()
 
             // 优先使用内置 Linux 环境（proot），完整 Linux 用户态可驱动所有服务端
             val proot = com.mcserver.launcher.core.linux.LinuxEnv.prootBinary()
             val rootfs = com.mcserver.launcher.core.linux.LinuxEnv.rootfs()
-            val guestJava = com.mcserver.launcher.core.linux.LinuxEnv.javaBinaryInGuest()
+            val guestJava = com.mcserver.launcher.core.linux.JdkManager.pickJavaInGuest()
             val useLinux = proot != null && rootfs != null && guestJava != null
 
             if (useLinux) {

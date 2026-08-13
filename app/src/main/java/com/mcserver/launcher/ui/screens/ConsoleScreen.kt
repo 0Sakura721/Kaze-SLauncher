@@ -70,16 +70,52 @@ fun ConsoleScreen(vm: AppViewModel) {
             .padding(horizontal = 16.dp)
     ) {
         Spacer(Modifier.height(18.dp))
-        Text(
-            "控制台",
-            style = MaterialTheme.typography.headlineMedium,
-            color = tokens.onBackground,
-        )
-        Text(
-            inst?.name ?: "无实例",
-            fontSize = 12.sp,
-            color = tokens.onBackground.copy(alpha = 0.5f),
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "控制台",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = tokens.onBackground,
+                )
+                Text(
+                    inst?.name ?: "无实例",
+                    fontSize = 12.sp,
+                    color = tokens.onBackground.copy(alpha = 0.5f),
+                )
+            }
+            // 运行状态徽章
+            Box(
+                Modifier
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+                    .background(
+                        when (state) {
+                            is ServerState.Running -> tokens.accent.copy(alpha = 0.16f)
+                            is ServerState.Starting -> tokens.primary.copy(alpha = 0.16f)
+                            is ServerState.Crashed -> Color(0xFFE53935).copy(alpha = 0.16f)
+                            else -> tokens.surfaceVariant
+                        }
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    when (state) {
+                        is ServerState.Running -> "● 运行中"
+                        is ServerState.Starting -> "● 启动中"
+                        is ServerState.Stopping -> "● 停止中"
+                        is ServerState.Crashed -> "● 已崩溃"
+                        else -> "○ 已停止"
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = when (state) {
+                        is ServerState.Running -> tokens.accent
+                        is ServerState.Starting -> tokens.primary
+                        is ServerState.Crashed -> Color(0xFFE53935)
+                        else -> tokens.onSurface.copy(alpha = 0.55f)
+                    },
+                )
+            }
+        }
         Spacer(Modifier.height(14.dp))
 
         // ── 终端窗 ──

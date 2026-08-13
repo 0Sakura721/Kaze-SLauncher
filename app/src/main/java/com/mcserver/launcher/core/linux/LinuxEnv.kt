@@ -1,6 +1,6 @@
 package com.mcserver.launcher.core.linux
 
-import com.mcserver.launcher.core.download.DownloadManager
+import android.content.Context
 import com.mcserver.launcher.data.AppPaths
 import com.mcserver.launcher.util.KLog
 import kotlinx.coroutines.Dispatchers
@@ -10,20 +10,16 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.zip.GZIPInputStream
 
-enum class LinuxStatus { NONE, DOWNLOADING, EXTRACTING, READY, ERROR }
+enum class LinuxStatus { NONE, UNPACKING, READY, ERROR }
 
 /**
- * 内置 Linux 环境（类似 Termux 的 proot 方案）：
- * - proot 二进制（termux/proot，按架构下载）
- * - Alpine minirootfs（musl libc，极小体积）
- * - Liberica musl JDK 21（解压到 rootfs 可见的 /opt/jdk）
+ * 内置 Linux 环境（模仿 Termux 的 proot 方案）：
+ * - proot（静态二进制）与 Alpine minirootfs 直接打包进 APK assets，开箱即用，无需下载
+ * - JDK/JRE 不内置：进入 rootfs 后通过 apk 包管理在线安装/卸载（多版本 8/11/17/21）
  *
  * 服务端在该环境内以完整 Linux 用户态运行，可驱动所有 MC Java 服务端。
- * 下载均走多镜像回退；解压为手写 gzip+tar（零依赖）。
  */
 object LinuxEnv {
 
@@ -38,79 +34,68 @@ object LinuxEnv {
 
     private val prootFile get() = File(AppPaths.linuxDir, "proot")
     private val rootfsDir get() = File(AppPaths.linuxDir, "rootfs")
-    private val jdkDir get() = File(AppPaths.linuxDir, "jdk")
-    private val jdkArchive get() = File(AppPaths.downloadsDir, "jdk21-linux-musl.tar.gz")
 
     fun isReady(): Boolean =
         prootFile.exists() && prootFile.length() > 100_000 &&
-            File(rootfsDir, "etc/alpine-release").exists() &&
-            File(jdkDir, "bin/java").exists()
+            File(rootfsDir, "etc/alpine-release").exists()
 
     fun prootBinary(): File? = if (prootFile.exists()) prootFile else null
 
     fun rootfs(): File? = if (File(rootfsDir, "etc/alpine-release").exists()) rootfsDir else null
 
-    /** guest 内 JDK 的 java 路径（linuxDir 绑定到 /opt） */
-    fun javaBinaryInGuest(): String? =
-        if (File(jdkDir, "bin/java").exists()) "/opt/jdk/bin/java" else null
-
     fun refresh() {
         _status.value = if (isReady()) LinuxStatus.READY else LinuxStatus.NONE
     }
 
-    /** 一键安装：proot → rootfs → JDK（已存在的组件跳过） */
-    suspend fun install(): Result<Unit> = withContext(Dispatchers.IO) {
+    /** 从 APK assets 解包内置环境（proot + rootfs + CA 证书），秒级完成 */
+    suspend fun setup(context: Context): Result<Unit> = withContext(Dispatchers.IO) {
         try {
-            _status.value = LinuxStatus.DOWNLOADING
+            _status.value = LinuxStatus.UNPACKING
             _progress.value = 0f
+            val assets = listOf("proot-aarch64", "alpine-minirootfs-aarch64.tar.gz", "ca-certificates-bundle.apk")
 
             // 1. proot
             if (!prootFile.exists() || prootFile.length() < 100_000) {
-                _detail.value = "正在获取 proot…"
-                val ok = downloadProot()
+                _detail.value = "释放 proot…"
+                val ok = copyAsset(context, "linux/proot-aarch64", prootFile)
                 if (!ok) {
                     _status.value = LinuxStatus.ERROR
-                    return@withContext Result.failure(Exception("proot 下载失败"))
+                    return@withContext Result.failure(Exception("内置资源缺失：proot"))
                 }
                 prootFile.setExecutable(true, true)
             }
 
             // 2. rootfs
             if (!File(rootfsDir, "etc/alpine-release").exists()) {
-                _detail.value = "正在下载 Linux 根文件系统…"
-                val archive = File(AppPaths.downloadsDir, "alpine-minirootfs.tar.gz")
-                val ok = downloadRootfs(archive)
+                _detail.value = "释放 Linux 根文件系统…"
+                rootfsDir.mkdirs()
+                val tmp = File(AppPaths.linuxDir, "rootfs-tmp.tar.gz")
+                val ok = copyAsset(context, "linux/alpine-minirootfs-aarch64.tar.gz", tmp)
                 if (!ok) {
                     _status.value = LinuxStatus.ERROR
-                    return@withContext Result.failure(Exception("rootfs 下载失败"))
+                    return@withContext Result.failure(Exception("内置资源缺失：rootfs"))
                 }
-                _status.value = LinuxStatus.EXTRACTING
-                _detail.value = "正在解压根文件系统…"
-                rootfsDir.mkdirs()
-                extractTarGz(archive, rootfsDir)
-                archive.delete()
-                // 补 DNS 配置
+                extractTarGz(tmp, rootfsDir)
+                tmp.delete()
+                _progress.value = 0.7f
+
+                // 3. CA 证书（保证 apk 走 HTTPS）
+                val caAsset = copyAsset(context, "linux/ca-certificates-bundle.apk", File(AppPaths.linuxDir, "ca.apk"))
+                if (caAsset) {
+                    try {
+                        extractTarGz(File(AppPaths.linuxDir, "ca.apk"), rootfsDir)
+                    } catch (e: Exception) {
+                        KLog.w("CA 证书包解压失败: ${e.message}")
+                    }
+                    File(AppPaths.linuxDir, "ca.apk").delete()
+                }
+
+                // DNS 配置
                 val resolv = File(rootfsDir, "etc/resolv.conf")
                 if (!resolv.exists()) {
                     resolv.parentFile?.mkdirs()
                     resolv.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
                 }
-            }
-
-            // 3. JDK（musl 版，适配 Alpine）
-            if (!File(jdkDir, "bin/java").exists()) {
-                _detail.value = "正在下载 Linux JDK 21…"
-                _progress.value = 0.55f
-                val ok = downloadJdk()
-                if (!ok) {
-                    _status.value = LinuxStatus.ERROR
-                    return@withContext Result.failure(Exception("JDK 下载失败"))
-                }
-                _status.value = LinuxStatus.EXTRACTING
-                _detail.value = "正在解压 JDK…"
-                jdkDir.mkdirs()
-                extractTarGz(jdkArchive, jdkDir)
-                jdkArchive.delete()
             }
 
             _progress.value = 1f
@@ -119,106 +104,84 @@ object LinuxEnv {
             if (_status.value == LinuxStatus.READY) Result.success(Unit)
             else Result.failure(Exception("环境校验未通过"))
         } catch (e: Exception) {
-            KLog.e("Linux 环境安装失败", e)
+            KLog.e("Linux 环境释放失败", e)
             _status.value = LinuxStatus.ERROR
             Result.failure(e)
         }
     }
 
-    // ── 下载 ──
-
-    private suspend fun downloadProot(): Boolean {
-        val asset = if (is64Bit()) "proot-android-aarch64" else "proot-android-arm"
-        val urls = listOf(
-            "https://ghfast.top/https://github.com/termux/proot/releases/latest/download/$asset",
-            "https://github.com/termux/proot/releases/latest/download/$asset",
-        )
-        return tryUrls(urls, prootFile)
-    }
-
-    private suspend fun downloadRootfs(dest: File): Boolean {
-        val arch = if (is64Bit()) "aarch64" else "armv7"
-        val yamlUrls = listOf(
-            "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/$arch/latest-releases.yaml",
-            "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/releases/$arch/latest-releases.yaml",
-            "https://mirrors.ustc.edu.cn/alpine/latest-stable/releases/$arch/latest-releases.yaml",
-        )
-        val yaml = fetchText(yamlUrls) ?: return false
-        val name = Regex("file: (alpine-minirootfs-[0-9.]+-$arch\\.tar\\.gz)").find(yaml)
-            ?.groupValues?.get(1) ?: return false
-        val fileUrls = listOf(
-            "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/$arch/$name",
-            "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/releases/$arch/$name",
-            "https://mirrors.ustc.edu.cn/alpine/latest-stable/releases/$arch/$name",
-        )
-        return tryUrls(fileUrls, dest)
-    }
-
-    private suspend fun downloadJdk(): Boolean {
-        val arch = if (is64Bit()) "aarch64" else "arm"
-        // 1) 动态解析 Liberica 版本
-        val api = "https://api.bell-sw.com/v1/liberica/core/releases" +
-            "?version-feature=21&os=linux&arch=$arch&libc=musl&bundle-type=jdk&package-type=tar.gz&bitness=64"
-        try {
-            val text = fetchText(listOf(api))
-            if (text != null) {
-                val url = Regex("\"downloadUrl\"\\s*:\\s*\"([^\"]+)\"").find(text)
-                    ?.groupValues?.get(1)
-                if (url != null && tryUrls(listOf(url), jdkArchive)) return true
-            }
-        } catch (e: Exception) {
-            KLog.w("Liberica API 解析失败: ${e.message}")
-        }
-        // 2) 回退直链（版本可能失效，仅兜底）
-        return tryUrls(
-            listOf(
-                "https://download.bell-sw.com/java/21.0.7+11/bellsoft-jdk21.0.7+11-linux-$arch-musl.tar.gz",
-            ),
-            jdkArchive,
-        )
-    }
-
-    private suspend fun tryUrls(urls: List<String>, dest: File): Boolean {
+    private fun copyAsset(context: Context, assetPath: String, dest: File): Boolean = try {
         dest.parentFile?.mkdirs()
-        var last: Throwable? = null
-        for ((i, u) in urls.withIndex()) {
-            try {
-                KLog.i("下载镜像(${i + 1}/${urls.size}): $u")
-                val r = DownloadManager.download(u, dest) { done, total ->
-                    if (total > 0) _progress.value = (done.toFloat() / total).coerceIn(0f, 1f)
+        val ins = context.assets.open(assetPath) ?: return false
+        FileOutputStream(dest).use { out -> ins.copyTo(out) }
+        true
+    } catch (e: Exception) {
+        KLog.w("assets 读取失败: $assetPath ${e.message}")
+        false
+    }
+
+    /**
+     * 在 rootfs 内执行命令（proot 包装）。
+     * @param args 例如 listOf("/sbin/apk", "add", "--no-cache", "openjdk21")
+     * @param env 附加环境变量
+     * @param onLog 逐行输出回调（可为 null）
+     */
+    fun exec(
+        args: List<String>,
+        env: Map<String, String> = emptyMap(),
+        timeoutSec: Long = 900,
+        onLog: ((String) -> Unit)? = null,
+    ): Result<String> {
+        val proot = prootBinary() ?: return Result.failure(Exception("环境未就绪"))
+        val rootfs = rootfs() ?: return Result.failure(Exception("环境未就绪"))
+        val cmd = mutableListOf<String>()
+        cmd.add(proot.absolutePath)
+        cmd.add("-0")
+        cmd.add("-r"); cmd.add(rootfs.absolutePath)
+        cmd.add("-b"); cmd.add("/dev")
+        cmd.add("-b"); cmd.add("/proc")
+        cmd.add("-b"); cmd.add("/sys")
+        cmd.add("-w"); cmd.add("/root")
+        cmd.addAll(args)
+        return try {
+            val pb = ProcessBuilder(cmd).redirectErrorStream(true)
+            pb.environment()["HOME"] = "/root"
+            pb.environment()["TERM"] = "xterm"
+            pb.environment()["LANG"] = "C.UTF-8"
+            pb.environment()["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            env.forEach { (k, v) -> pb.environment()[k] = v }
+            val p = pb.start()
+            val out = StringBuilder()
+            val reader = p.inputStream.bufferedReader()
+            val thread = Thread {
+                try {
+                    var line: String?
+                    while (true) {
+                        line = reader.readLine() ?: break
+                        out.appendLine(line)
+                        onLog?.invoke(line)
+                    }
+                } catch (_: Exception) {
                 }
-                if (r.isSuccess && dest.exists() && dest.length() > 0) return true
-                last = r.exceptionOrNull()
-            } catch (e: Exception) {
-                last = e
             }
-            dest.delete()
-        }
-        KLog.w("全部镜像下载失败: ${last?.message}")
-        return false
-    }
-
-    private fun fetchText(urls: List<String>): String? {
-        for (u in urls) {
-            try {
-                val conn = URL(u).openConnection() as HttpURLConnection
-                conn.connectTimeout = 10_000
-                conn.readTimeout = 15_000
-                conn.setRequestProperty("User-Agent", "Kaze-SLauncher/2.0")
-                if (conn.responseCode == 200) {
-                    val text = conn.inputStream.bufferedReader().readText()
-                    conn.disconnect()
-                    if (text.isNotBlank()) return text
-                } else conn.disconnect()
-            } catch (e: Exception) {
-                KLog.w("请求失败: $u ${e.message}")
+            thread.start()
+            val code = try {
+                if (!p.waitFor(timeoutSec, java.util.concurrent.TimeUnit.SECONDS)) {
+                    p.destroyForcibly()
+                    137
+                } else p.exitValue()
+            } catch (e: InterruptedException) {
+                p.destroyForcibly()
+                130
             }
+            thread.join(2000)
+            if (code == 0) Result.success(out.toString())
+            else Result.failure(Exception("退出码 $code: ${out.toString().takeLast(300)}"))
+        } catch (e: Exception) {
+            KLog.e("rootfs 执行失败", e)
+            Result.failure(e)
         }
-        return null
     }
-
-    private fun is64Bit(): Boolean =
-        android.os.Build.SUPPORTED_64_BIT_ABIS.isNotEmpty()
 
     // ── 手写 tar.gz 解压（标准 ustar + 老式 tar + 符号链接） ──
 

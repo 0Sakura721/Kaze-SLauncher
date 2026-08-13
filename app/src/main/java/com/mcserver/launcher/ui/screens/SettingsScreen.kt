@@ -22,9 +22,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -74,6 +78,8 @@ fun SettingsScreen(vm: AppViewModel) {
     val jreProgress by JreManager.progress.collectAsState()
     val jreVersion by JreManager.versionText.collectAsState()
     val backups = remember { mutableStateOf(BackupManager.list()) }
+    var showCustomMem by remember { mutableStateOf(false) }
+    var customMemInput by remember { mutableStateOf("2048") }
 
     // SAF 目录选择（导入 JRE）
     val jrePicker = rememberLauncherForActivityResult(
@@ -202,8 +208,13 @@ fun SettingsScreen(vm: AppViewModel) {
 
         Spacer(Modifier.height(18.dp))
 
-        // ── 内置 Linux 环境 ──
+        // ── 内置 Linux 环境（已内置 APK，一键部署） ──
         Text("内置 Linux 环境", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tokens.onSurface)
+        Text(
+            "proot + Alpine 已内置，部署即可用 · JDK 通过包管理在线安装",
+            fontSize = 11.sp,
+            color = tokens.onSurface.copy(alpha = 0.5f),
+        )
         Spacer(Modifier.height(10.dp))
         val linuxStatus by com.mcserver.launcher.core.linux.LinuxEnv.status.collectAsState()
         val linuxProgress by com.mcserver.launcher.core.linux.LinuxEnv.progress.collectAsState()
@@ -219,11 +230,10 @@ fun SettingsScreen(vm: AppViewModel) {
             Column(Modifier.weight(1f)) {
                 Text(
                     when (linuxStatus) {
-                        com.mcserver.launcher.core.linux.LinuxStatus.NONE -> "未安装"
-                        com.mcserver.launcher.core.linux.LinuxStatus.DOWNLOADING -> "下载中 ${(linuxProgress * 100).toInt()}%"
-                        com.mcserver.launcher.core.linux.LinuxStatus.EXTRACTING -> "解压中…"
+                        com.mcserver.launcher.core.linux.LinuxStatus.NONE -> "未部署"
+                        com.mcserver.launcher.core.linux.LinuxStatus.UNPACKING -> "部署中 ${(linuxProgress * 100).toInt()}%"
                         com.mcserver.launcher.core.linux.LinuxStatus.READY -> "已就绪"
-                        com.mcserver.launcher.core.linux.LinuxStatus.ERROR -> "安装失败"
+                        com.mcserver.launcher.core.linux.LinuxStatus.ERROR -> "部署失败"
                     },
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -231,14 +241,12 @@ fun SettingsScreen(vm: AppViewModel) {
                 )
                 Text(
                     if (linuxDetail.isNotBlank()) linuxDetail
-                    else "proot + Alpine + JDK 21（约 200MB），可运行全部 MC 服务端",
+                    else "内置约 4.5MB，解包到应用目录（秒级）",
                     fontSize = 11.sp,
                     color = tokens.onSurface.copy(alpha = 0.5f),
                     maxLines = 1,
                 )
-                if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.DOWNLOADING ||
-                    linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.EXTRACTING
-                ) {
+                if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.UNPACKING) {
                     Spacer(Modifier.height(6.dp))
                     LinearProgressIndicator(
                         progress = { linuxProgress },
@@ -254,12 +262,87 @@ fun SettingsScreen(vm: AppViewModel) {
         }
         Spacer(Modifier.height(10.dp))
         GradientButton(
-            text = if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.READY) "重新安装" else "一键安装",
-            enabled = linuxStatus != com.mcserver.launcher.core.linux.LinuxStatus.DOWNLOADING &&
-                linuxStatus != com.mcserver.launcher.core.linux.LinuxStatus.EXTRACTING,
+            text = if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.READY) "重新部署" else "一键部署",
+            enabled = linuxStatus != com.mcserver.launcher.core.linux.LinuxStatus.UNPACKING,
             onClick = { vm.installLinuxEnv() },
             modifier = Modifier.fillMaxWidth(),
         )
+
+        // ── JDK 多版本管理 ──
+        Spacer(Modifier.height(14.dp))
+        Text("JDK 多版本管理", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tokens.onSurface)
+        Text(
+            "1.8-1.12 用 JDK8 · 1.13-1.16 用 JDK11 · 1.17-1.20 用 JDK17 · 1.20.5+ 用 JDK21",
+            fontSize = 11.sp,
+            color = tokens.onSurface.copy(alpha = 0.5f),
+        )
+        Spacer(Modifier.height(8.dp))
+        val jdks by com.mcserver.launcher.core.linux.JdkManager.jdks.collectAsState()
+        jdks.forEach { info ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(tokens.cornerSmall))
+                    .then(Modifier.glassBg(tokens))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(9.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (info.installed) tokens.accent else tokens.onSurface.copy(alpha = 0.3f)
+                        )
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "JDK ${info.feature}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = tokens.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                if (info.busy) {
+                    Text("处理中…", fontSize = 12.sp, color = tokens.primary)
+                } else if (info.installed) {
+                    Text(
+                        "卸载",
+                        fontSize = 12.sp,
+                        color = tokens.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { vm.uninstallJdk(info.feature) }
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "装 JRE",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tokens.primary,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(tokens.primary.copy(alpha = 0.14f))
+                                .clickable { vm.installJdk(info.feature, jdk = false) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                        Text(
+                            "装 JDK",
+                            fontSize = 12.sp,
+                            color = tokens.onSurface.copy(alpha = 0.7f),
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(tokens.surfaceVariant)
+                                .clickable { vm.installJdk(info.feature, jdk = true) }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
 
         Spacer(Modifier.height(18.dp))
 
@@ -332,16 +415,69 @@ fun SettingsScreen(vm: AppViewModel) {
 
         Spacer(Modifier.height(18.dp))
 
-        // ── 默认内存 ──
+        // ── 默认内存（FCL 式档位） ──
         Text("默认内存预设", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tokens.onSurface)
-        Spacer(Modifier.height(8.dp))
-        SegmentRail(
-            options = listOf("1G" to 1024, "2G" to 2048, "4G" to 4096, "8G" to 8192),
-            selected = memPreset,
-            onSelect = { scope.launch { SettingsStore.setMemoryPreset(it) } },
+        Text(
+            "自动档按设备内存推荐 · 支持自定义 MB",
+            fontSize = 11.sp,
+            color = tokens.onSurface.copy(alpha = 0.5f),
         )
-
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(10.dp))
+        val memChips = listOf(
+            "自动" to SettingsStore.MEM_AUTO,
+            "512M" to 512,
+            "1G" to 1024,
+            "2G" to 2048,
+            "3G" to 3072,
+            "4G" to 4096,
+            "6G" to 6144,
+            "8G" to 8192,
+            "自定" to 0,
+        )
+        val memCustom = memPreset != SettingsStore.MEM_AUTO && memChips.none { it.second == memPreset }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            memChips.chunked(5).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    row.forEach { (label, value) ->
+                        val selected = if (value == 0) memCustom else memPreset == value
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+                                .background(
+                                    if (selected) Brush.linearGradient(listOf(tokens.primary, tokens.secondary))
+                                    else SolidColor(tokens.surfaceVariant)
+                                )
+                                .clickable {
+                                    scope.launch {
+                                        if (value == 0) {
+                                            // 打开自定义输入
+                                            customMemInput = memPreset.takeIf { it > 0 }?.toString() ?: "2048"
+                                            showCustomMem = true
+                                        } else {
+                                            SettingsStore.setMemoryPreset(value)
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 9.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                label,
+                                fontSize = 12.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) Color.White else tokens.onSurface.copy(alpha = 0.75f),
+                            )
+                        }
+                    }
+                    // 补齐剩余空位
+                    repeat(5 - row.size) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(14.dp))
 
         // ── 备份区 ──
         Text("备份", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tokens.onSurface)
@@ -393,6 +529,53 @@ fun SettingsScreen(vm: AppViewModel) {
             color = tokens.onSurface.copy(alpha = 0.35f),
         )
         Spacer(Modifier.height(24.dp))
+    }
+
+    // ── 自定义内存弹窗 ──
+    if (showCustomMem) {
+        AlertDialog(
+            onDismissRequest = { showCustomMem = false },
+            containerColor = tokens.surface,
+            title = {
+                Text("自定义内存", color = tokens.onSurface, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text(
+                        "输入分配内存（MB），例如 2560",
+                        fontSize = 12.sp,
+                        color = tokens.onSurface.copy(alpha = 0.6f),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = customMemInput,
+                        onValueChange = { v -> customMemInput = v.filter { it.isDigit() }.take(5) },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(color = tokens.onSurface),
+                        placeholder = { Text("2048", color = tokens.onSurface.copy(alpha = 0.4f)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val mb = customMemInput.toIntOrNull()
+                    if (mb != null && mb >= 256) {
+                        scope.launch { SettingsStore.setMemoryPreset(mb) }
+                        showCustomMem = false
+                    } else {
+                        vm.showToast("请输入不小于 256 的数值")
+                    }
+                }) {
+                    Text("确定", color = tokens.primary, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomMem = false }) {
+                    Text("取消", color = tokens.onSurface.copy(alpha = 0.6f))
+                }
+            },
+        )
     }
 }
 

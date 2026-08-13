@@ -43,7 +43,8 @@ object GlassEffects {
     ): Modifier {
         val shape = RoundedCornerShape(corner)
         val base = tokens.surface
-        val alpha = if (tokens.glassEnabled) 0.72f else 1f
+        // 液态玻璃：半透明底 + 上亮下暗描边 + 投影
+        val alpha = if (tokens.glassEnabled) 0.62f else 1f
         var m = modifier
             .shadow(elevation, shape, clip = false)
             .clip(shape)
@@ -53,11 +54,12 @@ object GlassEffects {
                 width = 1.dp,
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.55f),
-                        Color.White.copy(alpha = 0.08f),
+                        Color.White.copy(alpha = 0.72f),
+                        Color.White.copy(alpha = 0.16f),
+                        Color.White.copy(alpha = 0.04f),
                     ),
                     start = Offset.Zero,
-                    end = Offset(900f, 700f),
+                    end = Offset(0f, 420f),   // 竖直渐变：顶部受光最亮
                 ),
                 shape = shape,
             )
@@ -67,7 +69,7 @@ object GlassEffects {
         return m
     }
 
-    /** 玻璃卡左上高光（叠加层） */
+    /** 玻璃卡左上高光（叠加层：斜向主光 + 右上柔光斑） */
     @Composable
     fun HighlightOverlay(tokens: StyleTokens) {
         if (!tokens.glassEnabled) return
@@ -77,12 +79,26 @@ object GlassEffects {
                 .background(
                     Brush.linearGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.16f),
+                            Color.White.copy(alpha = 0.22f),
+                            Color.White.copy(alpha = 0.05f),
                             Color.Transparent,
                             Color.Transparent,
                         ),
                         start = Offset.Zero,
-                        end = Offset(700f, 450f),
+                        end = Offset(720f, 420f),
+                    )
+                )
+        )
+        // 右上柔光斑（bilipai 式玻璃受光点）
+        Box(
+            Modifier
+                .align(androidx.compose.ui.Alignment.TopEnd)
+                .size(120.dp)
+                .offset(x = 36.dp, y = (-46).dp)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color.White.copy(alpha = 0.18f), Color.Transparent),
+                        radius = 300f,
                     )
                 )
         )
@@ -134,5 +150,27 @@ fun GlassBackground(
                     )
             )
         }
+        // 高亮核心：快速漂移的小光点，模拟液态表面的受光折射
+        val fast by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(7000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "glowFast",
+        )
+        Box(
+            Modifier
+                .offset(x = (fast * 200 - 100).dp, y = ((1f - fast) * 260 - 60).dp)
+                .size(150.dp)
+                .then(if (useBlur) Modifier.blur(36.dp) else Modifier)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(Color.White.copy(alpha = 0.55f), Color.Transparent),
+                        radius = 700f,
+                    )
+                )
+        )
     }
 }

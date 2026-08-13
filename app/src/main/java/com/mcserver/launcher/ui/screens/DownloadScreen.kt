@@ -216,8 +216,8 @@ private fun CoreTypeCard(
     val tokens = LocalKazeTokens.current
     Box(
         Modifier
-            .width(128.dp)
-            .height(96.dp)
+            .width(132.dp)
+            .height(104.dp)
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(tokens.cornerMedium))
             .then(
                 if (selected) {
@@ -230,19 +230,35 @@ private fun CoreTypeCard(
             .padding(12.dp)
     ) {
         Column {
+            // 渐变首字母徽标
+            Box(
+                Modifier
+                    .size(26.dp)
+                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(tokens.cornerSmall))
+                    .background(Brush.linearGradient(listOf(tokens.primary, tokens.accent))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    type.label.take(1).uppercase(),
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp,
+                )
+            }
+            Spacer(Modifier.height(8.dp))
             Text(
                 type.label,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (selected) tokens.primary else tokens.onSurface,
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(3.dp))
             Text(
                 type.desc,
                 fontSize = 10.sp,
                 lineHeight = 13.sp,
                 color = tokens.onSurface.copy(alpha = 0.5f),
-                maxLines = 3,
+                maxLines = 2,
             )
         }
     }
