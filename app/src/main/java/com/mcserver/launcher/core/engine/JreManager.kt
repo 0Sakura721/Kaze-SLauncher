@@ -80,7 +80,7 @@ object JreManager {
             val arch = if (is64Bit()) "aarch64" else "arm"
             val urls = buildDownloadUrls(arch)
             val dest = File(AppPaths.downloadsDir, "jre21-$arch.tar.gz")
-            var lastErr: Exception? = null
+            var lastErr: Throwable? = null
             for ((idx, u) in urls.withIndex()) {
                 try {
                     KLog.i("下载 JRE 镜像(${idx + 1}/${urls.size})")

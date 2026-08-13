@@ -41,7 +41,7 @@ object DownloadManager {
         _state.value = DownloadState.Idle
         dest.parentFile?.mkdirs()
         val urls = listOf(url) + mirrors
-        var lastError: Exception? = null
+        var lastError: Throwable? = null
         for ((idx, u) in urls.withIndex()) {
             if (cancelled) break
             val r = downloadOne(u, dest, onProgress)
