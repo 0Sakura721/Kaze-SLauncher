@@ -1,4 +1,4 @@
-# Operit Android 项目
+#Android 项目
 
 这是一个基于 **Jetpack Compose** 的现代化 Android 应用开发模板。
 
