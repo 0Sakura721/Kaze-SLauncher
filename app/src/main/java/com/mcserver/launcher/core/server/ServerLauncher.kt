@@ -42,13 +42,9 @@ class ServerLauncher(private val context: Context) {
     private val _players = MutableStateFlow<List<String>>(emptyList())
     val players: StateFlow<List<String>> = _players.asStateFlow()
 
-    private val _runningInstanceId = MutableStateFlow<String?>(null)
-    val runningInstanceId: StateFlow<String?> = _runningInstanceId.asStateFlow()
-
     private var process: Process? = null
     private var tailJob: Job? = null
     private var uptimeJob: Job? = null
-    private var autoBackupJob: Job? = null
     private var processWaitJob: Job? = null
     private var restartCount = 0
     private val isLaunching = AtomicBoolean(false)
@@ -57,6 +53,9 @@ class ServerLauncher(private val context: Context) {
     private var launchedAtMs = 0L
 
     val isRunning: Boolean get() = process?.isAlive == true
+
+    /** 控制台日志(供 UI 一次性加载) */
+    fun snapshotConsole(): List<String> = emptyList()
 
     // ── 启动 ──
     suspend fun start(instance: ServerInstance): Result<Unit> {
@@ -70,87 +69,55 @@ class ServerLauncher(private val context: Context) {
         isLaunching.set(true)
         launchedAtMs = android.os.SystemClock.elapsedRealtime()
         _status.value = InstanceStatus.STARTING
-        _runningInstanceId.value = instance.id
 
         return kotlinx.coroutines.withContext(Dispatchers.IO) {
             try {
                 val dir = instance.dir(InstanceStore.instancesDir)
                 dir.mkdirs()
 
-                // 环境自检诊断(控制台可见,便于定位环境问题)
-                val jreOk = EnvManager.isJreReady()
-                emit("> 环境自检:Java 运行时=${if (jreOk) "OK(${EnvManager.jreHomeDir.name})" else "缺失(请到设置页部署/导入)"}")
-
-                // 1) 核心 jar(排除 installer:Forge/NeoForge 下载的是安装器,需先运行安装)
+                // 1) 核心 jar
                 val jarFile = dir.listFiles()?.firstOrNull { it.name.endsWith(".jar") && !it.name.contains("installer") }
-                    ?: run {
-                        val onlyInstaller = dir.listFiles()?.any { it.name.endsWith(".jar") && it.name.contains("installer") } == true
-                        if (onlyInstaller) {
-                            return@withContext Result.failure(
-                                RuntimeException("检测到 Forge/NeoForge 安装器(installer.jar)。本启动器暂不支持自动运行安装器,请下载已安装完成的服务端核心(如 ${instance.coreType.displayName} 的 server 版),或改用 Paper/Vanilla 核心")
-                            )
-                        }
-                        return@withContext Result.failure(RuntimeException("实例目录中没有服务端核心,请先下载"))
-                    }
+                    ?: return@withContext Result.failure(RuntimeException("实例目录中没有服务端核心,请先下载"))
                 val jarName = jarFile.name
 
                 // 2) eula + server.properties
                 writeEula(dir)
                 writeServerProperties(dir, instance)
 
-                // 3) 启动脚本(JRE 直跑:宿主 sh 直接 exec java,不经 proot)
+                // 3) 启动脚本
                 val logPath = File(dir, "server.log").absolutePath
-                // FIFO 必须放 App 私有目录:外部存储(FUSE)不支持 mkfifo
-                val pipePath = File(EnvManager.appTmpDir, "cmdpipe-${instance.id}").absolutePath
+                val pipePath = File(dir, "cmdpipe").absolutePath
                 val pidFile = File(dir, "mcserver.pid").absolutePath
-                val tmpDirPath = EnvManager.appTmpDir.absolutePath
                 val script = buildString {
                     appendLine("#!/bin/sh")
                     appendLine("cd '$dir' || exit 1")
                     appendLine("rm -f '$pipePath'")
                     appendLine("mkfifo '$pipePath'")
-                    // 保持 FIFO 写端打开:否则 java 的 stdin 读端 open 会阻塞等待写者,
-                    // 长时间阻塞易被 Android 信号打断(EINTR,启动失败)。
-                    // 后台 sleep 只持有 fd 不写数据,java 的读端 open 立即完成。
-                    appendLine("sleep 100000d > '$pipePath' &")
-                    appendLine("HOLDER_PID=\$!")
-                    // Android linker 不搜 JRE lib 目录,必须显式注入:
-                    // 否则 java 动态链接报 libz.so.1 / libandroid-shmem.so not found
-                    appendLine("export LD_LIBRARY_PATH='${EnvManager.jreLibDir.absolutePath}'")
-                    appendLine("export TMPDIR='$tmpDirPath'")
                     appendLine("echo '--- Server Started ---' > '$logPath'")
                     appendLine(": > '$pidFile'")
-                    // 用宿主 linker64 加载 java(而非直接 exec):
-                    // vivo/Android 16 对 untrusted_app 直接 exec 应用数据目录 ELF 有限制
-                    // (Termux 等白名单 App 不受限),linker64 加载不触发 exec 限制,
-                    // 与 proot 的 linker64 回退是同一机制,已验证可用
-                    val jvmArgs = instance.config.jvmArgs.trim()
-                        .replace(Regex("[\"'`;\\\\\\$\\n]"), " ")
-                    val jvmArgsPart = if (jvmArgs.isNotEmpty()) " $jvmArgs" else ""
-                    appendLine("/system/bin/linker64 $javaPath -Xmx${instance.config.maxRamMB}M -Xms${(instance.config.maxRamMB / 2).coerceAtLeast(256)}M$jvmArgsPart -Djava.io.tmpdir='$tmpDirPath' -jar '$jarName' ${if (instance.config.nogui) "nogui" else ""} >> '$logPath' 2>&1 < '$pipePath' &")
+                    appendLine("$javaPath -Xmx${instance.config.maxRamMB}M -Xms${(instance.config.maxRamMB / 2).coerceAtLeast(256)}M -jar '$jarName' ${if (instance.config.nogui) "nogui" else ""} >> '$logPath' 2>&1 < '$pipePath' &")
                     appendLine("JAVA_PID=\$!")
                     appendLine("echo \$JAVA_PID > '$pidFile'")
                     appendLine("wait \$JAVA_PID")
-                    appendLine("kill \$HOLDER_PID 2>/dev/null")
                     appendLine("echo '--- Server Stopped ---' >> '$logPath'")
                     appendLine("rm -f '$pipePath' '$pidFile'")
                 }
                 File(dir, "start.sh").writeText(script)
                 File(dir, "start.sh").setExecutable(true)
 
-                // 4) JRE 直跑启动(宿主 sh,不经 proot)
-                val pb = EnvManager.startShell(File(dir, "start.sh").absolutePath)
+                // 4) proot 启动
+                val pb = EnvManager.startProot(File(dir, "start.sh").absolutePath, dir.absolutePath)
                 process = pb
                 emit("> 服务器启动中(${instance.name} ${instance.mcVersion} ${instance.coreType.displayName})")
 
-                // 消费启动进程的输出(含 stderr 警告/错误),否则管道缓冲会阻塞
+                // 消费 proot 进程的输出(含 stderr 警告/错误),否则管道缓冲会阻塞
                 // 且失败原因无法查看
                 val procOut = process
                 scope.launch {
                     procOut?.inputStream?.bufferedReader()?.useLines { lines ->
                         lines.forEach { line ->
                             if (line.isNotBlank()) {
-                                Logger.w("sh: $line")
+                                Logger.w("proot: $line")
                                 emit(line)
                             }
                         }
@@ -167,14 +134,6 @@ class ServerLauncher(private val context: Context) {
                 startUptime()
 
                 _status.value = InstanceStatus.RUNNING
-                startAutoBackup(instance)
-                try {
-                    ServerKeepAliveService.update(
-                        com.mcserver.launcher.KazeApp.instance,
-                        instance.name,
-                        instance.mcVersion
-                    )
-                } catch (_: Exception) { }
                 Result.success(Unit)
             } catch (e: Exception) {
                 Logger.e("start failed", e)
@@ -188,51 +147,11 @@ class ServerLauncher(private val context: Context) {
     }
 
     // ── 停止 ──
-    private val stopJobs = mutableListOf<kotlinx.coroutines.Job>()
-    private var stopInstanceId: String? = null
-
-    /**
-     * 接管孤儿服务器进程(App 曾被系统杀死,服务器仍在运行)。
-     * 通过轮询 /proc/<pid> 检测退出,恢复状态与日志监控。
-     */
-    fun adoptOrphan(instance: ServerInstance, pid: Int): Boolean {
-        if (isRunning || isLaunching.get()) return false
-        if (!File("/proc/$pid").exists()) return false
-        currentInstance = instance
-        manualStop = false
-        isLaunching.set(false)
-        launchedAtMs = android.os.SystemClock.elapsedRealtime()
-        _status.value = InstanceStatus.RUNNING
-        _runningInstanceId.value = instance.id
-        emit("> 检测到服务器仍在运行(孤儿进程),已接管监控")
-        val dir = instance.dir(InstanceStore.instancesDir)
-        // 轮询检测进程退出(无法 waitFor 外部进程)
-        processWaitJob?.cancel()
-        processWaitJob = scope.launch {
-            while (File("/proc/$pid").exists()) {
-                kotlinx.coroutines.delay(3000)
-            }
-            handleExit()
-        }
-        startTail(File(dir, "server.log"))
-        startUptime()
-        startAutoBackup(instance)
-        try {
-            ServerKeepAliveService.update(
-                com.mcserver.launcher.KazeApp.instance,
-                instance.name,
-                instance.mcVersion
-            )
-        } catch (_: Exception) { }
-        return true
-    }
-
     suspend fun stop() {
         if (!isRunning) { _status.value = InstanceStatus.STOPPED; return }
         manualStop = true
-        stopInstanceId = currentInstance?.id
         _status.value = InstanceStatus.STOPPING
-        emit("> 正在停止服务器…")
+        emit("> 正在停止服务器...")
         sendCommand("stop")
         val dir = currentInstance?.dir(InstanceStore.instancesDir)
         if (dir != null) {
@@ -249,75 +168,35 @@ class ServerLauncher(private val context: Context) {
                 "fi\n"
             )
             script.setExecutable(true)
-            EnvManager.startShell(script.absolutePath)
+            EnvManager.startProot(script.absolutePath, dir.absolutePath)
         }
-        // 兜底:15 秒后强制收尾(仅当仍是本次停止的进程,防止误杀新启动的服务器)
-        val stopProcessRef = process
-        val stopJob = scope.launch {
+        // 兜底:15 秒后强制收尾
+        scope.launch {
             delay(15000)
-            // 校验:期间没有重新启动(process 引用变化 = 新进程)
-            if (isRunning && process === stopProcessRef && currentInstance?.id == stopInstanceId) {
+            if (isRunning) {
                 process?.destroy()
                 processWaitJob?.cancel()
                 finalizeStop()
             }
         }
-        stopJobs += stopJob
-        // 清理已完成的 stopJob,防止列表无限增长
-        stopJobs.removeAll { it.isCompleted }
     }
 
     // ── 控制台 ──
-    /**
-     * 发送控制台指令。优先走 RCON(服务器标准指令通道,稳定可靠);
-     * RCON 不可用时回退 FIFO(stdin 在非 TTY 下可能不被 JLine 读取,仅作后备)。
-     */
     fun sendCommand(cmd: String) {
         if (!isRunning || cmd.isBlank()) return
         emit("> $cmd")
         val dir = currentInstance?.dir(InstanceStore.instancesDir) ?: return
-        val cfg = currentInstance?.config
-        // 1) RCON 通道(后台线程,避免网络超时阻塞 UI)
-        if (cfg?.rconEnabled == true) {
-            val rconFile = File(dir, "rcon.txt")
-            val pwd = if (rconFile.exists()) rconFile.readText().trim() else cfg.rconPassword
-            val port = cfg.rconPort
-            Thread {
-                try {
-                    val client = RconClient(port = port, password = pwd)
-                    if (client.connect(2000)) {
-                        val response = client.command(cmd)
-                        client.close()
-                        // 显示 RCON 响应(如 list/seed 等命令的输出)
-                        if (!response.isNullOrEmpty()) {
-                            emit(response.trim())
-                        }
-                    } else {
-                        emit("> RCON 连接失败,命令未送达")
-                    }
-                } catch (e: Exception) {
-                    emit("> RCON 错误:${e.message}")
-                }
-            }.start()
-            return
-        }
-        // 2) FIFO 后备(线程化:文件写端打开在无读者时阻塞,不能占用 UI 线程)
-        val pipe = File(EnvManager.appTmpDir, "cmdpipe-${currentInstance?.id}")
+        val pipe = File(dir, "cmdpipe")
         if (pipe.exists()) {
-            Thread {
-                try {
-                    pipe.appendText(cmd + "\n")
-                } catch (e: Exception) {
-                    emit("> 命令发送失败:${e.message}")
-                }
-            }.start()
+            try {
+                pipe.appendText(cmd + "\n")
+            } catch (e: Exception) {
+                emit("> 命令发送失败:${e.message}")
+            }
         }
     }
 
-    private fun emit(line: String) {
-        // 行前缀携带实例 id,UI 按实例过滤,防止多实例控制台串台
-        _console.tryEmit("${currentInstance?.id ?: ""}|$line")
-    }
+    private fun emit(line: String) { _console.tryEmit(line) }
 
     private fun handleExit() {
         Logger.w("handleExit: manualStop=$manualStop launchedAtMs=$launchedAtMs now=${android.os.SystemClock.elapsedRealtime()}")
@@ -353,26 +232,13 @@ class ServerLauncher(private val context: Context) {
     }
 
     private fun finalizeStop() {
-        // 停止时自动备份(配置开启时)
-        val stopInstance = currentInstance
-        if (stopInstance != null && stopInstance.config.backupOnStop) {
-            emit("> 正在备份世界…")
-            val backupFile = BackupManager.backupWorld(stopInstance)
-            emit(if (backupFile != null) "> 备份完成:${backupFile.name}" else "> 无世界数据,跳过备份")
-        }
         _status.value = InstanceStatus.STOPPED
         _players.value = emptyList()
-        _runningInstanceId.value = null
         tailJob?.cancel()
         uptimeJob?.cancel()
-        autoBackupJob?.cancel()
         process = null
         restartCount = 0
         currentInstance = null
-        // 保活服务保持常驻,通知内容重置为默认
-        try {
-            ServerKeepAliveService.update(com.mcserver.launcher.KazeApp.instance, null)
-        } catch (_: Exception) { }
     }
 
     // ── 日志 tail ──
@@ -403,7 +269,7 @@ class ServerLauncher(private val context: Context) {
                         }
                         leftover = if (endsWithNl) byteArrayOf() else parts.last().toByteArray(Charsets.UTF_8)
                     } else if (size < lastSize) { lastSize = 0; leftover = byteArrayOf() }
-                } catch (e: Exception) { Logger.w("日志 tail 异常: ${e.message}") }
+                } catch (_: Exception) {}
                 delay(300)
             }
         }
@@ -416,32 +282,6 @@ class ServerLauncher(private val context: Context) {
             while (isActive) {
                 _uptimeSec.value = (System.currentTimeMillis() - start) / 1000
                 delay(1000)
-            }
-        }
-    }
-
-    /**
-     * 定时自动备份:每 5 分钟检查一次,累计到 autoBackupHours 小时执行一次世界备份。
-     * 仅世界目录存在且有变化时备份;关闭(autoBackupHours=0)不启动。
-     */
-    private fun startAutoBackup(instance: ServerInstance) {
-        autoBackupJob?.cancel()
-        val hours = instance.config.autoBackupHours
-        if (hours <= 0) return
-        autoBackupJob = scope.launch {
-            // 以服务器启动时间为基准计时
-            val checkEveryMs = 5 * 60 * 1000L
-            val intervalMs = hours * 60 * 60 * 1000L
-            var lastBackup = System.currentTimeMillis()
-            while (isActive && isRunning) {
-                delay(checkEveryMs)
-                if (!isRunning) break
-                if (System.currentTimeMillis() - lastBackup >= intervalMs) {
-                    lastBackup = System.currentTimeMillis()
-                    emit("> 定时自动备份(每 $hours 小时)…")
-                    val ok = BackupManager.backupWorld(instance)
-                    emit(if (ok != null) "> 自动备份完成:${ok.name}" else "> 自动备份:无世界数据,跳过")
-                }
             }
         }
     }
@@ -468,9 +308,6 @@ class ServerLauncher(private val context: Context) {
 
     private fun writeServerProperties(dir: File, instance: ServerInstance) {
         val cfg = instance.config
-        // RCON 密码固定化:空配置时生成随机密码,并写入 rcon.txt 供控制台指令使用
-        val rconPassword = cfg.rconPassword.ifEmpty { "kaze" + (100000..999999).random() }
-        File(dir, "rcon.txt").writeText(rconPassword)
         val desired = linkedMapOf(
             "server-port" to cfg.serverPort.toString(),
             "motd" to cfg.motd,
@@ -480,21 +317,12 @@ class ServerLauncher(private val context: Context) {
             "pvp" to cfg.pvp.toString(),
             "online-mode" to cfg.onlineMode.toString(),
             "white-list" to cfg.whiteList.toString(),
-            "level-name" to cfg.levelName,
-            "level-seed" to cfg.levelSeed,
-            "level-type" to cfg.levelType,
-            "hardcore" to cfg.hardcore.toString(),
-            "allow-nether" to cfg.allowNether.toString(),
-            "allow-flight" to cfg.allowFlight.toString(),
-            "spawn-monsters" to cfg.spawnMonsters.toString(),
-            "spawn-animals" to cfg.spawnAnimals.toString(),
-            "max-world-size" to cfg.maxWorldSize.toString(),
             "spawn-protection" to cfg.spawnProtection.toString(),
             "view-distance" to cfg.viewDistance.toString(),
             "enable-command-block" to "true",
             "enable-rcon" to cfg.rconEnabled.toString(),
             "rcon.port" to cfg.rconPort.toString(),
-            "rcon.password" to rconPassword
+            "rcon.password" to cfg.rconPassword.ifEmpty { "kaze" + (100000..999999).random() }
         )
         val file = File(dir, "server.properties")
         val lines = if (file.exists()) file.readLines().toMutableList() else mutableListOf()

@@ -102,8 +102,7 @@ object CoreSources {
                     url = dl?.optString("url") ?: ""
                 )
             }
-            // fill.papermc.io 返回降序数组(最新构建在前),保持原序即可
-            Result.success(list)
+            Result.success(list.reversed())
         } catch (e: Exception) { Result.failure(e) }
     }
 

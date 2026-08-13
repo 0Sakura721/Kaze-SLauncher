@@ -1,158 +1,97 @@
 package com.mcserver.launcher.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.SystemUpdate
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.mcserver.launcher.core.download.CoreDownload
-import com.mcserver.launcher.core.download.CoreSources
 import com.mcserver.launcher.core.download.DownloadCenter
-import com.mcserver.launcher.core.server.InstanceStore
+import com.mcserver.launcher.core.download.ModrinthApi
+import com.mcserver.launcher.ui.components.ModrinthSearchDialog
 import com.mcserver.launcher.core.server.PluginManager
-import com.mcserver.launcher.data.CoreType
-import com.mcserver.launcher.data.InstanceStatus
-import com.mcserver.launcher.data.ServerInstance
-import com.mcserver.launcher.ui.components.Chip
-import com.mcserver.launcher.ui.components.ConfirmDialog
-import com.mcserver.launcher.ui.components.EmptyState
-import com.mcserver.launcher.ui.components.KazeTopBar
-import com.mcserver.launcher.ui.components.LocalUiMessenger
-import com.mcserver.launcher.ui.components.StatusBadge
-import com.mcserver.launcher.ui.screens.tabs.AddonTab
-import com.mcserver.launcher.ui.screens.tabs.ConfigTab
-import com.mcserver.launcher.ui.screens.tabs.ConsoleTab
-import com.mcserver.launcher.ui.screens.tabs.WorldTab
-import com.mcserver.launcher.ui.theme.KazeCorners
-import com.mcserver.launcher.ui.theme.KazeSizes
-import com.mcserver.launcher.ui.theme.KazeSpacing
-import com.mcserver.launcher.ui.theme.KazeType
 import com.mcserver.launcher.core.server.ServerManager
+import com.mcserver.launcher.data.ServerInstance
+import com.mcserver.launcher.util.FileImporter
 import kotlinx.coroutines.launch
 import java.io.File
 
-private val TAB_LABELS = listOf("控制台", "插件", "配置", "世界")
-
+/**
+ * 实例详情:控制台(日志/命令)+ 插件模组管理(本地导入优先 + Modrinth 搜索)。
+ */
 @Composable
 fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier: Modifier = Modifier) {
-    val messenger = LocalUiMessenger.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val systemPaddings = WindowInsets.systemBars.asPaddingValues()
-    val status by ServerManager.status.collectAsState()
     var tab by remember { mutableStateOf(0) }
-    val commandHistory = remember { mutableStateListOf<String>() }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var currentName by remember { mutableStateOf(instance.name) }
-    var checkCoreUpdate by remember { mutableStateOf(false) }
-    var upgradeInfo by remember { mutableStateOf<CoreDownload?>(null) }
-    var upgrading by remember { mutableStateOf(false) }
-    var upgradeMsg by remember { mutableStateOf<String?>(null) }
 
     Column(modifier.fillMaxSize()) {
-        Spacer(Modifier.height(systemPaddings.calculateTopPadding()))
-
-        CompactTopBar(
-            instance = instance.copy(name = currentName),
-            status = status,
-            onBack = onBack,
-            onRename = { showRename = true },
-            onUpgrade = { checkCoreUpdate = true },
-            onDelete = { showDeleteConfirm = true },
-            onStart = {
-                scope.launch {
-                    val r = ServerManager.start(instance)
-                    if (r.isFailure) messenger.toastError(r.exceptionOrNull()?.message ?: "启动失败")
-                }
-            },
-            onStop = {
-                scope.launch { ServerManager.stop() }
-            }
-        )
-
-        Divider()
-
-        TabRow(
-            selectedTabIndex = tab,
-            modifier = Modifier.fillMaxWidth(),
-            containerColor = Color.Transparent,
-            divider = { Divider() }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            TAB_LABELS.forEachIndexed { index, label ->
-                Tab(
-                    selected = tab == index,
-                    onClick = { tab = index },
-                    text = {
-                        Text(
-                            text = label,
-                            fontSize = 13.sp,
-                            fontWeight = if (tab == index) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                    },
-                    selectedContentColor = MaterialTheme.colorScheme.primary,
-                    unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            IconButton(onClick = onBack) { Icon(Icons.Filled.ArrowBack, "返回") }
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(currentName, style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    IconButton(onClick = { showRename = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Edit, "重命名", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                Text(
+                    "${instance.coreType.displayName} ${instance.mcVersion} · ${PluginManager.dirLabel(instance)} 目录",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            ServerControlButton(instance)
+            IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Filled.Delete, "删除实例") }
         }
 
+        if (showRename) {
+            RenameInstanceDialog(
+                instance = instance,
+                initialName = currentName,
+                onDismiss = { showRename = false },
+                onRenamed = { newName -> currentName = newName; showRename = false }
+            )
+        }
+        TabRow(selectedTabIndex = tab) {
+            Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("控制台") })
+            Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("插件/模组") })
+            Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("配置") })
+            Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("世界") })
+        }
+        // 内容区固定高度(weight 1f),内部页面各自滚动
         Box(Modifier.weight(1f)) {
             when (tab) {
-                0 -> ConsoleTab(instance = instance, commandHistory = commandHistory, onStart = {
-                    scope.launch {
-                        val r = ServerManager.start(instance)
-                        if (r.isFailure) messenger.toastError(r.exceptionOrNull()?.message ?: "启动失败")
-                    }
-                })
+                0 -> ConsoleTab()
                 1 -> AddonTab(instance)
                 2 -> ConfigTab(instance)
                 3 -> WorldTab(instance)
@@ -160,284 +99,383 @@ fun InstanceDetailScreen(instance: ServerInstance, onBack: () -> Unit, modifier:
         }
     }
 
-    if (showRename) {
-        RenameInstanceDialog(
-            instance = instance,
-            initialName = currentName,
-            onDismiss = { showRename = false },
-            onRenamed = { newName -> currentName = newName; showRename = false }
-        )
-    }
-
     if (showDeleteConfirm) {
-        ConfirmDialog(
-            title = "删除实例",
-            message = "将删除「${instance.name}」及其全部文件(核心/世界/插件/模组),此操作不可恢复。",
-            confirmLabel = "删除",
-            destructive = true,
-            onConfirm = {
-                scope.launch {
-                    if (ServerManager.isRunningFor(instance.id)) {
-                        messenger.toast("服务器运行中,请先停止再删除")
-                        return@launch
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("删除实例") },
+            text = { Text("将删除「${instance.name}」及其全部文件(核心/世界/插件/模组),此操作不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    scope.launch {
+                        com.mcserver.launcher.core.server.InstanceStore.delete(instance.id)
+                        onBack()
                     }
-                    InstanceStore.delete(instance.id)
-                    onBack()
-                }
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
             },
-            onDismiss = { showDeleteConfirm = false }
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("取消") } }
         )
     }
+}
 
-    if (checkCoreUpdate) {
-        CoreUpgradeDialog(
-            instance = instance,
-            upgradeInfo = upgradeInfo,
-            upgradeMsg = upgradeMsg,
-            upgrading = upgrading,
-            onDismiss = { checkCoreUpdate = false },
-            onUpgrade = { info ->
-                upgrading = true
-                scope.launch {
-                    val dir = instance.dir(InstanceStore.instancesDir)
-                    val oldJar = dir.listFiles()?.firstOrNull {
-                        it.extension == "jar" && !it.name.contains("installer") && !it.name.endsWith(".bak")
-                    }
-                    // 备份旧核心(失败可手动将 .bak 改回 .jar 恢复)
-                    if (oldJar != null) {
-                        oldJar.copyTo(File(dir, "${oldJar.name}.bak"), overwrite = true)
-                        oldJar.delete()
-                    }
-                    DownloadCenter.enqueue(
-                        id = "upgrade-${instance.id}-${System.currentTimeMillis()}",
-                        title = "升级核心 ${instance.coreType.displayName} ${info.fileName}",
-                        urls = listOf(info.url),
-                        destFile = File(dir, info.fileName)
-                    )
-                    upgrading = false
-                    upgradeInfo = null
-                    checkCoreUpdate = false
-                    messenger.toast("已加入下载中心,完成后重启服务器生效(旧核心已备份为 .bak)")
-                }
+/** 启动/停止按钮 */
+@Composable
+private fun ServerControlButton(instance: ServerInstance) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val status by ServerManager.status.collectAsState()
+    val running = ServerManager.isRunningFor(instance.id) && status == com.mcserver.launcher.data.InstanceStatus.RUNNING
+    if (running) {
+        Button(onClick = { scope.launch { ServerManager.stop() } },
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+            Icon(Icons.Filled.Stop, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("停止")
+        }
+    } else {
+        Button(onClick = {
+            scope.launch {
+                val r = ServerManager.start(instance)
+                if (r.isFailure) android.widget.Toast.makeText(context, r.exceptionOrNull()?.message ?: "启动失败", android.widget.Toast.LENGTH_LONG).show()
             }
+        }) {
+            Icon(Icons.Filled.PlayArrow, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("启动")
+        }
+    }
+}
+
+// ═══════════ 控制台 ═══════════
+
+@Composable
+private fun ConsoleTab() {
+    val scope = rememberCoroutineScope()
+    val status by ServerManager.status.collectAsState()
+    val players by ServerManager.players.collectAsState()
+    val uptime by ServerManager.uptimeSec.collectAsState()
+    var command by remember { mutableStateOf("") }
+    val logLines = remember { mutableStateListOf<String>() }
+
+    LaunchedEffect(Unit) {
+        ServerManager.console.collect { line ->
+            logLines.add(line)
+            if (logLines.size > 1000) logLines.removeRange(0, logLines.size - 1000)
+        }
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            "${status.name} · 玩家 ${players.size} · 运行 ${uptime / 60}分${uptime % 60}秒",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         )
-        LaunchedEffect(Unit) {
-            val r = runCatching {
-                val versions = CoreSources.fetchVersions(instance.coreType).getOrThrow()
-                val sameVersion = versions.firstOrNull { it.id == instance.mcVersion }
-                    ?: return@runCatching UpgradeResult.VersionGone(instance.mcVersion, versions.firstOrNull()?.id)
-                CoreSources.resolveDownload(instance.coreType, sameVersion.id, "", null)
-                    .getOrNull()?.let { dl ->
-                        val dir = instance.dir(InstanceStore.instancesDir)
-                        val existing = dir.listFiles()?.firstOrNull {
-                            it.extension == "jar" && !it.name.contains("installer") && !it.name.endsWith(".bak")
-                        }?.name
-                        if (existing == dl.fileName) UpgradeResult.None else UpgradeResult.Found(dl)
-                    } ?: UpgradeResult.None
-            }.getOrElse { UpgradeResult.Error(it.message ?: "检查失败") }
-            when (r) {
-                is UpgradeResult.Found -> upgradeInfo = r.download
-                is UpgradeResult.None -> upgradeMsg = "当前版本 ${instance.mcVersion} 已是最新构建,无需升级。"
-                is UpgradeResult.VersionGone -> upgradeMsg = "当前版本 ${instance.mcVersion} 已不再支持;如需新版请新建实例(检测到最新:${r.latest ?: "无"})。"
-                is UpgradeResult.Error -> upgradeMsg = r.msg
+        LazyColumn(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                .padding(8.dp)
+        ) {
+            items(logLines.takeLast(500)) { line ->
+                Text(line, fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                    color = if (line.contains("ERROR") || line.contains("Exception")) MaterialTheme.colorScheme.error
+                            else if (line.startsWith(">")) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 1.dp))
             }
+        }
+        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedTextField(
+                value = command, onValueChange = { command = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("输入命令,如: op Steve / say hi") },
+                singleLine = true
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(onClick = {
+                if (command.isNotBlank()) { ServerManager.sendCommand(command.trim()); command = "" }
+            }, enabled = status == com.mcserver.launcher.data.InstanceStatus.RUNNING) { Text("发送") }
         }
     }
 }
 
-@Composable
-private fun CompactTopBar(
-    instance: ServerInstance,
-    status: InstanceStatus,
-    onBack: () -> Unit,
-    onRename: () -> Unit,
-    onUpgrade: () -> Unit,
-    onDelete: () -> Unit,
-    onStart: () -> Unit,
-    onStop: () -> Unit
-) {
-    val running = status == InstanceStatus.RUNNING
+// ═══════════ 插件/模组 ═══════════
 
-    Column {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = KazeSpacing.sm, vertical = KazeSpacing.xs),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack, modifier = Modifier.size(KazeSizes.buttonHeight)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回",
-                    tint = MaterialTheme.colorScheme.onBackground)
-            }
-            Spacer(Modifier.width(KazeSpacing.sm))
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text(
-                        instance.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.width(KazeSpacing.xs))
-                    IconButton(
-                        onClick = onRename,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Filled.Edit, "重命名",
-                            Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+@Composable
+private fun AddonTab(instance: ServerInstance) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var addons by remember { mutableStateOf<List<com.mcserver.launcher.core.server.InstalledAddon>>(emptyList()) }
+    var showSearch by remember { mutableStateOf(false) }
+
+    // 本地导入(优先,不消耗流量)
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            scope.launch {
+                val dest = PluginManager.addonDir(instance)
+                uris.forEach { uri ->
+                    FileImporter.copyFile(context, uri, dest).onFailure {
+                        android.widget.Toast.makeText(context, "导入失败:${it.message}", android.widget.Toast.LENGTH_LONG).show()
                     }
                 }
-                Text(
-                    "${instance.coreType.displayName} ${instance.mcVersion}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(Modifier.width(KazeSpacing.sm))
-            StatusBadge(status = status)
-            Spacer(Modifier.width(KazeSpacing.sm))
-            // 启停按钮:与首页统一用 40dp 方形 tinted
-            val actionSize = 40.dp
-            if (running) {
-                Box(
-                    Modifier
-                        .size(actionSize)
-                        .clip(KazeCorners.tiny)
-                        .background(MaterialTheme.colorScheme.error.copy(alpha = 0.12f))
-                        .clickable(onClick = onStop),
-                    contentAlignment = androidx.compose.ui.Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.Stop, "停止",
-                        Modifier.size(KazeSizes.iconSmall),
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                }
-            } else {
-                Box(
-                    Modifier
-                        .size(actionSize)
-                        .clip(KazeCorners.tiny)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-                        .clickable(onClick = onStart),
-                    contentAlignment = androidx.compose.ui.Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.PlayArrow, "启动",
-                        Modifier.size(KazeSizes.iconSmall),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-            Spacer(Modifier.width(KazeSpacing.xxs))
-            var showMore by remember { mutableStateOf(false) }
-            IconButton(onClick = { showMore = true }, modifier = Modifier.size(KazeSizes.buttonHeight)) {
-                Icon(Icons.Filled.MoreVert, "更多操作")
-            }
-            DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
-                DropdownMenuItem(
-                    text = { Text("升级核心", style = MaterialTheme.typography.bodyMedium) },
-                    leadingIcon = { Icon(Icons.Filled.SystemUpdate, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) },
-                    onClick = { showMore = false; onUpgrade() }
-                )
-                DropdownMenuItem(
-                    text = { Text("重命名", style = MaterialTheme.typography.bodyMedium) },
-                    leadingIcon = { Icon(Icons.Filled.Edit, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) },
-                    onClick = { showMore = false; onRename() }
-                )
-                DropdownMenuItem(
-                    text = { Text("删除实例", style = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.error)) },
-                    leadingIcon = { Icon(Icons.Filled.Delete, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error) },
-                    onClick = { showMore = false; onDelete() }
-                )
+                addons = PluginManager.list(instance)
             }
         }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = KazeSpacing.pageHorizontal, vertical = KazeSpacing.xxs),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-        ) {
-            Chip(text = PluginManager.dirLabel(instance), compact = true)
-        }
-        Spacer(Modifier.height(KazeSpacing.xs))
     }
-}
 
-private sealed class UpgradeResult {
-    data class Found(val download: CoreDownload) : UpgradeResult()
-    object None : UpgradeResult()
-    data class VersionGone(val current: String, val latest: String?) : UpgradeResult()
-    data class Error(val msg: String) : UpgradeResult()
-}
+    LaunchedEffect(instance.id) { addons = PluginManager.list(instance) }
 
-@Composable
-private fun CoreUpgradeDialog(
-    instance: ServerInstance,
-    upgradeInfo: CoreDownload?,
-    upgradeMsg: String?,
-    upgrading: Boolean,
-    onDismiss: () -> Unit,
-    onUpgrade: (CoreDownload) -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("升级核心", style = MaterialTheme.typography.titleLarge) },
-        text = {
-            Column {
-                Text("当前:${instance.coreType.displayName} ${instance.mcVersion}", style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(8.dp))
-                when {
-                    upgradeInfo == null && upgradeMsg == null -> {
-                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            Text("正在检查最新版本…",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
+        Row {
+            Button(onClick = { importLauncher.launch(arrayOf("application/java-archive", "application/octet-stream")) },
+                modifier = Modifier.weight(1f)) {
+                Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("从本地导入(推荐,不耗流量)")
+            }
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = { showSearch = true }) {
+                Icon(Icons.Filled.Search, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("在线搜索")
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text("目录:${PluginManager.dirLabel(instance)} · 已装 ${addons.size} 个(禁用文件以 .disabled 结尾)",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(8.dp))
+
+        if (addons.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("还没有${PluginManager.dirLabel(instance)},点上方按钮导入本地文件或在线搜索",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(addons, key = { it.file.name }) { addon ->
+                    val disabled = addon.file.name.endsWith(".disabled")
+                    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(addon.name, style = MaterialTheme.typography.bodyMedium,
+                                    color = if (disabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+                                Text(if (disabled) "已禁用" else "已启用",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (disabled) MaterialTheme.colorScheme.error else Color(0xFF4CAF50))
+                            }
+                            TextButton(onClick = {
+                                scope.launch {
+                                    PluginManager.toggleEnabled(instance, addon.file.name)
+                                    addons = PluginManager.list(instance)
+                                }
+                            }) { Text(if (disabled) "启用" else "禁用") }
+                            IconButton(onClick = {
+                                scope.launch {
+                                    PluginManager.delete(instance, addon.file.name)
+                                    addons = PluginManager.list(instance)
+                                }
+                            }) { Icon(Icons.Filled.Delete, "删除", Modifier.size(18.dp)) }
                         }
                     }
-                    upgradeMsg != null ->
-                        Text(upgradeMsg, style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    else -> upgradeInfo?.let { info ->
-                        Text("发现新版本:${info.fileName}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(4.dp))
-                        Text("下载后将备份当前核心并替换,重启服务器生效。",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
                 }
-                if (upgrading) {
-                    Spacer(Modifier.height(12.dp))
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-            }
-        },
-        confirmButton = {
-            if (upgradeInfo != null && !upgrading) {
-                Button(onClick = { onUpgrade(upgradeInfo) }) {
-                    Icon(Icons.Filled.SystemUpdate, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("下载并替换")
-                }
-            } else {
-                TextButton(onClick = onDismiss) { Text("关闭") }
-            }
-        },
-        dismissButton = {
-            if (upgradeInfo != null || upgradeMsg != null) {
-                TextButton(onClick = onDismiss) { Text("取消") }
             }
         }
-    )
+    }
+
+    if (showSearch) {
+        ModrinthSearchDialog(
+            instance = instance,
+            onDismiss = { showSearch = false },
+            onInstalled = { scope.launch { addons = PluginManager.list(instance) } }
+        )
+    }
+}
+
+
+// ═══════════ 配置 ═══════════
+
+@Composable
+private fun ConfigTab(instance: ServerInstance) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val cfg = instance.config
+    var port by remember { mutableStateOf(cfg.serverPort.toString()) }
+    var maxRam by remember { mutableStateOf(cfg.maxRamMB.toString()) }
+    var maxPlayers by remember { mutableStateOf(cfg.maxPlayers.toString()) }
+    var motd by remember { mutableStateOf(cfg.motd) }
+    var onlineMode by remember { mutableStateOf(cfg.onlineMode) }
+    var whiteList by remember { mutableStateOf(cfg.whiteList) }
+    var pvp by remember { mutableStateOf(cfg.pvp) }
+    var gamemode by remember { mutableStateOf(cfg.gamemode) }
+    var difficulty by remember { mutableStateOf(cfg.difficulty) }
+
+    Column(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp)) {
+        item {
+        Text("服务器配置(保存后重启生效)", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedTextField(value = port, onValueChange = { port = it.filter { c -> c.isDigit() }.take(5) },
+            label = { Text("端口") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = maxRam, onValueChange = { maxRam = it.filter { c -> c.isDigit() }.take(5) },
+            label = { Text("最大内存(MB),如 2048") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = maxPlayers, onValueChange = { maxPlayers = it.filter { c -> c.isDigit() }.take(4) },
+            label = { Text("最大玩家数") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(value = motd, onValueChange = { motd = it },
+            label = { Text("服务器描述(MOTD)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+
+        Spacer(Modifier.height(12.dp))
+        SwitchRow("在线模式(正版验证)", onlineMode) { onlineMode = it }
+        SwitchRow("白名单", whiteList) { whiteList = it }
+        SwitchRow("允许 PvP", pvp) { pvp = it }
+
+        Spacer(Modifier.height(12.dp))
+        Text("游戏模式", style = MaterialTheme.typography.labelMedium)
+        Row {
+            listOf("survival", "creative", "adventure").forEach { gm ->
+                FilterChip(
+                    selected = gamemode == gm,
+                    onClick = { gamemode = gm },
+                    label = { Text(gm) },
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("难度", style = MaterialTheme.typography.labelMedium)
+        Row {
+            listOf("peaceful", "easy", "normal", "hard").forEach { d ->
+                FilterChip(
+                    selected = difficulty == d,
+                    onClick = { difficulty = d },
+                    label = { Text(d) },
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            }
+        }
+
+        }
+    }
+
+    // 保存按钮固定在底部,不受滚动影响
+    Button(onClick = {
+        val newCfg = cfg.copy(
+            serverPort = port.toIntOrNull() ?: cfg.serverPort,
+            maxRamMB = maxRam.toIntOrNull()?.coerceAtLeast(512) ?: cfg.maxRamMB,
+            maxPlayers = maxPlayers.toIntOrNull() ?: cfg.maxPlayers,
+            motd = motd,
+            onlineMode = onlineMode,
+            whiteList = whiteList,
+            pvp = pvp,
+            gamemode = gamemode,
+            difficulty = difficulty
+        )
+        com.mcserver.launcher.core.server.InstanceStore.update(instance.copy(config = newCfg))
+        android.widget.Toast.makeText(context, "配置已保存,重启服务器后生效", android.widget.Toast.LENGTH_SHORT).show()
+    }, modifier = Modifier.fillMaxWidth().padding(16.dp)) { Text("保存配置") }
+    }
 }
 
 @Composable
+private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+// ═══════════ 世界管理 ═══════════
+
+@Composable
+private fun WorldTab(instance: ServerInstance) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var worlds by remember { mutableStateOf<List<File>>(emptyList()) }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val dest = java.io.File(instance.dir(com.mcserver.launcher.core.server.InstanceStore.instancesDir), "world_import_tmp")
+                if (dest.exists()) dest.deleteRecursively()
+                com.mcserver.launcher.util.FileImporter.copyTree(context, uri, dest)
+                    .onSuccess { count ->
+                        if (count == 0) {
+                            dest.deleteRecursively()
+                            android.widget.Toast.makeText(context, "所选目录为空", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            // 导入为 world_<时间戳>
+                            val name = "world_" + System.currentTimeMillis().toString().takeLast(8)
+                            val target = java.io.File(instance.dir(com.mcserver.launcher.core.server.InstanceStore.instancesDir), name)
+                            dest.renameTo(target)
+                            android.widget.Toast.makeText(context, "已导入世界 $name(可在 server.properties 设置 level-name)", android.widget.Toast.LENGTH_SHORT).show()
+                            worlds = listWorlds(instance)
+                        }
+                    }
+                    .onFailure { err -> android.widget.Toast.makeText(context, "导入失败:${err.message}", android.widget.Toast.LENGTH_LONG).show() }
+            }
+        }
+    }
+
+    LaunchedEffect(instance.id) { worlds = listWorlds(instance) }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("世界管理", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+        Spacer(Modifier.height(4.dp))
+        Text("导入本地世界目录(优先本地,不耗流量);导入后可在配置页将 level-name 设为该目录名", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = { importLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Filled.FolderOpen, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("从本地导入世界(不耗流量)")
+        }
+        Spacer(Modifier.height(12.dp))
+        if (worlds.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("还没有世界,点上方导入", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(worlds, key = { it.name }) { world ->
+                    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(world.name, style = MaterialTheme.typography.bodyMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+                                Text(formatSize(world.length()), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = {
+                                scope.launch {
+                                    world.deleteRecursively()
+                                    worlds = listWorlds(instance)
+                                }
+                            }) { Icon(Icons.Filled.Delete, "删除世界", Modifier.size(18.dp)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 列出实例中的世界目录(含 level.dat 或 data/ 的目录) */
+private fun listWorlds(instance: ServerInstance): List<File> =
+    instance.dir(com.mcserver.launcher.core.server.InstanceStore.instancesDir).listFiles()
+        ?.filter { it.isDirectory && it.name != "plugins" && it.name != "mods" && it.name != "world_import_tmp" &&
+            (File(it, "level.dat").exists() || File(it, "data").exists()) }
+        ?.sortedBy { it.name } ?: emptyList()
+
+/** 重命名实例对话框 */
+@Composable
 private fun RenameInstanceDialog(
-    instance: ServerInstance,
+    instance: com.mcserver.launcher.data.ServerInstance,
     initialName: String,
     onDismiss: () -> Unit,
     onRenamed: (String) -> Unit
@@ -445,31 +483,24 @@ private fun RenameInstanceDialog(
     var name by remember { mutableStateOf(initialName) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名实例", style = MaterialTheme.typography.titleLarge) },
+        title = { Text("重命名实例") },
         text = {
-            Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it.take(30) },
-                    label = { Text("实例标题") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
+            androidx.compose.material3.OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(30) },
+                label = { Text("实例标题") },
+                singleLine = true
+            )
         },
         confirmButton = {
-            Button(onClick = {
+            TextButton(onClick = {
                 val newName = name.trim()
                 if (newName.isNotEmpty() && newName != instance.name) {
-                    InstanceStore.update(instance.copy(name = newName))
+                    com.mcserver.launcher.core.server.InstanceStore.update(instance.copy(name = newName))
                 }
                 onRenamed(if (newName.isEmpty()) instance.name else newName)
-            }) {
-                Text("保存")
-            }
+            }) { Text("保存") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
     )
 }

@@ -1,44 +1,142 @@
+import java.net.HttpURLConnection
+import java.net.URL
+import java.io.FileOutputStream
+import java.io.File
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-import java.io.File
-import java.util.Properties
-
 // ═══════════════════════════════════════════════════════════════
-//  内置资源校验任务 —— ★ 本地无内置 JRE 资源也允许打包 ★
+//  内置资源任务 — CI 自动运行，首次启动零下载
 //
-//  Java 运行时改为用户按需:
-//    - 在设置页「本地导入 JDK 目录」(不耗流量,推荐)
-//    - 或在设置页「在线下载」(Adoptium glibc 版,兼容老环境)
-//  Android 版 JRE 21 体积 ~160MB 不入 Git/APK,避免安装包过大。
-//  proot 三架构兼容层(~0.4MB)缺省时也只警告不阻断,回退到纯 JRE 直跑模式。
+//  说明：
+//  - proot-{aarch64,armhf}.tar.gz（含 proot 二进制 + loader + libtalloc +
+//    libandroid-shmem）已 commit 到 git（共约 228 KB），无需 task 下载
+//  - Ubuntu 24.04 rootfs（arm64 + armhf，约 55 MB）太大，由本 task 在 CI
+//    上下载到 assets/bundled/，避免 git 仓库膨胀
 // ═══════════════════════════════════════════════════════════════
+val bundledAssetsDir = layout.projectDirectory.dir("src/main/assets/bundled")
+
 val downloadBundledAssets by tasks.registering {
     group = "bundled"
-    description = "校验内置资源完整性(缺 JRE 仅警告,不阻断构建——Java 按需导入/下载)"
-    doLast {
-        val missing = mutableListOf<String>()
-        fun check(dir: File, name: String, required: Boolean = false) {
-            val f = File(dir, name)
-            if (!f.exists() || f.length() == 0L) {
-                if (required) missing += "$dir/$name"
-                else println("⚠ 可选内置资源缺失: $dir/$name (可跳过,用户会在设置页按需获取)")
+    description = "下载 Ubuntu 24.04 rootfs 和所有 Java 版本到 assets/bundled/（proot 已内置 commit）"
+
+    val ubuntuVersion = "24.04.4"
+    // 内置全部 Java 版本（8/11/17/21）+ JDK/JRE + aarch64/armhf
+    // 命名约定：java-{version}-{jdk|jre}-{arch}.tar.gz
+    val javaVersions = listOf(21, 17, 11, 8)
+    val javaFiles = linkedMapOf<String, List<String>>()
+    javaVersions.forEach { ver ->
+        val adoptiumArch = { arch: String ->
+            when (arch) {
+                "aarch64" -> "aarch64"
+                "armhf" -> "arm"
+                else -> arch
             }
         }
-        // ★ JRE 不再内置,用户按需获取;缺失不阻断,只提示
-        check(file("src/arm64v8/assets/bundled"), "jre21-arm64.tar", required = false)
-        check(file("src/arm64v8/assets/bundled"), "jre21-arm64.tar.gz", required = false)
-        // 旧兼容资源(proot 三架构),缺了只提示
-        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz", "proot-x86_64.tar.gz")
-            .forEach { check(file("src/main/assets/bundled"), it, required = false) }
-        if (missing.isNotEmpty()) {
-            println("⚠ 必需内置资源缺失(CI 环境可忽略): ${missing.joinToString()}")
-        } else {
-            println("✓ 内置资源完整")
+        listOf("jdk" to "jdk", "jre" to "jre").forEach { (pkg, apiPkg) ->
+            listOf("aarch64", "armhf").forEach { arch ->
+                // Adoptium 仅对 ARM 32-bit 提供 Java 8/11 的构建，17/21 会 404
+                if (arch == "armhf" && ver !in listOf(8, 11)) return@forEach
+                val adoptiumArchName = adoptiumArch(arch)
+                javaFiles["java-$ver-$pkg-$arch.tar.gz"] = listOf(
+                    "https://api.adoptium.net/v3/binary/latest/$ver/ga/linux/$adoptiumArchName/$apiPkg/hotspot/normal/eclipse",
+                    "https://mirrors.aliyun.com/adoptium/$ver/$pkg/$adoptiumArchName/linux/${ver}u-latest_${pkg}_linux-${adoptiumArchName}_bin.tar.gz"
+                )
+            }
         }
+    }
+
+    val files = linkedMapOf(
+        "ubuntu-base-24.04-arm64.tar.gz" to listOf(
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-arm64.tar.gz"
+        ),
+        "ubuntu-base-24.04-armhf.tar.gz" to listOf(
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-$ubuntuVersion-base-armhf.tar.gz"
+        ),
+    )
+    files.putAll(javaFiles)
+
+    doLast {
+        val destDir = bundledAssetsDir.asFile
+        destDir.mkdirs()
+
+        fun downloadOne(urlStr: String, dest: File): Boolean {
+            if (dest.exists() && dest.length() > 0) { println("  ⏭ ${dest.name}"); return true }
+            try {
+                println("  ⬇ ${dest.name} (via ${urlStr.take(60)}...)")
+                val conn = URL(urlStr).openConnection() as HttpURLConnection
+                conn.connectTimeout = 60000; conn.readTimeout = 300000
+                conn.instanceFollowRedirects = true
+                var c = conn
+                for (i in 1..5) {
+                    val code = c.responseCode
+                    if (code in listOf(301, 302, 307, 308)) {
+                        val loc = c.getHeaderField("Location") ?: break
+                        c.disconnect()
+                        c = URL(loc).openConnection() as HttpURLConnection
+                        c.connectTimeout = 60000; c.readTimeout = 300000
+                    } else break
+                }
+                check(c.responseCode == 200) { "HTTP ${c.responseCode}" }
+                val total = c.contentLengthLong
+                FileOutputStream(dest).use { out ->
+                    c.inputStream.use { inp ->
+                        val buf = ByteArray(8192); var read: Int; var d = 0L
+                        while (inp.read(buf).also { read = it } != -1) {
+                            out.write(buf, 0, read); d += read
+                            if (total > 0 && d % (5 * 1024 * 1024) == 0L)
+                                print("\r    ${d * 100 / total}%")
+                        }
+                    }
+                }
+                c.disconnect()
+                println("\r  ✓ ${dest.name} (${dest.length() / 1024 / 1024} MB)")
+                return true
+            } catch (e: Exception) {
+                System.err.println("  ✗ ${dest.name}: ${e.message}")
+                dest.delete(); return false
+            }
+        }
+
+        fun download(urls: List<String>, dest: File): Boolean {
+            for (url in urls) {
+                if (downloadOne(url, dest)) return true
+            }
+            return false
+        }
+
+        println("═══ 下载 Ubuntu rootfs ═══")
+        var ok = true
+        files.forEach { (name, urls) ->
+            if (!download(urls, File(destDir, name))) ok = false
+        }
+        // 验证 proot tarball 已 commit
+        listOf("proot-aarch64.tar.gz", "proot-armhf.tar.gz").forEach { name ->
+            val f = File(destDir, name)
+            if (!f.exists() || f.length() == 0L) {
+                System.err.println("  ✗ 缺少内置资源 $name（应已 commit 到 git）")
+                ok = false
+            } else {
+                println("  ✓ $name (${f.length() / 1024} KB, 内置)")
+            }
+        }
+        // 验证 Java 资源
+        val javaAssetNames = javaFiles.keys.toList()
+        javaAssetNames.forEach { name ->
+            val f = File(destDir, name)
+            if (!f.exists() || f.length() == 0L) {
+                System.err.println("  ✗ 缺少 Java 资源 $name")
+                ok = false
+            } else {
+                println("  ✓ $name (${f.length() / 1024 / 1024} MB)")
+            }
+        }
+        println("═══ 完成 ${if (ok) "✓" else "(有失败项)"} ═══")
     }
 }
 
@@ -57,25 +155,6 @@ android {
         } catch (_: Exception) { "unknown" }}\"")
     }
 
-    // 架构维度：arm64v8 / armv7 / universal
-    // assets 按 flavor 目录拆分（见 src/<flavor>/assets/bundled），
-    // 每个 APK 只打包对应架构的 rootfs，显著减小体积
-    flavorDimensions += "arch"
-    productFlavors {
-        create("arm64v8") {
-            dimension = "arch"
-            versionNameSuffix = "-arm64"
-        }
-        create("armv7") {
-            dimension = "arch"
-            versionNameSuffix = "-armv7"
-        }
-        create("universal") {
-            dimension = "arch"
-            versionNameSuffix = "-universal"
-        }
-    }
-
     val localProperties = Properties()
     val localPropertiesFile = rootProject.file("local.properties")
     if (localPropertiesFile.exists()) {
@@ -84,7 +163,7 @@ android {
 
     signingConfigs {
         // 优先用项目内置的 release keystore（app/release-keystore.jks，已 commit 到 git）
-        // debug 和 release 共用同一份签名 → 覆盖安装不会因签名不一致而失败
+        // 这样本地和 CI 用同一份签名，覆盖安装不会因签名不一致而失败
         // 可通过 local.properties 的 storeFile/storePassword/keyAlias/keyPassword 覆盖
         val projectKeystore = file("release-keystore.jks")
         val overrideStoreFile = localProperties.getProperty("storeFile")
@@ -92,33 +171,27 @@ android {
             localProperties.getProperty("storePassword") != null &&
             localProperties.getProperty("keyAlias") != null &&
             localProperties.getProperty("keyPassword") != null
-        when {
-            hasOverride -> {
-                create("release") {
-                    storeFile = rootProject.file(overrideStoreFile)
-                    storePassword = localProperties.getProperty("storePassword")
-                    keyAlias = localProperties.getProperty("keyAlias")
-                    keyPassword = localProperties.getProperty("keyPassword")
-                }
+        if (hasOverride) {
+            create("release") {
+                storeFile = rootProject.file(overrideStoreFile)
+                storePassword = localProperties.getProperty("storePassword")
+                keyAlias = localProperties.getProperty("keyAlias")
+                keyPassword = localProperties.getProperty("keyPassword")
             }
-            projectKeystore.exists() -> {
-                create("release") {
-                    storeFile = projectKeystore
-                    storePassword = System.getenv("KEYSTORE_PASSWORD")
-                        ?: localProperties.getProperty("storePassword")
-                        ?: "kaze_slauncher_2026"
-                    keyAlias = System.getenv("KEY_ALIAS")
-                        ?: localProperties.getProperty("keyAlias")
-                        ?: "kaze_slauncher"
-                    keyPassword = System.getenv("KEY_PASSWORD")
-                        ?: localProperties.getProperty("keyPassword")
-                        ?: "kaze_slauncher_2026"
-                }
+        } else if (projectKeystore.exists()) {
+            create("release") {
+                storeFile = projectKeystore
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                    ?: localProperties.getProperty("storePassword")
+                    ?: "kaze_slauncher_2026"
+                keyAlias = System.getenv("KEY_ALIAS")
+                    ?: localProperties.getProperty("keyAlias")
+                    ?: "kaze_slauncher"
+                keyPassword = System.getenv("KEY_PASSWORD")
+                    ?: localProperties.getProperty("keyPassword")
+                    ?: "kaze_slauncher_2026"
             }
-            else -> { /* 无可用签名配置：使用 AGP 默认 debug keystore */ }
         }
-        // 注意：AGP 已默认创建名为 debug 的 SigningConfig（指向 SDK 的 debug.keystore），
-        // 在 buildTypes 里直接复用 release 的 signingConfig 即可统一签名。
     }
 
     buildTypes {
@@ -126,16 +199,13 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfigs.findByName("release")?.let { signingConfig = it }
+            if (signingConfigs.findByName("release") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         debug {
             isMinifyEnabled = false
             isDebuggable = true
-            // debug 包名加后缀 → 可与正式版共存安装（同时装两个版本对比）
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-DEBUG"
-            signingConfigs.findByName("debug")?.let { signingConfig = it }
-                ?: signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 

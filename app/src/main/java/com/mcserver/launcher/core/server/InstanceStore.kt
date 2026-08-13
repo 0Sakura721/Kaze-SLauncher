@@ -87,18 +87,7 @@ object InstanceStore {
                             put("viewDistance", inst.config.viewDistance)
                             put("spawnProtection", inst.config.spawnProtection)
                             put("nogui", inst.config.nogui)
-                            put("levelName", inst.config.levelName)
-                            put("levelSeed", inst.config.levelSeed)
-                            put("levelType", inst.config.levelType)
-                            put("hardcore", inst.config.hardcore)
-                            put("allowNether", inst.config.allowNether)
-                            put("allowFlight", inst.config.allowFlight)
-                            put("spawnMonsters", inst.config.spawnMonsters)
-                            put("spawnAnimals", inst.config.spawnAnimals)
-                            put("maxWorldSize", inst.config.maxWorldSize)
-                            put("jvmArgs", inst.config.jvmArgs)
                             put("rconEnabled", inst.config.rconEnabled)
-                            put("autoBackupHours", inst.config.autoBackupHours)
                             put("rconPassword", inst.config.rconPassword)
                             put("rconPort", inst.config.rconPort)
                             put("autoRestart", inst.config.autoRestart)
@@ -108,11 +97,7 @@ object InstanceStore {
                     }
                 )
             }
-            // 原子写:先写临时文件再 rename,避免进程被杀时配置损坏
-            val tmp = File(prefsFile.parentFile, prefsFile.name + ".tmp")
-            tmp.writeText(arr.toString(2))
-            if (prefsFile.exists()) prefsFile.delete()
-            tmp.renameTo(prefsFile)
+            prefsFile.writeText(arr.toString(2))
         } catch (e: Exception) {
             Logger.e("save instances failed", e)
         }
@@ -138,25 +123,14 @@ object InstanceStore {
                         gamemode = c.optString("gamemode", "survival"),
                         difficulty = c.optString("difficulty", "normal"),
                         pvp = c.optBoolean("pvp", true),
-                        onlineMode = c.optBoolean("onlineMode", false),
+                        onlineMode = c.optBoolean("onlineMode", true),
                         whiteList = c.optBoolean("whiteList", false),
                         motd = c.optString("motd", "A Minecraft Server"),
                         maxRamMB = c.optInt("maxRamMB", 2048),
                         viewDistance = c.optInt("viewDistance", 10),
                         spawnProtection = c.optInt("spawnProtection", 16),
                         nogui = c.optBoolean("nogui", true),
-                        levelName = c.optString("levelName", "world"),
-                        levelSeed = c.optString("levelSeed", ""),
-                        levelType = c.optString("levelType", "default"),
-                        hardcore = c.optBoolean("hardcore", false),
-                        allowNether = c.optBoolean("allowNether", true),
-                        allowFlight = c.optBoolean("allowFlight", false),
-                        spawnMonsters = c.optBoolean("spawnMonsters", true),
-                        spawnAnimals = c.optBoolean("spawnAnimals", true),
-                        maxWorldSize = c.optInt("maxWorldSize", 29999984),
-                        jvmArgs = c.optString("jvmArgs", ""),
                         rconEnabled = c.optBoolean("rconEnabled", true),
-                        autoBackupHours = c.optInt("autoBackupHours", 0),
                         rconPassword = c.optString("rconPassword", ""),
                         rconPort = c.optInt("rconPort", 25575),
                         autoRestart = c.optBoolean("autoRestart", true),

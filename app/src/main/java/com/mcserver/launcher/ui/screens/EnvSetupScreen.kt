@@ -14,17 +14,16 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.mcserver.launcher.core.env.EnvManager
 import com.mcserver.launcher.core.env.EnvState
-import com.mcserver.launcher.ui.theme.KazeSuccess
-import com.mcserver.launcher.util.FileFormat
 import kotlinx.coroutines.launch
 
 /**
- * 环境初始化页(可选):设置页里手动触发部署兼容环境(proot 旧兼容模式)。
- * Java 运行时不在此页部署——请在设置页「Java 运行时」本地导入或在线下载。
+ * 环境初始化:进入即自动部署(解压内置 proot + Ubuntu,零下载零操作)。
+ * Java 不在初始化中下载——按需到设置页本地导入或下载。
  */
 @Composable
 fun EnvSetupScreen(onSetupComplete: () -> Unit) {
@@ -33,7 +32,7 @@ fun EnvSetupScreen(onSetupComplete: () -> Unit) {
     val items by EnvManager.items.collectAsState()
     val logs by EnvManager.log.collectAsState()
 
-    // 进入即尝试部署(proot 兼容层,不包含 Java)
+    // 进入即自动开始部署(只装必需组件,不下载 Java)
     LaunchedEffect(Unit) {
         if (EnvManager.state.value != EnvState.SETTING_UP) {
             scope.launch { EnvManager.runFullSetup(emptyList()) }
@@ -60,14 +59,13 @@ fun EnvSetupScreen(onSetupComplete: () -> Unit) {
                 Text(
                     if (state == EnvState.READY) "环境已就绪"
                     else if (state == EnvState.ERROR) "环境部署失败"
-                    else "正在初始化兼容环境…",
+                    else "正在初始化环境...",
                     style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                "部署旧版 proot + rootfs 兼容层(给 glibc 版 JDK 兜底使用);\n" +
-                    "Java 运行时请另行到「设置 → Java 运行时」本地导入或下载。",
+                "自动解压内置的 proot 与 Ubuntu 24.04(不消耗流量);Java 不需要在这里安装,之后在「设置」中按需导入或下载",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -78,7 +76,7 @@ fun EnvSetupScreen(onSetupComplete: () -> Unit) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (item.done) {
-                            Icon(Icons.Filled.Check, null, tint = KazeSuccess, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Filled.Check, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(18.dp))
                         } else {
                             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         }
@@ -90,14 +88,14 @@ fun EnvSetupScreen(onSetupComplete: () -> Unit) {
                             else if (item.phase.isNotBlank()) item.phase
                             else "等待中",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (item.done) KazeSuccess else MaterialTheme.colorScheme.primary
+                            color = if (item.done) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary
                         )
                         Spacer(Modifier.weight(1f))
                         // 数据:已处理 / 总大小 / 速度
                         if (item.processedBytes > 0 || item.totalBytes > 0) {
                             Text(
-                                "${FileFormat.size(item.processedBytes)} / ${FileFormat.size(item.totalBytes)}" +
-                                    if (item.speedBytes > 0) " · ${FileFormat.size(item.speedBytes)}/s" else "",
+                                "${formatSize(item.processedBytes)} / ${formatSize(item.totalBytes)}" +
+                                    if (item.speedBytes > 0) " · ${formatSize(item.speedBytes)}/s" else "",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -148,16 +146,12 @@ fun EnvSetupScreen(onSetupComplete: () -> Unit) {
                         Text("重试部署")
                     }
                     Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = onSetupComplete, modifier = Modifier.fillMaxWidth()) {
-                        Text("跳过,直接进入主界面(稍后在设置中处理)")
-                    }
-                    Spacer(Modifier.height(8.dp))
                     Text("部署失败:${logs.lastOrNull() ?: "未知错误"}",
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall)
                 }
                 else -> {
-                    Text("正在解压部署,请勿关闭应用…", color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Text("正在解压部署,请勿关闭应用...", color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall)
                 }
             }

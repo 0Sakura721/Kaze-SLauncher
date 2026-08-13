@@ -41,10 +41,9 @@
 
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|fontScale"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:exported="true"
             android:launchMode="singleTask"
-            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.KazeSLauncher">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -56,13 +55,6 @@
             android:name=".core.download.DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
-
-        <!-- 服务器保活前台服务:服务器运行时常驻通知,防止后台被杀 -->
-        <service
-            android:name=".core.server.ServerKeepAliveService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync"
-            android:stopWithTask="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

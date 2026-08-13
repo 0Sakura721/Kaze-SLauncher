@@ -3,7 +3,6 @@ package com.mcserver.launcher.ui.components
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -86,7 +85,7 @@ fun AddonManageScreen(instance: ServerInstance, onBack: () -> Unit, modifier: Mo
 
     LaunchedEffect(instance.id) { addons = PluginManager.list(instance) }
 
-    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(modifier.fillMaxSize()) {
         // 顶部栏
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
