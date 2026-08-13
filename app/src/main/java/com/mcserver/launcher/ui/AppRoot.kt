@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Scaffold
@@ -31,6 +32,7 @@ import com.mcserver.launcher.ui.design.GlassCard
 import com.mcserver.launcher.ui.design.GlassTray
 import com.mcserver.launcher.ui.design.RunButton
 import com.mcserver.launcher.ui.screens.ConsoleScreen
+import com.mcserver.launcher.ui.screens.ContentScreen
 import com.mcserver.launcher.ui.screens.DownloadScreen
 import com.mcserver.launcher.ui.screens.HomeScreen
 import com.mcserver.launcher.ui.screens.InstanceScreen
@@ -42,8 +44,8 @@ import com.mcserver.launcher.ui.theme.LocalKazeTokens
 fun AppRoot(vm: AppViewModel) {
     val navController = rememberNavController()
     val backStack by navController.currentBackStackEntryAsState()
-    val route = backStack?.destination?.route ?: "home"
-    val mainRoutes = listOf("home", "console", "download", "settings")
+val route = backStack?.destination?.route ?: "home"
+        val mainRoutes = listOf("home", "console", "content", "download", "settings")
     val tokens = LocalKazeTokens.current
     val engineState by ServerEngine.state.collectAsState()
 
@@ -75,6 +77,7 @@ fun AppRoot(vm: AppViewModel) {
                             items = listOf(
                                 "home" to Icons.Filled.Home,
                                 "console" to Icons.Filled.Terminal,
+                                "content" to Icons.Filled.Menu,
                                 "download" to Icons.Filled.Download,
                                 "settings" to Icons.Filled.Settings,
                             ),
@@ -103,6 +106,7 @@ fun AppRoot(vm: AppViewModel) {
             ) {
                 composable("home") { HomeScreen(vm, onOpenInstances = { navController.navigate("instance") }, onOpenSettings = { navController.navigate("settings") }) }
                 composable("console") { ConsoleScreen(vm) }
+                composable("content") { ContentScreen(vm) }
                 composable("download") { DownloadScreen(vm, onOpenInstance = { navController.navigate("instance") }) }
                 composable("settings") { SettingsScreen(vm) }
                 composable("instance") { InstanceScreen(vm, onBack = { navController.popBackStack() }) }

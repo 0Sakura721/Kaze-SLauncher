@@ -113,6 +113,64 @@ fun HomeScreen(
             return@Column
         }
 
+        // ── 环境状态卡：内置 Linux 环境 / EULA 引导 ──
+        val linuxStatus by com.mcserver.launcher.core.linux.LinuxEnv.status.collectAsState()
+        val eulaExists by vm.eulaExists
+        val eulaAgreed by vm.eulaAgreed
+        if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.NONE ||
+            linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.ERROR ||
+            (eulaExists && !eulaAgreed)
+        ) {
+            GlassCard {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                ) {
+                    if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.NONE ||
+                        linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.ERROR
+                    ) {
+                        Text(
+                            "内置 Linux 环境未就绪",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tokens.onSurface,
+                        )
+                        Text(
+                            "proot + Alpine + JDK 21，软件内独立运行全部 MC 服务端",
+                            fontSize = 11.sp,
+                            color = tokens.onSurface.copy(alpha = 0.55f),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        com.mcserver.launcher.ui.design.GradientButton(
+                            text = if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.ERROR) "重试安装" else "一键安装",
+                            onClick = { vm.installLinuxEnv() },
+                        )
+                    }
+                    if (eulaExists && !eulaAgreed) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "Minecraft EULA 待同意",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = tokens.onSurface,
+                        )
+                        Text(
+                            "服务端已生成 eula.txt，同意后即可正常启动",
+                            fontSize = 11.sp,
+                            color = tokens.onSurface.copy(alpha = 0.55f),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        com.mcserver.launcher.ui.design.GradientButton(
+                            text = "同意 EULA",
+                            onClick = { vm.acceptEula() },
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
         // ── 三环交叠仪表组（错位破界） ──
         Box(
             Modifier

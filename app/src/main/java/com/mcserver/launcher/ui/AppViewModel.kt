@@ -12,7 +12,10 @@ import com.mcserver.launcher.core.download.DownloadManager
 import com.mcserver.launcher.core.engine.JreManager
 import com.mcserver.launcher.core.engine.ServerEngine
 import com.mcserver.launcher.core.instance.CoreType
+import com.mcserver.launcher.core.instance.EulaManager
 import com.mcserver.launcher.core.instance.InstanceStore
+import com.mcserver.launcher.core.linux.LinuxEnv
+import com.mcserver.launcher.core.linux.LinuxStatus
 import com.mcserver.launcher.core.service.ServerService
 import com.mcserver.launcher.data.ServerInstance
 import com.mcserver.launcher.data.ServerState
@@ -32,6 +35,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val jreStatus get() = JreManager.status
     val jreProgress get() = JreManager.progress
     val jreVersion get() = JreManager.versionText
+    val linuxStatus get() = LinuxEnv.status
+    val linuxProgress get() = LinuxEnv.progress
+    val linuxDetail get() = LinuxEnv.detail
+
+    /** 当前实例的 EULA 状态（供 UI 展示签署条） */
+    val eulaExists = mutableStateOf(false)
+    val eulaAgreed = mutableStateOf(false)
 
     // 下载页选择态
     val coreType = mutableStateOf(CoreType.PAPER)
@@ -43,6 +53,39 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     init {
         refreshInstances()
         JreManager.refresh()
+        LinuxEnv.refresh()
+        refreshEula()
+    }
+
+    fun refreshEula() {
+        val inst = currentInstance()
+        eulaExists.value = inst?.let { EulaManager.exists(it.id) } ?: false
+        eulaAgreed.value = inst?.let { EulaManager.isAgreed(it.id) } ?: false
+    }
+
+    /** 安装内置 Linux 环境（proot + rootfs + JDK） */
+    fun installLinuxEnv() {
+        viewModelScope.launch {
+            val r = LinuxEnv.install()
+            showToast(
+                if (r.isSuccess) "Linux 环境就绪"
+                else "环境安装失败: ${r.exceptionOrNull()?.message}"
+            )
+        }
+    }
+
+    /** 同意 EULA 并保存实例标记 */
+    fun acceptEula() {
+        val inst = currentInstance() ?: return
+        if (EulaManager.accept(inst.id)) {
+            val updated = inst.copy(agreeEula = true)
+            InstanceStore.add(updated)
+            refreshInstances()
+            refreshEula()
+            showToast("已同意 EULA，可以启动了")
+        } else {
+            showToast("写入 eula.txt 失败")
+        }
     }
 
     fun refreshInstances() {
@@ -85,18 +128,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             showToast("请先创建服务器实例")
             return
         }
-        val java = JreManager.currentJavaPath()
-        if (java == null) {
-            showToast("尚未安装 JRE，请到设置页下载或导入")
+        // Java 环境：优先内置 Linux（proot + Linux JDK），回退 Android 直跑 JRE
+        val guestJava = com.mcserver.launcher.core.linux.LinuxEnv.javaBinaryInGuest()
+        val fallbackJava = JreManager.currentJavaPath()
+        val javaPath: String = if (guestJava != null && LinuxEnv.isReady()) {
+            guestJava
+        } else if (fallbackJava != null) {
+            fallbackJava
+        } else {
+            showToast("请先安装 Java 环境（设置页：内置 Linux 环境 或 JRE）")
             return
         }
-        val ok = ServerEngine.start(getApplication(), inst, java)
+        val ok = ServerEngine.start(getApplication(), inst, javaPath)
         if (ok) {
             val intent = Intent(getApplication(), ServerService::class.java)
             getApplication<Application>().startForegroundService(intent)
         } else {
             showToast("启动失败，请查看控制台日志")
         }
+        refreshEula()
     }
 
     fun stopCurrent() {
@@ -184,6 +234,103 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 showToast("下载完成：${info.fileName}")
             } else {
                 showToast("下载失败: ${r.exceptionOrNull()?.message}")
+            }
+        }
+    }
+
+    // ── 内容中心安装 ──
+
+    /** 下载并安装内容到当前实例（模组/插件/资源包/数据包/整合包） */
+    fun installContent(item: com.mcserver.launcher.core.content.ContentItem) {
+        viewModelScope.launch {
+            val inst = currentInstance()
+            if (inst == null) {
+                showToast("请先创建服务器实例")
+                return@launch
+            }
+            val pair = com.mcserver.launcher.core.content.ModrinthApi.resolveDownload(item)
+            if (pair == null) {
+                showToast("该项目暂无可用文件")
+                return@launch
+            }
+            val (url, filename) = pair
+            val dest = java.io.File(com.mcserver.launcher.data.AppPaths.downloadsDir, filename)
+            showToast("开始下载：$filename")
+            val r = DownloadManager.download(url, dest)
+            if (r.isFailure) {
+                showToast("下载失败: ${r.exceptionOrNull()?.message}")
+                return@launch
+            }
+            val dir = com.mcserver.launcher.data.AppPaths.instanceDir(inst.id)
+            try {
+                when {
+                    filename.endsWith(".mrpack") -> installPack(dest, dir)
+                    item.projectType == "mod" -> installFile(dest, java.io.File(dir, "mods"), filename)
+                    item.projectType == "plugin" -> installFile(dest, java.io.File(dir, "plugins"), filename)
+                    item.projectType == "datapack" ->
+                        installFile(dest, java.io.File(dir, "world/datapacks"), filename)
+                    item.projectType == "resourcepack" ->
+                        installFile(dest, java.io.File(dir, "resourcepacks"), filename)
+                    item.projectType == "shader" ->
+                        installFile(dest, java.io.File(dir, "shaderpacks"), filename)
+                    else -> installFile(dest, java.io.File(dir, "mods"), filename)
+                }
+                showToast("安装完成：$filename")
+            } catch (e: Exception) {
+                showToast("安装失败: ${e.message}")
+            }
+        }
+    }
+
+    private fun installFile(src: java.io.File, targetDir: java.io.File, filename: String) {
+        targetDir.mkdirs()
+        src.copyTo(java.io.File(targetDir, filename), overwrite = true)
+        src.delete()
+    }
+
+    /** 整合包：解压 overrides + 按 index 下载依赖文件 */
+    private suspend fun installPack(pack: java.io.File, dir: java.io.File) {
+        val unzipDir = java.io.File(pack.parentFile, "pack-tmp")
+        if (unzipDir.exists()) unzipDir.deleteRecursively()
+        unzipDir.mkdirs()
+        unzip(pack, unzipDir)
+        // overrides 直接覆盖到实例目录
+        java.io.File(unzipDir, "overrides").copyRecursively(dir, overwrite = true)
+        // 解析 modrinth.index.json 依赖并下载
+        val indexFile = java.io.File(unzipDir, "modrinth.index.json")
+        if (indexFile.exists()) {
+            val index = org.json.JSONObject(indexFile.readText())
+            val files = com.mcserver.launcher.core.content.ModrinthApi.resolvePackFiles(index)
+            files.forEach { f ->
+                try {
+                    val target = java.io.File(dir, f.path)
+                    target.parentFile?.mkdirs()
+                    val r = DownloadManager.download(f.url, target)
+                    if (r.isFailure) {
+                        KLog.w("整合包依赖下载失败: ${f.path}")
+                    }
+                } catch (e: Exception) {
+                    KLog.w("整合包依赖安装失败: ${f.path} ${e.message}")
+                }
+            }
+        }
+        unzipDir.deleteRecursively()
+        pack.delete()
+    }
+
+    private fun unzip(zip: java.io.File, dest: java.io.File) {
+        java.util.zip.ZipInputStream(java.io.FileInputStream(zip)).use { zis ->
+            var entry = zis.nextEntry
+            while (entry != null) {
+                val out = java.io.File(dest, entry.name)
+                if (entry.isDirectory) {
+                    out.mkdirs()
+                } else {
+                    out.parentFile?.mkdirs()
+                    java.io.FileOutputStream(out).use { fos -> zis.copyTo(fos) }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
             }
         }
     }

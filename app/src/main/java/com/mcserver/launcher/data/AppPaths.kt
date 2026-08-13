@@ -11,6 +11,7 @@ object AppPaths {
     lateinit var root: File
     lateinit var instancesDir: File
     lateinit var runtimeDir: File
+    lateinit var linuxDir: File
     lateinit var logsDir: File
     lateinit var backupsDir: File
     lateinit var downloadsDir: File
@@ -19,6 +20,7 @@ object AppPaths {
         root = context.filesDir
         instancesDir = File(root, "instances").apply { mkdirs() }
         runtimeDir = File(root, "runtime").apply { mkdirs() }     // 导入的 JRE
+        linuxDir = File(root, "linux").apply { mkdirs() }         // 内置 Linux 环境（proot + rootfs + JDK）
         logsDir = File(root, "logs").apply { mkdirs() }
         backupsDir = File(root, "backups").apply { mkdirs() }
         downloadsDir = File(root, "downloads").apply { mkdirs() }

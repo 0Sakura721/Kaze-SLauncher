@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * 液态玻璃效果层：
- * - GlassBackground：漂浮光斑背景（PiliPlus 风格启用；API31+ 真实模糊）
+ * - GlassBackground：漂浮光斑背景（液态风格启用；API31+ 真实模糊）
  * - glassSurface：玻璃卡 Modifier（半透明底 + 渐变描边 + 投影）
  * - glassHighlight：卡片左上高光叠层
  */

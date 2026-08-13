@@ -17,7 +17,7 @@ import androidx.compose.ui.unit.sp
 
 /** 当前风格令牌（全 UI 通过它取色，实现全局换肤） */
 val LocalKazeTokens = staticCompositionLocalOf<StyleTokens> {
-    Styles.forKey(StyleKeys.PILIPLUS, false)
+    Styles.forKey(StyleKeys.LIQUID, false)
 }
 
 private val KazeTypography = Typography(
@@ -63,6 +63,7 @@ private val KazeTypography = Typography(
 fun KazeTheme(
     styleKey: String,
     themeMode: Int, // 0=系统 1=浅色 2=深色
+    customSeed: Int = 0, // 用户自定义主色（ARGB，0=风格默认）
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -71,7 +72,7 @@ fun KazeTheme(
         2 -> true
         else -> systemDark
     }
-    val tokens = Styles.forKey(styleKey, isDark)
+    val tokens = Styles.forKey(styleKey, isDark, customSeed)
 
     val colorScheme = if (isDark) {
         darkColorScheme(

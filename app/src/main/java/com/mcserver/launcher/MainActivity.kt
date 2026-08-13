@@ -34,9 +34,10 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val styleKey by SettingsStore.themeStyle.collectAsState(initial = StyleKeys.PILIPLUS)
+            val styleKey by SettingsStore.themeStyle.collectAsState(initial = StyleKeys.LIQUID)
             val themeMode by SettingsStore.themeMode.collectAsState(initial = 0)
-            KazeTheme(styleKey = styleKey, themeMode = themeMode) {
+            val customColor by SettingsStore.customColor.collectAsState(initial = 0)
+            KazeTheme(styleKey = styleKey, themeMode = themeMode, customSeed = customColor) {
                 AppRoot(vm)
             }
         }

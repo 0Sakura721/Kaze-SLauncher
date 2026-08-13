@@ -75,10 +75,18 @@ object ServerEngine {
             _state.value = ServerState.Crashed(-2)
             return false
         }
-        // EULA 检查与自动同意（用户已在 UI 勾选）
+        // EULA 处理：
+        // - 用户已同意（agreeEula）：直接写 eula=true（服务端不再询问）
+        // - 未同意且 eula.txt 不存在：放行首次启动，让服务端自己生成 eula.txt（随后退出）
+        // - 未同意但 eula.txt 存在：拒绝启动，等用户在 UI 同意
         val eula = File(dir, "eula.txt")
-        if (!eula.exists() || !eula.readText().contains("eula=true")) {
-            eula.writeText("eula=true\n")
+        if (inst.agreeEula) {
+            if (!eula.exists() || !eula.readText().contains("eula=true")) {
+                eula.writeText("eula=true\n")
+            }
+        } else if (eula.exists() && !eula.readText().contains("eula=true")) {
+            KLog.w("EULA 尚未同意，请先在 UI 中同意")
+            return false
         }
         try {
             _state.value = ServerState.Starting
@@ -86,16 +94,44 @@ object ServerEngine {
             val javaArgs = mutableListOf<String>()
             inst.jvmArgs.split(" ").filter { it.isNotBlank() }.forEach(javaArgs::add)
             val cmd = mutableListOf<String>()
-            cmd.add(javaPath)
-            cmd.addAll(javaArgs)
-            cmd.add("-jar")
-            cmd.add(coreFile.absolutePath)
-            cmd.add("nogui")
+
+            // 优先使用内置 Linux 环境（proot），完整 Linux 用户态可驱动所有服务端
+            val proot = com.mcserver.launcher.core.linux.LinuxEnv.prootBinary()
+            val rootfs = com.mcserver.launcher.core.linux.LinuxEnv.rootfs()
+            val guestJava = com.mcserver.launcher.core.linux.LinuxEnv.javaBinaryInGuest()
+            val useLinux = proot != null && rootfs != null && guestJava != null
+
+            if (useLinux) {
+                cmd.add(proot.absolutePath)
+                cmd.add("-0")
+                cmd.add("-r"); cmd.add(rootfs.absolutePath)
+                cmd.add("-b"); cmd.add("/dev")
+                cmd.add("-b"); cmd.add("/proc")
+                cmd.add("-b"); cmd.add("/sys")
+                cmd.add("-b"); cmd.add("${AppPaths.linuxDir.absolutePath}:/opt")
+                cmd.add("-b"); cmd.add("${AppPaths.instancesDir.absolutePath}:/srv")
+                cmd.add("-b"); cmd.add("${AppPaths.downloadsDir.absolutePath}:/downloads")
+                cmd.add("-w"); cmd.add("/srv/${inst.id}")
+                cmd.add(guestJava)
+                cmd.addAll(javaArgs)
+                cmd.add("-jar")
+                cmd.add("/srv/${inst.id}/${inst.coreFileName}")
+                cmd.add("nogui")
+            } else {
+                cmd.add(javaPath)
+                cmd.addAll(javaArgs)
+                cmd.add("-jar")
+                cmd.add(coreFile.absolutePath)
+                cmd.add("nogui")
+            }
 
             val pb = ProcessBuilder(cmd)
                 .directory(dir)
                 .redirectErrorStream(true)
-            pb.environment()["HOME"] = dir.absolutePath
+            pb.environment()["HOME"] = if (useLinux) "/root" else dir.absolutePath
+            pb.environment()["TERM"] = "xterm"
+            pb.environment()["LANG"] = "C.UTF-8"
+            pb.environment()["PATH"] = if (useLinux) "/opt/jdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" else pb.environment()["PATH"] ?: ""
             val p = pb.start()
             process = p
             runningInstanceId = inst.id

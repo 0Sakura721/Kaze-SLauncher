@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,8 +65,9 @@ fun SettingsScreen(vm: AppViewModel) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val styleKey by SettingsStore.themeStyle.collectAsState(initial = StyleKeys.PILIPLUS)
+    val styleKey by SettingsStore.themeStyle.collectAsState(initial = StyleKeys.LIQUID)
     val themeMode by SettingsStore.themeMode.collectAsState(initial = 0)
+    val customColor by SettingsStore.customColor.collectAsState(initial = 0)
     val memPreset by SettingsStore.memoryPresetMb.collectAsState(initial = 2048)
     val jreStatus by JreManager.status.collectAsState()
     val jreProgress by JreManager.progress.collectAsState()
@@ -169,10 +171,99 @@ fun SettingsScreen(vm: AppViewModel) {
             onSelect = { scope.launch { SettingsStore.setThemeMode(it) } },
         )
 
+        Spacer(Modifier.height(16.dp))
+
+        // ── 自定义颜色 ──
+        Text("自定义颜色", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tokens.onSurface)
+        Text(
+            "选择一个主色，整体配色自动生成",
+            fontSize = 11.sp,
+            color = tokens.onSurface.copy(alpha = 0.5f),
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 默认（不自定义）
+            ColorDot(
+                color = Color.Transparent,
+                label = "默认",
+                selected = customColor == 0,
+                onClick = { scope.launch { SettingsStore.setCustomColor(0) } },
+            )
+            com.mcserver.launcher.ui.theme.Styles.CustomPresets.forEach { c ->
+                ColorDot(
+                    color = c,
+                    label = null,
+                    selected = customColor == c.toArgb(),
+                    onClick = { scope.launch { SettingsStore.setCustomColor(c.toArgb()) } },
+                )
+            }
+        }
+
         Spacer(Modifier.height(18.dp))
 
-        // ── JRE 管理 ──
-        Text("Java 运行时（JRE）", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tokens.onSurface)
+        // ── 内置 Linux 环境 ──
+        Text("内置 Linux 环境", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tokens.onSurface)
+        Spacer(Modifier.height(10.dp))
+        val linuxStatus by com.mcserver.launcher.core.linux.LinuxEnv.status.collectAsState()
+        val linuxProgress by com.mcserver.launcher.core.linux.LinuxEnv.progress.collectAsState()
+        val linuxDetail by com.mcserver.launcher.core.linux.LinuxEnv.detail.collectAsState()
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(tokens.cornerMedium))
+                .then(Modifier.glassBg(tokens))
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    when (linuxStatus) {
+                        com.mcserver.launcher.core.linux.LinuxStatus.NONE -> "未安装"
+                        com.mcserver.launcher.core.linux.LinuxStatus.DOWNLOADING -> "下载中 ${(linuxProgress * 100).toInt()}%"
+                        com.mcserver.launcher.core.linux.LinuxStatus.EXTRACTING -> "解压中…"
+                        com.mcserver.launcher.core.linux.LinuxStatus.READY -> "已就绪"
+                        com.mcserver.launcher.core.linux.LinuxStatus.ERROR -> "安装失败"
+                    },
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = tokens.onSurface,
+                )
+                Text(
+                    if (linuxDetail.isNotBlank()) linuxDetail
+                    else "proot + Alpine + JDK 21（约 200MB），可运行全部 MC 服务端",
+                    fontSize = 11.sp,
+                    color = tokens.onSurface.copy(alpha = 0.5f),
+                    maxLines = 1,
+                )
+                if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.DOWNLOADING ||
+                    linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.EXTRACTING
+                ) {
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { linuxProgress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(CircleShape),
+                        color = tokens.primary,
+                        trackColor = tokens.surfaceVariant,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        GradientButton(
+            text = if (linuxStatus == com.mcserver.launcher.core.linux.LinuxStatus.READY) "重新安装" else "一键安装",
+            enabled = linuxStatus != com.mcserver.launcher.core.linux.LinuxStatus.DOWNLOADING &&
+                linuxStatus != com.mcserver.launcher.core.linux.LinuxStatus.EXTRACTING,
+            onClick = { vm.installLinuxEnv() },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(18.dp))
+
+        // ── JRE 管理（回退环境） ──
+        Text("Java 运行时（JRE · 回退）", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = tokens.onSurface)
         Spacer(Modifier.height(10.dp))
         Row(
             Modifier
@@ -345,3 +436,47 @@ private fun copyDocTree(ctx: Context, doc: DocumentFile, dest: File) {
 
 private fun Modifier.glassBg(tokens: com.mcserver.launcher.ui.theme.StyleTokens): Modifier =
     com.mcserver.launcher.ui.theme.GlassEffects.glassSurface(this, tokens, tokens.cornerMedium, elevation = 6.dp)
+
+@Composable
+private fun ColorDot(
+    color: Color,
+    label: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val tokens = LocalKazeTokens.current
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .then(
+                    if (color == Color.Transparent) {
+                        Modifier.background(Brush.linearGradient(listOf(Color(0xFF7C6FF0), Color(0xFF2F9BF4), Color(0xFF22B8A0))))
+                    } else {
+                        Modifier.background(color)
+                    }
+                )
+                .then(
+                    if (selected) {
+                        Modifier.border(
+                            width = androidx.compose.ui.unit.Dp(2f),
+                            color = tokens.onSurface,
+                            shape = CircleShape,
+                        )
+                    } else {
+                        Modifier.border(
+                            width = androidx.compose.ui.unit.Dp(1f),
+                            color = tokens.outline,
+                            shape = CircleShape,
+                        )
+                    }
+                )
+                .clickable { onClick() }
+        )
+        if (label != null) {
+            Spacer(Modifier.height(3.dp))
+            Text(label, fontSize = 10.sp, color = tokens.onSurface.copy(alpha = 0.6f))
+        }
+    }
+}
