@@ -1,9 +1,8 @@
-// CI 环境（GitHub Actions 等）直连官方源；本地 proot 环境走国内镜像加速
-val isCi = System.getenv("CI") != null || System.getenv("GITHUB_ACTIONS") != null
-
+// CI 环境（GitHub Actions 等）直连官方源；本地 proot 环境走国内镜像加速。
+// 注意：pluginManagement 块是独立脚本作用域，不能用顶层变量，需内联环境判断。
 pluginManagement {
     repositories {
-        if (isCi) {
+        if (System.getenv("CI") != null || System.getenv("GITHUB_ACTIONS") != null) {
             google()
             mavenCentral()
             gradlePluginPortal()
@@ -28,7 +27,7 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        if (isCi) {
+        if (System.getenv("CI") != null || System.getenv("GITHUB_ACTIONS") != null) {
             google()
             mavenCentral()
         } else {
