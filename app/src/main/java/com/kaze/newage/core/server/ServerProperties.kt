@@ -1,0 +1,91 @@
+package com.kaze.newage.core.server
+
+import com.kaze.newage.data.model.ServerInstance
+import java.io.File
+
+/**
+ * server.properties 读写工具（Java Properties 格式）。
+ * 支持：读取（保留注释与未知键）、按需写入、为新建实例分配空闲端口。
+ */
+object ServerProperties {
+
+    private val DEFAULT_PORT = 25565
+
+    /** 读取为有序 Map（保留原文件顺序；缺失返回空） */
+    fun load(dir: File): LinkedHashMap<String, String> {
+        val map = LinkedHashMap<String, String>()
+        val file = File(dir, "server.properties")
+        if (!file.exists()) return map
+        file.readLines().forEach { line ->
+            val trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!")) return@forEach
+            val idx = trimmed.indexOf('=')
+            if (idx > 0) {
+                val key = trimmed.substring(0, idx).trim()
+                val value = trimmed.substring(idx + 1).trim()
+                if (key.isNotEmpty()) map[key] = value
+            }
+        }
+        return map
+    }
+
+    /** 写入（追加未知键：原文件里存在但 map 中没有的键会被丢弃；顺序 = 模板顺序 + 未知键） */
+    fun save(dir: File, props: Map<String, String>) {
+        val file = File(dir, "server.properties")
+        file.parentFile?.mkdirs()
+        val sb = StringBuilder()
+        sb.append("# Minecraft server properties\n")
+        sb.append("# 由 Kaze SLauncher 管理（手动编辑同名文件会被覆盖）\n")
+        val written = mutableSetOf<String>()
+        for ((k, v) in props) {
+            sb.append(k).append('=').append(v).append('\n')
+            written.add(k)
+        }
+        // 追加原文件中未管理的键，避免丢配置
+        val existing = load(dir)
+        for ((k, v) in existing) {
+            if (k !in written) {
+                sb.append(k).append('=').append(v).append('\n')
+                written.add(k)
+            }
+        }
+        file.writeText(sb.toString())
+    }
+
+    /** 默认模板（新实例初始化用） */
+    fun defaults(port: Int, motd: String): LinkedHashMap<String, String> = linkedMapOf(
+        "motd" to motd,
+        "server-port" to port.toString(),
+        "max-players" to "20",
+        "gamemode" to "survival",
+        "difficulty" to "easy",
+        "pvp" to "true",
+        "online-mode" to "true",
+        "white-list" to "false",
+        "allow-flight" to "false",
+        "enable-command-block" to "false",
+        "hardcore" to "false",
+        "view-distance" to "10",
+        "simulation-distance" to "10",
+        "spawn-protection" to "16",
+    )
+
+    /** 为新实例分配空闲端口（25565 起，跳过已占用的） */
+    fun findFreePort(instances: List<ServerInstance>): Int {
+        val used = instances.mapNotNull { inst ->
+            load(inst.dir)["server-port"]?.toIntOrNull()
+        }.toSet()
+        var port = DEFAULT_PORT
+        while (port in used) port++
+        return port
+    }
+
+    /** 若实例目录无 server.properties，写入默认模板（端口自动分配，motd 用实例名） */
+    fun ensureInitial(instance: ServerInstance, allInstances: List<ServerInstance>) {
+        val file = File(instance.dir, "server.properties")
+        if (!file.exists()) {
+            val port = findFreePort(allInstances.filter { it.id != instance.id })
+            save(instance.dir, defaults(port, instance.name))
+        }
+    }
+}

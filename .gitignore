@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+**/build/
+gradle-user-home/
+.gradle-user-home/
+
+# Android Studio / IDEA
+.idea/
+*.iml
+local.properties
+
+# Kotlin
+.kotlin/
+
+# 临时目录
+.tmp/
+*.log
+captures/
+screens/
+.externalNativeBuild/
+.cxx/
+
+# 签名
+*.jks
+*.keystore
+!debug.keystore
+!release-keystore.jks
+
+# OS
+.DS_Store
+Thumbs.db
