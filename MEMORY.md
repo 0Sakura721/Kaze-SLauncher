@@ -44,6 +44,7 @@
 - **真机 run-as 诊断法**：push 诊断脚本到 /data/local/tmp + `run-as com.kaze.newage sh /data/local/tmp/diag.sh`（CWD=/，脚本内绝对路径 + cd 目录 + 设 PROOT_LOADER/LD_LIBRARY_PATH/PROOT_NO_SECCOMP）。注意 run-as 无法访问 /storage/emulated/0 且无 seccomp，只能证明"文件与 proot 本身 OK"，应用内问题必须以应用自身日志定位（proot -v 4 输出会经 console 流落盘）。
 - 资产长度校验：`assets.openFd` 对 compressed 资产抛异常 → 用 `assets.open().use { it.available().toLong() }`。
 - 日志证据：`/storage/emulated/0/Android/data/com.kaze.newage/files/instances/man/console-output.log` 会累积历史会话错误，诊断前先 rm 再触发。
+- **✅ 端到端跑通（2026-08-16 14:24，vivo 真机）**：应用内 启动服务端 → proot(nativeLibraryDir) → Ubuntu rootfs(内部463MB) → Temurin Java 25 → vanilla-26.1.1 → "Preparing level world / All chunks are saved / Server empty for 60 seconds, pausing"，adb forward 25565 TcpTestSucceeded=True。已提交推送 0815（62cb90e）。遗留：authlib 周期性网络 WARNING（无害）；局域网直连手机 IP 需手机防火墙放行（vivo 可能默认拦）。
 
 ## 模拟器测试（MuMu 12，重要发现）
 - adb 设备：emulator-5554（伪装 vivo V2203A），Android 15，主 ABI x86_64 但 **abilist 含 arm64-v8a**（houdini ARM 翻译层）→ `Build.SUPPORTED_ABIS` 判定走 arm64 路线，**proot aarch64 二进制可运行**（日志 `houdini: executing proot`）。
