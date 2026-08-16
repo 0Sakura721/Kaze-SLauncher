@@ -277,44 +277,49 @@ private fun VersionConfigPhase(
             }
 
             // ── 版本列表 ──
-            // borderless：选择版本的「MC 版本」框不带边框（用户指定），内容直接铺在卡片上
-            BackgroundCard(Modifier.fillMaxWidth(), borderless = true) {
-                CardTitleLayout("MC 版本", trailing = {
+            // 不用卡片：版本选择区域直接铺在页面背景上（无白色底板/无标题块/无分隔线，彻底无框）
+            Column(Modifier.fillMaxWidth()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("MC 版本", style = MaterialTheme.typography.titleMedium)
                     if (versionsLoading) {
                         Text("加载中…", style = MaterialTheme.typography.labelSmall)
                     }
-                }) {
-                    when {
-                        versionsLoading -> {
-                            LinearProgressIndicator(Modifier.fillMaxWidth())
-                        }
-                        filtered.isEmpty() -> {
-                            Text(
-                                if (versions.isEmpty()) "版本列表加载失败，请检查网络" else "没有匹配的版本",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        else -> {
-                            // 版本行用普通 Column（父级为滚动容器，避免嵌套 LazyColumn 崩溃）；
-                            // 数量上限保护，超出提示用搜索缩小范围
-                            val shown = filtered.take(40)
-                            Column(Modifier.fillMaxWidth()) {
-                                shown.forEach { v ->
-                                    VersionRow(
-                                        version = v,
-                                        selected = mcVersion == v.id,
-                                        onSelect = { mcVersion = v.id },
-                                    )
-                                }
-                                if (filtered.size > shown.size) {
-                                    Text(
-                                        "共 ${filtered.size} 个版本，输入关键字缩小范围",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    )
-                                }
+                }
+                when {
+                    versionsLoading -> {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                    filtered.isEmpty() -> {
+                        Text(
+                            if (versions.isEmpty()) "版本列表加载失败，请检查网络" else "没有匹配的版本",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                        )
+                    }
+                    else -> {
+                        // 版本行用普通 Column（父级为滚动容器，避免嵌套 LazyColumn 崩溃）；
+                        // 数量上限保护，超出提示用搜索缩小范围
+                        val shown = filtered.take(40)
+                        Column(Modifier.fillMaxWidth()) {
+                            shown.forEach { v ->
+                                VersionRow(
+                                    version = v,
+                                    selected = mcVersion == v.id,
+                                    onSelect = { mcVersion = v.id },
+                                )
+                            }
+                            if (filtered.size > shown.size) {
+                                Text(
+                                    "共 ${filtered.size} 个版本，输入关键字缩小范围",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                )
                             }
                         }
                     }
