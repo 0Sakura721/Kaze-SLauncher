@@ -21,10 +21,9 @@ import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 
 /**
- * 应用级背景：
- *  - 默认使用当前主题的背景层（M3 平面 / GLASS 柔光）
- *  - 用户在设置中启用背景图后，背景图（模糊 + 遮罩）替代主题背景层
- *  - 背景层作为 Haze 的模糊源（安卓原生液态玻璃：卡片经 hazeEffect 采样此处做真实背景模糊）
+ * 应用级状态提供者：提供 Haze 模糊状态与玻璃模糊开关。
+ * 背景绘制抽成 BackdropLayer（由 AppRoot 放进单一 hazeSource 内——多个 hazeSource
+ * 同 state 会互相覆盖导致底栏模糊采样不到内容，真机实测"没任何效果"）。
  * 背景图方案借鉴 ZalithLauncher2（GPL-3.0），Haze 模糊方案照搬 BiliPai（GPL-3.0）。
  */
 @Composable
@@ -37,36 +36,32 @@ fun AppBackground(
         LocalHazeState provides hazeState,
         LocalGlassBlurEnabled provides prefs.glassBlur.value,
     ) {
-        Box(Modifier.fillMaxSize()) {
-            // 背景层作为 Haze 模糊源
+        content()
+    }
+}
+
+/** 背景层：背景图（模糊+遮罩）或主题背景渐变 */
+@Composable
+fun BackdropLayer(prefs: SettingsPrefs, modifier: Modifier = Modifier) {
+    Box(modifier) {
+        val path = if (prefs.bgEnabled.value) prefs.backgroundImagePath() else null
+        val bitmap = remember(path) { path?.let { BitmapFactory.decodeFile(it) } }
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(prefs.bgBlur.floatValue.dp()),
+            )
             Box(
                 Modifier
                     .fillMaxSize()
-                    .hazeSource(state = hazeState)
-            ) {
-                val path = if (prefs.bgEnabled.value) prefs.backgroundImagePath() else null
-                val bitmap = remember(path) { path?.let { BitmapFactory.decodeFile(it) } }
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .blur(prefs.bgBlur.floatValue.dp()),
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(Color.Black.copy(alpha = prefs.bgOpacity.floatValue / 100f))
-                    )
-                } else {
-                    ThemeBackdrop(Modifier.fillMaxSize())
-                }
-            }
-            // 内容层不在此包 hazeSource（AppRoot 里只包 NavHost——绝不能把底栏自身包进模糊源，
-            // 否则底栏把自己模糊进缓存形成自反馈，玻璃映射效果全无）
-            content()
+                    .background(Color.Black.copy(alpha = prefs.bgOpacity.floatValue / 100f))
+            )
+        } else {
+            ThemeBackdrop(Modifier.fillMaxSize())
         }
     }
 }

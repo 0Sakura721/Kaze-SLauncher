@@ -48,6 +48,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.kaze.newage.ui.components.AppBackground
+import com.kaze.newage.ui.components.BackdropLayer
 import com.kaze.newage.ui.screens.AddonsScreen
 import com.kaze.newage.ui.screens.ConsoleScreen
 import com.kaze.newage.ui.screens.HomeScreen
@@ -91,15 +92,17 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     AppBackground(prefs = uiPrefs) {
         // 覆盖式布局（不用 Scaffold 的 bottomBar 预留位）：
         // 内容全屏滚动，可以"穿过"常驻底栏——滚动中的文字/卡片经 hazeSource 进入模糊源，
-        // 被底栏的液态玻璃实时映射（模糊的字）；底部留 80dp，滚动到底时内容不被底栏遮挡
+        // 被底栏的液态玻璃实时映射（模糊的字）
         Box(Modifier.fillMaxSize()) {
-            // 内容层作为 Haze 模糊源（只包 NavHost，绝不包含底栏自身——避免模糊自反馈）
-            val contentHaze = LocalHazeState.current
+            // 单一 hazeSource：背景 + 内容合并进同一模糊源（多个 source 同 state 会互相覆盖，
+            // 导致底栏模糊采样不到内容——真机实测"没任何效果"的根因）；底栏在 source 之外
+            val hazeState = LocalHazeState.current
             Box(
                 Modifier
                     .fillMaxSize()
-                    .then(if (contentHaze != null) Modifier.hazeSource(state = contentHaze) else Modifier)
+                    .then(if (hazeState != null) Modifier.hazeSource(state = hazeState) else Modifier)
             ) {
+                BackdropLayer(prefs = uiPrefs, modifier = Modifier.fillMaxSize())
                 NavHost(
                     navController = navController,
                     startDestination = Dest.Home.route,
