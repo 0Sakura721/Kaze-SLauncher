@@ -66,41 +66,42 @@ fun Modifier.glassBackdropBlur(
     contentLayer: GraphicsLayer,
     sampleScale: Float = 0.25f,
 ): Modifier = composed {
+    val smallLayer = rememberGraphicsLayer()
     var cached by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     // 底栏节点在窗口中的实际坐标（px）：模糊源必须取底栏**正下方**的内容区域
     var offsetInWin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val s = sampleScale.coerceIn(0.08f, 0.6f)
-    // 每帧：全屏栅格化 → 缩小（缩小=盒式模糊）→ 缓存。
-    // 不用 GraphicsLayer.record 降采样（实测 record 内 scale 不生效，小图尺寸=宿主节点尺寸）
+    // 性能关键：只栅格化**底栏那一小条区域**（约节点尺寸×s²≈15KB），
+    // 而不是全屏 14MB；每 2 帧栅格化一次（30fps 模糊更新，滚动时无感）
     LaunchedEffect(contentLayer, s) {
+        var frame = 0
         while (true) {
             androidx.compose.runtime.withFrameNanos { }
-            try {
-                val full = contentLayer.toImageBitmap().asAndroidBitmap()
-                val small = android.graphics.Bitmap.createScaledBitmap(
-                    full,
-                    (full.width * s).toInt().coerceAtLeast(1),
-                    (full.height * s).toInt().coerceAtLeast(1),
-                    true,
-                )
-                if (full !== small) full.recycle()
-                cached = small.asImageBitmap()
-            } catch (_: Exception) { }
+            frame++
+            if (frame and 1 == 0) cached = smallLayer.toImageBitmap()
         }
     }
     this
         .onGloballyPositioned { offsetInWin = it.positionInWindow() }
         .drawWithContent {
+            val barW = (size.width * s).toInt().coerceAtLeast(1)
+            val barH = (size.height * s).toInt().coerceAtLeast(1)
+            // 显式 record(size)（Miuix LayerRecorder 同款）：视口=底栏区域缩小图；
+            // 平移使视口对准底栏窗口位置，再缩比降采样（录制即盒式模糊）
+            smallLayer.record(androidx.compose.ui.unit.IntSize(barW, barH)) {
+                withTransform({
+                    translate(-offsetInWin.x, -offsetInWin.y)
+                    scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero)
+                }) {
+                    drawLayer(contentLayer)
+                }
+            }
             val bmp = cached ?: return@drawWithContent
-            // 取底栏正下方区域（按窗口坐标换算）等比放大绘制（线性过滤放大 = 模糊）
-            val barH = (size.height * s).toInt().coerceIn(1, bmp.height)
-            val barW = (size.width * s).toInt().coerceIn(1, bmp.width)
-            val srcTop = (offsetInWin.y * s).toInt().coerceIn(0, (bmp.height - barH).coerceAtLeast(0))
-            val srcLeft = (offsetInWin.x * s).toInt().coerceIn(0, (bmp.width - barW).coerceAtLeast(0))
+            // 线性放大绘制（降采样放大 = 模糊），src 即整张小图
             drawImage(
                 image = bmp,
-                srcOffset = androidx.compose.ui.unit.IntOffset(srcLeft, srcTop),
-                srcSize = androidx.compose.ui.unit.IntSize(barW, barH),
+                srcOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                srcSize = androidx.compose.ui.unit.IntSize(bmp.width, bmp.height),
                 dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
                 dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()),
                 filterQuality = androidx.compose.ui.graphics.FilterQuality.Low,
