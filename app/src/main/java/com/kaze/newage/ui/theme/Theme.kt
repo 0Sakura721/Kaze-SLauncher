@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
@@ -210,10 +211,10 @@ fun NewAgeTheme(
 ) {
     val context = LocalContext.current
     val style = runCatching { PaletteStyle.valueOf(paletteStyle) }.getOrDefault(PaletteStyle.TonalSpot)
+    val seed = if (colorSource == "custom") parseSeedColor(customColorHex) else null
 
     val scheme: ColorScheme = when (mode) {
         AppThemeMode.M3 -> {
-            val seed = if (colorSource == "custom") parseSeedColor(customColorHex) else null
             when {
                 // materialkolor 2.x：seedColor 为 Compose Color；原生支持 isAmoled 纯黑
                 seed != null -> dynamicColorScheme(
@@ -246,13 +247,15 @@ fun NewAgeTheme(
         )
     } else scheme
 
-    // 深色下整体提亮次级文字/描边：动态色的 onSurfaceVariant 在深底上偏暗，
-    // 各界面次级文字"颜色一模一样灰蒙蒙看不清"——向白 lerp 保留色相、提升对比度
+    // 深色可读性保险：中性文字角色不依赖动态色板，统一使用验证过的亮色系；
+    // 主/次/第三色仍保留动态取色。（历史根因：M3 1.3 MaterialTheme 不提供
+    // LocalContentColor，默认文字色=Color.Black，深色下整段文字与黑底融为一体。）
     val effectiveScheme = if (darkTheme) {
-        fun lift(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color.White, 0.32f)
         amoledAdjusted.copy(
-            onSurfaceVariant = lift(amoledAdjusted.onSurfaceVariant),
-            outline = lift(amoledAdjusted.outline),
+            onSurface = Color(0xFFE8ECF4),
+            onBackground = Color(0xFFE8ECF4),
+            onSurfaceVariant = Color(0xFFAEB8CC),
+            outline = Color(0xFF5E6A86),
         )
     } else amoledAdjusted
 
@@ -262,6 +265,9 @@ fun NewAgeTheme(
         LocalGlassMode provides glassMode,
         LocalGlassIntensity provides glassIntensity,
         LocalAmoledDark provides (darkTheme && amoledDark),
+        // M3 1.3.x 的 MaterialTheme 不再提供 LocalContentColor（默认值=Color.Black），
+        // 未显式指定颜色的 Text 在深色下会整段渲染成纯黑——这里按 scheme 显式补上
+        LocalContentColor provides effectiveScheme.onBackground,
     ) {
         MaterialTheme(colorScheme = effectiveScheme, content = content)
     }
