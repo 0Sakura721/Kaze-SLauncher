@@ -53,12 +53,13 @@ fun ThemeBackdrop(modifier: Modifier = Modifier) {
     }
 }
 
-/** CLEAR：轻微纵向渐变，保持克制 */
+/** CLEAR：轻微纵向渐变，保持克制；AMOLED 纯黑时全黑 */
 @Composable
 private fun ClearBackdrop(modifier: Modifier = Modifier) {
     val dark = LocalDarkTheme.current
-    val top = if (dark) Color(0xFF10131B) else Color(0xFFF7F9FC)
-    val bottom = if (dark) Color(0xFF0B0E14) else Color(0xFFEEF1F7)
+    val amoled = LocalAmoledDark.current
+    val top = if (amoled) Color.Black else if (dark) Color(0xFF10131B) else Color(0xFFF7F9FC)
+    val bottom = if (amoled) Color.Black else if (dark) Color(0xFF0B0E14) else Color(0xFFEEF1F7)
     Box(modifier.background(Brush.verticalGradient(listOf(top, bottom))))
 }
 
@@ -69,6 +70,7 @@ private fun ClearBackdrop(modifier: Modifier = Modifier) {
 @Composable
 private fun GlassBackdrop(modifier: Modifier = Modifier) {
     val dark = LocalDarkTheme.current
+    val amoled = LocalAmoledDark.current
     val still = reducedMotion()
     val transition = rememberInfiniteTransition(label = "glass")
     val phase by transition.animateFloat(
@@ -84,6 +86,12 @@ private fun GlassBackdrop(modifier: Modifier = Modifier) {
         val h = size.height
         val m = max(w, h)
         val twoPi = (2 * PI).toFloat()
+
+        // AMOLED 纯黑：全黑底、无光斑（发光像素违背纯黑省电语义）
+        if (amoled) {
+            drawRect(Color.Black)
+            return@Canvas
+        }
 
         // 底色
         drawRect(

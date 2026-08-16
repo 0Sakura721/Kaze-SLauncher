@@ -73,6 +73,9 @@ val LocalGlassMode = staticCompositionLocalOf { GlassMode.BALANCED }
 /** 玻璃强度（0.5..1.5）：glassSaturation 饱和度与透镜折射幅度按此缩放 */
 val LocalGlassIntensity = staticCompositionLocalOf { 1f }
 
+/** AMOLED 纯黑深色样式（背景层自绘渐变需感知，不能只靠 colorScheme） */
+val LocalAmoledDark = staticCompositionLocalOf { false }
+
 // ── M3 静态兜底（API<31 或取色失败时使用）──
 private val M3Light = lightColorScheme(
     primary = Color(0xFF3563E9),
@@ -248,6 +251,7 @@ fun NewAgeTheme(
         LocalDarkTheme provides darkTheme,
         LocalGlassMode provides glassMode,
         LocalGlassIntensity provides glassIntensity,
+        LocalAmoledDark provides (darkTheme && amoledDark),
     ) {
         MaterialTheme(colorScheme = effectiveScheme, content = content)
     }
