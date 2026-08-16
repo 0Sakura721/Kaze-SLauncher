@@ -109,7 +109,8 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             NavHost(
                 navController = navController,
                 startDestination = Dest.Home.route,
-                modifier = Modifier.padding(padding),
+                // 底部额外留白：内容不被常驻底栏遮挡（底栏已透明，靠留白保证可读）
+                modifier = Modifier.padding(padding).padding(bottom = 20.dp),
             ) {
                 composable(Dest.Home.route) {
                     HomeScreen(viewModel, onNavigate = { navController.navigate(it) })
@@ -185,11 +186,9 @@ private fun LiquidGlassNavBar(
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val pillShape = CircleShape
     val glassActive = isGlass && blurEnabled && hazeState != null
-    val containerColor = if (glassActive) {
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.4f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
-    }
+    // 底栏背景：完全透明（无白板）。玻璃激活时由「模糊+饱和度+透镜」构成玻璃本体，
+    // 不需要半透明色板；非玻璃时图标直接悬浮在页面上，遮挡交给各页底部空白
+    val containerColor = androidx.compose.ui.graphics.Color.Transparent
 
     Box(
         Modifier
