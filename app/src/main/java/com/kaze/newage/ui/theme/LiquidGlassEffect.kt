@@ -5,14 +5,21 @@ import android.graphics.RuntimeShader
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 
 /**
  * 液态玻璃效果库（对齐「现在的 BiliPai」= Miuix + Kyant0/AndroidLiquidGlass，均为 Apache-2.0）：
@@ -38,6 +45,53 @@ fun Modifier.glassSaturation(factor: Float? = null): Modifier = composed {
         ).asComposeRenderEffect()
     }
     this.graphicsLayer { renderEffect = effect }
+}
+
+/**
+ * 底栏玻璃背景：**软件模糊**（vivo Android 16 实测 RenderEffect blur 不渲染——
+ * Haze 与自研 graphicsLayer renderEffect 均无效，100dp 极端值文字仍清晰）。
+ * 原理：draw 阶段把录制的内容层降采样 record 进小 GraphicsLayer（指令级，廉价）；
+ * 协程每帧 toImageBitmap 栅格化小图并缓存；绘制时线性放大（降采样放大 = 模糊，
+ * 与 GPU 模糊支持无关，任何设备都生效）。
+ *
+ * @param contentLayer 录制了全屏内容的 GraphicsLayer
+ * @param sampleScale 降采样比例（越小越糊；0.25 柔和，0.12 强糊）
+ */
+@Composable
+fun Modifier.glassBackdropBlur(
+    contentLayer: GraphicsLayer,
+    sampleScale: Float = 0.25f,
+): Modifier = composed {
+    val smallLayer = rememberGraphicsLayer()
+    var cached by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    val s = sampleScale.coerceIn(0.08f, 0.6f)
+    // 每帧把最近一次 record 的小图栅格化（toImageBitmap 是 suspend，只能在此调用）
+    LaunchedEffect(contentLayer, s) {
+        while (true) {
+            androidx.compose.runtime.withFrameNanos { }
+            cached = smallLayer.toImageBitmap()
+        }
+    }
+    this.drawWithContent {
+        // 1) 内容降采样录制（必须发生在 draw 阶段）
+        smallLayer.record {
+            withTransform({ scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) }) {
+                drawLayer(contentLayer)
+            }
+        }
+        val bmp = cached ?: return@drawWithContent
+        // 2) 取底部对应区域放大绘制（线性过滤放大 = 模糊）
+        val barH = (size.height * s).coerceAtMost(bmp.height.toFloat())
+        val srcTop = (bmp.height - barH).coerceAtLeast(0f)
+        drawImage(
+            image = bmp,
+            srcOffset = androidx.compose.ui.unit.IntOffset(0, srcTop.toInt()),
+            srcSize = androidx.compose.ui.unit.IntSize(bmp.width, barH.toInt()),
+            dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
+            dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()),
+            filterQuality = androidx.compose.ui.graphics.FilterQuality.Low,
+        )
+    }
 }
 
 /**

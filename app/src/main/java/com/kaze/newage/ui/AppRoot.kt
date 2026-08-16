@@ -36,7 +36,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -62,12 +65,8 @@ import com.kaze.newage.ui.theme.LocalAppTheme
 import com.kaze.newage.ui.theme.LocalGlassBlurEnabled
 import com.kaze.newage.ui.theme.LocalGlassIntensity
 import com.kaze.newage.ui.theme.LocalGlassMode
-import com.kaze.newage.ui.theme.LocalHazeState
-import com.kaze.newage.ui.theme.glassNavBarHazeStyle
-import com.kaze.newage.ui.theme.glassSaturation
+import com.kaze.newage.ui.theme.glassBackdropBlur
 import com.kaze.newage.ui.theme.liquidGlassLensSafe
-import dev.chrisbanes.haze.hazeEffect
-import dev.chrisbanes.haze.hazeSource
 
 enum class Dest(
     val route: String,
@@ -94,13 +93,18 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         // 内容全屏滚动，可以"穿过"常驻底栏——滚动中的文字/卡片经 hazeSource 进入模糊源，
         // 被底栏的液态玻璃实时映射（模糊的字）
         Box(Modifier.fillMaxSize()) {
-            // 单一 hazeSource：背景 + 内容合并进同一模糊源（多个 source 同 state 会互相覆盖，
-            // 导致底栏模糊采样不到内容——真机实测"没任何效果"的根因）；底栏在 source 之外
-            val hazeState = LocalHazeState.current
+            // 内容层录制进 GraphicsLayer：底栏自研模糊从该层重绘底部区域
+            //（Haze 的 hazeSource 在 vivo 上采集失效，blur 不执行——已弃用）
+            val contentLayer = rememberGraphicsLayer()
             Box(
                 Modifier
                     .fillMaxSize()
-                    .then(if (hazeState != null) Modifier.hazeSource(state = hazeState) else Modifier)
+                    .drawWithContent {
+                        contentLayer.record {
+                            this@drawWithContent.drawContent()
+                        }
+                        drawLayer(contentLayer)
+                    }
             ) {
                 BackdropLayer(prefs = uiPrefs, modifier = Modifier.fillMaxSize())
                 NavHost(
@@ -167,6 +171,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                     LiquidGlassNavBar(
                         currentRoute = currentRoute,
+                        contentLayer = contentLayer,
                         onNavigate = { dest ->
                             navController.navigate(dest.route) {
                                 popUpTo(navController.graph.findStartDestination().id) {
@@ -194,20 +199,19 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
 @Composable
 private fun LiquidGlassNavBar(
     currentRoute: String?,
+    contentLayer: androidx.compose.ui.graphics.layer.GraphicsLayer,
     onNavigate: (Dest) -> Unit,
 ) {
     val isGlass = LocalAppTheme.current == AppThemeMode.GLASS
-    val hazeState = LocalHazeState.current
     val blurEnabled = LocalGlassBlurEnabled.current
     val density = LocalDensity.current
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val pillShape = CircleShape
     // 玻璃链只属于液态玻璃主题；M3 主题底栏保持原样式（不透明表面板，不参与模糊映射）
-    val glassActive = isGlass && blurEnabled && hazeState != null
-    // 底栏背景：玻璃主题=极淡磨砂（真机由 Haze 真模糊成型，模拟器也有玻璃雾感）；
-    // M3 主题=原样式不透明表面板
+    val glassActive = isGlass && blurEnabled
+    // 底栏背景：玻璃主题=极淡磨砂（自研 RenderEffect 模糊成型）；M3 主题=原样式不透明表面板
     val containerColor = if (isGlass) {
-        // 0.12 极淡表面：折射与轻模糊主导"液态"观感，磨砂太厚会盖住折射弯曲
+        // 0.12 极淡表面：折射与模糊主导"液态"观感，磨砂太厚会盖住折射弯曲
         MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.12f)
     } else {
         MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
@@ -226,20 +230,25 @@ private fun LiquidGlassNavBar(
                 .shadow(10.dp, pillShape, clip = false)
                 .clip(pillShape)
         ) {
-            // 层①：玻璃背景（BiliPai drawBackdrop 等效）——模糊+饱和度+透镜只作用于背景
+            // 层①：玻璃背景——自研：重绘内容层底部区域 + RenderEffect(blur→饱和度) 链，
+            // 再套 Kyant0 折射透镜（嵌套 graphicsLayer 各自 renderEffect）
             Box(
                 Modifier
                     .fillMaxSize()
                     .then(
                         if (glassActive) {
                             val glassP = com.kaze.newage.ui.theme.glassParams(LocalGlassMode.current)
+                            val intensity = LocalGlassIntensity.current
                             Modifier
-                                .hazeEffect(state = hazeState!!, style = glassNavBarHazeStyle())
-                                .glassSaturation()
+                                .glassBackdropBlur(
+                                    contentLayer = contentLayer,
+                                    // 强度越大越糊（降采样比例越低）
+                                    sampleScale = (0.3f / intensity).coerceIn(0.1f, 0.45f),
+                                )
                                 .liquidGlassLensSafe(
                                     refractionHeight = with(density) { 24.dp.toPx() },
                                     refractionAmount = with(density) { 24.dp.toPx() } *
-                                        LocalGlassIntensity.current * glassP.refractionScale,
+                                        intensity * glassP.refractionScale,
                                 )
                         } else Modifier
                     )
