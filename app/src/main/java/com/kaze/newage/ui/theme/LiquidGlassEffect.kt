@@ -20,6 +20,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 
 /**
  * 液态玻璃效果库（对齐「现在的 BiliPai」= Miuix + Kyant0/AndroidLiquidGlass，均为 Apache-2.0）：
@@ -64,6 +66,9 @@ fun Modifier.glassBackdropBlur(
 ): Modifier = composed {
     val smallLayer = rememberGraphicsLayer()
     var cached by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    // 底栏节点在窗口中的实际坐标（px）：模糊源必须取底栏**正下方**的内容区域，
+    // 否则透出影像与实际位置错位（底栏有 8dp+手势条悬浮偏移）
+    var offsetInWin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val s = sampleScale.coerceIn(0.08f, 0.6f)
     // 每帧把最近一次 record 的小图栅格化（toImageBitmap 是 suspend，只能在此调用）
     LaunchedEffect(contentLayer, s) {
@@ -72,26 +77,30 @@ fun Modifier.glassBackdropBlur(
             cached = smallLayer.toImageBitmap()
         }
     }
-    this.drawWithContent {
-        // 1) 内容降采样录制（必须发生在 draw 阶段）
-        smallLayer.record {
-            withTransform({ scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) }) {
-                drawLayer(contentLayer)
+    this
+        .onGloballyPositioned { offsetInWin = it.positionInWindow() }
+        .drawWithContent {
+            // 1) 内容降采样录制（必须发生在 draw 阶段）
+            smallLayer.record {
+                withTransform({ scale(s, s, pivot = androidx.compose.ui.geometry.Offset.Zero) }) {
+                    drawLayer(contentLayer)
+                }
             }
+            val bmp = cached ?: return@drawWithContent
+            // 2) 取底栏正下方区域（按窗口坐标换算）等比放大绘制（线性过滤放大 = 模糊）
+            val barH = (size.height * s).toInt().coerceIn(1, bmp.height)
+            val barW = (size.width * s).toInt().coerceIn(1, bmp.width)
+            val srcTop = (offsetInWin.y * s).toInt().coerceIn(0, (bmp.height - barH).coerceAtLeast(0))
+            val srcLeft = (offsetInWin.x * s).toInt().coerceIn(0, (bmp.width - barW).coerceAtLeast(0))
+            drawImage(
+                image = bmp,
+                srcOffset = androidx.compose.ui.unit.IntOffset(srcLeft, srcTop),
+                srcSize = androidx.compose.ui.unit.IntSize(barW, barH),
+                dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
+                dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()),
+                filterQuality = androidx.compose.ui.graphics.FilterQuality.Low,
+            )
         }
-        val bmp = cached ?: return@drawWithContent
-        // 2) 取底部对应区域放大绘制（线性过滤放大 = 模糊）
-        val barH = (size.height * s).coerceAtMost(bmp.height.toFloat())
-        val srcTop = (bmp.height - barH).coerceAtLeast(0f)
-        drawImage(
-            image = bmp,
-            srcOffset = androidx.compose.ui.unit.IntOffset(0, srcTop.toInt()),
-            srcSize = androidx.compose.ui.unit.IntSize(bmp.width, barH.toInt()),
-            dstOffset = androidx.compose.ui.unit.IntOffset.Zero,
-            dstSize = androidx.compose.ui.unit.IntSize(size.width.toInt(), size.height.toInt()),
-            filterQuality = androidx.compose.ui.graphics.FilterQuality.Low,
-        )
-    }
 }
 
 /**
