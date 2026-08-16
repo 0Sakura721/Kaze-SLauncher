@@ -62,7 +62,7 @@ import com.kaze.newage.ui.theme.LocalGlassBlurEnabled
 import com.kaze.newage.ui.theme.LocalGlassIntensity
 import com.kaze.newage.ui.theme.LocalGlassMode
 import com.kaze.newage.ui.theme.LocalHazeState
-import com.kaze.newage.ui.theme.glassHazeStyle
+import com.kaze.newage.ui.theme.glassNavBarHazeStyle
 import com.kaze.newage.ui.theme.glassSaturation
 import com.kaze.newage.ui.theme.liquidGlassLensSafe
 import dev.chrisbanes.haze.hazeEffect
@@ -199,12 +199,16 @@ private fun LiquidGlassNavBar(
     val density = LocalDensity.current
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val pillShape = CircleShape
-    // 底栏始终是液态玻璃（不限定 glass 主题）：滚动内容经 hazeSource 进入模糊源，
-    // 底栏 hazeEffect 实时映射出底下被模糊/折射的文字——这才是"液态玻璃"的观感。
-    // 仅受「原生模糊」开关控制；无模糊时退化为透明悬浮图标
-    val glassActive = blurEnabled && hazeState != null
-    // 底栏背景：完全透明（无白板），玻璃本体由「模糊+饱和度+透镜」构成
-    val containerColor = androidx.compose.ui.graphics.Color.Transparent
+    // 玻璃链只属于液态玻璃主题；M3 主题底栏保持原样式（不透明表面板，不参与模糊映射）
+    val glassActive = isGlass && blurEnabled && hazeState != null
+    // 底栏背景：玻璃主题=极淡磨砂（真机由 Haze 真模糊成型，模拟器也有玻璃雾感）；
+    // M3 主题=原样式不透明表面板
+    val containerColor = if (isGlass) {
+        // 0.28 磨砂：底下文字隐约透出（真机再叠加 Haze 真模糊；模拟器无 RenderEffect 也有玻璃感）
+        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.28f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+    }
 
     Box(
         Modifier
@@ -227,7 +231,7 @@ private fun LiquidGlassNavBar(
                         if (glassActive) {
                             val glassP = com.kaze.newage.ui.theme.glassParams(LocalGlassMode.current)
                             Modifier
-                                .hazeEffect(state = hazeState!!, style = glassHazeStyle())
+                                .hazeEffect(state = hazeState!!, style = glassNavBarHazeStyle())
                                 .glassSaturation()
                                 .liquidGlassLensSafe(
                                     refractionHeight = with(density) { 24.dp.toPx() },

@@ -338,6 +338,25 @@ fun glassHazeStyle(): dev.chrisbanes.haze.HazeStyle {
     )
 }
 
+/**
+ * 底栏专用 Haze 样式：更高强度模糊（30~60dp）——底栏玻璃要"明显能看出
+ * 底下滚动文字被映射模糊"，不能用卡片的柔和参数（GLM 视觉评测实测原参数"微弱"）。
+ */
+@Composable
+fun glassNavBarHazeStyle(): dev.chrisbanes.haze.HazeStyle {
+    val mode = LocalGlassMode.current
+    val white = dev.chrisbanes.haze.HazeTint(Color.White.copy(alpha = lerpF(0.14f, 0.26f, mode.progress)))
+    return dev.chrisbanes.haze.HazeStyle(
+        blurRadius = lerpF(30f, 60f, mode.progress).dp,
+        noiseFactor = 0.05f,
+        fallbackTint = white,
+        tints = listOf(
+            white,
+            dev.chrisbanes.haze.HazeTint(Color(0xFF2B4BFF).copy(alpha = 0.08f), BlendMode.Plus),
+        ),
+    )
+}
+
 // ───────────────────────────────────────────────
 // 状态色与日志着色
 // ───────────────────────────────────────────────
