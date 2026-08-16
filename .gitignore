@@ -17,7 +17,8 @@ local.properties
 .tmp/
 *.log
 captures/
-screens/
+# 只忽略仓库根目录的截图文件夹（/前缀=仅根目录，不影响 app/.../ui/screens/ 源码）
+/screens/
 .externalNativeBuild/
 .cxx/
 
