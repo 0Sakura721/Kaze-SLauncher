@@ -215,12 +215,13 @@ private fun LiquidGlassNavBar(
     val pillShape = CircleShape
     // 玻璃链只属于液态玻璃主题；M3 主题底栏保持原样式（不透明表面板，不参与模糊映射）
     val glassActive = isGlass && blurEnabled
-    // 底栏背景：玻璃主题=极淡磨砂（自研 RenderEffect 模糊成型）；M3 主题=原样式不透明表面板
+    // 底栏背景：玻璃主题=极淡磨砂（自研 RenderEffect 模糊成型）；M3 主题=50% 透光表面
+    // （普通黑/AMOLED 纯黑两种深色样式统一起效：滚动内容可从底栏透出）
     val containerColor = if (isGlass) {
         // 0.12 极淡表面：折射与模糊主导"液态"观感，磨砂太厚会盖住折射弯曲
         MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.12f)
     } else {
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
+        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f)
     }
 
     Box(

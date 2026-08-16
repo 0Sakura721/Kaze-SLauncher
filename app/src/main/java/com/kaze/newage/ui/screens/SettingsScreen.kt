@@ -12,17 +12,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -55,12 +58,28 @@ import androidx.compose.ui.unit.dp
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.CheckChip
-import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.GlassMode
+import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.cardBorderColor
+import com.kaze.newage.ui.theme.parseSeedColor
 import com.kaze.newage.ui.theme.statusPalette
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamicColorScheme
 import java.io.File
+
+/** 取色风格（materialkolor PaletteStyle）：英文名 → 中文说明 */
+private val paletteStyles: List<Pair<String, String>> = listOf(
+    "TonalSpot" to "贴近种子色相，均衡百搭",
+    "Fidelity" to "尽量还原种子原色",
+    "Vibrant" to "高饱和鲜明，活力感强",
+    "Expressive" to "冷暖对冲，更有张力",
+    "Content" to "柔和沉稳，适合长阅读",
+    "Neutral" to "几乎无彩色，灰度极简",
+    "Monochrome" to "单一色相，极简统一",
+    "Rainbow" to "多色相组合，多彩活泼",
+    "FruitSalad" to "果味多彩，鲜明跳脱",
+)
 
 /**
  * 设置：三区差异化布局——
@@ -227,18 +246,62 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     onClick = { paletteExpanded = !paletteExpanded },
                 )
                 AnimatedVisibility(visible = paletteExpanded) {
-                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                    androidx.compose.foundation.layout.FlowRow(
+                    // 每种风格按当前种子色 + 深浅实时生成主/次/第三色小色板，可直接对比效果
+                    val previewDark = LocalDarkTheme.current
+                    val previewSeed = parseSeedColor(uiPrefs.md3CustomColor.value) ?: 0xFF007AFF.toInt()
+                    Column(
                         Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        listOf("TonalSpot", "Vibrant", "Expressive", "Neutral", "Fidelity", "Content", "Monochrome", "Rainbow", "FruitSalad").forEach { styleName ->
-                            CheckChip(
-                                selected = uiPrefs.paletteStyle.value == styleName,
-                                label = styleName,
-                                onClick = { uiPrefs.setPaletteStyle(styleName) },
-                            )
+                        paletteStyles.forEach { (name, desc) ->
+                            val preview = remember(name, previewSeed, previewDark, uiPrefs.darkStyle.value) {
+                                runCatching {
+                                    dynamicColorScheme(
+                                        seedColor = Color(previewSeed),
+                                        isDark = previewDark,
+                                        isAmoled = uiPrefs.darkStyle.value == 1,
+                                        style = PaletteStyle.valueOf(name),
+                                    )
+                                }.getOrNull()
+                            }
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { uiPrefs.setPaletteStyle(name) }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (preview != null) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        listOf(preview.primary, preview.secondary, preview.tertiary).forEach { c ->
+                                            Box(
+                                                Modifier
+                                                    .size(14.dp)
+                                                    .clip(CircleShape)
+                                                    .background(c)
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                }
+                                Column(Modifier.weight(1f)) {
+                                    Text(name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        desc,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (uiPrefs.paletteStyle.value == name) {
+                                    Icon(
+                                        Icons.Filled.Check,
+                                        contentDescription = "当前使用",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
