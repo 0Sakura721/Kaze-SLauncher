@@ -54,6 +54,9 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
 
         // 回退：apt 安装
         onProgress(0.35f, "直接下载失败，回退 apt 安装 Java $majorVersion（约 100MB）…")
+        if (env.runCommand("command -v apt-get", timeoutMs = 30_000).isFailure) {
+            throw RuntimeException("环境内 apt 不可用（rootfs 可能损坏，将在下次启动时自动重建）")
+        }
         env.runCommand("DEBIAN_FRONTEND=noninteractive apt-get update -qq", timeoutMs = 600_000)
             .onFailure { /* 忽略 update 失败，直接尝试安装 */ }
         val result = env.runCommand(
@@ -61,7 +64,7 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
             timeoutMs = 900_000,
         )
         if (result.isFailure) {
-            throw RuntimeException("Java $majorVersion 安装失败：${result.exceptionOrNull()?.message}")
+            throw RuntimeException("apt 安装失败：${result.exceptionOrNull()?.message}")
         }
         if (!env.isJdkInstalled(majorVersion)) {
             throw RuntimeException("Java $majorVersion 安装完成但未找到可执行文件")
@@ -155,6 +158,8 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                     onProgress(0f, "源失败 ${src.take(70)}：$err")
                 },
                 shouldCancel = shouldCancel,
+                // 内容校验：部分镜像对不存在的大文件返回 200+HTML 错误页，仅凭 HTTP 码无法识别
+                validate = { f -> f.length() > 1_000_000 && isGzipTar(f) },
             )
             if (used == null) return@withContext null
             onProgress(1f, "下载完成（源：$used），解压中…")
@@ -218,4 +223,13 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
 
     private fun archSuffix(): String =
         if (android.os.Build.SUPPORTED_ABIS.any { it.contains("arm64-v8a", true) || it.contains("aarch64", true) }) "arm64" else "armhf"
+
+    /** gzip 魔数（0x1f 0x8b）检查：拦截 HTML 错误页等无效下载内容 */
+    private fun isGzipTar(f: File): Boolean = try {
+        java.io.RandomAccessFile(f, "r").use { raf ->
+            raf.readUnsignedByte() == 0x1f && raf.readUnsignedByte() == 0x8b
+        }
+    } catch (_: Exception) {
+        false
+    }
 }

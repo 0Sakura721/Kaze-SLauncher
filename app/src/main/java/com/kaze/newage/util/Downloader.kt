@@ -21,6 +21,8 @@ object Downloader {
      * @param dest 目标文件
      * @param onProgress (downloadedBytes, totalBytes) —— total 可能为 -1（未知）
      * @param shouldCancel 返回 true 时中止下载（抛 InterruptedException，部分文件保留可续传）
+     * @param validate 下载完成后校验文件内容；false 时删除文件并抛异常（触发调用方换源/重试）。
+     *                 部分镜像对不存在的大文件会返回 200+HTML 错误页，必须靠内容校验拦截。
      */
     @Throws(Exception::class)
     fun download(
@@ -28,6 +30,7 @@ object Downloader {
         dest: File,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
         shouldCancel: () -> Boolean = { false },
+        validate: (File) -> Boolean = { true },
     ) {
         dest.parentFile?.mkdirs()
         var url: URL? = null
@@ -102,6 +105,11 @@ object Downloader {
             }
             onProgress(downloaded, downloaded)
             conn.disconnect()
+            // 内容校验：部分镜像对不存在的大文件返回 200+HTML 错误页，仅靠 HTTP 码无法识别
+            if (!validate(dest)) {
+                dest.delete()
+                throw RuntimeException("下载内容校验失败（源可能返回了错误页）")
+            }
             return
         }
     }
@@ -204,6 +212,7 @@ object Downloader {
         onProgress: (Long, Long) -> Unit = { _, _ -> },
         onSourceError: (String, String) -> Unit = { _, _ -> },
         shouldCancel: () -> Boolean = { false },
+        validate: (File) -> Boolean = { true },
         maxRounds: Int = 4,
         roundDelayMs: Long = 5000,
         perSourceRetries: Int = 2,
@@ -220,7 +229,7 @@ object Downloader {
                 while (attempt <= perSourceRetries) {
                     if (shouldCancel()) return null
                     try {
-                        download(u, dest, onProgress, shouldCancel)
+                        download(u, dest, onProgress, shouldCancel, validate)
                         return u
                     } catch (e: InterruptedException) {
                         return null // 用户取消

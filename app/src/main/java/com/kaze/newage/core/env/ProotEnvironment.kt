@@ -83,21 +83,25 @@ class ProotEnvironment(
 
     // ── 状态 ──
     /**
-     * rootfs 健康检查：真实打开并读取 usr/bin/dash 一个字节。
+     * rootfs 健康检查：真实打开并读取关键文件一个字节。
      * 不能只用 exists()——真机内部 FUSE 会向应用返回陈旧 dentry 缓存
      *（磁盘上文件已被丢弃，exists() 仍为 true），必须触发真实读取。
+     * 检查项：/usr/bin/dash（解压完整性）、/usr/bin/sh（usrmerge 链）、
+     * /usr/bin/apt-get（apt 可用性）——任一缺失视为环境损坏，触发自动重建。
      */
-    private fun dashReadable(): Boolean = try {
-        File(rootfsDir, "usr/bin/dash").inputStream().use { it.read() >= 0 }
+    private fun readable(path: String): Boolean = try {
+        File(rootfsDir, path).inputStream().use { it.read() >= 0 }
     } catch (_: Exception) { false }
+
+    private fun rootfsHealthy(): Boolean =
+        readable("usr/bin/dash") && readable("usr/bin/sh") && readable("usr/bin/apt-get")
 
     override val isReady: Boolean
         get() {
             val checks = listOf(
                 "prootBinary" to prootBinary.exists(),
                 "prootLoader" to prootLoader.exists(),
-                "rootfsDir" to rootfsDir.exists(),
-                "dash" to dashReadable(),
+                "rootfs" to rootfsHealthy(),
             )
             val failed = checks.filter { !it.second }.map { it.first }
             if (failed.isNotEmpty()) {
@@ -162,7 +166,7 @@ class ProotEnvironment(
                 SetupItem("proot", "proot 运行时", "内置，解压即用", done = true),
                 SetupItem("rootfs", "Ubuntu 24.04", "下载/解压，约 200MB", phase = "准备中"),
             )
-            if (!dashReadable()) {
+            if (!rootfsHealthy()) {
                 val rootfsTarball = File(linuxDir, "rootfs.tar.gz")
                 if (extractBundledAsset("ubuntu-base-24.04-$rootfsArch.tar.gz", rootfsTarball)) {
                     log("  ✓ 内置提取成功")
@@ -195,11 +199,13 @@ class ProotEnvironment(
                             updateItem("rootfs") { it.copy(phase = "下载中", progress = if (total > 0) done.toFloat() / total else 0f, processedBytes = done, totalBytes = total) }
                         },
                         onSourceError = { src, err -> log("  ✗ 源失败 ${src.take(70)}：$err") },
-                    ) ?: throw RuntimeException("rootfs 下载失败（全部源不可用）")
+                        // 内容校验：镜像对不存在的文件返回 200+HTML 错误页，靠 gzip 魔数拦截
+                        validate = { f -> f.length() > 1_000_000 && isGzipTar(f) },
+                    ) ?: throw RuntimeException("rootfs 下载失败（全部源不可用或内容无效）")
                     log("  ✓ 下载完成（源：$used）")
                 }
                 log("  解压 rootfs（约 200MB，请耐心等待）…")
-                // 解压 + 校验（内部存储批量写可能被丢，重试直到 usr/bin/dash 落盘）
+                // 解压 + 校验（内部存储批量写可能被丢，重试直到 rootfs 关键文件落盘）
                 var extractTries = 0
                 while (true) {
                     extractTries++
@@ -207,9 +213,9 @@ class ProotEnvironment(
                     rootfsDir.mkdirs()
                     updateItem("rootfs") { item -> item.copy(phase = "解压中（第 $extractTries 次）", totalBytes = rootfsTarball.length()) }
                     extractViaSystemTar(rootfsTarball, rootfsDir)
-                    if (dashReadable()) break
-                    if (extractTries >= 4) throw RuntimeException("rootfs 解压多次仍不完整（usr/bin/dash 缺失）")
-                    log("  ! 解压不完整（usr/bin/dash 不可读），重试…")
+                    if (rootfsHealthy()) break
+                    if (extractTries >= 4) throw RuntimeException("rootfs 解压多次仍不完整（关键文件缺失）")
+                    log("  ! 解压不完整（关键文件不可读），重试…")
                 }
                 rootfsTarball.delete()
                 updateItem("rootfs") { item -> item.copy(done = true, phase = "") }
@@ -221,6 +227,10 @@ class ProotEnvironment(
             // rootfs 符号链接修复（usrmerge：bin/lib/sbin 软链 + usr/bin/sh）
             // 必须在 rootfs 解压之后执行——沙箱上软链可能建不出来，这里做兜底
             repairRootfsLinks()
+            // 重建内建目录（阶段 1 创建、若本环境重建 rootfs 会被解压覆盖删除）：
+            // .l2s（link2symlink 元数据）与 sys/.empty（selinux 空绑定）
+            File(rootfsDir, ".l2s").mkdirs()
+            File(rootfsDir, "sys/.empty").mkdirs()
 
             // 阶段 3：apt 初始化
             log(">>> 阶段 3/3：初始化 apt 包管理器")
@@ -487,5 +497,14 @@ class ProotEnvironment(
                     "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
             )
         }
+    }
+
+    /** gzip 魔数（0x1f 0x8b）检查：拦截镜像返回的 HTML 错误页 */
+    private fun isGzipTar(f: File): Boolean = try {
+        java.io.RandomAccessFile(f, "r").use { raf ->
+            raf.readUnsignedByte() == 0x1f && raf.readUnsignedByte() == 0x8b
+        }
+    } catch (_: Exception) {
+        false
     }
 }
