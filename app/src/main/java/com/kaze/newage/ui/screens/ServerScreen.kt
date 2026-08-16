@@ -324,11 +324,13 @@ private fun InstanceCard(
                     maxLines = 1,
                     modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
                 )
-                // Zalith FlowRow 信息行（alpha 0.7 + 状态点）
-                Row(
+                // Zalith 信息行（alpha 0.7 + 状态点）：FlowRow 自动换行——
+                // 元素多时（Java/内存/状态/EULA）宁可整体换行，不能把文字压成竖排
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
                     Modifier.alpha(0.7f),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text("Java ${instance.javaMajor}", style = MaterialTheme.typography.labelSmall)
                     Text("${instance.memoryMb} MB", style = MaterialTheme.typography.labelSmall)
