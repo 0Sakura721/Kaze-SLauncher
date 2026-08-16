@@ -66,6 +66,7 @@ import com.kaze.newage.ui.theme.glassHazeStyle
 import com.kaze.newage.ui.theme.glassSaturation
 import com.kaze.newage.ui.theme.liquidGlassLensSafe
 import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
 
 enum class Dest(
     val route: String,
@@ -92,14 +93,21 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         // 内容全屏滚动，可以"穿过"常驻底栏——滚动中的文字/卡片经 hazeSource 进入模糊源，
         // 被底栏的液态玻璃实时映射（模糊的字）；底部留 80dp，滚动到底时内容不被底栏遮挡
         Box(Modifier.fillMaxSize()) {
-            NavHost(
-                navController = navController,
-                startDestination = Dest.Home.route,
-                modifier = Modifier
+            // 内容层作为 Haze 模糊源（只包 NavHost，绝不包含底栏自身——避免模糊自反馈）
+            val contentHaze = LocalHazeState.current
+            Box(
+                Modifier
                     .fillMaxSize()
-                    .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
-                    .padding(bottom = 80.dp),
+                    .then(if (contentHaze != null) Modifier.hazeSource(state = contentHaze) else Modifier)
             ) {
+                NavHost(
+                    navController = navController,
+                    startDestination = Dest.Home.route,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+                        .padding(bottom = 80.dp),
+                ) {
                 composable(Dest.Home.route) {
                     HomeScreen(viewModel, onNavigate = { navController.navigate(it) })
                 }
@@ -148,6 +156,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         else com.kaze.newage.core.addons.AddonKind.PLUGIN,
                         onBack = { navController.popBackStack() },
                     )
+                }
                 }
             }
             // 常驻底栏：覆盖在内容之上（内容可滚动穿过，被液态玻璃模糊映射）

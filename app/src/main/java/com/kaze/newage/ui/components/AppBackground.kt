@@ -64,15 +64,9 @@ fun AppBackground(
                     ThemeBackdrop(Modifier.fillMaxSize())
                 }
             }
-            // 内容层也作为 Haze 模糊源：页面滚动时，文字/卡片经过底部玻璃栏下方会被
-            // 真实模糊 + 折射（否则只有背景透出，内容直接盖在栏下面，没有液态玻璃感）
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .hazeSource(state = hazeState)
-            ) {
-                content()
-            }
+            // 内容层不在此包 hazeSource（AppRoot 里只包 NavHost——绝不能把底栏自身包进模糊源，
+            // 否则底栏把自己模糊进缓存形成自反馈，玻璃映射效果全无）
+            content()
         }
     }
 }
