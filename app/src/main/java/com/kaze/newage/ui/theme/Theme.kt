@@ -294,6 +294,19 @@ fun cardBorderColor(): Color = when (LocalAppTheme.current) {
     else Color.White.copy(alpha = 0.85f)
 }
 
+/** 服务器实例项边框：主题对应且**可见**（M3=outline 灰框；玻璃深色=白框；玻璃浅色=深蓝灰框；选中=主色） */
+@Composable
+@ReadOnlyComposable
+fun serverItemBorderColor(selected: Boolean = false): Color = when (LocalAppTheme.current) {
+    AppThemeMode.M3 ->
+        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+    AppThemeMode.GLASS -> when {
+        selected -> MaterialTheme.colorScheme.primary
+        LocalDarkTheme.current -> Color.White.copy(alpha = 0.35f)
+        else -> Color(0xFF233049).copy(alpha = 0.30f)
+    }
+}
+
 /** 卡片圆角：M3=14 / GLASS=24 */
 @Composable
 @ReadOnlyComposable

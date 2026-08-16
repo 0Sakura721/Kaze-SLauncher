@@ -69,6 +69,7 @@ import com.kaze.newage.ui.components.InstanceIcon
 import com.kaze.newage.ui.isBusy
 import com.kaze.newage.ui.theme.cardBorderColor
 import com.kaze.newage.ui.theme.itemColor
+import com.kaze.newage.ui.theme.serverItemBorderColor
 import com.kaze.newage.ui.theme.statusPalette
 import com.kaze.newage.ui.toLabel
 
@@ -289,6 +290,11 @@ private fun InstanceCard(
         shape = MaterialTheme.shapes.large,
         color = itemColor(),
         contentColor = MaterialTheme.colorScheme.onSurface,
+        // 每个服务器项带主题对应的可见边框（选中=主色粗框）
+        border = androidx.compose.foundation.BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            serverItemBorderColor(selected),
+        ),
         onClick = onSelect,
     ) {
         Row(
