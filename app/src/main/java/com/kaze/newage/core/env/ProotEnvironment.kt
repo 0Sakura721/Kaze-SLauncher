@@ -6,6 +6,7 @@ import android.util.Log
 import com.kaze.newage.util.Downloader
 import com.kaze.newage.util.TarExtractor
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,10 +63,16 @@ class ProotEnvironment(
 
     // ── 路径 ──
     private val linuxDir: File get() = linuxBase().apply { mkdirs() }
-    private val prootHomeDir: File get() = File(linuxDir, "proot-home").apply { mkdirs() }
-    private val prootBinary: File get() = File(prootHomeDir, "bin/proot")
-    private val prootLoader: File get() = File(prootHomeDir, "libexec/loader")
-    private val prootLibDir: File get() = File(prootHomeDir, "lib")
+    /**
+     * proot 运行时 = 修补版二进制（oonid/pr 的 proot fork，GPL-2.0-or-later，THIRD_PARTY_NOTICES 已记）。
+     * 必须从 **nativeLibraryDir** 直接运行：
+     *   - targetSdk>=29 的应用进程受 Android W^X 限制，无法 exec /data/data/... 下的 ELF；
+     *   - nativeLibraryDir（/data/app/.../lib/arm64）是唯一允许 untrusted_app execve 的位置；
+     *   - 修补版 proot 内置 SIGSYS 处理器，模拟被 zygote seccomp 拦截的 chdir/chmod/getcwd 等系统调用；
+     *   - PROOT_LOADER 指向同目录的 loader，由它 mmap 加载 guest ELF（不触发 W^X）。
+     */
+    private val prootBinary: File get() = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
+    private val prootLoader: File get() = File(context.applicationInfo.nativeLibraryDir, "libproot-loader.so")
     override val rootfsDir: File get() = File(linuxDir, "rootfs")
     val javaHomeDir: File get() = File(rootfsDir, "usr/lib/jvm")
 
@@ -75,14 +82,22 @@ class ProotEnvironment(
     private val rootfsArch: String get() = if (isAarch64) "arm64" else "armhf"
 
     // ── 状态 ──
+    /**
+     * rootfs 健康检查：真实打开并读取 usr/bin/dash 一个字节。
+     * 不能只用 exists()——真机内部 FUSE 会向应用返回陈旧 dentry 缓存
+     *（磁盘上文件已被丢弃，exists() 仍为 true），必须触发真实读取。
+     */
+    private fun dashReadable(): Boolean = try {
+        File(rootfsDir, "usr/bin/dash").inputStream().use { it.read() >= 0 }
+    } catch (_: Exception) { false }
+
     override val isReady: Boolean
         get() {
             val checks = listOf(
                 "prootBinary" to prootBinary.exists(),
                 "prootLoader" to prootLoader.exists(),
                 "rootfsDir" to rootfsDir.exists(),
-                "dash" to File(rootfsDir, "usr/bin/dash").exists(),
-                "sh" to File(rootfsDir, "usr/bin/sh").exists(),
+                "dash" to dashReadable(),
             )
             val failed = checks.filter { !it.second }.map { it.first }
             if (failed.isNotEmpty()) {
@@ -96,7 +111,7 @@ class ProotEnvironment(
         return javaBin.exists() && javaBin.canExecute()
     }
 
-    fun installedJdkVersions(): List<Int> = listOf(8, 11, 17, 21).filter { isJdkInstalled(it) }
+    fun installedJdkVersions(): List<Int> = listOf(8, 11, 17, 21, 25).filter { isJdkInstalled(it) }
 
     /** rootfs 内 java 路径（供启动脚本使用） */
     fun getJavaPath(version: Int): String = "/usr/lib/jvm/java-$version-openjdk-$rootfsArch/bin/java"
@@ -128,43 +143,18 @@ class ProotEnvironment(
         fun log(msg: String) { _log.value = _log.value + msg }
 
         try {
-            // 阶段 1：proot 运行时（内置资产）
-            log(">>> 阶段 1/3：获取 proot 运行时 ($archName)")
-            _items.value = listOf(SetupItem("proot", "proot 运行时", "内置，解压即用", phase = "提取中"))
+            // 阶段 1：proot 运行时（jniLibs 内置，无需解压）
+            log(">>> 阶段 1/3：检查 proot 运行时 ($archName)")
+            _items.value = listOf(SetupItem("proot", "proot 运行时", "内置，开箱即用", phase = "检查中"))
             if (!prootBinary.exists() || !prootLoader.exists()) {
-                val prootTarball = File(linuxDir, "proot.tar.gz")
-                if (extractBundledAsset("proot-$archName.tar.gz", prootTarball)) {
-                    updateItem("proot") { item -> item.copy(phase = "解压中") }
-                    TarExtractor.extract(prootTarball, prootHomeDir) { processed, total, speed ->
-                        updateItem("proot") { it.copy(phase = "解压中", progress = if (total > 0) processed.toFloat() / total else 0f, processedBytes = processed, totalBytes = total, speedBytes = speed) }
-                    }
-                    prootTarball.delete()
-                    updateItem("proot") { item -> item.copy(done = true, phase = "") }
-                    log("  ✓ 内置提取成功")
-                    fixProotSonameLinks()
-                } else {
-                    // 网络回退：termux/proot 官方 releases
-                    val url = if (isAarch64)
-                        "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-aarch64.tar.gz"
-                    else "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-armhf.tar.gz"
-                    log("  内置不可用，网络下载…")
-                    updateItem("proot") { item -> item.copy(phase = "下载中") }
-                    Downloader.download(url, prootTarball) { done, total ->
-                        updateItem("proot") { it.copy(phase = "下载中", progress = if (total > 0) done.toFloat() / total else 0f, processedBytes = done, totalBytes = total) }
-                    }
-                    updateItem("proot") { item -> item.copy(phase = "解压中") }
-                    TarExtractor.extract(prootTarball, prootHomeDir)
-                    prootTarball.delete()
-                    updateItem("proot") { item -> item.copy(done = true, phase = "") }
-                    log("  ✓ 网络下载成功")
-                }
-            } else {
-                updateItem("proot") { item -> item.copy(done = true, phase = "") }
-                log("  ✓ 已就绪，跳过")
+                throw RuntimeException("proot 运行时缺失（nativeLibraryDir 无 libproot.so）")
             }
-            prootBinary.setExecutable(true)
-            prootLoader.setExecutable(true)
-            File(prootHomeDir, "libexec/loader32").takeIf { f -> f.exists() }?.setExecutable(true)
+            _items.value = listOf(SetupItem("proot", "proot 运行时", "内置，开箱即用", done = true))
+            log("  ✓ proot 就绪（nativeLibraryDir）")
+            // rootfs 内建 .l2s（link2symlink 元数据目录，与 rootfs 同文件系统，apt/dpkg 硬链接需要）
+            File(rootfsDir, ".l2s").mkdirs()
+            // /sys/fs/selinux 空绑定（Android 上无 selinuxfs，避免 guest 访问报错）
+            File(rootfsDir, "sys/.empty").mkdirs()
 
             // 阶段 2：Ubuntu rootfs
             log(">>> 阶段 2/3：获取 Ubuntu 24.04 rootfs")
@@ -172,31 +162,56 @@ class ProotEnvironment(
                 SetupItem("proot", "proot 运行时", "内置，解压即用", done = true),
                 SetupItem("rootfs", "Ubuntu 24.04", "下载/解压，约 200MB", phase = "准备中"),
             )
-            if (!File(rootfsDir, "usr/bin/dash").exists()) {
+            if (!dashReadable()) {
                 val rootfsTarball = File(linuxDir, "rootfs.tar.gz")
                 if (extractBundledAsset("ubuntu-base-24.04-$rootfsArch.tar.gz", rootfsTarball)) {
                     log("  ✓ 内置提取成功")
+                    // 校验资产拷贝完整性：内部存储 FUSE 会静默截断批量写
+                    val assetName = "ubuntu-base-24.04-$rootfsArch.tar"
+                    val expected = context.assets.open("bundled/$assetName").use { it.available().toLong() }
+                    var copyTries = 0
+                    while (rootfsTarball.length() != expected && copyTries < 3) {
+                        copyTries++
+                        log("  ! 资产拷贝不完整（${rootfsTarball.length()}/$expected），重拷 $copyTries")
+                        rootfsTarball.delete()
+                        extractBundledAsset(assetName, rootfsTarball)
+                    }
+                    if (rootfsTarball.length() != expected) {
+                        throw RuntimeException("rootfs 资产拷贝不完整（${rootfsTarball.length()}/$expected）")
+                    }
                 } else {
                     log("  内置不可用，网络下载…")
                     updateItem("rootfs") { item -> item.copy(phase = "下载中") }
-                    Downloader.download(
-                        "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/ubuntu-base-24.04.3-base-$rootfsArch.tar.gz",
+                    val basePath = "ubuntu-base/releases/24.04/release/ubuntu-base-24.04.3-base-$rootfsArch.tar.gz"
+                    val sources = listOf(
+                        "https://cdimage.ubuntu.com/$basePath",
+                        "https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/$basePath",
+                        "https://mirrors.huaweicloud.com/ubuntu-cdimage/$basePath",
+                    )
+                    val used = Downloader.downloadFromSources(
+                        sources,
                         rootfsTarball,
-                    ) { done, total ->
-                        updateItem("rootfs") { it.copy(phase = "下载中", progress = if (total > 0) done.toFloat() / total else 0f, processedBytes = done, totalBytes = total) }
-                    }
+                        onProgress = { done, total ->
+                            updateItem("rootfs") { it.copy(phase = "下载中", progress = if (total > 0) done.toFloat() / total else 0f, processedBytes = done, totalBytes = total) }
+                        },
+                        onSourceError = { src, err -> log("  ✗ 源失败 ${src.take(70)}：$err") },
+                    ) ?: throw RuntimeException("rootfs 下载失败（全部源不可用）")
+                    log("  ✓ 下载完成（源：$used）")
                 }
                 log("  解压 rootfs（约 200MB，请耐心等待）…")
-                if (rootfsDir.exists()) rootfsDir.deleteRecursively()
-                rootfsDir.mkdirs()
-                updateItem("rootfs") { item -> item.copy(phase = "解压中", totalBytes = rootfsTarball.length()) }
-                TarExtractor.extract(rootfsTarball, rootfsDir) { processed, total, speed ->
-                    updateItem("rootfs") { it.copy(phase = "解压中", progress = if (total > 0) processed.toFloat() / total else 0f, processedBytes = processed, totalBytes = total, speedBytes = speed) }
+                // 解压 + 校验（内部存储批量写可能被丢，重试直到 usr/bin/dash 落盘）
+                var extractTries = 0
+                while (true) {
+                    extractTries++
+                    if (rootfsDir.exists()) rootfsDir.deleteRecursively()
+                    rootfsDir.mkdirs()
+                    updateItem("rootfs") { item -> item.copy(phase = "解压中（第 $extractTries 次）", totalBytes = rootfsTarball.length()) }
+                    extractViaSystemTar(rootfsTarball, rootfsDir)
+                    if (dashReadable()) break
+                    if (extractTries >= 4) throw RuntimeException("rootfs 解压多次仍不完整（usr/bin/dash 缺失）")
+                    log("  ! 解压不完整（usr/bin/dash 不可读），重试…")
                 }
                 rootfsTarball.delete()
-                if (!File(rootfsDir, "usr/bin/dash").exists()) {
-                    throw RuntimeException("rootfs 解压不完整（usr/bin/dash 缺失），请重试")
-                }
                 updateItem("rootfs") { item -> item.copy(done = true, phase = "") }
                 log("  ✓ rootfs 就绪")
             } else {
@@ -271,19 +286,26 @@ class ProotEnvironment(
         }
     }
 
-    /** 在环境内执行命令并收集完整输出（apt 等一次性命令用） */
+    /** 在环境内执行命令并收集完整输出（apt 等一次性命令用）。
+     *  注意：先 waitFor(timeout) 再取输出——避免子进程不退时 readText 永久阻塞导致超时失效。 */
     suspend fun runCommand(command: String, timeoutMs: Long = 900_000): Result<String> =
         withContext(Dispatchers.IO) {
             try {
                 val pb = buildProotCommand(listOf("/bin/sh", "-c", command), null)
                 val proc = startProot(pb) ?: return@withContext Result.failure(RuntimeException("无法启动 proot"))
-                val output = proc.inputStream.bufferedReader().readText()
+                // 输出在独立协程读取（防止管道写满死锁子进程）
+                val readJob = async(Dispatchers.IO) {
+                    runCatching { proc.inputStream.bufferedReader().use { it.readText() } }.getOrDefault("")
+                }
                 val exited = proc.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                 if (!exited) {
                     proc.destroyForcibly()
-                    Result.failure(RuntimeException("命令超时"))
-                } else if (proc.exitValue() == 0) Result.success(output)
-                else Result.failure(RuntimeException("退出码 ${proc.exitValue()}：${output.take(300)}"))
+                    Result.failure(RuntimeException("命令超时（${timeoutMs / 1000}s）：$command"))
+                } else {
+                    val output = readJob.await()
+                    if (proc.exitValue() == 0) Result.success(output)
+                    else Result.failure(RuntimeException("退出码 ${proc.exitValue()}：${output.take(300)}"))
+                }
             } catch (e: Exception) {
                 Result.failure(e)
             }
@@ -293,38 +315,55 @@ class ProotEnvironment(
     private fun prootEnvironment(): Map<String, String> {
         val env = mutableMapOf<String, String>()
         env["PROOT_LOADER"] = prootLoader.absolutePath
+        // 修补版为静态链接，nativeLibraryDir 兜底
+        val libDir = context.applicationInfo.nativeLibraryDir
         val existing = System.getenv("LD_LIBRARY_PATH") ?: ""
-        env["LD_LIBRARY_PATH"] = if (existing.isEmpty()) prootLibDir.absolutePath else "${prootLibDir.absolutePath}:$existing"
+        env["LD_LIBRARY_PATH"] = if (existing.isEmpty()) libDir else "$libDir:$existing"
+        // 只关 proot 自己的 seccomp；zygote 过滤器由修补版 SIGSYS 处理器接管（oonid/pr 方案）
         env["PROOT_NO_SECCOMP"] = "1"
-        // proot 需要可写临时目录做 glue rootfs/f2fs 探测，否则启动即失败
-        env["PROOT_TMP_DIR"] = File(rootfsDir, "tmp").absolutePath
-        env["TMPDIR"] = File(rootfsDir, "tmp").absolutePath
+        // glue rootfs/f2fs 探测临时目录：内部 cacheDir 实测唯一可靠位置
+        //（外部缓存 glue 导致 execve EACCES；rootfs/tmp 刚解压 dentry 陈旧会 ENOENT）
+        val tmpCandidate = context.cacheDir.also { it.mkdirs() }
+        env["PROOT_TMP_DIR"] = tmpCandidate.absolutePath
+        env["TMPDIR"] = tmpCandidate.absolutePath
+        // link2symlink 元数据目录必须与 rootfs 同文件系统（dpkg/apt 硬链接需要，oonid/pr 经验）
+        val l2s = File(rootfsDir, ".l2s").apply { mkdirs() }
+        env["PROOT_L2S_DIR"] = l2s.absolutePath
+        // guest 基础环境
+        env["HOME"] = "/root"
+        env["LANG"] = "C.UTF-8"
+        env["TERM"] = "xterm"
         return env
     }
 
     private fun buildProotCommand(command: List<String>, workDir: File?): ProcessBuilder {
         val args = mutableListOf(
-            prootBinary.absolutePath, "-0",
-            "-r", rootfsDir.absolutePath,
-            "-b", "/dev:/dev",
-            "-b", "/proc:/proc",
-            "-b", "/sys:/sys",
+            prootBinary.absolutePath,
+            "--rootfs=${rootfsDir.absolutePath}",
+            "--cwd=/",
+            "--change-id=0:0",
+            "--kill-on-exit",
+            "--link2symlink",
+            "--kernel-release=6.17.0-pr",
+            "-b", "/dev",
+            "-b", "/proc",
+            "-b", "/sys",
+            "-b", "/proc/self/fd:/dev/fd",
+            "-b", "/dev/urandom:/dev/random",
+            "-b", "${File(rootfsDir, "sys/.empty").absolutePath}:/sys/fs/selinux",
+            "-b", "${context.cacheDir.absolutePath}:/tmp",
+            "-b", "${File(rootfsDir, "tmp").absolutePath}:/dev/shm",
         )
         if (workDir != null && workDir.exists()) {
-            args.add("-b"); args.add("${workDir.absolutePath}:${workDir.absolutePath}")
+            // 工作目录绑定到 guest 的 /mnt（真实存在的目录，避免在 glue 里物化
+            // 深层 /storage/... 路径；外部 FUSE 上深层路径 sanitize 曾失败）
+            args.add("-b"); args.add("${workDir.absolutePath}:/mnt")
         }
-        // Ubuntu 24.04 usrmerge 兼容：bin/lib/sbin 是符号链接，Android 沙箱无法创建，
-        // 用 proot 绑定将 usr 子目录映射到根目录
-        if (File(rootfsDir, "usr/bin").exists() && !File(rootfsDir, "bin/sh").exists()) {
-            args.add("-b"); args.add("${File(rootfsDir, "usr/bin").absolutePath}:/bin")
-            args.add("-b"); args.add("${File(rootfsDir, "usr/lib").absolutePath}:/lib")
-            args.add("-b"); args.add("${File(rootfsDir, "usr/sbin").absolutePath}:/sbin")
-        }
-        // 包装：cd 到工作目录后执行
+        // 包装：cd 到工作目录（绑定在 /mnt）后执行
         val wrapped = buildList {
             add("/bin/sh")
             add("-c")
-            val cd = workDir?.let { "cd '$it' && " } ?: ""
+            val cd = if (workDir != null && workDir.exists()) "cd '/mnt' && " else ""
             add(cd + command.joinToString(" ") { if (it.contains(' ')) "'$it'" else it })
         }
         args.addAll(wrapped)
@@ -334,9 +373,8 @@ class ProotEnvironment(
     }
 
     /**
-     * 启动 proot 进程。优先直接 exec（模拟器/翻译层兼容），
-     * 若被系统拒绝（Android 15+/厂商 ROM 禁止 exec 应用目录 ELF，execve EACCES），
-     * 自动退回用 /system/bin/linker64 加载（proot 类 App 的标准做法）。
+     * 启动 proot 进程。直接 exec（nativeLibraryDir 允许 untrusted_app execve）。
+     * 若被系统拒绝，退回用 /system/bin/linker64 加载。
      */
     private fun startProot(pb: ProcessBuilder): Process? {
         return try {
@@ -377,22 +415,20 @@ class ProotEnvironment(
         return false
     }
 
-    /** 修复 proot 库 soname 链接（沙箱无法建链接 → 用文件副本） */
-    private fun fixProotSonameLinks() {
-        try {
-            val libDir = File(prootHomeDir, "lib")
-            libDir.listFiles()?.forEach { f ->
-                if (f.isDirectory) {
-                    val real = libDir.listFiles()?.firstOrNull {
-                        it.isFile && it.name != f.name && it.name.startsWith(f.name)
-                    }
-                    if (real != null) {
-                        f.deleteRecursively()
-                        real.copyTo(File(libDir, f.name), overwrite = true)
-                    }
-                }
-            }
-        } catch (_: Exception) { }
+    /**
+     * 用系统 tar 二进制解压（前人经验：Termux pkg / proot-distro 均走系统 tar，
+     * 久经验证，避免手写解压器在厂商 FUSE 上的兼容问题；toybox tar 自动识别 gzip）。
+     */
+    private fun extractViaSystemTar(tarFile: File, destDir: File) {
+        destDir.mkdirs()
+        val proc = Runtime.getRuntime().exec(
+            arrayOf("/system/bin/sh", "-c", "tar xf '${tarFile.absolutePath}' -C '${destDir.absolutePath}'")
+        )
+        val code = proc.waitFor()
+        if (code != 0) {
+            val err = proc.errorStream.bufferedReader().readText().take(300)
+            throw RuntimeException("系统 tar 解压失败（exit=$code）：$err")
+        }
     }
 
     /**

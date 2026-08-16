@@ -1,7 +1,7 @@
 # Memory — Kaze-SLauncher（新版，工作区目录：NEW AGE KAZE-SLAUNCHER）
 
 > 跨会话记忆文件。规则：动手前先读；有值得记住的信息就更新；过期条目删除或标注。
-> 最近更新：2026-08-14
+> 最近更新：2026-08-16
 
 ## 项目约定
 - 包名 `com.kaze.newage`，应用名 "Kaze SLauncher"（Kaze 与 SLauncher 之间带空格；连字符仅为 GitHub 仓库名所需，用户 2026-08-14 明确），GPL-3.0（与旧版 v2/v3 可共存）。
@@ -29,6 +29,21 @@
 - **当前基线 =「现在的 BiliPai」版式（Miuix IosLiquidGlassNavigationBar，Apache-2.0 已记 NOTICES）**：底栏 = 24dp 边距浮动圆胶囊（64dp）+ 10dp 投影 + 三层结构（层①背景玻璃链=haze+饱和1.5+Kyant0透镜24/24dp，层②surfaceContainer a0.4，层③图标标签最上——**透镜只作用于背景层，绝不能套在内容上**（会把图标吞掉，"选项都没了"bug 根因））。背景=纯色渐变+柔光斑（用户要求不改背景）。卡片=Haze+饱和1.5。用户方向（2026-08-15）：**"先完善UI，不要塑料UI"**——拒绝扁平塑料感，走真玻璃（透镜+景深+高光）。
 - **去"劣质大框架"（2026-08-15，用户反馈三页廉价大卡框）**：① BackgroundCard 玻璃模式默认**无发丝边框**（effectiveBorder=null；M3 保留 hairline；显式 border 参数仍生效）；② CardTitleLayout 玻璃分隔线软化为 white 0.10/0.30；③ ServerScreen **删除整页大卡**——工具条+列表直接铺背景，实例卡悬浮；④ HomeScreen **删除大面板卡**——状态球/信息行/环境行直接铺背景，选择器改为 itemColor 小型玻璃 chip（Surface onClick，圆角 16）。真机实测：三页无框架、选择器下拉正常、胶囊底栏导航正常。
 - **真机 blur 实测在工作**（开/关像素有差异）。玻璃观感全部来自面板层。**注意：测试中改动的用户 prefs 要恢复原状（theme_mode_value 曾误改 1→已恢复 0 跟随系统）**。
+- **真机 rootfs 部署失败的根因 = 内部存储 /data/user/0 写入不稳定（2026-08-15 实锤）**：症状——提取器完整跑完（dash 检查通过、apt 日志存在、"环境初始化完成"），但 usr/bin 在 setup 后变空、var/lib/apt/lists 空、rootfs 只有 11MB；proot-home/instances.json/prefs 等小写入正常。与模拟器存储损坏同病。**解法：设置 → 存放到外部存储（env_external=true）→ 重新部署**。外部存储实测完整成功：rootfs 134MB、usr/bin 287 文件、dash 存在、"Linux 环境就绪"、进入 Java 21 安装阶段。**adb 调试注意：`run-as pkg sh -c '相对路径'` 的 CWD 是 / 不是应用目录（写入会落到根目录报 ENOENT），一律用绝对路径 /data/user/0/<pkg>/...；`adb shell 2>/dev/null` 在 PowerShell 会当成本地路径报错，用 2>&1。**
+- **设置页去框架（2026-08-15，用户"设置页还是有塑料似的边框，弄成和其它页面一样"）**：删除全部 BackgroundCard+CardTitleLayout 包装——外观/环境/通用三个分区改为纯文字标题（titleMedium）+ 内容直接铺背景；环境卡的「部署」按钮移到标题行右侧；通用手风琴保持（行+分隔线）。真机实测无卡片框架。cardBorderColor 仅剩小元素（chip/磁贴）使用。
+- **gradle 构建沙箱注意**：DSH 沙箱为 workspace-write 时，Gradle 写工作区外的 GRADLE_USER_HOME（v3\.gradle-user-home）会被拒（wrapper .lck 拒绝访问）；需 danger-full-access 或确认策略。残留 .lck 可删。
+- **GuardService 已删除（2026-08-16）**：自加的前台服务是"闪退"元凶（startForegroundService 5 秒内未 startForeground 崩 RemoteServiceException），修复无效后整体移除（manifest + 全部调用点）。应用恢复稳定（pid 持续）。
+
+## 真机环境部署通关记录（2026-08-16）
+- **根因实锤：targetSdk≥29 应用的 W^X + zygote seccomp**（vivo Android 16/API36 实测）：① W^X 禁止 exec /data/data 下 app_data_file ELF（proot exec guest /bin/sh 报 EACCES）；② zygote seccomp 拦截 18+ 系统调用（chdir/chmod/getcwd/clone3…）。`run-as` 能跑通是因为它没有 seccomp 过滤器（/proc/<pid>/status Seccomp: 2 vs 0）。与 oonid/pr 文档《important-notes.md》三拦路虎描述 100% 吻合（他们已用 "W^X + seccomp + targetSdk 35 proot Android" 验证）。
+- **最终方案（前人经验，oonid/pr，GPL-2.0-or-later 与 GPL-3.0 兼容）**：bundle 其修补版 proot 二进制到 `app/src/main/jniLibs/arm64-v8a/{libproot.so(2.5MB), libproot-loader.so(18KB)}`（jsdelivr 从 github.com/oonid/pr 下载，勿改动）。proot 直接从 **nativeLibraryDir** 运行（唯一允许 untrusted_app execve 的位置），PROOT_LOADER 指同目录 loader（mmap 加载 guest ELF 绕过 W^X），修补版内置 SIGSYS 处理器模拟被 seccomp 拦的系统调用。**启动参数照搬其 shared.rs**：`--rootfs --cwd=/ --change-id=0:0 --kill-on-exit --link2symlink --kernel-release=6.17.0-pr -b /dev -b /proc -b /sys -b /proc/self/fd:/dev/fd -b /dev/urandom:/dev/random -b rootfs/sys/.empty:/sys/fs/selinux -b cacheDir:/tmp -b rootfs/tmp:/dev/shm -b <实例目录>:/mnt`。环境：PROOT_TMP_DIR/TMPDIR=**内部 cacheDir**、PROOT_L2S_DIR=rootfs/.l2s（须与 rootfs 同文件系统，dpkg/apt 硬链接需要）、HOME/LANG/TERM。已删除 proot-home 资产提取（fixProotSonameLinks 等旧代码）。
+- 备选快速方案（未用）：targetSdk 28 无 W^X/seccomp（oonid/pr 实测表 targetSdk 28 proot 直跑）。
+- **extractNativeLibs 必须 true**（2026-08-16）：AGP 默认 run-from-apk 模式不落盘 .so，nativeLibraryDir 为空 → "proot 运行时缺失"。已在 manifest application 加 `android:extractNativeLibs="true"`。验证：装完 `ls /data/app/~~*/<pkg>-*/lib/arm64` 应看到 libproot.so。
+- **MC 新版（26.x，如 26.1.1）需要 Java 25**（实测 bundler class file 69.0，Java 21 报 UnsupportedClassVersionError）。已改：JavaVersionInference（major≥26→25）、installedJdkVersions 加 25、设置页/新建实例 Java 列表加 25、InstanceStore.load 迁移旧档 javaMajor<25 自动升 25。Adoptium 直连下载 Temurin 25（api.adoptium.net，手机网络不受限）。
+- **内部 rootfs 部署成功**：系统 tar 解压 + 全局 sync + dashReadable 实读校验重试 → 内部 rootfs 463MB 完整；JDK 348MB 外部→内部迁移成功（java-21-openjdk-arm64 完整可执行）。
+- **真机 run-as 诊断法**：push 诊断脚本到 /data/local/tmp + `run-as com.kaze.newage sh /data/local/tmp/diag.sh`（CWD=/，脚本内绝对路径 + cd 目录 + 设 PROOT_LOADER/LD_LIBRARY_PATH/PROOT_NO_SECCOMP）。注意 run-as 无法访问 /storage/emulated/0 且无 seccomp，只能证明"文件与 proot 本身 OK"，应用内问题必须以应用自身日志定位（proot -v 4 输出会经 console 流落盘）。
+- 资产长度校验：`assets.openFd` 对 compressed 资产抛异常 → 用 `assets.open().use { it.available().toLong() }`。
+- 日志证据：`/storage/emulated/0/Android/data/com.kaze.newage/files/instances/man/console-output.log` 会累积历史会话错误，诊断前先 rm 再触发。
 
 ## 模拟器测试（MuMu 12，重要发现）
 - adb 设备：emulator-5554（伪装 vivo V2203A），Android 15，主 ABI x86_64 但 **abilist 含 arm64-v8a**（houdini ARM 翻译层）→ `Build.SUPPORTED_ABIS` 判定走 arm64 路线，**proot aarch64 二进制可运行**（日志 `houdini: executing proot`）。

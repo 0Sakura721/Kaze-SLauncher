@@ -201,12 +201,18 @@ class DefaultServerManager(
         slot.setState(ServerState.Running)
         slot.log("> 服务器启动中", LineType.System)
 
-        // 消费输出
+        // 消费输出（同时落盘到实例目录，便于诊断）
+        val logFile = java.io.File(slot.instance.dir, "console-output.log")
         scope.launch {
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line ->
-                        if (line.isNotBlank()) slot.log(line, classify(line))
+                        if (line.isNotBlank()) {
+                            slot.log(line, classify(line))
+                            try {
+                                logFile.appendText(line + "\n")
+                            } catch (_: Exception) { }
+                        }
                     }
                 }
             } catch (_: Exception) { }
@@ -215,7 +221,8 @@ class DefaultServerManager(
         // 退出监控
         slot.waitJob?.cancel()
         slot.waitJob = scope.launch {
-            proc.waitFor()
+            val code = proc.waitFor()
+            slot.log("> 服务器进程退出（exit=$code）", LineType.System)
             handleExit(slot)
         }
         startUptime(slot)

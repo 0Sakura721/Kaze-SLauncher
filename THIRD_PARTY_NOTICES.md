@@ -11,7 +11,8 @@ Kaze SLauncher（GPL-3.0）参考/复用了以下开源项目的体系与代码�
 | PojavLauncher | github.com/PojavLauncherTeam/PojavLauncher | GPL-3.0 | 服务器原生运行思路、JRE 生态 |
 | BiliPai | github.com/jay3-yy/BiliPai | GPL-3.0 | **主题设置体系与安卓原生液态玻璃**（Haze 背景模糊 + 折射 RuntimeShader 改编自其 LiquidGlassTuning / FullBarLiquidGlassModifier，参数照搬 BALANCED 档） |
 | Kaze SLauncher v2（本项目旧版，作者自有） | github.com/0Sakura721/Kaze-SLauncher | LGPL-3.0 | proot 环境部署、tar 解压、下载源、服务端生命周期、eula 处理（LGPL-3.0 → GPL-3.0 兼容） |
-| proot | github.com/termux/proot | GPL-2.0+ | 内置 proot 运行时（assets/bundled） |
+| proot（内置运行时已替换，见下） | github.com/termux/proot | GPL-2.0+ | 原内置 proot 运行时（assets/bundled）——已由 oonid/pr 修补版替代 |
+| **oonid/pr（修补版 proot + loader）** | github.com/oonid/pr | **proot fork：GPL-2.0-or-later**（其余组件 MIT） | **现役内置 proot 运行时**：`app/src/main/jniLibs/arm64-v8a/libproot.so` + `libproot-loader.so`（预编译二进制直接采用）。解决 targetSdk≥29 应用在 Android 12+ 上的 W^X（禁止 exec app_data_file）、zygote seccomp（18+ 系统调用拦截，SIGSYS 用户态模拟）与 PROOT_LOADER（nativeLibraryDir）机制；基于 proot v5.4.0 + termux-proot 补丁 |
 | proot-distro | github.com/termux/proot-distro | GPL-3.0 | rootfs 部署方案参考 |
 
 ## 运行时与分发物
@@ -33,7 +34,7 @@ Jetpack Compose / AndroidX（Apache-2.0）、Kotlin & kotlinx（Apache-2.0）、
 - [x] 本软件整体以 **GPL-3.0** 发布（见 LICENSE，全文随发行提供）。
 - [x] 使用 GPL-3.0 组件（FCL / Zalith / Pojav / proot-distro）的衍生作品须整体 GPL-3.0 开源 —— 本项目开源。
 - [x] 改编自 ZalithLauncher2 / FCL 的源文件保留来源注释（`// 改编自 ZalithLauncher2 … GPL-3.0`）。
-- [x] 内置 proot 二进制按 GPL-2.0+ 提供其源码获取方式：https://github.com/termux/proot
+- [x] 内置 proot 二进制按 GPL-2.0+ 提供其源码获取方式：https://github.com/termux/proot；现役修补版（GPL-2.0-or-later）源码获取方式：https://github.com/oonid/pr（`src/proot/`，二进制位于 `android/app/src/main/jniLibs/arm64-v8a/`，本项目 `app/src/main/jniLibs/arm64-v8a/` 下两份二进制与其一致，未修改）。
 - [x] 应用内「设置 → 关于与许可证」页展示许可证摘要与 EULA 声明。
 - [x] 运行时下载的服务端 jar 不随 APK 再分发，仅提供下载入口与来源标注。
 - [x] 使用本项目即表示你同意 Minecraft EULA（https://aka.ms/MinecraftEULA），eula.txt 由应用在用户启动流程中自动接受（等同于用户确认）。

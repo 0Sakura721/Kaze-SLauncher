@@ -6,8 +6,8 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * 轻量 HTTP 下载器：自动跟随重定向（最多 5 跳）、断点续传、进度回调。
- * 来源：v2 EnvManager.downloadToFile 思路重构（自有代码）。
+ * 轻量 HTTP 下载器：自动跟随重定向（最多 5 跳）、断点续传（Range + 追加）、
+ * 多源探测（自动选最快镜像）与多源回退、进度回调。
  */
 object Downloader {
 
@@ -15,7 +15,8 @@ object Downloader {
     private const val USER_AGENT = "KazeSLauncher/3.0 (Android; Minecraft Server Launcher)"
 
     /**
-     * 下载文件。
+     * 下载文件（支持断点续传：目标文件已有部分时用 Range 追加；
+     * 服务器不支持 Range 时自动从头开始）。
      * @param urlStr 下载地址
      * @param dest 目标文件
      * @param onProgress (downloadedBytes, totalBytes) —— total 可能为 -1（未知）
@@ -59,6 +60,13 @@ object Downloader {
                 }
                 206 -> { /* 断点续传成功 */ }
                 200 -> downloaded = 0 // 服务器不支持 Range，从头下载
+                416 -> {
+                    // Range 超出文件范围（部分文件损坏/比源大）：丢弃重下
+                    conn.disconnect()
+                    dest.delete()
+                    downloaded = 0
+                    continue
+                }
                 else -> {
                     conn.disconnect()
                     throw RuntimeException("HTTP $code")
@@ -70,7 +78,6 @@ object Downloader {
                 conn.inputStream.use { input ->
                     val buf = ByteArray(64 * 1024)
                     var lastUpdate = System.currentTimeMillis()
-                    var lastBytes = downloaded
                     while (true) {
                         val n = input.read(buf)
                         if (n == -1) break
@@ -80,17 +87,127 @@ object Downloader {
                         if (now - lastUpdate >= 150) {
                             onProgress(downloaded, total)
                             lastUpdate = now
-                            lastBytes = downloaded
                         }
                     }
                 }
                 try {
-                    out.fd.sync() // 强制落盘（模拟器异步写层）
+                    out.fd.sync() // 强制落盘
                 } catch (_: Exception) { }
+            }
+            if (downloaded == 0L && dest.length() == 0L && total != 0L) {
+                throw RuntimeException("下载内容为空（Content-Length=$total）")
             }
             onProgress(downloaded, downloaded)
             conn.disconnect()
             return
         }
+    }
+
+    /** 下载小文本（元数据接口等） */
+    @Throws(Exception::class)
+    fun downloadText(urlStr: String, timeoutMs: Int = 15000): String {
+        var redirects = 0
+        var current = urlStr
+        while (true) {
+            val conn = URL(current).openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            when (val code = conn.responseCode) {
+                in 301..308 -> {
+                    val loc = conn.getHeaderField("Location") ?: throw RuntimeException("重定向无 Location")
+                    conn.disconnect()
+                    if (++redirects > MAX_REDIRECTS) throw RuntimeException("重定向过多")
+                    current = loc
+                    continue
+                }
+                200 -> {
+                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                    conn.disconnect()
+                    return text
+                }
+                else -> {
+                    conn.disconnect()
+                    throw RuntimeException("HTTP $code")
+                }
+            }
+        }
+    }
+
+    /**
+     * 并发探测候选源：对每个 URL 发起 1KB Range 请求，测「连接+首字节」耗时，
+     * 返回最快的 URL；全部失败返回 null。
+     */
+    fun probeFastest(urls: List<String>, probeTimeoutMs: Int = 4000): String? {
+        val candidates = urls.filter { it.isNotBlank() }.distinct()
+        if (candidates.isEmpty()) return null
+        val results = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(candidates.size, 4))
+        try {
+            val futures = candidates.map { u ->
+                pool.submit {
+                    try {
+                        val start = System.currentTimeMillis()
+                        val conn = URL(u).openConnection() as HttpURLConnection
+                        conn.instanceFollowRedirects = true
+                        conn.connectTimeout = probeTimeoutMs
+                        conn.readTimeout = probeTimeoutMs
+                        conn.setRequestProperty("User-Agent", USER_AGENT)
+                        conn.setRequestProperty("Range", "bytes=0-1023")
+                        val code = conn.responseCode
+                        if (code !in 200..299) {
+                            conn.disconnect()
+                            return@submit
+                        }
+                        conn.inputStream.use { ins ->
+                            val buf = ByteArray(1024)
+                            var read = 0
+                            while (read < buf.size) {
+                                val n = ins.read(buf, read, buf.size - read)
+                                if (n == -1) break
+                                read += n
+                            }
+                        }
+                        conn.disconnect()
+                        results[u] = System.currentTimeMillis() - start
+                    } catch (_: Exception) {
+                        // 该源不可达，跳过
+                    }
+                }
+            }
+            futures.forEach { it.get() }
+        } finally {
+            pool.shutdownNow()
+        }
+        return results.entries.minByOrNull { it.value }?.key
+    }
+
+    /**
+     * 多源下载：先探测最快源，按序尝试；任一源失败自动回退下一个
+     * （断点续传贯穿：已下载部分保留，换源后继续追加）。
+     * @param onSourceError 单个源失败时回调（源 URL, 错误消息），用于界面展示诊断
+     * @return 实际使用的 URL；全部失败返回 null
+     */
+    fun downloadFromSources(
+        urls: List<String>,
+        dest: File,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+        onSourceError: (String, String) -> Unit = { _, _ -> },
+    ): String? {
+        val candidates = urls.filter { it.isNotBlank() }.distinct()
+        if (candidates.isEmpty()) return null
+        val best = probeFastest(candidates)
+        val ordered = (listOfNotNull(best) + candidates.filter { it != best })
+        for (u in ordered) {
+            try {
+                download(u, dest, onProgress)
+                return u
+            } catch (e: Exception) {
+                onSourceError(u, e.message ?: "未知错误")
+                // 回退下一源（dest 的部分内容已保留，续传继续）
+            }
+        }
+        return null
     }
 }

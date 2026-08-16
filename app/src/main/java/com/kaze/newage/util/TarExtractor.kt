@@ -128,8 +128,8 @@ object TarExtractor {
                                 out.write(buffer, 0, chunk)
                                 remaining -= chunk
                             }
-                            // 注意：不做 fd.sync()——FUSE 外部存储上 sync 可能长时间阻塞
-                            // （模拟器实测卡死）；关闭流时的 flush 已足够（jar/备份大文件写入均验证持久）
+                            // 不做逐文件 fsync：真机内部 FUSE passthrough 上逐文件 sync
+                            // 极慢且可能触发回刷缺陷；改用提取完成后的全局 sync()。
                         }
                         // 可执行位
                         if (path.contains("bin/") || path.contains("libexec/")) target.setExecutable(true)
@@ -179,6 +179,13 @@ object TarExtractor {
             }
 
             onProgress(total, total, 0)
+
+            // 全局 sync：真机内部 FUSE 会丢目录项（文件数据 fsync 后 dentry 仍可能丢失，
+            // 症状=解压后 usr/bin 目录空）。系统级 sync() 强制 FUSE/F2FS 全量回刷。
+            try {
+                val p = Runtime.getRuntime().exec(arrayOf("sync"))
+                p.waitFor()
+            } catch (_: Exception) { }
         } finally {
             rawInput.close()
             fileStream.close()

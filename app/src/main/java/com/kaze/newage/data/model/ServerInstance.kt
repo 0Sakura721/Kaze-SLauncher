@@ -67,7 +67,9 @@ data class ServerInstance(
 
 /**
  * 按 MC 版本推断所需 Java 主版本（来源：itzg/docker-minecraft-server 官方文档）。
- * 1.8–1.16.5 → 8；1.17 → 17；1.18–1.20.4 → 17；≥1.20.5 → 21
+ * 旧命名：1.8–1.16.5 → 8；1.17–1.20.4 → 17；≥1.20.5 → 21
+ * 新命名（2025 起，如 24.1 / 26.1.1）：24.x–25.x → 21；≥26.x → 25（实测 vanilla-26.1.1
+ * 的 bundler 为 class file 69.0 = Java 25，Java 21 报 UnsupportedClassVersionError）
  */
 object JavaVersionInference {
 
@@ -76,6 +78,8 @@ object JavaVersionInference {
         val major = m.groupValues[1].toInt()
         val minor = m.groupValues[2].toInt()
         return when {
+            major >= 26 -> 25
+            major >= 24 -> 21
             major == 1 && minor <= 16 -> 8
             major == 1 && minor <= 20 && (minor < 20 || (minor == 20 && m.groupValues[3].toIntOrNull() ?: 0 < 5)) -> 17
             else -> 21
