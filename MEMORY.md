@@ -45,6 +45,7 @@
 - 资产长度校验：`assets.openFd` 对 compressed 资产抛异常 → 用 `assets.open().use { it.available().toLong() }`。
 - 日志证据：`/storage/emulated/0/Android/data/com.kaze.newage/files/instances/man/console-output.log` 会累积历史会话错误，诊断前先 rm 再触发。
 - **✅ 端到端跑通（2026-08-16 14:24，vivo 真机）**：应用内 启动服务端 → proot(nativeLibraryDir) → Ubuntu rootfs(内部463MB) → Temurin Java 25 → vanilla-26.1.1 → "Preparing level world / All chunks are saved / Server empty for 60 seconds, pausing"，adb forward 25565 TcpTestSucceeded=True。已提交推送 0815（62cb90e）。遗留：authlib 周期性网络 WARNING（无害）；局域网直连手机 IP 需手机防火墙放行（vivo 可能默认拦）。
+- **2026-08-16 下午新增（已推送 0815，a6ea68b）**：①控制台右上角「保存日志」按钮（SAF 选目录一次性导出完整日志，默认名 `<实例>-<时间戳>.log`；用户明确不要实时写入，MediaStore 实时方案已移除——踩坑：MediaStore Downloads 的 IS_PENDING 流程必须先 open 写、后清 pending，否则行被删 open 报 No item；vivo 会把 console.log 改名 console.log.txt）；②电池白名单：启动服务端首次自动弹 ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS + 设置→守护与电池 手风琴（状态/重试/vivo 后台耗电管理引导）；③实例详情 server.properties 编辑器「空服自动暂停」chips（pause-when-empty-seconds 关闭/30s/60s/2m/5m，MC 1.21.2+）；④ServerGuardService 前台守护（specialUse，详见上）。
 
 ## 模拟器测试（MuMu 12，重要发现）
 - adb 设备：emulator-5554（伪装 vivo V2203A），Android 15，主 ABI x86_64 但 **abilist 含 arm64-v8a**（houdini ARM 翻译层）→ `Build.SUPPORTED_ABIS` 判定走 arm64 路线，**proot aarch64 二进制可运行**（日志 `houdini: executing proot`）。
