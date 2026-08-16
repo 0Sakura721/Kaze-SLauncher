@@ -57,6 +57,9 @@ class SettingsPrefs(context: Context) {
     /** 原生模糊（Haze/RenderEffect，Android 12+；个别 GPU 异常时可关闭回退半透明玻璃） */
     val glassBlur = mutableStateOf(prefs.getBoolean("glass_blur", true))
 
+    /** 玻璃强度（0.5..1.5，默认 1.0；作用于饱和度增强与透镜折射幅度） */
+    val glassIntensity = mutableFloatStateOf(prefs.getFloat("glass_intensity", 1.0f))
+
     /** 是否已请求过电池优化白名单（只自动弹一次） */
     val batteryPrompted = mutableStateOf(prefs.getBoolean("battery_prompted", false))
 
@@ -141,6 +144,11 @@ class SettingsPrefs(context: Context) {
     fun setGlassBlur(v: Boolean) {
         glassBlur.value = v
         prefs.edit().putBoolean("glass_blur", v).apply()
+    }
+
+    fun setGlassIntensity(v: Float) {
+        glassIntensity.floatValue = v
+        prefs.edit().putFloat("glass_intensity", v).apply()
     }
 
     fun setBatteryPrompted(v: Boolean) {

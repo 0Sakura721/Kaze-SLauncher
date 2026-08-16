@@ -24,13 +24,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 
 /**
  * 饱和度增强（等效 BiliPai vibrancy()：brightness=0, contrast=1, saturation=1.5）。
+ * 不传 factor 时按「玻璃强度」设置自动缩放（默认 1.5 × LocalGlassIntensity）。
  */
-fun Modifier.glassSaturation(factor: Float = 1.5f): Modifier = composed {
+fun Modifier.glassSaturation(factor: Float? = null): Modifier = composed {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@composed this
-    val effect = remember(factor) {
+    val intensity = LocalGlassIntensity.current
+    val f = (factor ?: 1.5f * intensity).coerceIn(0.1f, 3f)
+    val effect = remember(f) {
         RenderEffect.createColorFilterEffect(
             android.graphics.ColorMatrixColorFilter(
-                android.graphics.ColorMatrix().apply { setSaturation(factor) }
+                android.graphics.ColorMatrix().apply { setSaturation(f) }
             )
         ).asComposeRenderEffect()
     }

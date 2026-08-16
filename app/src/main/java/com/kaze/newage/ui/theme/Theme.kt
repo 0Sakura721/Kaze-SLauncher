@@ -67,6 +67,9 @@ fun glassParams(mode: GlassMode): GlassParams {
 /** 当前液态玻璃模式 */
 val LocalGlassMode = staticCompositionLocalOf { GlassMode.BALANCED }
 
+/** 玻璃强度（0.5..1.5）：glassSaturation 饱和度与透镜折射幅度按此缩放 */
+val LocalGlassIntensity = staticCompositionLocalOf { 1f }
+
 // ── M3 静态兜底（API<31 或取色失败时使用）──
 private val M3Light = lightColorScheme(
     primary = Color(0xFF3563E9),
@@ -196,6 +199,7 @@ fun NewAgeTheme(
     customColorHex: String = "#007AFF",
     paletteStyle: String = "TonalSpot",
     glassMode: GlassMode = GlassMode.BALANCED,
+    glassIntensity: Float = 1f,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -240,6 +244,7 @@ fun NewAgeTheme(
         LocalAppTheme provides mode,
         LocalDarkTheme provides darkTheme,
         LocalGlassMode provides glassMode,
+        LocalGlassIntensity provides glassIntensity,
     ) {
         MaterialTheme(colorScheme = effectiveScheme, content = content)
     }

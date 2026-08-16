@@ -58,6 +58,7 @@ import com.kaze.newage.ui.screens.SettingsScreen
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.LocalAppTheme
 import com.kaze.newage.ui.theme.LocalGlassBlurEnabled
+import com.kaze.newage.ui.theme.LocalGlassIntensity
 import com.kaze.newage.ui.theme.LocalHazeState
 import com.kaze.newage.ui.theme.glassHazeStyle
 import com.kaze.newage.ui.theme.glassSaturation
@@ -210,10 +211,10 @@ private fun LiquidGlassNavBar(
                         if (glassActive) {
                             Modifier
                                 .hazeEffect(state = hazeState!!, style = glassHazeStyle())
-                                .glassSaturation(1.5f)
+                                .glassSaturation()
                                 .liquidGlassLensSafe(
                                     refractionHeight = with(density) { 24.dp.toPx() },
-                                    refractionAmount = with(density) { 24.dp.toPx() },
+                                    refractionAmount = with(density) { 24.dp.toPx() } * LocalGlassIntensity.current,
                                 )
                         } else Modifier
                     )

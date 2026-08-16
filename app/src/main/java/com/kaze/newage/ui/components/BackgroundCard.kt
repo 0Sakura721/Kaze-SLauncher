@@ -74,7 +74,7 @@ fun BackgroundCard(
     val cardModifier = if (isGlass && blurEnabled && hazeState != null) {
         modifier
             .hazeEffect(state = hazeState, style = glassHazeStyle())
-            .glassSaturation(1.5f)
+            .glassSaturation()
     } else {
         modifier
     }

@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
             val customColor by prefs.md3CustomColor
             val paletteStyle by prefs.paletteStyle
             val glassModeId by prefs.glassMode
+            val glassIntensity by prefs.glassIntensity
 
             // 主题模式（照搬 BiliPai AppThemeMode）：0=跟随系统 1=浅色 2=深色
             val darkTheme = when (modeValue) {
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
                 customColorHex = customColor,
                 paletteStyle = paletteStyle,
                 glassMode = GlassMode.fromId(glassModeId),
+                glassIntensity = glassIntensity,
             ) {
                 AppRoot()
             }
