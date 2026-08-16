@@ -24,7 +24,13 @@ fun CheckChip(
     FilterChip(
         selected = selected,
         onClick = onClick,
-        label = { Text(label) },
+        label = {
+            Text(
+                label,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        },
         leadingIcon = {
             if (selected) {
                 Icon(

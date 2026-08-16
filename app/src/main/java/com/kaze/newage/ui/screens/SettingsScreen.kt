@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
@@ -44,7 +43,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,10 +55,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.theme.AppThemeMode
@@ -90,32 +86,15 @@ private val paletteStyles: List<Pair<String, String>> = listOf(
 /**
  * 设置：三区差异化布局——
  * ① 外观：展示卡（主题磁贴 + 色板，整页最重）；
- * ② 环境：功能卡（部署进度 + 开关）；
+ * ② 存储位置：自定义实例目录（游戏可存到其他目录并直接运行；环境部署已自动化，无需手动管理）；
  * ③ 通用：手风琴分组列表（背景图 / Java / 关于，逐条展开）。
  */
 @Composable
 fun SettingsScreen(viewModel: AppViewModel) {
-    val envState by viewModel.envState.collectAsState()
-    val envItems by viewModel.envItems.collectAsState()
-    val envLog by viewModel.envLog.collectAsState()
-    val download by viewModel.download.collectAsState()
     val javaVersions by viewModel.envJavaVersions.collectAsState()
     val javaTask by viewModel.javaTask.collectAsState()
     val appContext = LocalContext.current.applicationContext
     val uiPrefs = viewModel.uiPrefs
-
-    // 部署日志：部署中实时显示，完成后 3 秒自动隐藏（可手动再展开）
-    var showEnvLog by remember { mutableStateOf(true) }
-    LaunchedEffect(envState) {
-        when (envState) {
-            ProotEnvironment.State.SETTING_UP -> showEnvLog = true
-            ProotEnvironment.State.READY -> {
-                kotlinx.coroutines.delay(3000)
-                showEnvLog = false
-            }
-            else -> Unit
-        }
-    }
 
     // 手风琴：同一时刻只展开一节（null = 全部收起）
     var openSection by remember { mutableStateOf<String?>(null) }
@@ -195,7 +174,13 @@ fun SettingsScreen(viewModel: AppViewModel) {
 
                 // 主题模式（BiliPai AppThemeMode：跟随系统/浅色/深色）
                 Text("主题模式", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp))
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // FlowRow：窄屏（真机 360dp 宽）下 chip 自动换行，不会被横向挤压截断
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     CheckChip(selected = uiPrefs.themeModeValue.value == 0, label = "跟随系统", onClick = { uiPrefs.setThemeModeValue(0) })
                     CheckChip(selected = uiPrefs.themeModeValue.value == 1, label = "浅色模式", onClick = { uiPrefs.setThemeModeValue(1) })
                     CheckChip(selected = uiPrefs.themeModeValue.value == 2, label = "深色模式", onClick = { uiPrefs.setThemeModeValue(2) })
@@ -203,14 +188,24 @@ fun SettingsScreen(viewModel: AppViewModel) {
 
                 // 深色样式（BiliPai DarkThemeStyle：普通黑/AMOLED纯黑）
                 Text("深色样式", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp))
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     CheckChip(selected = uiPrefs.darkStyle.value == 0, label = "普通黑", onClick = { uiPrefs.setDarkStyle(0) })
                     CheckChip(selected = uiPrefs.darkStyle.value == 1, label = "AMOLED 纯黑", onClick = { uiPrefs.setDarkStyle(1) })
                 }
 
                 // MD3 颜色来源（BiliPai Md3ColorSource：跟随系统壁纸/自定义颜色）
                 Text("颜色来源", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp))
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     CheckChip(selected = uiPrefs.md3ColorSource.value == "wallpaper", label = "跟随系统壁纸", onClick = { uiPrefs.setMd3ColorSource("wallpaper") })
                     CheckChip(selected = uiPrefs.md3ColorSource.value == "custom", label = "自定义颜色", onClick = { uiPrefs.setMd3ColorSource("custom") })
                 }
@@ -362,159 +357,94 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 }
         }
 
-        // ═══ ② 环境（内容直接铺背景）═══
-        Row(
-            Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("Linux 环境（proot + Ubuntu 24.04）", style = MaterialTheme.typography.titleMedium)
-            if (envState != ProotEnvironment.State.READY && envState != ProotEnvironment.State.SETTING_UP) {
-                Button(onClick = { viewModel.setupEnv() }) {
-                    Icon(Icons.Filled.Build, null, Modifier.size(18.dp))
-                    Text("部署", Modifier.padding(start = 6.dp))
-                }
-            }
-        }
+        // ═══ ② 存储位置（自定义实例目录：游戏存到其他目录并直接从该目录运行）═══
+        Text(
+            "存储位置",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(top = 4.dp),
+        )
         Column {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("存放到外部存储", style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            "内部空间不足时开启；切换后需重新部署环境。",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = uiPrefs.envExternal.value,
-                        onCheckedChange = { uiPrefs.setEnvExternal(it) },
+            val dirPicker = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocumentTree()
+            ) { uri ->
+                if (uri == null) return@rememberLauncherForActivityResult
+                val dir = StorageDirUtil.treeUriToFile(uri)
+                if (dir == null) {
+                    Toast.makeText(appContext, "所选目录暂不支持（请选择主存储或 SD 卡目录）", Toast.LENGTH_LONG).show()
+                    return@rememberLauncherForActivityResult
+                }
+                if (!StorageDirUtil.isWritableDir(dir)) {
+                    Toast.makeText(appContext, "所选目录不可写，无法存放实例", Toast.LENGTH_LONG).show()
+                    return@rememberLauncherForActivityResult
+                }
+                // 持久化 SAF 授权（防系统回收）+ 保存路径
+                runCatching {
+                    appContext.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                     )
                 }
-
-                // ── 实例存储位置（自定义目录：游戏存到其他目录并直接从该目录运行）──
-                val dirPicker = rememberLauncherForActivityResult(
-                    ActivityResultContracts.OpenDocumentTree()
-                ) { uri ->
-                    if (uri == null) return@rememberLauncherForActivityResult
-                    val dir = StorageDirUtil.treeUriToFile(uri)
-                    if (dir == null) {
-                        Toast.makeText(appContext, "所选目录暂不支持（请选择主存储或 SD 卡目录）", Toast.LENGTH_LONG).show()
-                        return@rememberLauncherForActivityResult
-                    }
-                    if (!StorageDirUtil.isWritableDir(dir)) {
-                        Toast.makeText(appContext, "所选目录不可写，无法存放实例", Toast.LENGTH_LONG).show()
-                        return@rememberLauncherForActivityResult
-                    }
-                    // 持久化 SAF 授权（防系统回收）+ 保存路径
+                // 释放旧目录的持久授权
+                uiPrefs.instanceDirUri.value.takeIf { it.isNotBlank() }?.let { old ->
                     runCatching {
-                        appContext.contentResolver.takePersistableUriPermission(
-                            uri,
+                        appContext.contentResolver.releasePersistableUriPermission(
+                            Uri.parse(old),
                             Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
                         )
                     }
-                    // 释放旧目录的持久授权
-                    uiPrefs.instanceDirUri.value.takeIf { it.isNotBlank() }?.let { old ->
-                        runCatching {
-                            appContext.contentResolver.releasePersistableUriPermission(
-                                Uri.parse(old),
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                            )
-                        }
-                    }
-                    uiPrefs.setInstanceDir(dir.absolutePath, uri.toString())
-                    viewModel.rescanInstances()
-                    Toast.makeText(appContext, "实例目录已切换，正在扫描所选目录…", Toast.LENGTH_LONG).show()
                 }
-                Column(Modifier.padding(top = 10.dp)) {
-                    Text("实例存储位置", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        if (uiPrefs.instanceDirPath.value.isBlank()) "默认（应用外部目录 instances/）；可自定义到其他目录"
-                        else "当前：${StorageDirUtil.displayPath(uiPrefs.instanceDirPath.value)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = {
-                            if (StorageDirUtil.hasAllFilesAccess(appContext)) {
-                                dirPicker.launch(null)
-                            } else {
-                                // 先引导授予「所有文件访问」（Android 11+ 分区存储下 File API 读写任意目录的前提）
-                                Toast.makeText(
-                                    appContext,
-                                    "请在系统设置中授予「所有文件访问」后，再次点击选择目录",
-                                    Toast.LENGTH_LONG,
-                                ).show()
-                                runCatching {
-                                    val intent = Intent(
-                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                        Uri.parse("package:com.kaze.newage"),
-                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    appContext.startActivity(intent)
-                                }
-                            }
-                        }) { Text("选择目录") }
-                        if (uiPrefs.instanceDirPath.value.isNotBlank()) {
-                            OutlinedButton(onClick = {
-                                uiPrefs.setInstanceDir("")
-                                viewModel.rescanInstances()
-                                Toast.makeText(appContext, "已恢复默认实例目录", Toast.LENGTH_SHORT).show()
-                            }) { Text("恢复默认") }
-                        }
-                    }
-                }
-
+                uiPrefs.setInstanceDir(dir.absolutePath, uri.toString())
+                viewModel.rescanInstances()
+                Toast.makeText(appContext, "实例目录已切换，正在扫描所选目录…", Toast.LENGTH_LONG).show()
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    when (envState) {
-                        ProotEnvironment.State.READY -> "已就绪"
-                        ProotEnvironment.State.SETTING_UP -> "部署中…"
-                        ProotEnvironment.State.ERROR -> "部署失败"
-                        ProotEnvironment.State.NOT_INITIALIZED -> "未部署"
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
+                    if (uiPrefs.instanceDirPath.value.isBlank()) "默认：应用外部目录 instances/"
+                    else "当前：${StorageDirUtil.displayPath(uiPrefs.instanceDirPath.value)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
                 )
-                if (envState == ProotEnvironment.State.SETTING_UP) {
-                    LinearProgressIndicator(
-                        progress = { download.progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    )
-                    download.message.let {
-                        if (it.isNotBlank()) Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
-                    }
-                }
-                envItems.forEach { item ->
-                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            if (item.done) "✓" else if (item.phase.isNotEmpty()) "…" else "·",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Column {
-                            Text("${item.name}（${item.desc}）", style = MaterialTheme.typography.bodyMedium)
-                            if (item.phase.isNotEmpty()) {
-                                Text(item.phase, style = MaterialTheme.typography.bodySmall)
-                            }
+                OutlinedButton(onClick = {
+                    if (StorageDirUtil.hasAllFilesAccess(appContext)) {
+                        dirPicker.launch(null)
+                    } else {
+                        // 先引导授予「所有文件访问」（Android 11+ 分区存储下 File API 读写任意目录的前提）
+                        Toast.makeText(
+                            appContext,
+                            "请在系统设置中授予「所有文件访问」后，再次点击选择目录",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        runCatching {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                Uri.parse("package:com.kaze.newage"),
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            appContext.startActivity(intent)
                         }
                     }
-                }
-                if (envLog.isNotEmpty() && showEnvLog) {
-                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    Text("部署日志", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        envLog.joinToString("\n"),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                } else if (envLog.isNotEmpty()) {
-                    TextButton(onClick = { showEnvLog = true }, modifier = Modifier.padding(top = 4.dp)) {
-                        Text("查看部署日志")
-                    }
-                }
+                }) { Text("选择目录") }
+            }
+            if (uiPrefs.instanceDirPath.value.isNotBlank()) {
+                TextButton(
+                    onClick = {
+                        uiPrefs.setInstanceDir("")
+                        viewModel.rescanInstances()
+                        Toast.makeText(appContext, "已恢复默认实例目录", Toast.LENGTH_SHORT).show()
+                    },
+                    modifier = Modifier.padding(top = 2.dp),
+                ) { Text("恢复默认") }
+            }
+            Text(
+                "游戏实例默认存到应用外部目录；可自定义到其他目录（如大分区/SD 卡），新实例存到所选目录，所选目录中已有的服务端也会被直接识别运行。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
         }
 
         // ═══ ③ 通用（内容直接铺背景）═══
