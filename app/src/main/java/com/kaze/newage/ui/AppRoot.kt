@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -87,30 +88,17 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val showBottomBar = Dest.entries.any { it.route == currentRoute }
 
     AppBackground(prefs = uiPrefs) {
-        Scaffold(
-            containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            bottomBar = {
-                if (showBottomBar) {
-                    LiquidGlassNavBar(
-                        currentRoute = currentRoute,
-                        onNavigate = { dest ->
-                            navController.navigate(dest.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
-                    )
-                }
-            },
-        ) { padding ->
+        // 覆盖式布局（不用 Scaffold 的 bottomBar 预留位）：
+        // 内容全屏滚动，可以"穿过"常驻底栏——滚动中的文字/卡片经 hazeSource 进入模糊源，
+        // 被底栏的液态玻璃实时映射（模糊的字）；底部留 80dp，滚动到底时内容不被底栏遮挡
+        Box(Modifier.fillMaxSize()) {
             NavHost(
                 navController = navController,
                 startDestination = Dest.Home.route,
-                // 底部额外留白：内容不被常驻底栏遮挡（底栏已透明，靠留白保证可读）
-                modifier = Modifier.padding(padding).padding(bottom = 20.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
+                    .padding(bottom = 80.dp),
             ) {
                 composable(Dest.Home.route) {
                     HomeScreen(viewModel, onNavigate = { navController.navigate(it) })
@@ -162,6 +150,23 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
             }
+            // 常驻底栏：覆盖在内容之上（内容可滚动穿过，被液态玻璃模糊映射）
+            if (showBottomBar) {
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                    LiquidGlassNavBar(
+                        currentRoute = currentRoute,
+                        onNavigate = { dest ->
+                            navController.navigate(dest.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
+                    )
+                }
+            }
         }
     }
 }
@@ -185,9 +190,11 @@ private fun LiquidGlassNavBar(
     val density = LocalDensity.current
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val pillShape = CircleShape
-    val glassActive = isGlass && blurEnabled && hazeState != null
-    // 底栏背景：完全透明（无白板）。玻璃激活时由「模糊+饱和度+透镜」构成玻璃本体，
-    // 不需要半透明色板；非玻璃时图标直接悬浮在页面上，遮挡交给各页底部空白
+    // 底栏始终是液态玻璃（不限定 glass 主题）：滚动内容经 hazeSource 进入模糊源，
+    // 底栏 hazeEffect 实时映射出底下被模糊/折射的文字——这才是"液态玻璃"的观感。
+    // 仅受「原生模糊」开关控制；无模糊时退化为透明悬浮图标
+    val glassActive = blurEnabled && hazeState != null
+    // 底栏背景：完全透明（无白板），玻璃本体由「模糊+饱和度+透镜」构成
     val containerColor = androidx.compose.ui.graphics.Color.Transparent
 
     Box(
