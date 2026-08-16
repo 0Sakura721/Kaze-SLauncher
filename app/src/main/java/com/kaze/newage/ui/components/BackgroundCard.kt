@@ -45,6 +45,8 @@ fun BackgroundCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
     border: BorderStroke? = null,
+    /** 强制无边框（忽略主题默认描边；用于个别"画布"式面板，如版本选择列表） */
+    borderless: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = cardShape()
@@ -57,8 +59,9 @@ fun BackgroundCard(
         contentColor = onCardColor(),
     )
     // 玻璃面板无发丝边框（BiliPai 式：只有顶部高光与边缘光晕，避免"大框架"廉价感）；
-    // M3 或显式传入 border 时保留描边
+    // M3 或显式传入 border 时保留描边；borderless=true 时任何主题都无边框
     val effectiveBorder = when {
+        borderless -> null
         border != null -> border
         isGlass -> null
         else -> BorderStroke(1.dp, cardBorderColor())

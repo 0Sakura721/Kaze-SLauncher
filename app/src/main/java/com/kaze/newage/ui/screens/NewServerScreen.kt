@@ -277,7 +277,8 @@ private fun VersionConfigPhase(
             }
 
             // ── 版本列表 ──
-            BackgroundCard(Modifier.fillMaxWidth()) {
+            // borderless：选择版本的「MC 版本」框不带边框（用户指定），内容直接铺在卡片上
+            BackgroundCard(Modifier.fillMaxWidth(), borderless = true) {
                 CardTitleLayout("MC 版本", trailing = {
                     if (versionsLoading) {
                         Text("加载中…", style = MaterialTheme.typography.labelSmall)
