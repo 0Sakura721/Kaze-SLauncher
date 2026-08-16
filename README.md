@@ -2,6 +2,8 @@
 
 > 在 Android 上运行 **Minecraft Java 服务端**的启动器 —— 自包含（proot + Ubuntu 24.04），无需 Root、无需 Termux，一键完成「环境 → Java → 服务端 → EULA → 实时控制台」全链路。
 
+> 当前主线版本：**v2.5-0815**
+
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.1-blue?logo=kotlin)
 ![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-green)
 ![minSdk](https://img.shields.io/badge/minSdk-27-orange)
