@@ -41,6 +41,14 @@ app/src/main/java/com/kaze/newage/
 └── util/          # 下载、tar 解压
 ```
 
+## ☕ 赞助支持
+
+如果这个项目对你有帮助，可以请我喝杯奶茶 ☕
+
+| 支付宝 | 微信 |
+|:------:|:----:|
+| ![支付宝](docs/images/alipay.png) | ![微信](docs/images/wechat.png) |
+
 ## 📄 许可证
 
 **GPL-3.0**（见 [LICENSE](LICENSE)）。架构与 UI 体系参考 Fold Craft Launcher、ZalithLauncher2（均 GPL-3.0）；环境方案参考 proot / proot-distro。第三方组件清单与许可义务见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
