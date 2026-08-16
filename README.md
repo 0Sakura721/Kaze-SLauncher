@@ -51,7 +51,24 @@ app/src/main/java/com/kaze/newage/
 
 ## 📄 许可证
 
-**GPL-3.0**（见 [LICENSE](LICENSE)）。架构与 UI 体系参考 Fold Craft Launcher、ZalithLauncher2（均 GPL-3.0）；环境方案参考 proot / proot-distro。第三方组件清单与许可义务见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+**GPL-3.0**（见 [LICENSE](LICENSE)）。
+
+### 借鉴项目（按各自许可证）
+
+| 项目 | 许可证 | 借鉴内容 |
+|---|---|---|
+| [Fold Craft Launcher (FCL)](https://github.com/FCL-Team/FoldCraftLauncher) | GPL-3.0 | 分层架构思路、JRE 管理、下载源（piston-meta / BMCLAPI）、版本安装流程 |
+| [ZalithLauncher 2](https://github.com/ZalithLauncher/ZalithLauncher2) | GPL-3.0 | Compose 重写路线、UI 卡片体系（BackgroundCard / CardTitleLayout / CheckChip） |
+| [PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher) | GPL-3.0 | 服务器原生运行思路、JRE 生态 |
+| [BiliPai](https://github.com/jay3-yy/BiliPai) | GPL-3.0 | 主题设置体系、安卓原生液态玻璃（Haze 模糊 + 折射透镜） |
+| [oonid/pr](https://github.com/oonid/pr) | GPL-2.0-or-later | 修补版 proot + loader（绕过 targetSdk 29+ 的 W^X / zygote seccomp） |
+| [termux/proot](https://github.com/termux/proot) | GPL-2.0+ | proot 运行时基础 |
+| [proot-distro](https://github.com/termux/proot-distro) | GPL-3.0 | rootfs 部署方案 |
+| [Kaze SLauncher v2/v3](https://github.com/0Sakura721/Kaze-SLauncher)（本项目旧版） | LGPL-3.0 / GPL-3.0 | 服务端生命周期、eula 处理、下载源、proot 环境部署 |
+| [Haze](https://github.com/chrisbanes/haze) | Apache-2.0 | 安卓原生背景模糊 |
+| [materialkolor](https://github.com/jordond/materialkolor) | Apache-2.0 | 动态取色 / 自定义种子色 / 取色风格 |
+
+完整第三方组件清单与许可义务见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## ⚠️ 免责声明
 
