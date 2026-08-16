@@ -67,6 +67,11 @@ import com.kaze.newage.ui.theme.LocalGlassIntensity
 import com.kaze.newage.ui.theme.LocalGlassMode
 import com.kaze.newage.ui.theme.glassBackdropBlur
 import com.kaze.newage.ui.theme.liquidGlassLensSafe
+import com.kaze.newage.ui.theme.blur.Backdrop
+import com.kaze.newage.ui.theme.blur.blur
+import com.kaze.newage.ui.theme.blur.drawBackdrop
+import com.kaze.newage.ui.theme.blur.layerBackdrop
+import com.kaze.newage.ui.theme.blur.rememberLayerBackdrop
 
 enum class Dest(
     val route: String,
@@ -93,18 +98,15 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         // 内容全屏滚动，可以"穿过"常驻底栏——滚动中的文字/卡片经 hazeSource 进入模糊源，
         // 被底栏的液态玻璃实时映射（模糊的字）
         Box(Modifier.fillMaxSize()) {
-            // 内容层录制进 GraphicsLayer：底栏自研模糊从该层重绘底部区域
-            //（Haze 的 hazeSource 在 vivo 上采集失效，blur 不执行——已弃用）
-            val contentLayer = rememberGraphicsLayer()
+            // 内容层：Miuix miuix-blur 方案（Apache-2.0，已记 NOTICES）——
+            // LayerBackdrop 录制内容，drawBackdrop 以 RuntimeShader 高斯模糊重绘
+            //（vivo 上 RenderEffect.createBlurEffect 不渲染，此前 Haze/自研均无效；
+            //   高斯 shader 与透镜同为 RuntimeShader，实测可用）
+            val backdrop = rememberLayerBackdrop()
             Box(
                 Modifier
                     .fillMaxSize()
-                    .drawWithContent {
-                        contentLayer.record {
-                            this@drawWithContent.drawContent()
-                        }
-                        drawLayer(contentLayer)
-                    }
+                    .layerBackdrop(backdrop)
             ) {
                 BackdropLayer(prefs = uiPrefs, modifier = Modifier.fillMaxSize())
                 NavHost(
@@ -171,7 +173,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                     LiquidGlassNavBar(
                         currentRoute = currentRoute,
-                        contentLayer = contentLayer,
+                        backdrop = backdrop,
                         onNavigate = { dest ->
                             navController.navigate(dest.route) {
                                 popUpTo(navController.graph.findStartDestination().id) {
@@ -199,7 +201,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
 @Composable
 private fun LiquidGlassNavBar(
     currentRoute: String?,
-    contentLayer: androidx.compose.ui.graphics.layer.GraphicsLayer,
+    backdrop: Backdrop,
     onNavigate: (Dest) -> Unit,
 ) {
     val isGlass = LocalAppTheme.current == AppThemeMode.GLASS
@@ -230,8 +232,8 @@ private fun LiquidGlassNavBar(
                 .shadow(10.dp, pillShape, clip = false)
                 .clip(pillShape)
         ) {
-            // 层①：玻璃背景——自研：重绘内容层底部区域 + RenderEffect(blur→饱和度) 链，
-            // 再套 Kyant0 折射透镜（嵌套 graphicsLayer 各自 renderEffect）
+            // 层①：玻璃背景——Miuix miuix-blur：drawBackdrop 以 RuntimeShader 高斯模糊
+            // 重绘内容层（自带坐标对齐/降采样），外再套 Kyant0 折射透镜
             Box(
                 Modifier
                     .fillMaxSize()
@@ -239,11 +241,14 @@ private fun LiquidGlassNavBar(
                         if (glassActive) {
                             val glassP = com.kaze.newage.ui.theme.glassParams(LocalGlassMode.current)
                             val intensity = LocalGlassIntensity.current
+                            val blurPx = with(density) { (glassP.blurRadius * intensity).toPx() }
                             Modifier
-                                .glassBackdropBlur(
-                                    contentLayer = contentLayer,
-                                    // 强度越大越糊（降采样比例越低）
-                                    sampleScale = (0.3f / intensity).coerceIn(0.1f, 0.45f),
+                                .drawBackdrop(
+                                    backdrop = backdrop,
+                                    shape = { pillShape },
+                                    effects = {
+                                        blur(blurPx)
+                                    },
                                 )
                                 .liquidGlassLensSafe(
                                     refractionHeight = with(density) { 24.dp.toPx() },
