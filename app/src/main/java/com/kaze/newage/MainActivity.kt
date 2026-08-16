@@ -1,9 +1,13 @@
 package com.kaze.newage
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
 import com.kaze.newage.ui.AppRoot
@@ -12,8 +16,17 @@ import com.kaze.newage.ui.theme.GlassMode
 import com.kaze.newage.ui.theme.NewAgeTheme
 
 class MainActivity : ComponentActivity() {
+
+    // Android 13+：前台服务通知需要运行时授权（拒绝仅隐藏通知，服务照常运行）
+    private val notifPermLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         enableEdgeToEdge()
         setContent {
             val prefs = (applicationContext as NewAgeApp).container.uiPrefs

@@ -41,7 +41,7 @@ class AppContainer(context: Context) {
 
     val javaManager: RootfsJavaManager = RootfsJavaManager(env)
 
-    val serverManager: DefaultServerManager = DefaultServerManager(env, javaManager, console)
+    val serverManager: DefaultServerManager = DefaultServerManager(env, javaManager, console, appContext)
 
     val instanceStore: InstanceStore = InstanceStore(appContext)
 }

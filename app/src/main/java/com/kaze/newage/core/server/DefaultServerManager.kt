@@ -37,6 +37,7 @@ class DefaultServerManager(
     private val env: LinuxEnvironment,
     private val javaManager: JavaManager,
     private val systemConsole: ConsoleStream,
+    private val appContext: android.content.Context,
 ) : ServerManager {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -200,6 +201,7 @@ class DefaultServerManager(
         slot.launchedAtMs = System.currentTimeMillis()
         slot.setState(ServerState.Running)
         slot.log("> 服务器启动中", LineType.System)
+        startGuard(slot.instance)
 
         // 消费输出（同时落盘到实例目录，便于诊断）
         val logFile = java.io.File(slot.instance.dir, "console-output.log")
@@ -300,6 +302,20 @@ class DefaultServerManager(
         slot.restartCount = 0
         slot.setState(ServerState.Stopped)
         slots.remove(slot.instance.id)
+        // 全部实例停止后撤下守护前台服务
+        if (slots.values.none { it.process?.isAlive == true }) {
+            com.kaze.newage.core.service.ServerGuardService.stop(appContext)
+        }
+    }
+
+    /** 启动/更新守护前台服务（防止应用退后台后服务端进程被系统回收） */
+    private fun startGuard(instance: ServerInstance) {
+        val port = ServerProperties.load(instance.dir)["server-port"] ?: "25565"
+        com.kaze.newage.core.service.ServerGuardService.start(
+            appContext,
+            "Kaze SLauncher · ${instance.name}",
+            "MC ${instance.mcVersion} 服务端运行中 · 端口 $port",
+        )
     }
 
     // ── 内部工具 ──
