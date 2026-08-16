@@ -98,15 +98,19 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         // 内容全屏滚动，可以"穿过"常驻底栏——滚动中的文字/卡片经 hazeSource 进入模糊源，
         // 被底栏的液态玻璃实时映射（模糊的字）
         Box(Modifier.fillMaxSize()) {
-            // 内容层：Miuix miuix-blur 方案（Apache-2.0，已记 NOTICES）——
-            // LayerBackdrop 录制内容，drawBackdrop 以 RuntimeShader 高斯模糊重绘
-            //（vivo 上 RenderEffect.createBlurEffect 不渲染，此前 Haze/自研均无效；
-            //   高斯 shader 与透镜同为 RuntimeShader，实测可用）
-            val backdrop = rememberLayerBackdrop()
+            // 内容层录制进 GraphicsLayer：软件模糊从该层栅格化+降采样放大
+            //（vivo Android 16：RenderEffect blur 不渲染——Haze、自研 renderEffect、
+            //   Miuix 高斯 shader 均无效；软件降采样是真机唯一已验证生效的路径）
+            val contentLayer = rememberGraphicsLayer()
             Box(
                 Modifier
                     .fillMaxSize()
-                    .layerBackdrop(backdrop)
+                    .drawWithContent {
+                        contentLayer.record {
+                            this@drawWithContent.drawContent()
+                        }
+                        drawLayer(contentLayer)
+                    }
             ) {
                 BackdropLayer(prefs = uiPrefs, modifier = Modifier.fillMaxSize())
                 NavHost(
@@ -173,7 +177,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
                     LiquidGlassNavBar(
                         currentRoute = currentRoute,
-                        backdrop = backdrop,
+                        contentLayer = contentLayer,
                         onNavigate = { dest ->
                             navController.navigate(dest.route) {
                                 popUpTo(navController.graph.findStartDestination().id) {
@@ -201,7 +205,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
 @Composable
 private fun LiquidGlassNavBar(
     currentRoute: String?,
-    backdrop: Backdrop,
+    contentLayer: androidx.compose.ui.graphics.layer.GraphicsLayer,
     onNavigate: (Dest) -> Unit,
 ) {
     val isGlass = LocalAppTheme.current == AppThemeMode.GLASS
@@ -232,8 +236,7 @@ private fun LiquidGlassNavBar(
                 .shadow(10.dp, pillShape, clip = false)
                 .clip(pillShape)
         ) {
-            // 层①：玻璃背景——Miuix miuix-blur：drawBackdrop 以 RuntimeShader 高斯模糊
-            // 重绘内容层（自带坐标对齐/降采样），外再套 Kyant0 折射透镜
+            // 层①：玻璃背景——软件模糊（vivo 唯一生效路径）+ Kyant0 折射透镜在外
             Box(
                 Modifier
                     .fillMaxSize()
@@ -241,14 +244,11 @@ private fun LiquidGlassNavBar(
                         if (glassActive) {
                             val glassP = com.kaze.newage.ui.theme.glassParams(LocalGlassMode.current)
                             val intensity = LocalGlassIntensity.current
-                            val blurPx = with(density) { (glassP.blurRadius * intensity).toPx() }
                             Modifier
-                                .drawBackdrop(
-                                    backdrop = backdrop,
-                                    shape = { pillShape },
-                                    effects = {
-                                        blur(blurPx)
-                                    },
+                                .glassBackdropBlur(
+                                    contentLayer = contentLayer,
+                                    // 强度越大越糊（降采样比例越低）
+                                    sampleScale = (0.3f / intensity).coerceIn(0.1f, 0.45f),
                                 )
                                 .liquidGlassLensSafe(
                                     refractionHeight = with(density) { 24.dp.toPx() },
