@@ -63,7 +63,11 @@ fun Modifier.liquidGlassLensSafe(
     }
     var gpuOk by remember { mutableStateOf<Boolean?>(null) }
     this.graphicsLayer {
-        val ok = gpuOk ?: probeGpuRenderer().also { gpuOk = it }
+        val ok = gpuOk ?: probeGpuRenderer().also {
+            gpuOk = it
+            // vivo 屏蔽 Log.d，用 println 走 System.out 便于真机诊断
+            println("KazeGlass: lens enabled=$it")
+        }
         if (!ok) return@graphicsLayer
         shader.setFloatUniform("size", size.width.toFloat(), size.height.toFloat())
         // 全圆角胶囊：cornerRadii = min(半宽, 半高)

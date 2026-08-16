@@ -63,7 +63,7 @@ fun glassParams(mode: GlassMode): GlassParams {
         blurRadius = lerpF(10f, 38f, p).dp,
         surfaceAlpha = lerpF(0.10f, 0.34f, p),
         whiteOverlayAlpha = lerpF(0.02f, 0.14f, p),
-        refractionScale = lerpF(0.4f, 1.4f, p),
+        refractionScale = lerpF(0.8f, 1.6f, p),
     )
 }
 
@@ -356,15 +356,16 @@ fun glassHazeStyle(): dev.chrisbanes.haze.HazeStyle {
 }
 
 /**
- * 底栏专用 Haze 样式：更高强度模糊（30~60dp）——底栏玻璃要"明显能看出
- * 底下滚动文字被映射模糊"，不能用卡片的柔和参数（GLM 视觉评测实测原参数"微弱"）。
+ * 底栏专用 Haze 样式（照搬 BiliPai LiquidGlassTuning：blur 3→30dp）：
+ * 文字透过时明显模糊但仍可辨形态，边缘折射弯曲可见；强度滑杆缩放模糊。
  */
 @Composable
 fun glassNavBarHazeStyle(): dev.chrisbanes.haze.HazeStyle {
     val mode = LocalGlassMode.current
-    val white = dev.chrisbanes.haze.HazeTint(Color.White.copy(alpha = lerpF(0.14f, 0.26f, mode.progress)))
+    val intensity = LocalGlassIntensity.current
+    val white = dev.chrisbanes.haze.HazeTint(Color.White.copy(alpha = lerpF(0.04f, 0.10f, mode.progress)))
     return dev.chrisbanes.haze.HazeStyle(
-        blurRadius = lerpF(30f, 60f, mode.progress).dp,
+        blurRadius = (lerpF(3f, 30f, mode.progress) * intensity).dp,
         noiseFactor = 0.05f,
         fallbackTint = white,
         tints = listOf(

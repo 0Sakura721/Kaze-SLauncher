@@ -204,8 +204,8 @@ private fun LiquidGlassNavBar(
     // 底栏背景：玻璃主题=极淡磨砂（真机由 Haze 真模糊成型，模拟器也有玻璃雾感）；
     // M3 主题=原样式不透明表面板
     val containerColor = if (isGlass) {
-        // 0.28 磨砂：底下文字隐约透出（真机再叠加 Haze 真模糊；模拟器无 RenderEffect 也有玻璃感）
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.28f)
+        // 0.12 极淡表面：折射与轻模糊主导"液态"观感，磨砂太厚会盖住折射弯曲
+        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.12f)
     } else {
         MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.95f)
     }
