@@ -231,7 +231,7 @@ fun NewAgeTheme(
     }
 
     // AMOLED 纯黑：深色时将背景/表面系压到纯黑
-    val effectiveScheme = if (darkTheme && amoledDark) {
+    val amoledAdjusted = if (darkTheme && amoledDark) {
         scheme.copy(
             background = Color.Black,
             onBackground = scheme.onBackground,
@@ -245,6 +245,16 @@ fun NewAgeTheme(
             surfaceContainerHighest = Color(0xFF101216),
         )
     } else scheme
+
+    // 深色下整体提亮次级文字/描边：动态色的 onSurfaceVariant 在深底上偏暗，
+    // 各界面次级文字"颜色一模一样灰蒙蒙看不清"——向白 lerp 保留色相、提升对比度
+    val effectiveScheme = if (darkTheme) {
+        fun lift(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color.White, 0.28f)
+        amoledAdjusted.copy(
+            onSurfaceVariant = lift(amoledAdjusted.onSurfaceVariant),
+            outline = lift(amoledAdjusted.outline),
+        )
+    } else amoledAdjusted
 
     CompositionLocalProvider(
         LocalAppTheme provides mode,
@@ -392,7 +402,7 @@ fun statusPalette(): StatusPalette = when (LocalAppTheme.current) {
     AppThemeMode.M3 -> if (LocalDarkTheme.current) StatusPalette(
         running = Color(0xFF34D399),
         busy = Color(0xFFFFC24B),
-        idle = Color(0xFF7C87A3),
+        idle = Color(0xFFA9B3C8), // 提亮：深色下"未启动/已停止"等状态字可见
         error = Color(0xFFFF6B6B),
     ) else StatusPalette(
         running = Color(0xFF23A268),
@@ -403,7 +413,7 @@ fun statusPalette(): StatusPalette = when (LocalAppTheme.current) {
     AppThemeMode.GLASS -> if (LocalDarkTheme.current) StatusPalette(
         running = Color(0xFF34D399),
         busy = Color(0xFFFFC24B),
-        idle = Color(0xFF7C87A3),
+        idle = Color(0xFFA9B3C8), // 提亮：深色下状态字可见
         error = Color(0xFFFF6B6B),
     ) else StatusPalette(
         running = Color(0xFF1FA36B),

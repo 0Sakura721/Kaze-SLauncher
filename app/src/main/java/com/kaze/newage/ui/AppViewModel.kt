@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /** 服务端下载状态 */
@@ -317,10 +318,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ServerProperties.ensureInitial(instance, instanceStore.instances.value)
                 _currentInstanceId.value = instance.id
                 _download.value = DownloadState(done = true, message = "下载完成")
-                onComplete(instance)
+                // 导航/UI 回调必须回主线程（否则 Compose 报 setCurrentState 或静默失败不跳转）
+                withContext(Dispatchers.Main) { onComplete(instance) }
             } catch (e: Exception) {
                 _download.value = DownloadState(error = e.message ?: "下载失败")
-                onComplete(null)
+                withContext(Dispatchers.Main) { onComplete(null) }
             }
         }
     }

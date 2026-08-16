@@ -311,10 +311,15 @@ private fun toneColor(tone: StatusTone): Color {
     }
 }
 
-/** 运行信息小字（Zalith labelSmall 风） */
+/** 运行信息小字（Zalith labelSmall 风；深色下用 onSurface 提亮保证可读） */
 @Composable
 private fun InfoText(text: String) {
-    Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = if (LocalDarkTheme.current) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+        else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 /** eula 三步指示：生成 eula.txt → 接受条款 → 启动服务端 */

@@ -328,7 +328,7 @@ private fun InstanceCard(
                 // 元素多时（Java/内存/状态/EULA）宁可整体换行，不能把文字压成竖排
                 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
                 androidx.compose.foundation.layout.FlowRow(
-                    Modifier.alpha(0.7f),
+                    Modifier.alpha(if (com.kaze.newage.ui.theme.LocalDarkTheme.current) 0.9f else 0.7f),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
@@ -340,7 +340,9 @@ private fun InstanceCard(
                         Text(
                             "EULA 未接受",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (com.kaze.newage.ui.theme.LocalDarkTheme.current)
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
