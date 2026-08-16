@@ -49,6 +49,8 @@ data class GlassParams(
     val blurRadius: Dp,
     val surfaceAlpha: Float,
     val whiteOverlayAlpha: Float,
+    /** 底栏透镜折射幅度系数：清晰→弱折射，磨砂→强折射 */
+    val refractionScale: Float,
 )
 
 private fun lerpF(start: Float, stop: Float, fraction: Float): Float =
@@ -61,6 +63,7 @@ fun glassParams(mode: GlassMode): GlassParams {
         blurRadius = lerpF(10f, 38f, p).dp,
         surfaceAlpha = lerpF(0.10f, 0.34f, p),
         whiteOverlayAlpha = lerpF(0.02f, 0.14f, p),
+        refractionScale = lerpF(0.4f, 1.4f, p),
     )
 }
 

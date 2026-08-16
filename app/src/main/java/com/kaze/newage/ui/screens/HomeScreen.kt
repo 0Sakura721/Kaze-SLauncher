@@ -235,8 +235,7 @@ fun HomeScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     val (icon, color) = when (envState) {
-                        ProotEnvironment.State.READY -> Icons.Filled.CheckCircle to
-                            (if (LocalDarkTheme.current) Color(0xFF34D399) else Color(0xFF23A268))
+                        ProotEnvironment.State.READY -> Icons.Filled.CheckCircle to statusPalette().running
                         ProotEnvironment.State.SETTING_UP -> Icons.Filled.CloudDownload to MaterialTheme.colorScheme.primary
                         ProotEnvironment.State.ERROR -> Icons.Filled.ErrorOutline to MaterialTheme.colorScheme.error
                         else -> Icons.Filled.CloudDownload to MaterialTheme.colorScheme.onSurfaceVariant

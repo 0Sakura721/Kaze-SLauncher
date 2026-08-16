@@ -57,9 +57,9 @@ import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.theme.AppThemeMode
-import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.GlassMode
 import com.kaze.newage.ui.theme.cardBorderColor
+import com.kaze.newage.ui.theme.statusPalette
 import java.io.File
 
 /**
@@ -131,7 +131,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
-                Text("v1-0811", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text("v1.0.0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -205,20 +205,28 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     }
                 }
 
-                // 取色风格（materialkolor PaletteStyle，BiliPai resolveColorStyleOptions）
-                Text("取色风格", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp))
-                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                androidx.compose.foundation.layout.FlowRow(
-                    Modifier.padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    listOf("TonalSpot", "Vibrant", "Expressive", "Neutral", "Fidelity", "Content", "Monochrome", "Rainbow", "FruitSalad").forEach { styleName ->
-                        CheckChip(
-                            selected = uiPrefs.paletteStyle.value == styleName,
-                            label = styleName,
-                            onClick = { uiPrefs.setPaletteStyle(styleName) },
-                        )
+                // 取色风格（materialkolor PaletteStyle，BiliPai resolveColorStyleOptions）——抽屉式，与「通用」手风琴一致
+                var paletteExpanded by remember { mutableStateOf(false) }
+                AccordionRow(
+                    title = "取色风格",
+                    desc = if (paletteExpanded) "点击收起" else "当前：${uiPrefs.paletteStyle.value}",
+                    expanded = paletteExpanded,
+                    onClick = { paletteExpanded = !paletteExpanded },
+                )
+                AnimatedVisibility(visible = paletteExpanded) {
+                    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                    androidx.compose.foundation.layout.FlowRow(
+                        Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        listOf("TonalSpot", "Vibrant", "Expressive", "Neutral", "Fidelity", "Content", "Monochrome", "Rainbow", "FruitSalad").forEach { styleName ->
+                            CheckChip(
+                                selected = uiPrefs.paletteStyle.value == styleName,
+                                label = styleName,
+                                onClick = { uiPrefs.setPaletteStyle(styleName) },
+                            )
+                        }
                     }
                 }
 
@@ -448,9 +456,8 @@ fun SettingsScreen(viewModel: AppViewModel) {
                                     Text(
                                         if (installed) "已安装" else "未安装",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (installed) {
-                                            if (LocalDarkTheme.current) Color(0xFF34D399) else Color(0xFF23A268)
-                                        } else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = if (installed) statusPalette().running
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                                 if (installed) {
@@ -517,9 +524,8 @@ fun SettingsScreen(viewModel: AppViewModel) {
                             if (batteryOk) "已允许后台运行，应用不被省电策略回收"
                             else "未加入白名单：应用在后台可能被系统回收",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (batteryOk) {
-                                if (LocalDarkTheme.current) Color(0xFF34D399) else Color(0xFF23A268)
-                            } else MaterialTheme.colorScheme.error,
+                            color = if (batteryOk) statusPalette().running
+                            else MaterialTheme.colorScheme.error,
                         )
                         if (!batteryOk) {
                             Button(
@@ -550,7 +556,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 // 关于与许可证
                 AccordionRow(
                     title = "关于与许可证",
-                    desc = "v1-0811 · GNU GPL-3.0",
+                    desc = "v1.0.0 · GNU GPL-3.0",
                     expanded = openSection == "about",
                     onClick = { openSection = if (openSection == "about") null else "about" },
                 )

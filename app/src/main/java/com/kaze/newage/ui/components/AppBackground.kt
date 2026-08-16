@@ -38,6 +38,7 @@ fun AppBackground(
         LocalGlassBlurEnabled provides prefs.glassBlur.value,
     ) {
         Box(Modifier.fillMaxSize()) {
+            // 背景层作为 Haze 模糊源
             Box(
                 Modifier
                     .fillMaxSize()
@@ -63,7 +64,15 @@ fun AppBackground(
                     ThemeBackdrop(Modifier.fillMaxSize())
                 }
             }
-            content()
+            // 内容层也作为 Haze 模糊源：页面滚动时，文字/卡片经过底部玻璃栏下方会被
+            // 真实模糊 + 折射（否则只有背景透出，内容直接盖在栏下面，没有液态玻璃感）
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .hazeSource(state = hazeState)
+            ) {
+                content()
+            }
         }
     }
 }
