@@ -63,6 +63,8 @@ app/src/main/java/com/kaze/newage/
 | [ZalithLauncher 2](https://github.com/ZalithLauncher/ZalithLauncher2) | GPL-3.0 | Compose 重写路线、UI 卡片体系（BackgroundCard / CardTitleLayout / CheckChip） |
 | [PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher) | GPL-3.0 | 服务器原生运行思路、JRE 生态 |
 | [BiliPai](https://github.com/jay3-yy/BiliPai) | GPL-3.0 | 主题设置体系、安卓原生液态玻璃（Haze 模糊 + 折射透镜） |
+| [Miuix](https://github.com/Miuix-Kotlin-Multiplatform/Miuix) | Apache-2.0 | 浮动胶囊底栏（IosLiquidGlassNavigationBar 三层结构） |
+| [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) | Apache-2.0 | 圆角矩形折射透镜 RuntimeShader（BiliPai 现役 lens 同款） |
 | [oonid/pr](https://github.com/oonid/pr) | GPL-2.0-or-later | 修补版 proot + loader（绕过 targetSdk 29+ 的 W^X / zygote seccomp） |
 | [termux/proot](https://github.com/termux/proot) | GPL-2.0+ | proot 运行时基础 |
 | [proot-distro](https://github.com/termux/proot-distro) | GPL-3.0 | rootfs 部署方案 |
