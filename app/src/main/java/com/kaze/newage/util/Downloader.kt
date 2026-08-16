@@ -20,12 +20,14 @@ object Downloader {
      * @param urlStr 下载地址
      * @param dest 目标文件
      * @param onProgress (downloadedBytes, totalBytes) —— total 可能为 -1（未知）
+     * @param shouldCancel 返回 true 时中止下载（抛 InterruptedException，部分文件保留可续传）
      */
     @Throws(Exception::class)
     fun download(
         urlStr: String,
         dest: File,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
+        shouldCancel: () -> Boolean = { false },
     ) {
         dest.parentFile?.mkdirs()
         var url: URL? = null
@@ -79,6 +81,7 @@ object Downloader {
                     val buf = ByteArray(64 * 1024)
                     var lastUpdate = System.currentTimeMillis()
                     while (true) {
+                        if (shouldCancel()) throw InterruptedException("下载已取消")
                         val n = input.read(buf)
                         if (n == -1) break
                         out.write(buf, 0, n)
@@ -186,6 +189,12 @@ object Downloader {
     /**
      * 多源下载：先探测最快源，按序尝试；任一源失败自动回退下一个
      * （断点续传贯穿：已下载部分保留，换源后继续追加）。
+     *
+     * 断网场景对策：单源失败重试 [perSourceRetries] 次（间隔 [retryDelayMs]）；
+     * 全部源都失败后等待 [roundDelayMs] 再整体重来，共 [maxRounds] 轮——
+     * 下载中途断网会自动等待网络恢复后从断点续传，不会白白丢弃已下载数据。
+     * 仍失败返回 null 时，目标文件保留部分内容供下次续传。
+     *
      * @param onSourceError 单个源失败时回调（源 URL, 错误消息），用于界面展示诊断
      * @return 实际使用的 URL；全部失败返回 null
      */
@@ -194,18 +203,40 @@ object Downloader {
         dest: File,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
         onSourceError: (String, String) -> Unit = { _, _ -> },
+        shouldCancel: () -> Boolean = { false },
+        maxRounds: Int = 4,
+        roundDelayMs: Long = 5000,
+        perSourceRetries: Int = 2,
+        retryDelayMs: Long = 2000,
     ): String? {
         val candidates = urls.filter { it.isNotBlank() }.distinct()
         if (candidates.isEmpty()) return null
-        val best = probeFastest(candidates)
-        val ordered = (listOfNotNull(best) + candidates.filter { it != best })
-        for (u in ordered) {
-            try {
-                download(u, dest, onProgress)
-                return u
-            } catch (e: Exception) {
-                onSourceError(u, e.message ?: "未知错误")
+        for (round in 1..maxRounds) {
+            // 每轮重新探测最快源：断网恢复后最优镜像可能变化
+            val best = probeFastest(candidates)
+            val ordered = (listOfNotNull(best) + candidates.filter { it != best })
+            for (u in ordered) {
+                var attempt = 0
+                while (attempt <= perSourceRetries) {
+                    if (shouldCancel()) return null
+                    try {
+                        download(u, dest, onProgress, shouldCancel)
+                        return u
+                    } catch (e: InterruptedException) {
+                        return null // 用户取消
+                    } catch (e: Exception) {
+                        attempt++
+                        onSourceError(u, e.message ?: "未知错误")
+                        if (attempt <= perSourceRetries && !shouldCancel()) {
+                            try { Thread.sleep(retryDelayMs) } catch (_: InterruptedException) { return null }
+                        }
+                    }
+                }
                 // 回退下一源（dest 的部分内容已保留，续传继续）
+            }
+            if (round < maxRounds) {
+                onSourceError("", "所有源不可用（可能断网），${roundDelayMs / 1000} 秒后自动重试（第 ${round + 1}/$maxRounds 轮）…")
+                try { Thread.sleep(roundDelayMs) } catch (_: InterruptedException) { return null }
             }
         }
         return null

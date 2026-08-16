@@ -405,6 +405,7 @@ private fun VersionConfigPhase(
             Text(
                 when {
                     download.running -> "下载中…"
+                    download.error != null -> "重试下载（断点续传）"
                     mcVersion.isBlank() -> "请先选择版本"
                     else -> "下载并创建"
                 }

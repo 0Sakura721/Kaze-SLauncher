@@ -1,5 +1,9 @@
 package com.kaze.newage.ui.screens
 
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -64,6 +69,7 @@ import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.cardBorderColor
 import com.kaze.newage.ui.theme.parseSeedColor
 import com.kaze.newage.ui.theme.statusPalette
+import com.kaze.newage.util.StorageDirUtil
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamicColorScheme
 import java.io.File
@@ -389,6 +395,80 @@ fun SettingsScreen(viewModel: AppViewModel) {
                         onCheckedChange = { uiPrefs.setEnvExternal(it) },
                     )
                 }
+
+                // ── 实例存储位置（自定义目录：游戏存到其他目录并直接从该目录运行）──
+                val dirPicker = rememberLauncherForActivityResult(
+                    ActivityResultContracts.OpenDocumentTree()
+                ) { uri ->
+                    if (uri == null) return@rememberLauncherForActivityResult
+                    val dir = StorageDirUtil.treeUriToFile(uri)
+                    if (dir == null) {
+                        Toast.makeText(appContext, "所选目录暂不支持（请选择主存储或 SD 卡目录）", Toast.LENGTH_LONG).show()
+                        return@rememberLauncherForActivityResult
+                    }
+                    if (!StorageDirUtil.isWritableDir(dir)) {
+                        Toast.makeText(appContext, "所选目录不可写，无法存放实例", Toast.LENGTH_LONG).show()
+                        return@rememberLauncherForActivityResult
+                    }
+                    // 持久化 SAF 授权（防系统回收）+ 保存路径
+                    runCatching {
+                        appContext.contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                        )
+                    }
+                    // 释放旧目录的持久授权
+                    uiPrefs.instanceDirUri.value.takeIf { it.isNotBlank() }?.let { old ->
+                        runCatching {
+                            appContext.contentResolver.releasePersistableUriPermission(
+                                Uri.parse(old),
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                            )
+                        }
+                    }
+                    uiPrefs.setInstanceDir(dir.absolutePath, uri.toString())
+                    viewModel.rescanInstances()
+                    Toast.makeText(appContext, "实例目录已切换，正在扫描所选目录…", Toast.LENGTH_LONG).show()
+                }
+                Column(Modifier.padding(top = 10.dp)) {
+                    Text("实例存储位置", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        if (uiPrefs.instanceDirPath.value.isBlank()) "默认（应用外部目录 instances/）；可自定义到其他目录"
+                        else "当前：${StorageDirUtil.displayPath(uiPrefs.instanceDirPath.value)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                    Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            if (StorageDirUtil.hasAllFilesAccess(appContext)) {
+                                dirPicker.launch(null)
+                            } else {
+                                // 先引导授予「所有文件访问」（Android 11+ 分区存储下 File API 读写任意目录的前提）
+                                Toast.makeText(
+                                    appContext,
+                                    "请在系统设置中授予「所有文件访问」后，再次点击选择目录",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                                runCatching {
+                                    val intent = Intent(
+                                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                        Uri.parse("package:com.kaze.newage"),
+                                    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    appContext.startActivity(intent)
+                                }
+                            }
+                        }) { Text("选择目录") }
+                        if (uiPrefs.instanceDirPath.value.isNotBlank()) {
+                            OutlinedButton(onClick = {
+                                uiPrefs.setInstanceDir("")
+                                viewModel.rescanInstances()
+                                Toast.makeText(appContext, "已恢复默认实例目录", Toast.LENGTH_SHORT).show()
+                            }) { Text("恢复默认") }
+                        }
+                    }
+                }
+
                 Text(
                     when (envState) {
                         ProotEnvironment.State.READY -> "已就绪"
@@ -507,21 +587,39 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
 
                 // Java 运行时
+                var javaDeleteConfirm by remember { mutableStateOf<Int?>(null) }
                 AccordionRow(
                     title = "Java 运行时",
                     desc = "已装：" + if (javaVersions.isEmpty()) "无" else javaVersions.sorted().joinToString(" / ") { "Java $it" },
                     expanded = openSection == "java",
                     onClick = { openSection = if (openSection == "java") null else "java" },
                 )
+                javaDeleteConfirm?.let { v ->
+                    AlertDialog(
+                        onDismissRequest = { javaDeleteConfirm = null },
+                        title = { Text("删除 Java $v？") },
+                        text = { Text("将删除运行时文件（约 200MB）并清理下载残留。正在使用 Java $v 的实例将无法启动，直到重新安装。") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                javaDeleteConfirm = null
+                                viewModel.uninstallJava(v)
+                            }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { javaDeleteConfirm = null }) { Text("取消") }
+                        },
+                    )
+                }
                 AnimatedVisibility(visible = openSection == "java") {
                     Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            "Java 不随应用内置，按需下载所需版本；不同 MC 版本对 Java 的要求不同（1.8–1.16.5→8 / 1.18–1.20.4→17 / ≥1.20.5→21 / ≥26.x→25），可在新建实例时手动指定。",
+                            "Java 不随应用内置，按需下载所需版本；不同 MC 版本对 Java 的要求不同（1.8–1.16.5→8 / 1.18–1.20.4→17 / ≥1.20.5→21 / ≥26.x→25），可在新建实例时手动指定。下载支持断点续传，断网会自动重试；中断后可点击继续。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         listOf(8, 17, 21, 25).forEach { v ->
                             val installed = javaVersions.contains(v)
+                            val isTaskFor = javaTask.version == v
                             Row(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -530,24 +628,38 @@ fun SettingsScreen(viewModel: AppViewModel) {
                                 Column {
                                     Text("Java $v", style = MaterialTheme.typography.bodyMedium)
                                     Text(
-                                        if (installed) "已安装" else "未安装",
+                                        when {
+                                            installed -> "已安装"
+                                            javaTask.running && isTaskFor -> "任务进行中…"
+                                            javaTask.error != null && isTaskFor -> javaTask.error.orEmpty().take(80)
+                                            else -> "未安装"
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (installed) statusPalette().running
-                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = when {
+                                            installed -> statusPalette().running
+                                            javaTask.error != null && isTaskFor -> MaterialTheme.colorScheme.error
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
                                     )
                                 }
-                                if (installed) {
-                                    OutlinedButton(
-                                        onClick = { viewModel.uninstallJava(v) },
+                                when {
+                                    installed -> OutlinedButton(
+                                        onClick = { javaDeleteConfirm = v },
                                         enabled = !javaTask.running,
                                     ) { Text("删除") }
-                                } else {
-                                    Button(
+                                    javaTask.running && isTaskFor && !javaTask.cancelRequested -> OutlinedButton(
+                                        onClick = { viewModel.cancelJavaTask() },
+                                    ) { Text("取消") }
+                                    javaTask.error != null && isTaskFor -> Button(
+                                        onClick = { viewModel.installJava(v) },
+                                        enabled = !javaTask.running,
+                                    ) { Text("重试") }
+                                    else -> Button(
                                         onClick = { viewModel.installJava(v) },
                                         enabled = !javaTask.running,
                                     ) {
                                         Text(
-                                            if (javaTask.running && javaTask.version == v) "下载中…" else "下载安装"
+                                            if (javaTask.running && isTaskFor) "取消中…" else "下载安装"
                                         )
                                     }
                                 }
@@ -561,9 +673,6 @@ fun SettingsScreen(viewModel: AppViewModel) {
                             javaTask.message.let {
                                 if (it.isNotBlank()) Text(it, style = MaterialTheme.typography.bodySmall)
                             }
-                        }
-                        javaTask.error?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }

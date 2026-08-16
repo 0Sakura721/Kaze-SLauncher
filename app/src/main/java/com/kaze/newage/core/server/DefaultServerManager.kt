@@ -128,9 +128,9 @@ class DefaultServerManager(
                     already != null -> already
                     javaInitializing.compareAndSet(false, true) -> {
                         try {
-                            javaManager.install(javaMajor) { _, message ->
+                            javaManager.install(javaMajor, onProgress = { _, message ->
                                 slot.log("> $message", LineType.System)
-                            }
+                            })
                         } finally {
                             javaInitializing.set(false)
                         }

@@ -28,7 +28,7 @@ import com.materialkolor.dynamicColorScheme
 // 主题系统（照搬 BiliPai 主题设置体系，GPL-3.0）：
 //  - 主题模式：跟随系统 / 浅色 / 深色（AppThemeMode）
 //  - 深色样式：普通黑 / AMOLED 纯黑（DarkThemeStyle）
-//  - 主题样式：Material 3（动态取色/自定义种子色 + 取色风格）/ 安卓原生液态玻璃
+//  - 主题样式：Material 3（动态取色/自定义种子色 + 取色风格）/ 液态玻璃
 //  - 液态玻璃模式：清晰 CLEAR / 均衡 BALANCED / 磨砂 FROSTED
 //    （参数照搬 BiliPai LiquidGlassTuning 的 progress 线性映射）
 // ══════════════════════════════════════════════════════════════
@@ -128,7 +128,7 @@ private val M3Dark = darkColorScheme(
     onError = Color(0xFF3B0606),
 )
 
-// ── GLASS · 安卓原生液态玻璃（浅色）──
+// ── GLASS · 液态玻璃（浅色）──
 private val GlassLight = lightColorScheme(
     primary = Color(0xFF2B6BE4),
     onPrimary = Color(0xFFFFFFFF),
@@ -154,7 +154,7 @@ private val GlassLight = lightColorScheme(
     onError = Color(0xFFFFFFFF),
 )
 
-// ── GLASS · 安卓原生液态玻璃（深色）──
+// ── GLASS · 液态玻璃（深色）──
 private val GlassDark = darkColorScheme(
     primary = Color(0xFF7CA8FF),
     onPrimary = Color(0xFF0A2A6B),

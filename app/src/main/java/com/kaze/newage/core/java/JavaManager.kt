@@ -23,8 +23,15 @@ interface JavaManager {
     /** 已安装的运行时列表 */
     fun installed(): List<JavaRuntime>
 
-    /** 安装指定主版本（如 17），返回安装后的运行时；已安装则直接返回 */
-    suspend fun install(majorVersion: Int, onProgress: (Float, String) -> Unit = { _, _ -> }): JavaRuntime
+    /**
+     * 安装指定主版本（如 17），返回安装后的运行时；已安装则直接返回。
+     * @param shouldCancel 返回 true 时取消（下载中断点保留，可下次续传）
+     */
+    suspend fun install(
+        majorVersion: Int,
+        onProgress: (Float, String) -> Unit = { _, _ -> },
+        shouldCancel: () -> Boolean = { false },
+    ): JavaRuntime
 
     /** 删除指定版本 */
     suspend fun uninstall(majorVersion: Int)

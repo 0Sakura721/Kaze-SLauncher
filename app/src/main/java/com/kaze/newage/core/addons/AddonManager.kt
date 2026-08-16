@@ -75,10 +75,10 @@ object AddonManager {
             ?: throw RuntimeException("版本无下载文件")
         val dest = File(addonDir(instance, kind), file.filename.ifBlank { "$projectId.jar" })
         onProgress(0f, "下载 ${file.filename}（${version.version_number}）…")
-        Downloader.download(file.url, dest) { done, total ->
+        Downloader.download(file.url, dest, onProgress = { done, total ->
             val progress = if (total > 0) done.toFloat() / total else 0f
             onProgress(progress, "下载中 ${(done / 1024 / 1024)}MB / ${(total / 1024 / 1024)}MB")
-        }
+        })
         return dest
     }
 }

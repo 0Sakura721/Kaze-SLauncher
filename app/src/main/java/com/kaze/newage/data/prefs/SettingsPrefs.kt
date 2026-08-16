@@ -19,7 +19,7 @@ class SettingsPrefs(context: Context) {
     /** 是否启用背景图 */
     val bgEnabled = mutableStateOf(prefs.getBoolean("bg_enabled", false))
 
-    /** 主题模式：m3（Material 3 动态取色，默认）/ glass（安卓原生液态玻璃，已封锁） */
+    /** 主题模式：m3（Material 3 动态取色，默认）/ glass（液态玻璃，已封锁） */
     val themeMode = mutableStateOf(prefs.getString("theme_mode", "clear") ?: "clear")
 
     init {
@@ -61,6 +61,15 @@ class SettingsPrefs(context: Context) {
 
     /** Linux 环境存放到外部存储（内部空间不足时；切换后需重新部署） */
     val envExternal = mutableStateOf(prefs.getBoolean("env_external", false))
+
+    /**
+     * 自定义实例存储目录（空 = 默认 app 外部目录 instances/）。
+     * 通过 SAF 目录选择器写入（需「所有文件访问」权限）；实例可直接存到该目录并从该目录加载运行。
+     */
+    val instanceDirPath = mutableStateOf(prefs.getString("instance_dir_path", "") ?: "")
+
+    /** 自定义目录对应的 SAF tree URI（持久授权记录，切换/恢复时释放） */
+    val instanceDirUri = mutableStateOf(prefs.getString("instance_dir_uri", "") ?: "")
 
     /** 原生模糊（Haze/RenderEffect，Android 12+；个别 GPU 异常时可关闭回退半透明玻璃） */
     val glassBlur = mutableStateOf(prefs.getBoolean("glass_blur", true))
@@ -147,6 +156,16 @@ class SettingsPrefs(context: Context) {
     fun setEnvExternal(v: Boolean) {
         envExternal.value = v
         prefs.edit().putBoolean("env_external", v).apply()
+    }
+
+    /** 设置自定义实例目录（path 为空 = 恢复默认） */
+    fun setInstanceDir(path: String, uri: String = "") {
+        instanceDirPath.value = path
+        instanceDirUri.value = uri
+        prefs.edit()
+            .putString("instance_dir_path", path)
+            .putString("instance_dir_uri", uri)
+            .apply()
     }
 
     fun setGlassBlur(v: Boolean) {

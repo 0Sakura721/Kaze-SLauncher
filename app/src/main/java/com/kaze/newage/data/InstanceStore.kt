@@ -53,8 +53,11 @@ data class StoredInstance(
     }
 }
 
-/** 实例存储：内存 StateFlow + JSON 文件持久化 */
-class InstanceStore(context: Context) {
+/** 实例存储：内存 StateFlow + JSON 文件持久化；实例目录支持自定义（SAF 选择） */
+class InstanceStore(
+    context: Context,
+    private val prefs: com.kaze.newage.data.prefs.SettingsPrefs,
+) {
 
     private val context: Context = context.applicationContext
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
@@ -66,13 +69,25 @@ class InstanceStore(context: Context) {
     val instances: StateFlow<List<ServerInstance>> = _instances.asStateFlow()
 
     init {
+        rescan()
+    }
+
+    /** 重新加载：读 JSON + 扫描实例根目录（切换自定义目录后调用，可直接识别新目录里的既有服务端） */
+    fun rescan() {
         _instances.value = load()
         save() // 目录扫描恢复出的实例回存 JSON
     }
 
-    /** 实例根目录（app 外部存储，用户可见） */
-    fun instancesRoot(): File =
-        File(context.getExternalFilesDir(null), "instances").apply { mkdirs() }
+    /**
+     * 实例根目录：优先自定义目录（设置→环境→实例存储位置）；
+     * 未设置时用 app 外部目录（用户可见）。目录不存在时自动创建。
+     */
+    fun instancesRoot(): File {
+        val custom = prefs.instanceDirPath.value.takeIf { it.isNotBlank() }
+            ?.let { File(it) }
+            ?.takeIf { it.isDirectory }
+        return (custom ?: File(context.getExternalFilesDir(null), "instances")).apply { mkdirs() }
+    }
 
     fun createInstanceDir(name: String): File =
         File(instancesRoot(), sanitize(name)).apply { mkdirs() }
@@ -116,7 +131,8 @@ class InstanceStore(context: Context) {
     private fun recoverFromDirs(): List<ServerInstance> {
         val root = instancesRoot()
         return try {
-            root.listFiles()?.filter { it.isDirectory }?.mapNotNull { dir ->
+            val dirs = root.listFiles()?.filter { it.isDirectory } ?: emptyList()
+            dirs.mapNotNull { dir ->
                 val jar = dir.listFiles()?.firstOrNull { it.isFile && it.name.endsWith(".jar") && !it.name.contains("installer", true) }
                     ?: return@mapNotNull null
                 val name = jar.name.removeSuffix(".jar")
@@ -139,7 +155,7 @@ class InstanceStore(context: Context) {
                     maxRestarts = 3,
                     dir = dir,
                 )
-            } ?: emptyList()
+            }
         } catch (_: Exception) { emptyList() }
     }
 

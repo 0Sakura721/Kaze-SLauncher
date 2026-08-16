@@ -26,7 +26,11 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
             )
         }
 
-    override suspend fun install(majorVersion: Int, onProgress: (Float, String) -> Unit): JavaRuntime {
+    override suspend fun install(
+        majorVersion: Int,
+        onProgress: (Float, String) -> Unit,
+        shouldCancel: () -> Boolean,
+    ): JavaRuntime {
         if (env.isJdkInstalled(majorVersion)) {
             onProgress(1f, "Java $majorVersion 已安装")
             return installed().first { it.version == majorVersion.toString() }
@@ -39,13 +43,14 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
         }
 
         // 主方案：Adoptium 官方 OpenJDK 直接下载解压
-        val directResult = installFromAdoptium(majorVersion) { progress, message ->
+        val directResult = installFromAdoptium(majorVersion, shouldCancel) { progress, message ->
             onProgress(0.3f + progress * 0.65f, message)
         }
         if (directResult != null) {
             onProgress(1f, "Java $majorVersion 安装完成")
             return directResult
         }
+        if (shouldCancel()) throw InterruptedException("安装已取消")
 
         // 回退：apt 安装
         onProgress(0.35f, "直接下载失败，回退 apt 安装 Java $majorVersion（约 100MB）…")
@@ -66,24 +71,30 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
     }
 
     override suspend fun uninstall(majorVersion: Int) {
-        if (!env.isReady) return
         val jvmDir = File(env.javaHomeDir, "java-$majorVersion-openjdk-${archSuffix()}")
         runCatching { jvmDir.deleteRecursively() }
+        // 清理下载残留（tar 包与临时解压目录）
+        runCatching { File(env.javaHomeDir, "openjdk-$majorVersion.tar.gz").delete() }
+        runCatching { File(env.javaHomeDir, "openjdk-$majorVersion-tmp").deleteRecursively() }
         // 卸载通过 apt 兜底；失败时静默
-        env.runCommand("DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq openjdk-$majorVersion-jdk-headless", timeoutMs = 300_000)
+        if (env.isReady) {
+            env.runCommand("DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq openjdk-$majorVersion-jdk-headless", timeoutMs = 300_000)
+        }
     }
 
     /**
      * Adoptium 直连下载 OpenJDK 并解压到 /usr/lib/jvm/java-N-openjdk-arm64。
-     * 多源探测（GitHub 官方 + TUNA/华为镜像，自动选最快）+ 断点续传。
-     * 成功返回 JavaRuntime，失败返回 null（交给调用方回退 apt）。
+     * 多源探测（GitHub 官方 + TUNA/华为镜像，自动选最快）+ 断点续传 + 断网自动重试。
+     * 成功返回 JavaRuntime；失败（含用户取消）返回 null（交给调用方回退 apt）。
      */
     private suspend fun installFromAdoptium(
         majorVersion: Int,
+        shouldCancel: () -> Boolean,
         onProgress: (Float, String) -> Unit,
     ): JavaRuntime? = withContext(Dispatchers.IO) {
+        val targetDir = File(env.javaHomeDir, "java-$majorVersion-openjdk-${archSuffix()}")
+        val tmpDir = File(env.javaHomeDir, "openjdk-$majorVersion-tmp")
         try {
-            val targetDir = File(env.javaHomeDir, "java-$majorVersion-openjdk-${archSuffix()}")
             if (targetDir.exists() && File(targetDir, "bin/java").exists()) {
                 return@withContext JavaRuntime(majorVersion.toString(), targetDir, archSuffix())
             }
@@ -143,21 +154,34 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                 onSourceError = { src, err ->
                     onProgress(0f, "源失败 ${src.take(70)}：$err")
                 },
+                shouldCancel = shouldCancel,
             )
             if (used == null) return@withContext null
             onProgress(1f, "下载完成（源：$used），解压中…")
 
             // 解压到临时目录，再移到目标（Adoptium tar 内有一层 jdk-xx.y+z/ 目录）
-            val tmpDir = File(targetDir.parentFile, "openjdk-$majorVersion-tmp")
             if (tmpDir.exists()) tmpDir.deleteRecursively()
             tmpDir.mkdirs()
             onProgress(1f, "解压 OpenJDK $majorVersion…")
-            // 用系统 tar（久经验证，Termux/pkg 同款路径）
-            val proc = Runtime.getRuntime().exec(
-                arrayOf("/system/bin/sh", "-c", "tar xf '${tarFile.absolutePath}' -C '${tmpDir.absolutePath}'")
-            )
-            if (proc.waitFor() != 0) {
-                throw RuntimeException("tar 解压失败")
+            // 主方案：系统 tar（久经验证，Termux/pkg 同款路径）；失败回退内置 TarExtractor（带进度）
+            val systemTarOk = runCatching {
+                val proc = Runtime.getRuntime().exec(
+                    arrayOf("/system/bin/sh", "-c", "tar xf '${tarFile.absolutePath}' -C '${tmpDir.absolutePath}'")
+                )
+                proc.waitFor() == 0
+            }.getOrDefault(false)
+            if (!systemTarOk) {
+                if (shouldCancel()) return@withContext null
+                onProgress(1f, "系统 tar 不可用，回退内置解压…")
+                try {
+                    TarExtractor.extract(tarFile, tmpDir) { done, total, speed ->
+                        onProgress(if (total > 0) done.toFloat() / total else 0f, "解压 OpenJDK：${done / 1024 / 1024}MB${if (total > 0) " / ${total / 1024 / 1024}MB" else ""}（${speed / 1024}KB/s）")
+                    }
+                } catch (e: Exception) {
+                    onProgress(0f, "解压失败：${e.message}")
+                    tmpDir.deleteRecursively()
+                    return@withContext null
+                }
             }
             tarFile.delete()
 
@@ -180,7 +204,14 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
             javaBin.setExecutable(true)
             installed().firstOrNull { it.version == majorVersion.toString() }
                 ?: JavaRuntime(majorVersion.toString(), targetDir, archSuffix())
+        } catch (e: InterruptedException) {
+            null
         } catch (e: Exception) {
+            // 失败/取消清理：半成品解压目录与目标目录删除（tar 包保留用于断点续传）
+            runCatching { tmpDir.deleteRecursively() }
+            if (shouldCancel() || File(targetDir, "bin/java").exists().not()) {
+                runCatching { targetDir.deleteRecursively() }
+            }
             null
         }
     }

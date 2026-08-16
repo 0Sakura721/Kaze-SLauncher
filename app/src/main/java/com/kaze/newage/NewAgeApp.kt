@@ -43,7 +43,7 @@ class AppContainer(context: Context) {
 
     val serverManager: DefaultServerManager = DefaultServerManager(env, javaManager, console, appContext)
 
-    val instanceStore: InstanceStore = InstanceStore(appContext)
+    val instanceStore: InstanceStore = InstanceStore(appContext, uiPrefs)
 }
 
 /** 便捷获取容器 */

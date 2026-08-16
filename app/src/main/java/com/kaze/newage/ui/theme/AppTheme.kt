@@ -5,11 +5,11 @@ import dev.chrisbanes.haze.HazeState
 /**
  * 主题模式（照搬 BiliPai 主题设置思路，GPL-3.0）：
  *  - M3：Material 3 动态取色（Material You，跟随系统深浅色）
- *  - GLASS：安卓原生液态玻璃（Haze 原生背景模糊 + 折射，跟随系统深浅色）
+ *  - GLASS：液态玻璃（Haze 原生背景模糊 + 折射，跟随系统深浅色）
  */
 enum class AppThemeMode(val id: String, val label: String, val desc: String) {
     M3("m3", "Material 3", "动态取色（Material You）"),
-    GLASS("glass", "安卓原生液态玻璃", "原生背景模糊 + 折射"),
+    GLASS("glass", "液态玻璃", "原生背景模糊 + 折射"),
     ;
 
     companion object {
