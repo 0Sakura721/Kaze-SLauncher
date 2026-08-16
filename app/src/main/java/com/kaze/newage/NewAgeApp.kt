@@ -23,7 +23,7 @@ class NewAgeApp : Application() {
 
 /** 依赖容器（简单手动 DI，避免引入框架） */
 class AppContainer(context: Context) {
-    private val appContext = context.applicationContext
+    val appContext: Context = context.applicationContext
 
     val console: ConsoleStream = ConsoleStream()
 

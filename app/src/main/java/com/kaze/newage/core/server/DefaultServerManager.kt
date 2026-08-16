@@ -203,7 +203,7 @@ class DefaultServerManager(
         slot.log("> 服务器启动中", LineType.System)
         startGuard(slot.instance)
 
-        // 消费输出（同时落盘到实例目录，便于诊断）
+        // 消费输出（落盘到实例目录 console-output.log，供控制台「保存日志」导出）
         val logFile = java.io.File(slot.instance.dir, "console-output.log")
         scope.launch {
             try {

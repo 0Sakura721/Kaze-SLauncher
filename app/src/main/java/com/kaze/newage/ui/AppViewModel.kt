@@ -203,9 +203,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startInstance(instance: ServerInstance) {
         _currentInstanceId.value = instance.id
+        // 电池优化白名单：首次启动服务端时自动弹系统请求（防止后台被杀）；拒绝可去设置页重试
+        requestBatteryWhitelistOnce()
         viewModelScope.launch(Dispatchers.IO) {
             serverManager.start(instance)
         }
+    }
+
+    /** 未忽略电池优化时，弹系统对话框请求加入白名单（只自动弹一次，vivo 等厂商后台管理需手动引导） */
+    private fun requestBatteryWhitelistOnce() {
+        try {
+            if (container.uiPrefs.batteryPrompted.value) return
+            val pm = container.appContext.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            if (pm.isIgnoringBatteryOptimizations(container.appContext.packageName)) return
+            container.uiPrefs.setBatteryPrompted(true)
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                android.net.Uri.parse("package:${container.appContext.packageName}"),
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            container.appContext.startActivity(intent)
+        } catch (_: Exception) { }
     }
 
     fun stopInstance(instance: ServerInstance) {
@@ -227,6 +244,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 清空当前实例控制台显示（不影响后端日志流） */
     fun clearConsole() {
         _consoleLines.value = emptyList()
+    }
+
+    /** 导出当前实例完整日志到用户选择的目录（SAF 一次性保存） */
+    fun saveConsoleLog(uri: android.net.Uri) {
+        val id = _currentInstanceId.value ?: return
+        val inst = instanceStore.get(id) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val src = java.io.File(inst.dir, "console-output.log")
+                val text = if (src.exists()) src.readText() else "（该实例暂无日志）\n"
+                container.appContext.contentResolver.openOutputStream(uri)?.use { out ->
+                    out.write(text.toByteArray(Charsets.UTF_8))
+                }
+            } catch (_: Exception) { }
+        }
     }
 
     fun removeInstance(instance: ServerInstance) {
