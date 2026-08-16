@@ -151,7 +151,18 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     ThemeTile(
                         mode = mode,
                         selected = uiPrefs.themeMode.value == mode.id,
-                        onClick = { uiPrefs.setThemeMode(mode.id) },
+                        onClick = {
+                            if (mode == AppThemeMode.GLASS) {
+                                // 液态玻璃功能封锁：点击仅提示（3 秒），不切换主题
+                                android.widget.Toast.makeText(
+                                    appContext,
+                                    "液态玻璃功能已封锁，敬请期待",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            } else {
+                                uiPrefs.setThemeMode(mode.id)
+                            }
+                        },
                         modifier = Modifier.weight(1f),
                     )
                 }

@@ -19,8 +19,16 @@ class SettingsPrefs(context: Context) {
     /** 是否启用背景图 */
     val bgEnabled = mutableStateOf(prefs.getBoolean("bg_enabled", false))
 
-    /** 主题模式：m3（Material 3 动态取色，默认）/ glass（安卓原生液态玻璃） */
+    /** 主题模式：m3（Material 3 动态取色，默认）/ glass（安卓原生液态玻璃，已封锁） */
     val themeMode = mutableStateOf(prefs.getString("theme_mode", "clear") ?: "clear")
+
+    init {
+        // 液态玻璃功能封锁：旧档若处于 glass 主题，强制回退 m3（点击入口已弹提示）
+        if (themeMode.value == "glass") {
+            themeMode.value = "m3"
+            prefs.edit().putString("theme_mode", "m3").apply()
+        }
+    }
 
     /** 深色模式（旧键，迁移到 themeModeValue 后弃用） */
     val forceDark = mutableStateOf<Boolean?>(
