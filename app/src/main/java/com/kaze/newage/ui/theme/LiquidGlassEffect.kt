@@ -64,21 +64,27 @@ fun Modifier.glassSaturation(factor: Float? = null): Modifier = composed {
 @Composable
 fun Modifier.glassBackdropBlur(
     contentLayer: GraphicsLayer,
-    sampleScale: Float = 0.25f,
+    sampleScale: Float = 0.4f,
+    blurRadiusPx: Float = 3f,
 ): Modifier = composed {
     val smallLayer = rememberGraphicsLayer()
     var cached by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     // 底栏节点在窗口中的实际坐标（px）：模糊源必须取底栏**正下方**的内容区域
     var offsetInWin by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val s = sampleScale.coerceIn(0.08f, 0.6f)
-    // 性能关键：只栅格化**底栏那一小条区域**（约节点尺寸×s²≈15KB），
-    // 而不是全屏 14MB；每 2 帧栅格化一次（30fps 模糊更新，滚动时无感）
-    LaunchedEffect(contentLayer, s) {
+    // 性能关键：只栅格化底栏小区域（约节点尺寸×s²≈15KB）+ StackBlur 软件高斯（微秒级）；
+    // 每 2 帧一次（30fps 模糊更新）
+    LaunchedEffect(contentLayer, s, blurRadiusPx) {
         var frame = 0
         while (true) {
             androidx.compose.runtime.withFrameNanos { }
             frame++
-            if (frame and 1 == 0) cached = smallLayer.toImageBitmap()
+            if (frame and 1 == 0) {
+                try {
+                    val raw = smallLayer.toImageBitmap().asAndroidBitmap()
+                    cached = com.kaze.newage.util.StackBlur.blur(raw, blurRadiusPx).asImageBitmap()
+                } catch (_: Exception) { }
+            }
         }
     }
     this

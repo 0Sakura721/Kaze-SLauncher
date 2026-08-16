@@ -11,6 +11,7 @@ Kaze SLauncher（GPL-3.0）参考/复用了以下开源项目的体系与代码�
 | PojavLauncher | github.com/PojavLauncherTeam/PojavLauncher | GPL-3.0 | 服务器原生运行思路、JRE 生态 |
 | BiliPai | github.com/jay3-yy/BiliPai | GPL-3.0 | **主题设置体系与安卓原生液态玻璃**（Haze 背景模糊 + 折射 RuntimeShader 改编自其 LiquidGlassTuning / FullBarLiquidGlassModifier，参数照搬 BALANCED 档） |
 | **Miuix**（LiquidGlassNavigationBar） | github.com/Miuix-Kotlin-Multiplatform/Miuix | Apache-2.0 | 浮动胶囊底栏（IosLiquidGlassNavigationBar 三层结构：背景玻璃链 + 内容层 + 图标层） |
+| **android-stackblur（StackBlur 软件高斯）** | github.com/djun100/android-stackblur | Apache-2.0 | 底栏软件模糊核心（`util/StackBlur.java` 单文件并入，算法原作者 Mario Klingemann）；vivo 上 RenderEffect blur 不渲染时的真高斯替代（比降采样盒式模糊质量高） |
 | **Miuix miuix-blur / miuix-shader 模块（源码并入）** | github.com/Miuix-Kotlin-Multiplatform/Miuix（miuix-blur/、miuix-shader/） | Apache-2.0 | **底栏高斯模糊核心**：`app/src/main/java/com/kaze/newage/ui/theme/blur/` 与 `.../ui/theme/shader/` 为直接复制自该两模块（仅改包名 top.yukonga.miuix.kmp.blur→com.kaze.newage.ui.theme.blur、去除 KMP expect/actual 与 context receiver 以适配 Kotlin 2.1）。自建高斯 RuntimeShader（LMGauss 可分离 H/V + 降采样），不依赖 RenderEffect.createBlurEffect（vivo Android 16 上该 API 不渲染） |
 | **Kyant0/AndroidLiquidGlass** | github.com/Kyant0/AndroidLiquidGlass | Apache-2.0 | 圆角矩形折射透镜 RuntimeShader（BiliPai 现役 lens 同款） |
 | Kaze SLauncher v2（本项目旧版，作者自有） | github.com/0Sakura721/Kaze-SLauncher | LGPL-3.0 | proot 环境部署、tar 解压、下载源、服务端生命周期、eula 处理（LGPL-3.0 → GPL-3.0 兼容） |

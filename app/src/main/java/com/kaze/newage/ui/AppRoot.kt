@@ -247,8 +247,10 @@ private fun LiquidGlassNavBar(
                             Modifier
                                 .glassBackdropBlur(
                                     contentLayer = contentLayer,
-                                    // 强度越大越糊（降采样比例越低）
-                                    sampleScale = (0.3f / intensity).coerceIn(0.1f, 0.45f),
+                                    // 更精细的源（0.4），真高斯交给 StackBlur 半径
+                                    sampleScale = 0.4f,
+                                    // 玻璃强度 → 高斯半径（越大越糊）
+                                    blurRadiusPx = (2f + 6f * (intensity - 0.5f)).coerceIn(1f, 9f),
                                 )
                                 .liquidGlassLensSafe(
                                     refractionHeight = with(density) { 24.dp.toPx() },
