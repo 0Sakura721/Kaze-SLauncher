@@ -83,7 +83,13 @@ fun ConsoleScreen(viewModel: AppViewModel) {
     val states by viewModel.serverStates.collectAsState()
     var showSwitcher by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().imePadding()) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .imePadding()
+            // 底部空白承载常驻栏：命令输入行位于栏上方不被遮挡
+            .padding(bottom = 96.dp)
+    ) {
         // ── 头部 ──
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),

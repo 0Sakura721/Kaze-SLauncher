@@ -105,8 +105,8 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     startDestination = Dest.Home.route,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
-                        .padding(bottom = 80.dp),
+                        .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()),
+                    // 无底部留白：内容（含各页自带底部空白）可滚过常驻栏，滚动中充分透出
                 ) {
                 composable(Dest.Home.route) {
                     HomeScreen(viewModel, onNavigate = { navController.navigate(it) })

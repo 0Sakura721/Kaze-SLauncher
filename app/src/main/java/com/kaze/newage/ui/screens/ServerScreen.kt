@@ -118,7 +118,13 @@ fun ServerScreen(
     }
 
     // 内容直接铺在背景上（无整页大卡框架）；列表项/工具条为小型玻璃元素
-    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp)
+            // 底部空白承载常驻栏：实例列表滚动中透过底栏玻璃，滚到底最后一项不被遮挡
+            .padding(bottom = 96.dp)
+    ) {
         // ── 顶部工具条（横向滚动）──
         Row(
             Modifier

@@ -115,7 +115,9 @@ fun SettingsScreen(viewModel: AppViewModel) {
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(16.dp)
+            // 底部空白承载常驻栏：滚动中内容充分透过底栏玻璃，滚到底时最后内容不被遮挡
+            .padding(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // ── 页头：标题 + 版本徽章 ──

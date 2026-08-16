@@ -86,7 +86,9 @@ fun HomeScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .padding(12.dp),
+            .padding(12.dp)
+            // 底部空白承载常驻栏：内容滚过栏时透出玻璃，滚到底时最后内容在栏上方可见
+            .padding(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // ── 内容直接铺在背景上（无大面板框架），玻璃只用于小型元素 ──
