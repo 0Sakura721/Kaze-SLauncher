@@ -249,7 +249,7 @@ fun NewAgeTheme(
     // 深色下整体提亮次级文字/描边：动态色的 onSurfaceVariant 在深底上偏暗，
     // 各界面次级文字"颜色一模一样灰蒙蒙看不清"——向白 lerp 保留色相、提升对比度
     val effectiveScheme = if (darkTheme) {
-        fun lift(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color.White, 0.28f)
+        fun lift(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color.White, 0.32f)
         amoledAdjusted.copy(
             onSurfaceVariant = lift(amoledAdjusted.onSurfaceVariant),
             outline = lift(amoledAdjusted.outline),
@@ -439,14 +439,14 @@ fun consoleLineColor(type: LineType): Color = when (LocalAppTheme.current) {
         LineType.Error -> Color(0xFFFF7A7A)
         LineType.Warn -> Color(0xFFFFD166)
         LineType.Command -> Color(0xFF7CB8FF)
-        LineType.System -> Color(0xFF8B95A8)
+        LineType.System -> Color(0xFFAEB8CC) // 提亮：深色终端上系统行可见
         LineType.Info -> Color(0xFFDDE3EC)
     }
     AppThemeMode.GLASS -> when (type) {
         LineType.Error -> Color(0xFFFF7A7A)
         LineType.Warn -> Color(0xFFFFD166)
         LineType.Command -> Color(0xFF8AB9FF)
-        LineType.System -> if (LocalDarkTheme.current) Color(0xFF7C87A3) else Color(0xFF93A1B8)
+        LineType.System -> if (LocalDarkTheme.current) Color(0xFFA9B3C8) else Color(0xFF93A1B8)
         LineType.Info -> if (LocalDarkTheme.current) Color(0xFFC9D4E8) else Color(0xFFE2E9F4)
     }
 }
