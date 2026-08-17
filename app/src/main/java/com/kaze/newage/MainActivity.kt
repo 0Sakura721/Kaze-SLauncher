@@ -12,6 +12,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
 import com.kaze.newage.ui.AppRoot
 import com.kaze.newage.ui.theme.AppThemeMode
+import com.kaze.newage.ui.theme.FgColorMode
 import com.kaze.newage.ui.theme.GlassMode
 import com.kaze.newage.ui.theme.NewAgeTheme
 
@@ -38,6 +39,7 @@ class MainActivity : ComponentActivity() {
             val paletteStyle by prefs.paletteStyle
             val glassModeId by prefs.glassMode
             val glassIntensity by prefs.glassIntensity
+            val fgColorModeId by prefs.fgColorMode
 
             // 主题模式（照搬 BiliPai AppThemeMode）：0=跟随系统 1=浅色 2=深色
             val darkTheme = when (modeValue) {
@@ -54,6 +56,7 @@ class MainActivity : ComponentActivity() {
                 paletteStyle = paletteStyle,
                 glassMode = GlassMode.fromId(glassModeId),
                 glassIntensity = glassIntensity,
+                fgColorMode = FgColorMode.fromId(fgColorModeId),
             ) {
                 AppRoot()
             }

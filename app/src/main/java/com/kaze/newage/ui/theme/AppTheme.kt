@@ -41,3 +41,23 @@ val LocalHazeState = staticCompositionLocalOf<HazeState?> { null }
  * 原生模糊是否启用（设置「原生模糊」开关；个别 GPU 渲染异常时可关闭回退半透明玻璃）。
  */
 val LocalGlassBlurEnabled = staticCompositionLocalOf { true }
+
+/**
+ * 图标与文字颜色模式（设置「背景图 → 图标与文字颜色」）：
+ *  - AUTO：跟随主题深浅色（默认）
+ *  - LIGHT：强制白色（深色背景图）
+ *  - DARK：强制黑色（浅色背景图）
+ */
+enum class FgColorMode(val id: String, val label: String) {
+    AUTO("auto", "跟随主题"),
+    LIGHT("light", "白色"),
+    DARK("dark", "黑色"),
+    ;
+
+    companion object {
+        fun fromId(id: String?): FgColorMode = entries.firstOrNull { it.id == id } ?: AUTO
+    }
+}
+
+/** 当前图标与文字颜色模式（由 NewAgeTheme 提供） */
+val LocalFgColorMode = staticCompositionLocalOf { FgColorMode.AUTO }

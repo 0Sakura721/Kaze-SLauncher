@@ -61,6 +61,7 @@ import androidx.core.content.FileProvider
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.theme.AppThemeMode
+import com.kaze.newage.ui.theme.FgColorMode
 import com.kaze.newage.ui.theme.GlassMode
 import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.cardBorderColor
@@ -548,6 +549,21 @@ fun SettingsScreen(viewModel: AppViewModel) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                        }
+                        Text("图标与文字颜色", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            "深色背景图选「白色」、浅色图选「黑色」可保证可读性",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FgColorMode.entries.forEach { mode ->
+                                CheckChip(
+                                    selected = uiPrefs.fgColorMode.value == mode.id,
+                                    label = mode.label,
+                                    onClick = { uiPrefs.setFgColorMode(mode.id) },
+                                )
+                            }
                         }
                     }
                 }

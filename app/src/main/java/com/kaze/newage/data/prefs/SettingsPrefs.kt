@@ -90,6 +90,14 @@ class SettingsPrefs(context: Context) {
     /** 背景不透明度（0..100，影响背景图整体显示） */
     val bgOpacity = mutableFloatStateOf(prefs.getFloat("bg_opacity", 25f))
 
+    /** 图标与文字颜色模式：auto（跟随主题）/ light（白色）/ dark（黑色） */
+    val fgColorMode = mutableStateOf(prefs.getString("fg_color_mode", "auto") ?: "auto")
+
+    fun setFgColorMode(v: String) {
+        fgColorMode.value = v
+        prefs.edit().putString("fg_color_mode", v).apply()
+    }
+
     fun backgroundImagePath(): String? = bgFile.takeIf { it.exists() }?.absolutePath
 
     /** 保存选中的背景图（压缩到屏幕尺寸，避免大图内存问题） */

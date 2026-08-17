@@ -207,6 +207,7 @@ fun NewAgeTheme(
     paletteStyle: String = "TonalSpot",
     glassMode: GlassMode = GlassMode.BALANCED,
     glassIntensity: Float = 1f,
+    fgColorMode: FgColorMode = FgColorMode.AUTO,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
@@ -259,17 +260,38 @@ fun NewAgeTheme(
         )
     } else amoledAdjusted
 
+    // 图标与文字颜色模式：覆盖中性前景角色（背景/卡片上的文字与图标色），
+    // 动态色底（chip/按钮容器）上的文字保持原有对比，不随模式翻转。
+    val fgAdjusted = when (fgColorMode) {
+        FgColorMode.LIGHT -> effectiveScheme.copy(
+            onSurface = Color(0xFFFFFFFF),
+            onBackground = Color(0xFFFFFFFF),
+            onSurfaceVariant = Color(0xFFD6DCE6),
+            outline = Color(0xFF8A93A6),
+            outlineVariant = Color(0xFF5E6A86),
+        )
+        FgColorMode.DARK -> effectiveScheme.copy(
+            onSurface = Color(0xFF1A1C20),
+            onBackground = Color(0xFF1A1C20),
+            onSurfaceVariant = Color(0xFF4A505C),
+            outline = Color(0xFF6E7684),
+            outlineVariant = Color(0xFFB8BEC9),
+        )
+        FgColorMode.AUTO -> effectiveScheme
+    }
+
     CompositionLocalProvider(
         LocalAppTheme provides mode,
         LocalDarkTheme provides darkTheme,
         LocalGlassMode provides glassMode,
         LocalGlassIntensity provides glassIntensity,
         LocalAmoledDark provides (darkTheme && amoledDark),
+        LocalFgColorMode provides fgColorMode,
         // M3 1.3.x 的 MaterialTheme 不再提供 LocalContentColor（默认值=Color.Black），
         // 未显式指定颜色的 Text 在深色下会整段渲染成纯黑——这里按 scheme 显式补上
-        LocalContentColor provides effectiveScheme.onBackground,
+        LocalContentColor provides fgAdjusted.onBackground,
     ) {
-        MaterialTheme(colorScheme = effectiveScheme, content = content)
+        MaterialTheme(colorScheme = fgAdjusted, content = content)
     }
 }
 
