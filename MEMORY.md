@@ -82,7 +82,7 @@
 - 附加组件：`ModrinthApi`（v2 开放 API 搜索/版本）+ `AddonManager`（plugins/mods 目录、*.jar.disabled 启停、CDN 下载安装）；AddonsScreen 支持 Paper 插件与 Fabric/Forge 模组（supports() 按核心类型门控）。
 - 核心类型已全量解锁（Vanilla/Paper/Purpur/Spigot/Fabric/Forge/NeoForge/导入）。
 - **「显示背景」开关仅在已选背景图时显示（2026-08-17，commit 1f390db，用户"清除了背景还能打开开关"）**：原开关行无条件显示，清除背景后仍可打开（无图无效果，逻辑矛盾）。改为开关行移入 `if (hasBackgroundImage)` 分支（与模糊/遮罩滑杆同级）；未选图时只显示"未选择背景图"文案。MuMu 实测：无图→无开关无清除；选图裁剪后→开关+清除+滑杆出现。
-- **git 注意**：根目录 `Kaze-SLauncher-v1.0.0-debug.apk` 是本地构建副本（.gitignore 排除 *.apk，勿 git add -A 提交 76MB 二进制）。
+- **清除背景图后手风琴自动收起（2026-08-17，commit fa6c2b8，用户"做个动画，清楚了就自动收起来"）**：清除按钮 onClick 追加 `openSection = null`，AnimatedVisibility（`visible = openSection == "bg"`）自带淡出+高度折叠动画。MuMu 实测：点清除 → background.png 删除 + 手风琴整体收起（选择背景图/开关/滑杆/未选择文案全部折叠）。
 
 ## 待办（全面完善路线，目标 goal-a807f30d）
 - 已全部实现（2026-08-14）：①多开 ②实例详情+server.properties 编辑器 ③插件管理（Modrinth）④模组管理 ⑤备份/恢复/**导入导出**（SAF CreateDocument/OpenDocument）⑥**玩家管理**（ConsoleParser 解析 list 响应 + join/leave 事件 + OP/白名单/踢出快捷命令）⑦**崩溃报告 + latest.log 查看页**（LogsScreen，读文件末尾 300KB）。
