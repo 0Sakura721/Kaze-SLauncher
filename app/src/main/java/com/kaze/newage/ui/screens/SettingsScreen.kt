@@ -208,6 +208,23 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     CheckChip(selected = uiPrefs.themeModeValue.value == 2, label = "深色模式", onClick = { uiPrefs.setThemeModeValue(2) })
                 }
 
+                // 图标与文字颜色（背景图可读性：跟随主题/白/黑）
+                Text("图标与文字颜色", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp))
+                Text(
+                    "深色背景图选「白色」、浅色图选「黑色」可保证可读性",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FgColorMode.entries.forEach { mode ->
+                        CheckChip(
+                            selected = uiPrefs.fgColorMode.value == mode.id,
+                            label = mode.label,
+                            onClick = { uiPrefs.setFgColorMode(mode.id) },
+                        )
+                    }
+                }
+
                 // 深色样式（BiliPai DarkThemeStyle：普通黑/AMOLED纯黑）
                 Text("深色样式", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp))
                 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -535,21 +552,6 @@ fun SettingsScreen(viewModel: AppViewModel) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                        }
-                        Text("图标与文字颜色", style = MaterialTheme.typography.labelLarge)
-                        Text(
-                            "深色背景图选「白色」、浅色图选「黑色」可保证可读性",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FgColorMode.entries.forEach { mode ->
-                                CheckChip(
-                                    selected = uiPrefs.fgColorMode.value == mode.id,
-                                    label = mode.label,
-                                    onClick = { uiPrefs.setFgColorMode(mode.id) },
-                                )
-                            }
                         }
                     }
                 }
