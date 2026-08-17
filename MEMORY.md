@@ -84,6 +84,7 @@
 - **「显示背景」开关仅在已选背景图时显示（2026-08-17，commit 1f390db，用户"清除了背景还能打开开关"）**：原开关行无条件显示，清除背景后仍可打开（无图无效果，逻辑矛盾）。改为开关行移入 `if (hasBackgroundImage)` 分支（与模糊/遮罩滑杆同级）；未选图时只显示"未选择背景图"文案。MuMu 实测：无图→无开关无清除；选图裁剪后→开关+清除+滑杆出现。
 - **清除背景图后手风琴自动收起（2026-08-17，commit fa6c2b8，用户"做个动画，清楚了就自动收起来"）**：清除按钮 onClick 追加 `openSection = null`，AnimatedVisibility（`visible = openSection == "bg"`）自带淡出+高度折叠动画。MuMu 实测：点清除 → background.png 删除 + 手风琴整体收起（选择背景图/开关/滑杆/未选择文案全部折叠）。
 - **「图标与文字颜色」设置项移动（2026-08-17，commit 6c8c519，用户"移到主题模式下边"）**：从背景图手风琴移到设置页外观区「主题模式」FlowRow 下方（顺序：主题样式→主题模式→图标与文字颜色→深色样式→颜色来源→取色风格），背景图手风琴只保留选择/清除/开关/模糊/遮罩。MuMu 实测位置与移除均正确。
+- **Paper/Purpur 启动预置原版 jar（2026-08-17，commit 927e724，真机日志 Failed to download mojang_1.18.1.jar）**：paperclip 启动时需从 `launcher.mojang.com` 下载对应 vanilla server jar，国内 DNS 常不可达（UnknownHostException）→ 启动失败。修复：`DefaultServerManager.start` 步骤 3.5 `ensureVanillaJar`——Paper/Purpur 实例启动前检查 `实例目录/versions/<mc>/<mc>.jar`（>1MB 视为有效），缺失则下载预置（源：piston-meta→piston-data 官方，失败换 BMCLAPI `bmclapi2.bangbang93.com/download/<mc>/server` + `/version/<mc>/server` 兜底；Downloader.download 带 .part 断点 + >1MB 内容校验；进度 10MB 一条防刷屏）；paperclip 检测到 versions jar 存在即跳过联网。另 `patchRootfs` 补 `rootfs/sys/.empty`（proot sanitize 警告，无害）。MuMu 当时未开未实测，需真机验证。
 
 ## 待办（全面完善路线，目标 goal-a807f30d）
 - 已全部实现（2026-08-14）：①多开 ②实例详情+server.properties 编辑器 ③插件管理（Modrinth）④模组管理 ⑤备份/恢复/**导入导出**（SAF CreateDocument/OpenDocument）⑥**玩家管理**（ConsoleParser 解析 list 响应 + join/leave 事件 + OP/白名单/踢出快捷命令）⑦**崩溃报告 + latest.log 查看页**（LogsScreen，读文件末尾 300KB）。
