@@ -496,25 +496,25 @@ fun SettingsScreen(viewModel: AppViewModel) {
                                 }) { Text("清除") }
                             }
                         }
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("显示背景", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    "选择图片后自动开启",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        if (uiPrefs.hasBackgroundImage) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text("显示背景", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        "选择图片后自动开启",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Switch(
+                                    checked = uiPrefs.bgEnabled.value,
+                                    onCheckedChange = { uiPrefs.setBgEnabled(it) },
                                 )
                             }
-                            Switch(
-                                checked = uiPrefs.bgEnabled.value,
-                                onCheckedChange = { uiPrefs.setBgEnabled(it) },
-                            )
-                        }
-                        if (uiPrefs.hasBackgroundImage) {
                             Text("模糊强度", style = MaterialTheme.typography.labelLarge)
                             Slider(
                                 value = uiPrefs.bgBlur.floatValue,
