@@ -493,6 +493,8 @@ fun SettingsScreen(viewModel: AppViewModel) {
                                 OutlinedButton(onClick = {
                                     uiPrefs.clearBackgroundImage()
                                     uiPrefs.setBgEnabled(false)
+                                    // 清除后自动收起（AnimatedVisibility 平滑收起动画）
+                                    openSection = null
                                 }) { Text("清除") }
                             }
                         }
