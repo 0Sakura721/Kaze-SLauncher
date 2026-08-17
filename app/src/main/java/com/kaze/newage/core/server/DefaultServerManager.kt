@@ -214,20 +214,33 @@ class DefaultServerManager(
 
     /**
      * patched 核心（Paper/Purpur）预置原版 server jar：
-     * paperclip 启动时需从 launcher.mojang.com 下载对应版本 vanilla jar（国内 DNS 常不可达，
-     * 报 "Failed to download mojang_x.jar / UnknownHostException"）。预置到
-     * `实例目录/versions/<mc>/<mc>.jar` 后 paperclip 检测到文件存在即跳过联网。
+     * 旧版 paperclip 启动时读 jar 内 META-INF/download-context（`<sha256>\t<url>\t<fileName>`），
+     * 若 `CWD/cache/<fileName>` 不存在或 SHA256 不匹配，则从 url（launcher.mojang.com，国内 DNS
+     * 常不可达 → "Failed to download mojang_x.jar / UnknownHostException"）重新下载。
+     * 预置正确哈希的原版 jar 到 `实例目录/cache/<fileName>` 即跳过联网。
      * 下载源：官方 piston-meta → piston-data，失败换 BMCLAPI 国内镜像。
      */
     private suspend fun ensureVanillaJar(slot: RuntimeSlot, instance: ServerInstance) {
         if (instance.coreType != CoreType.PAPER && instance.coreType != CoreType.PURPUR) return
-        val mc = instance.mcVersion
+        val jar = instance.jarFile
+        if (!jar.exists()) return
+        val dc: Triple<String, String, String> = try {
+            java.util.zip.ZipFile(jar).use { zip ->
+                val entry = zip.getEntry("META-INF/download-context") ?: return
+                val parts = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }.trim()
+                    .split(Regex("\\s+"))
+                if (parts.size < 3) return
+                Triple(parts[0].lowercase(), parts[1], parts[2])
+            }
+        } catch (_: Exception) { return }
+        val (hash, _, fileName) = dc
+        val mc = paperclipVanillaVersion(instance)
         if (mc.isBlank()) return
-        val dest = File(instance.dir, "versions/$mc/$mc.jar")
-        if (dest.exists() && dest.length() > 1_000_000) return
+        val dest = File(instance.dir, "cache/$fileName")
+        if (dest.exists() && sha256Hex(dest) == hash) return
 
-        slot.log("> 预置原版服务端 jar（$mc，Paper/Purpur 启动需要）…", LineType.System)
-        val tmp = File(instance.dir, "versions/$mc/$mc.jar.part")
+        slot.log("> 预置原版服务端 jar（$mc → cache/$fileName，Paper 启动需要）…", LineType.System)
+        val tmp = File(instance.dir, "cache/$fileName.part")
         val sources = buildList {
             CoreSources.getVanillaDownload(mc).getOrNull()?.let { add(it.url) }
             add("https://bmclapi2.bangbang93.com/download/$mc/server")
@@ -243,7 +256,7 @@ class DefaultServerManager(
                     tmp,
                     onProgress = { d, t ->
                         val mb = d / 1024 / 1024
-                        if (mb - lastMb >= 10) { // 10MB 打一条，避免刷屏
+                        if (mb - lastMb >= 10) { // 10MB 一条，避免刷屏
                             lastMb = mb
                             val total = if (t > 0) "/ ${t / 1024 / 1024}MB" else ""
                             slot.log("> 下载原版 $mc：${mb}MB$total", LineType.System)
@@ -251,17 +264,56 @@ class DefaultServerManager(
                     },
                     validate = { f -> f.length() > 1_000_000 },
                 )
-                if (!tmp.renameTo(dest)) {
-                    tmp.copyTo(dest, overwrite = true)
-                    tmp.delete()
+                if (sha256Hex(tmp) == hash) {
+                    if (!tmp.renameTo(dest)) {
+                        tmp.copyTo(dest, overwrite = true)
+                        tmp.delete()
+                    }
+                    slot.log("> 原版服务端预置完成（$mc）", LineType.System)
+                    return
                 }
-                slot.log("> 原版服务端预置完成（$mc）", LineType.System)
-                return
+                tmp.delete() // 哈希不匹配（镜像内容不一致），换源
+                lastErr = RuntimeException("SHA256 不匹配")
             } catch (e: Exception) {
                 lastErr = e
             }
         }
         slot.log("> 原版服务端预置失败（$mc）：${lastErr?.message ?: "全部源失败"}，Paper 启动可能受影响", LineType.Warn)
+    }
+
+    /** SHA-256 hex（小写） */
+    private fun sha256Hex(f: File): String = try {
+        java.security.MessageDigest.getInstance("SHA-256").let { md ->
+            f.inputStream().use { ins ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = ins.read(buf)
+                    if (n <= 0) break
+                    md.update(buf, 0, n)
+                }
+            }
+            md.digest().joinToString("") { "%02x".format(it) }
+        }
+    } catch (_: Exception) { "" }
+
+    /**
+     * paperclip 要找的 vanilla 版本：读核心 jar 根目录 version.json 的 id 字段。
+     * Paper 的构建版本号与内部 MC 版本可能不一致（如 paper-1.18.2-217.jar 的
+     * version.json id=1.18.1 → paperclip 找 versions/1.18.1/1.18.1.jar）。
+     */
+    private fun paperclipVanillaVersion(instance: ServerInstance): String {
+        val jar = instance.jarFile
+        if (jar.exists()) {
+            try {
+                java.util.zip.ZipFile(jar).use { zip ->
+                    val entry = zip.getEntry("version.json") ?: return@use
+                    val text = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
+                    val id = Regex(""""id"\s*:\s*"([^"]+)"""").find(text)?.groupValues?.get(1)
+                    if (!id.isNullOrBlank()) return id
+                }
+            } catch (_: Exception) { }
+        }
+        return instance.mcVersion
     }
 
     /** 修补 rootfs 结构缺失：sys/.empty 丢失会产生 proot sanitize 警告（无害，顺带补齐） */
