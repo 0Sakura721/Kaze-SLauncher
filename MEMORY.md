@@ -81,6 +81,7 @@
 - **Java 不内置（用户明确要求，2026-08-14）**：rootfs 为纯净 Ubuntu base；Java 8/17/21 通过设置页「Java 运行时（可选下载）」卡片按需 apt 安装/删除；新建实例可手动指定 Java 版本（自动推断默认，兼容性覆盖）。
 - 附加组件：`ModrinthApi`（v2 开放 API 搜索/版本）+ `AddonManager`（plugins/mods 目录、*.jar.disabled 启停、CDN 下载安装）；AddonsScreen 支持 Paper 插件与 Fabric/Forge 模组（supports() 按核心类型门控）。
 - 核心类型已全量解锁（Vanilla/Paper/Purpur/Spigot/Fabric/Forge/NeoForge/导入）。
+- **「显示背景」开关仅在已选背景图时显示（2026-08-17，commit 1f390db，用户"清除了背景还能打开开关"）**：原开关行无条件显示，清除背景后仍可打开（无图无效果，逻辑矛盾）。改为开关行移入 `if (hasBackgroundImage)` 分支（与模糊/遮罩滑杆同级）；未选图时只显示"未选择背景图"文案。MuMu 实测：无图→无开关无清除；选图裁剪后→开关+清除+滑杆出现。
 - **git 注意**：根目录 `Kaze-SLauncher-v1.0.0-debug.apk` 是本地构建副本（.gitignore 排除 *.apk，勿 git add -A 提交 76MB 二进制）。
 
 ## 待办（全面完善路线，目标 goal-a807f30d）
