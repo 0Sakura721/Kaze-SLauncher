@@ -67,13 +67,35 @@ class DefaultServerManager(
         var waitJob: Job? = null
         var uptimeJob: Job? = null
 
+        /** 日志落盘锁：系统消息（slot.log）与服务器 stdout 可能并发写同一文件 */
+        private val logLock = Any()
+
         fun setState(s: ServerState) {
             state.value = s
             _states.value = _states.value + (instance.id to s)
         }
 
+        /** 系统消息（部署/Java/启动/报错，带 "> " 前缀）也持久化：
+         *  进程退出/重启后仍可在「日志」页查看完整过程与报错 */
         fun log(text: String, type: LineType = LineType.System) {
             console.emit(text, type)
+            persistLine(text)
+        }
+
+        private fun persistLine(text: String) {
+            try {
+                synchronized(logLock) {
+                    val f = java.io.File(instance.dir, "console-output.log")
+                    f.parentFile?.mkdirs()
+                    // 日志轮转：超过 8MB 时把旧日志改名保留，避免无限膨胀
+                    if (f.length() > 8L * 1024 * 1024) {
+                        val old = java.io.File(instance.dir, "console-output.old.log")
+                        old.delete()
+                        f.renameTo(old)
+                    }
+                    f.appendText(text + "\n")
+                }
+            } catch (_: Exception) { }
         }
     }
 
@@ -203,17 +225,13 @@ class DefaultServerManager(
         slot.log("> 服务器启动中", LineType.System)
         startGuard(slot.instance)
 
-        // 消费输出（落盘到实例目录 console-output.log，供控制台「保存日志」导出）
-        val logFile = java.io.File(slot.instance.dir, "console-output.log")
+        // 消费输出（slot.log 已同步写入运行日志 console-output.log）
         scope.launch {
             try {
                 proc.inputStream.bufferedReader().useLines { lines ->
                     lines.forEach { line ->
                         if (line.isNotBlank()) {
                             slot.log(line, classify(line))
-                            try {
-                                logFile.appendText(line + "\n")
-                            } catch (_: Exception) { }
                         }
                     }
                 }

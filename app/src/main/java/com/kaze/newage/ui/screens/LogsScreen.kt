@@ -64,6 +64,7 @@ fun LogsScreen(
             ?.sortedByDescending { it.lastModified() } ?: emptyList()
     }
     val latestLog = remember(instanceId, refresh) { File(instance.dir, "logs/latest.log") }
+    val runLog = remember(instanceId, refresh) { File(instance.dir, "console-output.log") }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         // ── 顶部栏 ──
@@ -131,6 +132,39 @@ fun LogsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
+                            Text(
+                                "查看",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── 运行日志（应用层完整过程：部署/Java/启动/报错 + 服务器输出）──
+            BackgroundCard(Modifier.fillMaxWidth()) {
+                CardTitleLayout("运行日志") {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { if (runLog.exists()) selected = runLog }
+                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Description, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(Modifier.weight(1f)) {
+                            Text("console-output.log", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                if (runLog.exists()) "${runLog.length() / 1024} KB · ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(runLog.lastModified()))}"
+                                else "启动/部署过服务器后生成（含环境检查、Java 安装、启动报错等完整记录）",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (runLog.exists()) {
                             Text(
                                 "查看",
                                 style = MaterialTheme.typography.labelMedium,
