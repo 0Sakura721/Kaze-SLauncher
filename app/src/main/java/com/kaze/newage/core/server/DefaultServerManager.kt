@@ -2,9 +2,12 @@ package com.kaze.newage.core.server
 
 import com.kaze.newage.core.console.ConsoleStream
 import com.kaze.newage.core.console.LineType
+import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.env.LinuxEnvironment
 import com.kaze.newage.core.java.JavaManager
+import com.kaze.newage.data.model.CoreType
 import com.kaze.newage.data.model.ServerInstance
+import com.kaze.newage.util.Downloader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,6 +18,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -172,6 +176,10 @@ class DefaultServerManager(
             val jar = instance.jarFile
             if (!jar.exists()) throw RuntimeException("实例目录中没有服务端核心 jar：${jar.path}")
 
+            // 3.5 patched 核心（Paper/Purpur）预置原版 jar + 修补 rootfs 结构
+            ensureVanillaJar(slot, instance)
+            patchRootfs(slot)
+
             // 4. eula 三段式
             when {
                 EulaHandler.isAccepted(instance.dir) -> {
@@ -201,6 +209,69 @@ class DefaultServerManager(
         } catch (e: Exception) {
             slot.log("> 启动失败：${e.message}", LineType.Error)
             slot.setState(ServerState.Error)
+        }
+    }
+
+    /**
+     * patched 核心（Paper/Purpur）预置原版 server jar：
+     * paperclip 启动时需从 launcher.mojang.com 下载对应版本 vanilla jar（国内 DNS 常不可达，
+     * 报 "Failed to download mojang_x.jar / UnknownHostException"）。预置到
+     * `实例目录/versions/<mc>/<mc>.jar` 后 paperclip 检测到文件存在即跳过联网。
+     * 下载源：官方 piston-meta → piston-data，失败换 BMCLAPI 国内镜像。
+     */
+    private suspend fun ensureVanillaJar(slot: RuntimeSlot, instance: ServerInstance) {
+        if (instance.coreType != CoreType.PAPER && instance.coreType != CoreType.PURPUR) return
+        val mc = instance.mcVersion
+        if (mc.isBlank()) return
+        val dest = File(instance.dir, "versions/$mc/$mc.jar")
+        if (dest.exists() && dest.length() > 1_000_000) return
+
+        slot.log("> 预置原版服务端 jar（$mc，Paper/Purpur 启动需要）…", LineType.System)
+        val tmp = File(instance.dir, "versions/$mc/$mc.jar.part")
+        val sources = buildList {
+            CoreSources.getVanillaDownload(mc).getOrNull()?.let { add(it.url) }
+            add("https://bmclapi2.bangbang93.com/download/$mc/server")
+            add("https://bmclapi2.bangbang93.com/version/$mc/server")
+        }.distinct()
+
+        var lastErr: Exception? = null
+        for (url in sources) {
+            try {
+                var lastMb = 0L
+                Downloader.download(
+                    url,
+                    tmp,
+                    onProgress = { d, t ->
+                        val mb = d / 1024 / 1024
+                        if (mb - lastMb >= 10) { // 10MB 打一条，避免刷屏
+                            lastMb = mb
+                            val total = if (t > 0) "/ ${t / 1024 / 1024}MB" else ""
+                            slot.log("> 下载原版 $mc：${mb}MB$total", LineType.System)
+                        }
+                    },
+                    validate = { f -> f.length() > 1_000_000 },
+                )
+                if (!tmp.renameTo(dest)) {
+                    tmp.copyTo(dest, overwrite = true)
+                    tmp.delete()
+                }
+                slot.log("> 原版服务端预置完成（$mc）", LineType.System)
+                return
+            } catch (e: Exception) {
+                lastErr = e
+            }
+        }
+        slot.log("> 原版服务端预置失败（$mc）：${lastErr?.message ?: "全部源失败"}，Paper 启动可能受影响", LineType.Warn)
+    }
+
+    /** 修补 rootfs 结构缺失：sys/.empty 丢失会产生 proot sanitize 警告（无害，顺带补齐） */
+    private fun patchRootfs(slot: RuntimeSlot) {
+        runCatching {
+            val se = File(env.rootfsDir, "sys/.empty")
+            if (!se.exists()) {
+                se.parentFile?.mkdirs()
+                se.writeText("")
+            }
         }
     }
 
