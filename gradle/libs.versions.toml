@@ -10,6 +10,7 @@ coroutines = "1.9.0"
 serializationJson = "1.7.3"
 haze = "1.6.10"
 materialkolor = "2.1.1"
+imageCropper = "4.6.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -28,6 +29,7 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serializationJson" }
 haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
 materialkolor = { group = "com.materialkolor", name = "material-kolor", version.ref = "materialkolor" }
+android-image-cropper = { group = "com.vanniktech", name = "android-image-cropper", version.ref = "imageCropper" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

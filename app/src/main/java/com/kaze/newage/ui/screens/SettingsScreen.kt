@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.theme.AppThemeMode
@@ -66,9 +67,16 @@ import com.kaze.newage.ui.theme.cardBorderColor
 import com.kaze.newage.ui.theme.parseSeedColor
 import com.kaze.newage.ui.theme.statusPalette
 import com.kaze.newage.util.StorageDirUtil
+import com.canhub.cropper.CropImage
+import com.canhub.cropper.CropImageContract
+import com.canhub.cropper.CropImageContractOptions
+import com.canhub.cropper.CropImageOptions
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamicColorScheme
 import java.io.File
+
+/** 背景图裁剪源：选图后复制到 cacheDir 此固定文件，经 CropFileProvider 交给裁剪 Activity */
+private const val BG_CROP_SRC = "bg_crop_src.tmp"
 
 /** 取色风格（materialkolor PaletteStyle）：英文名 → 中文说明 */
 private val paletteStyles: List<Pair<String, String>> = listOf(
@@ -99,18 +107,31 @@ fun SettingsScreen(viewModel: AppViewModel) {
     // 手风琴：同一时刻只展开一节（null = 全部收起）
     var openSection by remember { mutableStateOf<String?>(null) }
 
+    // 裁剪：CanHub Android-Image-Cropper（uCrop 同源，Apache-2.0），Activity 模式
+    val cropLauncher = rememberLauncherForActivityResult(CropImageContract()) { result ->
+        if (result.isSuccessful) {
+            val bmp = result.getBitmap(appContext) ?: return@rememberLauncherForActivityResult
+            uiPrefs.saveBackgroundImage(bmp)
+            uiPrefs.setBgEnabled(true)
+        }
+    }
+
     val imageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             try {
-                val tmp = File(appContext.cacheDir, "bg_src_${System.currentTimeMillis()}.tmp")
+                // 复制到 cacheDir 固定文件，经 CropFileProvider 交给裁剪 Activity
+                val dst = File(appContext.cacheDir, BG_CROP_SRC)
                 appContext.contentResolver.openInputStream(uri)?.use { ins ->
-                    tmp.outputStream().use { outs -> ins.copyTo(outs) }
+                    dst.outputStream().use { outs -> ins.copyTo(outs) }
                 }
-                uiPrefs.saveBackgroundImage(tmp.absolutePath)
-                tmp.delete()
-                uiPrefs.setBgEnabled(true)
+                val fileUri = FileProvider.getUriForFile(
+                    appContext,
+                    "${appContext.packageName}.cropper.fileprovider",
+                    dst,
+                )
+                cropLauncher.launch(CropImageContractOptions(fileUri, CropImageOptions()))
             } catch (_: Exception) { }
         }
     }
@@ -457,7 +478,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 // 背景图
                 AccordionRow(
                     title = "背景图",
-                    desc = if (uiPrefs.hasBackgroundImage) "已设置 · 点击调整模糊与遮罩" else "自定义壁纸，可模糊 + 遮罩",
+                    desc = if (uiPrefs.hasBackgroundImage) "已设置 · 点击调整模糊与遮罩" else "自定义壁纸，选图后裁剪，可模糊 + 遮罩",
                     expanded = openSection == "bg",
                     onClick = { openSection = if (openSection == "bg") null else "bg" },
                 )
@@ -472,6 +493,22 @@ fun SettingsScreen(viewModel: AppViewModel) {
                                     uiPrefs.clearBackgroundImage()
                                     uiPrefs.setBgEnabled(false)
                                 }) { Text("清除") }
+                            }
+                            // 已设置时允许重新裁剪
+                            if (uiPrefs.hasBackgroundImage) {
+                                OutlinedButton(onClick = {
+                                    val f = File(uiPrefs.backgroundImagePath() ?: "")
+                                    if (f.exists()) {
+                                        try {
+                                            val fileUri = FileProvider.getUriForFile(
+                                                appContext,
+                                                "${appContext.packageName}.cropper.fileprovider",
+                                                f,
+                                            )
+                                            cropLauncher.launch(CropImageContractOptions(fileUri, CropImageOptions()))
+                                        } catch (_: Exception) { }
+                                    }
+                                }) { Text("重设") }
                             }
                         }
                         Row(

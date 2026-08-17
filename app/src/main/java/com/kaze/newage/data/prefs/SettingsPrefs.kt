@@ -16,6 +16,10 @@ class SettingsPrefs(context: Context) {
     private val prefs = context.getSharedPreferences("kaze_ui_settings", Context.MODE_PRIVATE)
     private val bgFile = File(context.filesDir, "background.png")
 
+    /** 背景图是否存在（State：保存/清除后自动刷新 UI） */
+    private val bgExists = mutableStateOf(bgFile.exists())
+    val hasBackgroundImage: Boolean get() = bgExists.value
+
     /** 是否启用背景图 */
     val bgEnabled = mutableStateOf(prefs.getBoolean("bg_enabled", false))
 
@@ -86,8 +90,6 @@ class SettingsPrefs(context: Context) {
     /** 背景不透明度（0..100，影响背景图整体显示） */
     val bgOpacity = mutableFloatStateOf(prefs.getFloat("bg_opacity", 25f))
 
-    val hasBackgroundImage: Boolean get() = bgFile.exists()
-
     fun backgroundImagePath(): String? = bgFile.takeIf { it.exists() }?.absolutePath
 
     /** 保存选中的背景图（压缩到屏幕尺寸，避免大图内存问题） */
@@ -101,10 +103,24 @@ class SettingsPrefs(context: Context) {
         bgFile.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         if (scaled != src) scaled.recycle()
         src.recycle()
+        bgExists.value = true
+    }
+
+    /** 保存裁剪页返回的背景位图（压缩到屏幕尺寸） */
+    fun saveBackgroundImage(bitmap: Bitmap) {
+        val maxDim = 1600
+        val scale = minOf(1f, maxDim.toFloat() / maxOf(bitmap.width, bitmap.height))
+        val out = if (scale < 1f) {
+            Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
+        } else bitmap
+        bgFile.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        if (out !== bitmap) out.recycle()
+        bgExists.value = true
     }
 
     fun clearBackgroundImage() {
         bgFile.delete()
+        bgExists.value = false
     }
 
     fun setBgEnabled(v: Boolean) {
