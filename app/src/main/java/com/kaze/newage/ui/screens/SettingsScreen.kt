@@ -495,22 +495,6 @@ fun SettingsScreen(viewModel: AppViewModel) {
                                     uiPrefs.setBgEnabled(false)
                                 }) { Text("清除") }
                             }
-                            // 已设置时允许重新裁剪
-                            if (uiPrefs.hasBackgroundImage) {
-                                OutlinedButton(onClick = {
-                                    val f = File(uiPrefs.backgroundImagePath() ?: "")
-                                    if (f.exists()) {
-                                        try {
-                                            val fileUri = FileProvider.getUriForFile(
-                                                appContext,
-                                                "${appContext.packageName}.cropper.fileprovider",
-                                                f,
-                                            )
-                                            cropLauncher.launch(CropImageContractOptions(fileUri, CropImageOptions()))
-                                        } catch (_: Exception) { }
-                                    }
-                                }) { Text("重设") }
-                            }
                         }
                         Row(
                             Modifier.fillMaxWidth(),
