@@ -71,10 +71,37 @@ class ProotEnvironment(
      *   - 修补版 proot 内置 SIGSYS 处理器，模拟被 zygote seccomp 拦截的 chdir/chmod/getcwd 等系统调用；
      *   - PROOT_LOADER 指向同目录的 loader，由它 mmap 加载 guest ELF（不触发 W^X）。
      */
-    private val prootBinary: File get() = File(context.applicationInfo.nativeLibraryDir, "libproot.so")
-    private val prootLoader: File get() = File(context.applicationInfo.nativeLibraryDir, "libproot-loader.so")
+    private val prootBinary: File get() =
+        File(context.applicationInfo.nativeLibraryDir, "libproot.so").takeIf { it.exists() }
+            ?: extractNativeProot("libproot.so")
+    private val prootLoader: File get() =
+        File(context.applicationInfo.nativeLibraryDir, "libproot-loader.so").takeIf { it.exists() }
+            ?: extractNativeProot("libproot-loader.so")
     override val rootfsDir: File get() = File(linuxDir, "rootfs")
     val javaHomeDir: File get() = File(rootfsDir, "usr/lib/jvm")
+
+    /**
+     * x86_64 首选设备（如 MuMu：SUPPORTED_ABIS 首选 x86_64 且 APK 含 x86_64 lib 时，
+     * 安装只解压 x86_64 目录）不会解压 arm64 lib → nativeLibraryDir 缺 libproot.so。
+     * 从 APK zip 内 lib/arm64-v8a/ 提取到 filesDir 兜底（模拟器等无 W^X 设备可 exec；
+     * 真机 arm64 首选时 nativeLibraryDir 必有 proot，不走此路径）。
+     */
+    private fun extractNativeProot(name: String): File {
+        val dir = File(context.filesDir, "native-extract").apply { mkdirs() }
+        val f = File(dir, name)
+        if (!f.exists() || f.length() < 100_000L) {
+            try {
+                java.util.zip.ZipFile(context.applicationInfo.sourceDir).use { zip ->
+                    val entry = zip.getEntry("lib/arm64-v8a/$name") ?: return f
+                    zip.getInputStream(entry).use { ins ->
+                        f.outputStream().use { ins.copyTo(it) }
+                    }
+                }
+                f.setExecutable(true)
+            } catch (_: Exception) { }
+        }
+        return f
+    }
 
     private val isAarch64: Boolean
         get() = Build.SUPPORTED_ABIS.any { it.contains("arm64-v8a", ignoreCase = true) || it.contains("aarch64", ignoreCase = true) }
