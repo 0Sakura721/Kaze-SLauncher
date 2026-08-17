@@ -108,7 +108,7 @@ object Downloader {
             // 内容校验：部分镜像对不存在的大文件返回 200+HTML 错误页，仅靠 HTTP 码无法识别
             if (!validate(dest)) {
                 dest.delete()
-                throw RuntimeException("下载内容校验失败（源可能返回了错误页）")
+                throw RuntimeException("返回内容不是有效文件（镜像可能下架了该版本），已换源重试")
             }
             return
         }
@@ -149,6 +149,8 @@ object Downloader {
     /**
      * 并发探测候选源：对每个 URL 发起 1KB Range 请求，测「连接+首字节」耗时，
      * 返回最快的 URL；全部失败返回 null。
+     * 额外嗅探响应内容：部分镜像对不存在的大文件返回 200+HTML 错误页
+     *（HTTP 码正常但内容无效），以 "<html"/"<?xml" 开头视为错误页排除。
      */
     fun probeFastest(urls: List<String>, probeTimeoutMs: Int = 4000): String? {
         val candidates = urls.filter { it.isNotBlank() }.distinct()
@@ -171,7 +173,7 @@ object Downloader {
                             conn.disconnect()
                             return@submit
                         }
-                        conn.inputStream.use { ins ->
+                        val head = conn.inputStream.use { ins ->
                             val buf = ByteArray(1024)
                             var read = 0
                             while (read < buf.size) {
@@ -179,8 +181,13 @@ object Downloader {
                                 if (n == -1) break
                                 read += n
                             }
+                            String(buf, 0, read, Charsets.ISO_8859_1).trimStart()
                         }
                         conn.disconnect()
+                        // 内容嗅探：HTML/XML 错误页视为不可用（镜像"假 200"）
+                        if (head.startsWith("<html", ignoreCase = true) || head.startsWith("<?xml", ignoreCase = true)) {
+                            return@submit
+                        }
                         results[u] = System.currentTimeMillis() - start
                     } catch (_: Exception) {
                         // 该源不可达，跳过

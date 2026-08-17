@@ -119,18 +119,39 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                 }
             }
 
-            // 1. 解析元数据：拿到官方包文件名（供镜像构造 URL）
+            // 1. 解析元数据：拿到官方包文件名（供镜像构造 URL）。
+            // 优先 TUNA 目录页（国内直连稳定、列出镜像上实际存在的版本）；
+            // 官方 Adoptium API 在国内可能被墙/超时，仅作补充（拿 GitHub 直链）。
             val api = "https://api.adoptium.net/v3/assets/latest/$majorVersion/hotspot" +
                 "?architecture=aarch64&image_type=jdk&os=linux&vendor=eclipse"
             var fileName: String? = null
             var githubLink: String? = null
+            fileName = runCatching {
+                val html = Downloader.downloadText(
+                    "https://mirrors.tuna.tsinghua.edu.cn/Adoptium/$majorVersion/jdk/aarch64/linux/",
+                    timeoutMs = 20_000,
+                )
+                Regex("""OpenJDK\d+U-jdk_aarch64_linux_hotspot_[^"<>]+\.tar\.gz""")
+                    .find(html)?.value
+            }.getOrNull()
             try {
                 val json = org.json.JSONArray(Downloader.downloadText(api))
                 val bin = json.getJSONObject(0).optJSONObject("binary") ?: org.json.JSONObject()
                 val pkg = bin.optJSONObject("package") ?: org.json.JSONObject()
-                fileName = pkg.optString("name").takeIf { it.isNotBlank() }
+                fileName = pkg.optString("name").takeIf { it.isNotBlank() } ?: fileName
                 githubLink = pkg.optString("link").takeIf { it.isNotBlank() }
             } catch (_: Exception) { }
+            if (fileName.isNullOrBlank()) {
+                // 兜底：华为目录页（格式与 TUNA 不同，仅解析文件名）
+                fileName = runCatching {
+                    val html = Downloader.downloadText(
+                        "https://mirrors.huaweicloud.com/adoptium/$majorVersion/jdk/aarch64/linux/",
+                        timeoutMs = 15_000,
+                    )
+                    Regex("""OpenJDK\d+U-jdk_aarch64_linux_hotspot_[^"<>]+\.tar\.gz""")
+                        .find(html)?.value
+                }.getOrNull()
+            }
 
             // 2. 候选源：官方 API 直链 + TUNA / 华为镜像
             val urls = buildList {
