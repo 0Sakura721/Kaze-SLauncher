@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.DropdownMenu
@@ -151,6 +152,17 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                 }
             }
             Row {
+                // 复制日志：一键复制当前实例完整日志到剪贴板
+                IconButton(
+                    onClick = { viewModel.copyConsoleLog() },
+                    enabled = current != null,
+                ) {
+                    Icon(
+                        Icons.Filled.ContentCopy,
+                        contentDescription = "复制日志",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 // 保存日志：SAF 选择目标位置，一次性导出当前实例完整日志
                 val saveLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.CreateDocument("text/plain")

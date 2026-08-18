@@ -290,6 +290,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 复制当前实例完整日志到剪贴板 */
+    fun copyConsoleLog() {
+        val id = _currentInstanceId.value ?: return
+        val inst = instanceStore.get(id) ?: return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val src = java.io.File(inst.dir, "console-output.log")
+                val text = if (src.exists()) src.readText() else "（该实例暂无日志）\n"
+                withContext(Dispatchers.Main) {
+                    val cm = container.appContext.getSystemService(
+                        android.content.Context.CLIPBOARD_SERVICE
+                    ) as android.content.ClipboardManager
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Kaze 日志", text))
+                    android.widget.Toast.makeText(
+                        container.appContext,
+                        "已复制完整日志",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            } catch (_: Exception) { }
+        }
+    }
+
     fun removeInstance(instance: ServerInstance) {
         viewModelScope.launch(Dispatchers.IO) {
             // 运行中先停止，避免进程占用目录文件导致删除失败/残留
