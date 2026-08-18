@@ -81,9 +81,28 @@ fun ConsoleScreen(viewModel: AppViewModel) {
         StatusTone.Error -> palette.error
     }
 
+    // 键盘/底栏动态避让：
+    // 输入框位置 = 窗口底 - max(imeInset, 96dp) —— 键盘弹出时贴键盘顶（inset>96dp），
+    // 收起动画期间 inset 连续减小，padding 同步补偿（96-inset），输入框恒不穿过底栏，
+    // 平稳回到 96dp 位置。不能只用 isImeVisible 切换（收起动画期间 inset>0 仍为 true，
+    // padding 保持 0 会让输入框沉到窗口底部穿过底栏再弹回）。
+    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    val bottomPad = (96.dp - imeBottom).coerceAtLeast(0.dp)
+
     // 新日志自动滚到底部（可暂停跟随）
     LaunchedEffect(lines.size) {
         if (follow && lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
+    }
+
+    // 键盘弹出瞬间重新滚到底：日志区被键盘压缩，最新一行可能被盖住。
+    // 只在"无键盘→有键盘"沿触发一次（imeBottom 动画中连续变化，不重复滚动）
+    var wasImeVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(imeBottom) {
+        val visible = imeBottom > 0.dp
+        if (visible && !wasImeVisible && follow && lines.isNotEmpty()) {
+            listState.scrollToItem(lines.size - 1)
+        }
+        wasImeVisible = visible
     }
 
     // 实例切换器（多开：每实例独立控制台）
@@ -92,13 +111,6 @@ fun ConsoleScreen(viewModel: AppViewModel) {
     val current = instances.firstOrNull { it.id == currentInstanceId }
     val states by viewModel.serverStates.collectAsState()
     var showSwitcher by remember { mutableStateOf(false) }
-    // 键盘/底栏动态避让：
-    // 输入框位置 = 窗口底 - max(imeInset, 96dp) —— 键盘弹出时贴键盘顶（inset>96dp），
-    // 收起动画期间 inset 连续减小，padding 同步补偿（96-inset），输入框恒不穿过底栏，
-    // 平稳回到 96dp 位置。不能只用 isImeVisible 切换（收起动画期间 inset>0 仍为 true，
-    // padding 保持 0 会让输入框沉到窗口底部穿过底栏再弹回）。
-    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
-    val bottomPad = (96.dp - imeBottom).coerceAtLeast(0.dp)
 
     Column(
         Modifier
