@@ -8,10 +8,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -91,16 +92,20 @@ fun ConsoleScreen(viewModel: AppViewModel) {
     val current = instances.firstOrNull { it.id == currentInstanceId }
     val states by viewModel.serverStates.collectAsState()
     var showSwitcher by remember { mutableStateOf(false) }
-    // 键盘弹出时输入框紧贴输入法上方（去掉底栏占位 96dp，底栏已被键盘覆盖）
-    val imeVisible = WindowInsets.isImeVisible
+    // 键盘/底栏动态避让：
+    // 输入框位置 = 窗口底 - max(imeInset, 96dp) —— 键盘弹出时贴键盘顶（inset>96dp），
+    // 收起动画期间 inset 连续减小，padding 同步补偿（96-inset），输入框恒不穿过底栏，
+    // 平稳回到 96dp 位置。不能只用 isImeVisible 切换（收起动画期间 inset>0 仍为 true，
+    // padding 保持 0 会让输入框沉到窗口底部穿过底栏再弹回）。
+    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    val bottomPad = (96.dp - imeBottom).coerceAtLeast(0.dp)
 
     Column(
         Modifier
             .fillMaxSize()
             .imePadding()
-            // 底部空白承载常驻栏：命令输入行位于栏上方不被遮挡；键盘弹出时让输入框正好在输入法上方。
-            // 120dp > 底栏总高（margin 24 + 胶囊 64 + 底 padding 8 + 手势条 ~24），保证不与底栏重叠
-            .padding(bottom = if (imeVisible) 0.dp else 120.dp)
+            // 底部空白承载常驻栏：bottomPad 随 IME inset 连续补偿（见上方注释），输入框不穿过底栏
+            .padding(bottom = bottomPad)
     ) {
         // ── 头部 ──
         Row(
