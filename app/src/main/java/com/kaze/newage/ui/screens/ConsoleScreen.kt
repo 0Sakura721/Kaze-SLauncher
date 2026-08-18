@@ -7,9 +7,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -56,6 +58,7 @@ import com.kaze.newage.ui.toLabel
 import com.kaze.newage.ui.toTone
 
 /** 控制台：实时日志（主题化深色终端）+ 命令输入 */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ConsoleScreen(viewModel: AppViewModel) {
     val lines by viewModel.consoleLines.collectAsState()
@@ -88,13 +91,15 @@ fun ConsoleScreen(viewModel: AppViewModel) {
     val current = instances.firstOrNull { it.id == currentInstanceId }
     val states by viewModel.serverStates.collectAsState()
     var showSwitcher by remember { mutableStateOf(false) }
+    // 键盘弹出时输入框紧贴输入法上方（去掉底栏占位 96dp，底栏已被键盘覆盖）
+    val imeVisible = WindowInsets.isImeVisible
 
     Column(
         Modifier
             .fillMaxSize()
             .imePadding()
-            // 底部空白承载常驻栏：命令输入行位于栏上方不被遮挡
-            .padding(bottom = 96.dp)
+            // 底部空白承载常驻栏：命令输入行位于栏上方不被遮挡；键盘弹出时让输入框正好在输入法上方
+            .padding(bottom = if (imeVisible) 0.dp else 96.dp)
     ) {
         // ── 头部 ──
         Row(
