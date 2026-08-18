@@ -290,25 +290,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 复制当前实例完整日志到剪贴板 */
+    /** 复制当前实例控制台显示的完整内容到剪贴板（与屏幕所见一致，含实时流与清空后状态） */
     fun copyConsoleLog() {
-        val id = _currentInstanceId.value ?: return
-        val inst = instanceStore.get(id) ?: return
-        viewModelScope.launch(Dispatchers.IO) {
+        val text = _consoleLines.value.joinToString("\n") { it.text }
+        val ctx = container.appContext
+        if (text.isBlank()) {
+            android.widget.Toast.makeText(ctx, "暂无日志", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        viewModelScope.launch(Dispatchers.Main) {
             try {
-                val src = java.io.File(inst.dir, "console-output.log")
-                val text = if (src.exists()) src.readText() else "（该实例暂无日志）\n"
-                withContext(Dispatchers.Main) {
-                    val cm = container.appContext.getSystemService(
-                        android.content.Context.CLIPBOARD_SERVICE
-                    ) as android.content.ClipboardManager
-                    cm.setPrimaryClip(android.content.ClipData.newPlainText("Kaze 日志", text))
-                    android.widget.Toast.makeText(
-                        container.appContext,
-                        "已复制完整日志",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }
+                val cm = ctx.getSystemService(
+                    android.content.Context.CLIPBOARD_SERVICE
+                ) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Kaze 日志", text))
+                android.widget.Toast.makeText(ctx, "已复制完整日志", android.widget.Toast.LENGTH_SHORT).show()
             } catch (_: Exception) { }
         }
     }
