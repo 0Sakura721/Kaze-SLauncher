@@ -64,6 +64,11 @@ fun ConsoleScreen(viewModel: AppViewModel) {
     var follow by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
     val tone = serverState.toTone()
+
+    // 停止时清空输入框残留：保证 placeholder「服务端运行后可输入命令」恒定可见
+    LaunchedEffect(serverState) {
+        if (serverState != ServerState.Running) input = ""
+    }
     val palette = statusPalette()
     val stateColor = when (tone) {
         StatusTone.Running -> palette.running
@@ -255,6 +260,8 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                     )
                 },
                 singleLine = true,
+                // 停止时禁用：避免能输入但发不出去，且残留文字顶掉 placeholder
+                enabled = serverState == ServerState.Running,
             )
             IconButton(
                 onClick = {
