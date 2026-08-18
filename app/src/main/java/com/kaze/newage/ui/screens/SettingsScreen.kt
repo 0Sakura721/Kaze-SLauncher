@@ -79,6 +79,13 @@ import java.io.File
 /** 背景图裁剪源：选图后复制到 cacheDir 此固定文件，经 CropFileProvider 交给裁剪 Activity */
 private const val BG_CROP_SRC = "bg_crop_src.tmp"
 
+/**
+ * 版本徽章背板色（#A87C27，用户指定）。
+ * 原样式：`MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)`（主色 12% 透明）。
+ * 改颜色只动这里即可；如恢复原样式，把背景改回 primary.copy(alpha = 0.12f) 并删除本常量。
+ */
+private val versionBadgeBackdrop: Color = Color(0xFFA87C27)
+
 /** 取色风格（materialkolor PaletteStyle）：英文名 → 中文说明 */
 private val paletteStyles: List<Pair<String, String>> = listOf(
     "TonalSpot" to "贴近种子色相，均衡百搭",
@@ -156,10 +163,11 @@ fun SettingsScreen(viewModel: AppViewModel) {
             Box(
                 Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                    // 背板色：versionBadgeBackdrop（#A87C27）；原样式 primary.copy(alpha = 0.12f)
+                    .background(versionBadgeBackdrop)
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
-                Text("v1.0.0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text("v0.1.0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -712,7 +720,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 // 关于与许可证
                 AccordionRow(
                     title = "关于与许可证",
-                    desc = "v1.0.0 · GNU GPL-3.0",
+                    desc = "v0.1.0 · GNU GPL-3.0",
                     expanded = openSection == "about",
                     onClick = { openSection = if (openSection == "about") null else "about" },
                 )
