@@ -14,7 +14,11 @@ android {
         minSdk = 27
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "0.1.0"
+        ndk {
+            // 仅发布 arm64-v8a（真机主流 ABI；剔除 x86/x86_64/armeabi-v7a 减小体积）
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
