@@ -275,14 +275,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _consoleLines.value = emptyList()
     }
 
-    /** 导出当前实例完整日志到用户选择的目录（SAF 一次性保存） */
+    /** 导出当前实例控制台显示内容到用户选择的目录（SAF 一次性保存，与复制一致 = 控制台所见） */
     fun saveConsoleLog(uri: android.net.Uri) {
-        val id = _currentInstanceId.value ?: return
-        val inst = instanceStore.get(id) ?: return
+        val text = _consoleLines.value.joinToString("\n") { it.text }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val src = java.io.File(inst.dir, "console-output.log")
-                val text = if (src.exists()) src.readText() else "（该实例暂无日志）\n"
                 container.appContext.contentResolver.openOutputStream(uri)?.use { out ->
                     out.write(text.toByteArray(Charsets.UTF_8))
                 }
