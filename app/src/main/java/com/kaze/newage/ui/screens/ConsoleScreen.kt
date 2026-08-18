@@ -98,8 +98,9 @@ fun ConsoleScreen(viewModel: AppViewModel) {
         Modifier
             .fillMaxSize()
             .imePadding()
-            // 底部空白承载常驻栏：命令输入行位于栏上方不被遮挡；键盘弹出时让输入框正好在输入法上方
-            .padding(bottom = if (imeVisible) 0.dp else 96.dp)
+            // 底部空白承载常驻栏：命令输入行位于栏上方不被遮挡；键盘弹出时让输入框正好在输入法上方。
+            // 120dp > 底栏总高（margin 24 + 胶囊 64 + 底 padding 8 + 手势条 ~24），保证不与底栏重叠
+            .padding(bottom = if (imeVisible) 0.dp else 120.dp)
     ) {
         // ── 头部 ──
         Row(
