@@ -466,7 +466,7 @@ private fun PropertiesEditor(
     val viewDistance = value("view-distance", "10").toIntOrNull() ?: 10
     val simDistance = value("simulation-distance", "10").toIntOrNull() ?: 10
     val spawnProtection = value("spawn-protection", "16").toIntOrNull() ?: 16
-    val pauseSeconds = value("pause-when-empty-seconds", "60").toIntOrNull() ?: 60
+    val pauseSeconds = value("pause-when-empty-seconds", "-1").toIntOrNull() ?: -1
 
     BackgroundCard(Modifier.fillMaxWidth()) {
         CardTitleLayout("server.properties") {

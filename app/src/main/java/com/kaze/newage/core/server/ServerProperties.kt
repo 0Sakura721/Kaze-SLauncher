@@ -68,6 +68,9 @@ object ServerProperties {
         "view-distance" to "10",
         "simulation-distance" to "10",
         "spawn-protection" to "16",
+        // 空服自动暂停默认关闭：proot 环境下暂停后唤醒会卡死（Can't keep up 数万 ms →
+        // Watchdog 判崩溃强杀 → 自动重启循环，用户日志实锤 7 次）。-1 = MC 官方语义禁用。
+        "pause-when-empty-seconds" to "-1",
     )
 
     /** 为新实例分配空闲端口（25565 起，跳过已占用的） */
@@ -80,12 +83,21 @@ object ServerProperties {
         return port
     }
 
-    /** 若实例目录无 server.properties，写入默认模板（端口自动分配，motd 用实例名） */
+    /** 若实例目录无 server.properties，写入默认模板（端口自动分配，motd 用实例名）；
+     *  已有文件若缺失 pause-when-empty-seconds 键则补写 -1（旧实例兼容：MC 26 无键默认 60s
+     *  自动暂停，proot 下暂停唤醒会卡死 → Watchdog 崩溃循环，见记忆 2026-08-18）。
+     *  用户主动设置过（键存在且 >0）则保留不覆盖。 */
     fun ensureInitial(instance: ServerInstance, allInstances: List<ServerInstance>) {
         val file = File(instance.dir, "server.properties")
         if (!file.exists()) {
             val port = findFreePort(allInstances.filter { it.id != instance.id })
             save(instance.dir, defaults(port, instance.name))
+            return
+        }
+        val existing = load(instance.dir)
+        if (existing["pause-when-empty-seconds"] == null) {
+            existing["pause-when-empty-seconds"] = "-1"
+            save(instance.dir, existing)
         }
     }
 }

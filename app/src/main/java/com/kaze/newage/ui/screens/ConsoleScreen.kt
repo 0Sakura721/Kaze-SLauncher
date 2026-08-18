@@ -191,9 +191,10 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                // 保存日志：SAF 选择目标位置，一次性导出当前实例完整日志
+                // 保存日志：SAF 选择目标位置，一次性导出当前实例完整日志。
+                // MIME 用 application/octet-stream：vivo 对 text/plain 会把 .log 自动改名 .log.txt
                 val saveLauncher = rememberLauncherForActivityResult(
-                    ActivityResultContracts.CreateDocument("text/plain")
+                    ActivityResultContracts.CreateDocument("application/octet-stream")
                 ) { uri ->
                     uri?.let { viewModel.saveConsoleLog(it) }
                 }
