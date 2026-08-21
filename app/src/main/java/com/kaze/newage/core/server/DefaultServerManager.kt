@@ -86,6 +86,12 @@ class DefaultServerManager(
             persistLine(text)
         }
 
+        /** \r 覆盖式进度行：控制台替换上一行（文件仍逐行落盘，与服务器原始日志一致） */
+        fun logReplace(text: String, type: LineType) {
+            console.emitReplace(text, type)
+            persistLine(text)
+        }
+
         private fun persistLine(text: String) {
             try {
                 synchronized(logLock) {
@@ -122,6 +128,8 @@ class DefaultServerManager(
         val slot = existing ?: RuntimeSlot(instance).also { slots[instance.id] = it }
         slot.manualStop = false
         slot.setState(ServerState.Starting)
+        // 一启动就保活：环境部署/Java 安装可能耗时数分钟，期间应用退后台也不能被杀
+        startGuard(instance)
 
         try {
             // 1. 环境（多实例互斥，只部署一次）
@@ -209,6 +217,10 @@ class DefaultServerManager(
         } catch (e: Exception) {
             slot.log("> 启动失败：${e.message}", LineType.Error)
             slot.setState(ServerState.Error)
+            // 启动失败且没有其他实例在跑：撤下保活前台服务
+            if (slots.values.none { it.process?.isAlive == true }) {
+                com.kaze.newage.core.service.ServerGuardService.stop(appContext)
+            }
         }
     }
 
@@ -351,13 +363,29 @@ class DefaultServerManager(
         // 消费输出（slot.log 已同步写入运行日志 console-output.log）
         scope.launch {
             try {
-                proc.inputStream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        if (line.isNotBlank()) {
-                            slot.log(line, classify(line))
+                // 逐字符流式读取：\r = 覆盖式进度行（控制台替换上一行，避免几百行刷屏），
+                // \n = 普通行。readLine 会把 \r 也当分隔符，无法区分，故手写分割。
+                val reader = proc.inputStream.bufferedReader()
+                val sb = StringBuilder()
+                while (true) {
+                    val c = reader.read()
+                    if (c < 0) break
+                    when (c.toChar()) {
+                        '\r' -> {
+                            val text = sb.toString().trim()
+                            sb.clear()
+                            if (text.isNotEmpty()) slot.logReplace(text, classify(text))
                         }
+                        '\n' -> {
+                            val text = sb.toString().trim()
+                            sb.clear()
+                            if (text.isNotEmpty()) slot.log(text, classify(text))
+                        }
+                        else -> sb.append(c.toChar())
                     }
                 }
+                val tail = sb.toString().trim()
+                if (tail.isNotEmpty()) slot.log(tail, classify(tail))
             } catch (_: Exception) { }
         }
 
@@ -469,11 +497,21 @@ class DefaultServerManager(
         return condition()
     }
 
+    /**
+     * JVM 启动参数（移动端 proot 环境实测优化）：
+     *  - Xms=Xmx：消除堆扩容停顿（启动阶段反复扩容是拖慢主因之一）
+     *  - PerfDisableSharedMem：禁止写 /tmp/hsperfdata_*（proot 映射 /tmp 有 IO 开销且无意义）
+     *  - MaxGCPauseMillis：G1 目标停顿，避免长时间 STW
+     *  - java.security.egd=urandom：Java 8/17 上 SecureRandom 阻塞读 /dev/random 的规避
+     */
     private fun javaArgs(instance: ServerInstance, javaBin: String, jarName: String): List<String> =
         buildList {
             add(javaBin)
             add("-Xmx${instance.memoryMb}M")
-            add("-Xms${(instance.memoryMb / 2).coerceAtLeast(256)}M")
+            add("-Xms${instance.memoryMb}M")
+            add("-XX:+PerfDisableSharedMem")
+            add("-XX:MaxGCPauseMillis=200")
+            add("-Djava.security.egd=file:/dev/urandom")
             add("-jar")
             add(jarName)
             if (instance.nogui) add("nogui")

@@ -93,6 +93,22 @@ class SettingsPrefs(context: Context) {
     /** 图标与文字颜色模式：auto（跟随主题）/ light（白色）/ dark（黑色） */
     val fgColorMode = mutableStateOf(prefs.getString("fg_color_mode", "auto") ?: "auto")
 
+    /** 每次启动自动检查更新（默认开） */
+    val autoUpdate = mutableStateOf(prefs.getBoolean("auto_update", true))
+
+    /** 更新通道：preview（预览版，默认，含 prerelease）/ stable（仅正式版） */
+    val updateChannel = mutableStateOf(prefs.getString("update_channel", "preview") ?: "preview")
+
+    fun setAutoUpdate(v: Boolean) {
+        autoUpdate.value = v
+        prefs.edit().putBoolean("auto_update", v).apply()
+    }
+
+    fun setUpdateChannel(v: String) {
+        updateChannel.value = v
+        prefs.edit().putString("update_channel", v).apply()
+    }
+
     fun setFgColorMode(v: String) {
         fgColorMode.value = v
         prefs.edit().putString("fg_color_mode", v).apply()

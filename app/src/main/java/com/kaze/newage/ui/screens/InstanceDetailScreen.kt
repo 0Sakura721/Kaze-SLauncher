@@ -14,10 +14,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -99,6 +102,7 @@ fun InstanceDetailScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         // ── 顶部栏 ──
+        var showRenameDialog by remember(instanceId) { mutableStateOf(false) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
@@ -107,6 +111,49 @@ fun InstanceDetailScreen(
                 Text(instance.name, style = MaterialTheme.typography.titleLarge, maxLines = 1)
                 Text(state.toLabel(), style = MaterialTheme.typography.labelMedium, color = stateColor)
             }
+            // 改名：只改软件里显示的名字，与服务器 MOTD（server.properties）独立
+            IconButton(onClick = { showRenameDialog = true }) {
+                Icon(Icons.Filled.Edit, contentDescription = "重命名实例")
+            }
+        }
+
+        // ── 重命名对话框 ──
+        if (showRenameDialog) {
+            var newName by remember(instanceId) { mutableStateOf(instance.name) }
+            AlertDialog(
+                onDismissRequest = { showRenameDialog = false },
+                title = { Text("重命名实例") },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = newName,
+                            onValueChange = { newName = it },
+                            label = { Text("实例名称") },
+                            singleLine = true,
+                        )
+                        Text(
+                            "仅修改软件内显示名；服务器 MOTD 独立保存在 server.properties 中，不受影响。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            if (newName.isNotBlank() && newName.trim() != instance.name) {
+                                viewModel.renameInstance(instanceId, newName)
+                            }
+                            showRenameDialog = false
+                        },
+                        enabled = newName.isNotBlank(),
+                    ) { Text("确定") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showRenameDialog = false }) { Text("取消") }
+                },
+            )
         }
 
         // ── 运行总览 ──

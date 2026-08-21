@@ -27,12 +27,21 @@ import androidx.compose.material.icons.outlined.Dns
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Terminal
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +50,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -50,6 +60,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.kaze.newage.core.update.UpdateChecker
+import com.kaze.newage.core.update.UpdateInstaller
 import com.kaze.newage.ui.components.AppBackground
 import com.kaze.newage.ui.components.BackdropLayer
 import com.kaze.newage.ui.screens.AddonsScreen
@@ -60,6 +72,7 @@ import com.kaze.newage.ui.screens.LogsScreen
 import com.kaze.newage.ui.screens.NewServerScreen
 import com.kaze.newage.ui.screens.ServerScreen
 import com.kaze.newage.ui.screens.SettingsScreen
+import kotlinx.coroutines.launch
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.LocalAppTheme
 import com.kaze.newage.ui.theme.LocalGlassBlurEnabled
@@ -92,6 +105,50 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val currentRoute = backStackEntry?.destination?.route
     val uiPrefs = viewModel.uiPrefs
     val showBottomBar = Dest.entries.any { it.route == currentRoute }
+
+    // ── 启动自动检查更新（默认开；通道默认预览版，设置页可改）──
+    val appContext = LocalContext.current.applicationContext
+    val scope = rememberCoroutineScope()
+    var updateInfo by remember { mutableStateOf<UpdateChecker.ReleaseInfo?>(null) }
+    var updateProgress by remember { mutableStateOf<String?>(null) }
+    var updateBusy by remember { mutableStateOf(false) }
+    var updateChecked by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (uiPrefs.autoUpdate.value && !updateChecked) {
+            updateChecked = true
+            val channel = uiPrefs.updateChannel.value
+            val current = runCatching {
+                appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: ""
+            }.getOrDefault("")
+            try {
+                val info = UpdateChecker.check(channel)
+                if (info != null && UpdateChecker.isNewer(info.tag, current)) {
+                    updateInfo = info
+                }
+            } catch (_: Exception) { /* 静默：启动检查失败不影响使用 */ }
+        }
+    }
+    fun startUpdateDownload(info: UpdateChecker.ReleaseInfo) {
+        if (updateBusy) return
+        updateBusy = true
+        updateProgress = "准备下载…"
+        scope.launch {
+            val file = UpdateInstaller.download(
+                context = appContext,
+                info = info,
+                onProgress = { done, total, _ ->
+                    updateProgress = if (total > 0) "下载中 $done MB / $total MB" else "下载中 $done MB…"
+                },
+            )
+            updateBusy = false
+            if (file != null) {
+                updateInfo = null
+                UpdateInstaller.install(appContext, file)
+            } else {
+                updateProgress = "下载失败，请稍后在设置中重试"
+            }
+        }
+    }
 
     AppBackground(prefs = uiPrefs) {
         // 覆盖式布局（不用 Scaffold 的 bottomBar 预留位）：
@@ -190,6 +247,50 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
             }
+        }
+
+        // ── 启动自动检查：发现新版本弹窗 ──
+        updateInfo?.let { info ->
+            AlertDialog(
+                onDismissRequest = { if (!updateBusy) updateInfo = null },
+                title = { Text("发现新版本 ${info.tag}") },
+                text = {
+                    Column {
+                        if (info.body.isNotBlank()) {
+                            Text(
+                                info.body.take(400),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        updateProgress?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                        if (updateBusy) {
+                            LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = { startUpdateDownload(info) },
+                        enabled = !updateBusy,
+                    ) {
+                        Text(if (updateBusy) "下载中…" else "下载并安装")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { updateInfo = null },
+                        enabled = !updateBusy,
+                    ) { Text("以后再说") }
+                },
+            )
         }
     }
 }

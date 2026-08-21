@@ -102,6 +102,16 @@ class InstanceStore(
         save()
     }
 
+    /** 重命名实例（只改软件里的显示名，不影响目录/server.properties/MOTD） */
+    fun rename(id: String, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) return
+        _instances.value = _instances.value.map {
+            if (it.id == id) it.copy(name = trimmed) else it
+        }
+        save()
+    }
+
     fun get(id: String): ServerInstance? = _instances.value.firstOrNull { it.id == id }
 
     private fun load(): List<ServerInstance> {

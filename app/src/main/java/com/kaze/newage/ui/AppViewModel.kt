@@ -226,6 +226,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ── 动作：服务端（多开）──
+    /** 重命名实例（软件显示名；不影响 server.properties / MOTD，两者独立修改） */
+    fun renameInstance(id: String, newName: String) {
+        instanceStore.rename(id, newName)
+    }
     fun selectInstance(instance: ServerInstance) {
         _currentInstanceId.value = instance.id
     }

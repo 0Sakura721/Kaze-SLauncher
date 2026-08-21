@@ -60,13 +60,16 @@ object ServerProperties {
         "gamemode" to "survival",
         "difficulty" to "easy",
         "pvp" to "true",
-        "online-mode" to "true",
+        // 默认关闭正版验证（用户要求）：局域网/无正版账号场景可直接进服；实例详情页可改回
+        "online-mode" to "false",
         "white-list" to "false",
         "allow-flight" to "false",
         "enable-command-block" to "false",
         "hardcore" to "false",
-        "view-distance" to "10",
-        "simulation-distance" to "10",
+        // 移动端默认降低：世界准备/实体 tick 随距离² 增长，8/6 显著加快启动且省电；
+        // 需更大视野可在实例详情页调回（用户核心诉求 = 启动速度）
+        "view-distance" to "8",
+        "simulation-distance" to "6",
         "spawn-protection" to "16",
         // 空服自动暂停默认关闭：proot 环境下暂停后唤醒会卡死（Can't keep up 数万 ms →
         // Watchdog 判崩溃强杀 → 自动重启循环，用户日志实锤 7 次）。-1 = MC 官方语义禁用。

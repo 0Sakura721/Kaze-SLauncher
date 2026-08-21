@@ -47,6 +47,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +59,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import com.kaze.newage.core.update.UpdateChecker
+import com.kaze.newage.core.update.UpdateInstaller
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.theme.AppThemeMode
@@ -74,6 +77,9 @@ import com.canhub.cropper.CropImageContractOptions
 import com.canhub.cropper.CropImageOptions
 import com.materialkolor.PaletteStyle
 import com.materialkolor.dynamicColorScheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /** 背景图裁剪源：选图后复制到 cacheDir 此固定文件，经 CropFileProvider 交给裁剪 Activity */
@@ -717,6 +723,18 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
 
+                // 检查更新（GitHub Releases + 多线路加速下载，机制同 operit.app）
+                AccordionRow(
+                    title = "检查更新",
+                    desc = "GitHub Releases · 自动选最快下载线路",
+                    expanded = openSection == "update",
+                    onClick = { openSection = if (openSection == "update") null else "update" },
+                )
+                AnimatedVisibility(visible = openSection == "update") {
+                    UpdateSection(appContext, uiPrefs)
+                }
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp))
+
                 // 关于与许可证
                 AccordionRow(
                     title = "关于与许可证",
@@ -741,6 +759,187 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 }
         }
     }
+}
+
+/** 检查更新：GitHub Releases API 查最新版（机制同 operit.app），多镜像测速择优下载后走系统安装器 */
+@Composable
+private fun UpdateSection(appContext: android.content.Context, uiPrefs: com.kaze.newage.data.prefs.SettingsPrefs) {
+    val scope = rememberCoroutineScope()
+    val currentVersion = remember {
+        runCatching {
+            appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: ""
+        }.getOrDefault("")
+    }
+    var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
+    var cancelDownload by remember { mutableStateOf(false) }
+
+    fun checkUpdate() {
+        updateState = UpdateUiState.Checking
+        scope.launch(Dispatchers.IO) {
+            try {
+                val info = UpdateChecker.check(uiPrefs.updateChannel.value)
+                if (info == null || !UpdateChecker.isNewer(info.tag, currentVersion)) {
+                    withContext(Dispatchers.Main) { updateState = UpdateUiState.Latest }
+                } else {
+                    withContext(Dispatchers.Main) { updateState = UpdateUiState.Found(info) }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    updateState = UpdateUiState.Error(e.message ?: "检查失败（网络不可达？）")
+                }
+            }
+        }
+    }
+
+    fun downloadAndInstall(info: UpdateChecker.ReleaseInfo) {
+        cancelDownload = false
+        updateState = UpdateUiState.Downloading(info, 0f, "准备下载…")
+        scope.launch(Dispatchers.IO) {
+            val file = UpdateInstaller.download(
+                context = appContext,
+                info = info,
+                onProgress = { done, total, p ->
+                    val msg = "下载中 $done MB" + (if (total > 0) " / $total MB" else "")
+                    updateState = UpdateUiState.Downloading(info, p, msg)
+                },
+                shouldCancel = { cancelDownload },
+            )
+            if (file == null) {
+                withContext(Dispatchers.Main) {
+                    updateState = if (cancelDownload) UpdateUiState.Idle
+                    else UpdateUiState.Error("下载失败：所有线路不可用，请稍后重试")
+                }
+                return@launch
+            }
+            withContext(Dispatchers.Main) {
+                if (UpdateInstaller.install(appContext, file)) {
+                    updateState = UpdateUiState.Idle
+                } else {
+                    updateState = UpdateUiState.Error("无法打开安装器，请到设置中开启「安装未知应用」权限")
+                }
+            }
+        }
+    }
+
+    Column(
+        Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // ── 每次启动自动检查（默认开）──
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("每次启动自动检查更新", style = MaterialTheme.typography.labelLarge)
+                Text(
+                    "打开后每次启动应用自动检查，发现新版本会弹窗提示",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = uiPrefs.autoUpdate.value,
+                onCheckedChange = { uiPrefs.setAutoUpdate(it) },
+            )
+        }
+        HorizontalDivider()
+
+        // ── 更新通道：预览版（默认）/ 正式版 ──
+        Text("更新通道", style = MaterialTheme.typography.labelLarge)
+        Text(
+            "预览版优先推送最新功能（含测试版本）；正式版仅推送稳定发布",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CheckChip(
+                selected = uiPrefs.updateChannel.value != "stable",
+                label = "预览版（含测试版）",
+                onClick = { uiPrefs.setUpdateChannel("preview") },
+            )
+            CheckChip(
+                selected = uiPrefs.updateChannel.value == "stable",
+                label = "仅正式版",
+                onClick = { uiPrefs.setUpdateChannel("stable") },
+            )
+        }
+        HorizontalDivider()
+
+        Text(
+            "当前版本 $currentVersion · GitHub Releases · 自动测速选择最快下载线路",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        when (val s = updateState) {
+            is UpdateUiState.Idle -> {
+                Button(onClick = { checkUpdate() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("检查更新")
+                }
+            }
+            is UpdateUiState.Checking -> {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text("正在检查…", style = MaterialTheme.typography.bodySmall)
+            }
+            is UpdateUiState.Error -> {
+                Text(s.msg, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Button(onClick = { checkUpdate() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("重试")
+                }
+            }
+            is UpdateUiState.Latest -> {
+                Text(
+                    "已是最新版本（或仓库暂未发布更新）",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            is UpdateUiState.Found -> {
+                Text("发现新版本 ${s.info.tag}", style = MaterialTheme.typography.titleSmall)
+                if (s.info.body.isNotBlank()) {
+                    Text(
+                        s.info.body.take(600),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(
+                    onClick = { downloadAndInstall(s.info) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("下载并安装")
+                }
+            }
+            is UpdateUiState.Downloading -> {
+                LinearProgressIndicator(
+                    progress = { s.progress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(s.message, style = MaterialTheme.typography.bodySmall)
+                TextButton(
+                    onClick = { cancelDownload = true },
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text("取消")
+                }
+            }
+        }
+    }
+}
+
+/** 更新流程 UI 状态 */
+private sealed interface UpdateUiState {
+    data object Idle : UpdateUiState
+    data object Checking : UpdateUiState
+    data class Error(val msg: String) : UpdateUiState
+    data object Latest : UpdateUiState
+    data class Found(val info: UpdateChecker.ReleaseInfo) : UpdateUiState
+    data class Downloading(
+        val info: UpdateChecker.ReleaseInfo,
+        val progress: Float,
+        val message: String,
+    ) : UpdateUiState
 }
 
 /** 手风琴行：标题 + 摘要 + 旋转箭头 */

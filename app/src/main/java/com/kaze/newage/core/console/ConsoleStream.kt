@@ -40,6 +40,14 @@ class ConsoleStream(
         _lines.tryEmit(line)
     }
 
+    /** 覆盖式输出（服务端用 \r 原地更新进度，如 "Preparing spawn area: 50%"）：
+     *  替换最后一行，控制台不刷屏、观感与原始日志一致 */
+    @Synchronized
+    fun emitReplace(text: String, type: LineType = LineType.Info) {
+        if (buffer.isNotEmpty()) buffer.removeLast()
+        emit(text, type)
+    }
+
     @Synchronized
     fun snapshot(): List<ConsoleLine> = buffer.toList()
 
