@@ -36,7 +36,6 @@ class MainActivity : ComponentActivity() {
             val darkStyle by prefs.darkStyle
             val colorSource by prefs.md3ColorSource
             val customColor by prefs.md3CustomColor
-            val paletteStyle by prefs.paletteStyle
             val glassModeId by prefs.glassMode
             val glassIntensity by prefs.glassIntensity
             val fgColorModeId by prefs.fgColorMode
@@ -53,7 +52,6 @@ class MainActivity : ComponentActivity() {
                 amoledDark = darkStyle == 1,
                 colorSource = colorSource,
                 customColorHex = customColor,
-                paletteStyle = paletteStyle,
                 glassMode = GlassMode.fromId(glassModeId),
                 glassIntensity = glassIntensity,
                 fgColorMode = FgColorMode.fromId(fgColorModeId),

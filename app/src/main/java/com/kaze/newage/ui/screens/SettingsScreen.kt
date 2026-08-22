@@ -12,6 +12,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,7 +31,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -55,10 +57,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import com.kaze.newage.core.update.UpdateChecker
 import com.kaze.newage.core.update.UpdateInstaller
 import com.kaze.newage.ui.AppViewModel
@@ -66,24 +71,16 @@ import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.FgColorMode
 import com.kaze.newage.ui.theme.GlassMode
-import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.cardBorderColor
 import com.kaze.newage.ui.theme.parseSeedColor
 import com.kaze.newage.ui.theme.statusPalette
 import com.kaze.newage.util.StorageDirUtil
-import com.canhub.cropper.CropImage
-import com.canhub.cropper.CropImageContract
-import com.canhub.cropper.CropImageContractOptions
-import com.canhub.cropper.CropImageOptions
-import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamicColorScheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/** 背景图裁剪源：选图后复制到 cacheDir 此固定文件，经 CropFileProvider 交给裁剪 Activity */
-private const val BG_CROP_SRC = "bg_crop_src.tmp"
+/** 背景图选图即用（显示端自适应铺满+模糊+遮罩），不再进入手动裁剪页 */
 
 /**
  * 版本徽章背板色（#A87C27，用户指定）。
@@ -92,18 +89,7 @@ private const val BG_CROP_SRC = "bg_crop_src.tmp"
  */
 private val versionBadgeBackdrop: Color = Color(0xFFA87C27)
 
-/** 取色风格（materialkolor PaletteStyle）：英文名 → 中文说明 */
-private val paletteStyles: List<Pair<String, String>> = listOf(
-    "TonalSpot" to "贴近种子色相，均衡百搭",
-    "Fidelity" to "尽量还原种子原色",
-    "Vibrant" to "高饱和鲜明，活力感强",
-    "Expressive" to "冷暖对冲，更有张力",
-    "Content" to "柔和沉稳，适合长阅读",
-    "Neutral" to "几乎无彩色，灰度极简",
-    "Monochrome" to "单一色相，极简统一",
-    "Rainbow" to "多色相组合，多彩活泼",
-    "FruitSalad" to "果味多彩，鲜明跳脱",
-)
+/** 取色风格已移除：自定义颜色用取色器选主色，生成方式参考 operit（见 theme/Theme.kt seedColorScheme） */
 
 /**
  * 设置：三区差异化布局——
@@ -121,31 +107,14 @@ fun SettingsScreen(viewModel: AppViewModel) {
     // 手风琴：同一时刻只展开一节（null = 全部收起）
     var openSection by remember { mutableStateOf<String?>(null) }
 
-    // 裁剪：CanHub Android-Image-Cropper（uCrop 同源，Apache-2.0），Activity 模式
-    val cropLauncher = rememberLauncherForActivityResult(CropImageContract()) { result ->
-        if (result.isSuccessful) {
-            val bmp = result.getBitmap(appContext) ?: return@rememberLauncherForActivityResult
-            uiPrefs.saveBackgroundImage(bmp)
-            uiPrefs.setBgEnabled(true)
-        }
-    }
-
     val imageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             try {
-                // 复制到 cacheDir 固定文件，经 CropFileProvider 交给裁剪 Activity
-                val dst = File(appContext.cacheDir, BG_CROP_SRC)
-                appContext.contentResolver.openInputStream(uri)?.use { ins ->
-                    dst.outputStream().use { outs -> ins.copyTo(outs) }
-                }
-                val fileUri = FileProvider.getUriForFile(
-                    appContext,
-                    "${appContext.packageName}.cropper.fileprovider",
-                    dst,
-                )
-                cropLauncher.launch(CropImageContractOptions(fileUri, CropImageOptions()))
+                // 选图即用：解码压缩保存（显示端自适应铺满 + 模糊/遮罩），无需手动裁剪
+                uiPrefs.saveBackgroundImage(uri)
+                uiPrefs.setBgEnabled(true)
             } catch (_: Exception) { }
         }
     }
@@ -263,100 +232,44 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     CheckChip(selected = uiPrefs.md3ColorSource.value == "custom", label = "自定义颜色", onClick = { uiPrefs.setMd3ColorSource("custom") })
                 }
                 if (uiPrefs.md3ColorSource.value == "custom") {
+                    // 二级色：取色器弹窗（参考 operit 的 colorpicker 交互，自研 HSV 取色器，支持手动输入 HEX）
+                    var showColorPicker by remember { mutableStateOf(false) }
                     Row(
                         Modifier.padding(top = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        OutlinedTextField(
-                            value = uiPrefs.md3CustomColor.value,
-                            onValueChange = { v ->
-                                if (v.length <= 7) uiPrefs.setMd3CustomColor(v)
-                            },
-                            label = { Text("种子色（hex）") },
-                            placeholder = { Text("#007AFF") },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f),
-                        )
                         Box(
                             Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
+                                .size(44.dp)
+                                .clip(MaterialTheme.shapes.medium)
                                 .background(runCatching {
                                     androidx.compose.ui.graphics.Color(
                                         uiPrefs.md3CustomColor.value.removePrefix("#").toLong(16).toInt() or 0xFF000000.toInt()
                                     )
                                 }.getOrDefault(MaterialTheme.colorScheme.primary))
                         )
-                    }
-                }
-
-                // 取色风格（materialkolor PaletteStyle，BiliPai resolveColorStyleOptions）——抽屉式，与「通用」手风琴一致
-                var paletteExpanded by remember { mutableStateOf(false) }
-                AccordionRow(
-                    title = "取色风格",
-                    desc = if (paletteExpanded) "点击收起" else "当前：${uiPrefs.paletteStyle.value}",
-                    expanded = paletteExpanded,
-                    onClick = { paletteExpanded = !paletteExpanded },
-                )
-                AnimatedVisibility(visible = paletteExpanded) {
-                    // 每种风格按当前种子色 + 深浅实时生成主/次/第三色小色板，可直接对比效果
-                    val previewDark = LocalDarkTheme.current
-                    val previewSeed = parseSeedColor(uiPrefs.md3CustomColor.value) ?: 0xFF007AFF.toInt()
-                    Column(
-                        Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        paletteStyles.forEach { (name, desc) ->
-                            val preview = remember(name, previewSeed, previewDark, uiPrefs.darkStyle.value) {
-                                runCatching {
-                                    dynamicColorScheme(
-                                        seedColor = Color(previewSeed),
-                                        isDark = previewDark,
-                                        isAmoled = uiPrefs.darkStyle.value == 1,
-                                        style = PaletteStyle.valueOf(name),
-                                    )
-                                }.getOrNull()
-                            }
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { uiPrefs.setPaletteStyle(name) }
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                if (preview != null) {
-                                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                                        listOf(preview.primary, preview.secondary, preview.tertiary).forEach { c ->
-                                            Box(
-                                                Modifier
-                                                    .size(14.dp)
-                                                    .clip(CircleShape)
-                                                    .background(c)
-                                            )
-                                        }
-                                    }
-                                    Spacer(Modifier.width(10.dp))
-                                }
-                                Column(Modifier.weight(1f)) {
-                                    Text(name, style = MaterialTheme.typography.bodyMedium)
-                                    Text(
-                                        desc,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                if (uiPrefs.paletteStyle.value == name) {
-                                    Icon(
-                                        Icons.Filled.Check,
-                                        contentDescription = "当前使用",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
+                        Column(Modifier.weight(1f)) {
+                            Text("二级色", style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                uiPrefs.md3CustomColor.value,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
+                        Button(onClick = { showColorPicker = true }) {
+                            Text("取色")
+                        }
+                    }
+                    if (showColorPicker) {
+                        ColorPickerDialog(
+                            initialArgb = parseSeedColor(uiPrefs.md3CustomColor.value) ?: 0x00FFFF.toInt(),
+                            onConfirm = { argb ->
+                                uiPrefs.setMd3CustomColor(String.format("#%06X", argb and 0xFFFFFF))
+                                showColorPicker = false
+                            },
+                            onDismiss = { showColorPicker = false },
+                        )
                     }
                 }
 
@@ -940,6 +853,180 @@ private sealed interface UpdateUiState {
         val progress: Float,
         val message: String,
     ) : UpdateUiState
+}
+
+/** 自研 HSV 取色器（参考 operit colorpicker 交互；无第三方依赖）：
+ * 色相条 + 饱和度/明度面板 + 实时预览，确定后回调 ARGB */
+@Composable
+private fun ColorPickerDialog(
+    initialArgb: Int,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var hsv by remember(initialArgb) {
+        mutableStateOf(
+            floatArrayOf(0f, 0f, 0f).also {
+                android.graphics.Color.colorToHSV(initialArgb, it)
+                if (it[0].isNaN()) it[0] = 0f
+            }
+        )
+    }
+    val hueColor = androidx.compose.ui.graphics.Color(
+        android.graphics.Color.HSVToColor(floatArrayOf(hsv[0], 1f, 1f))
+    )
+    val current = androidx.compose.ui.graphics.Color(android.graphics.Color.HSVToColor(hsv))
+    val density = LocalDensity.current
+    val markerPx = with(density) { 8.dp.toPx() }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择二级色") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // 饱和度（横轴）× 明度（纵轴）2D 面板
+                var panelSize by remember { mutableStateOf(androidx.compose.ui.geometry.Size.Zero) }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                listOf(androidx.compose.ui.graphics.Color.White, hueColor)
+                            )
+                        )
+                        .onSizeChanged {
+                            panelSize = androidx.compose.ui.geometry.Size(it.width.toFloat(), it.height.toFloat())
+                        }
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                hsv = floatArrayOf(
+                                    hsv[0],
+                                    (down.position.x / size.width).coerceIn(0f, 1f),
+                                    1f - (down.position.y / size.height).coerceIn(0f, 1f),
+                                )
+                                while (true) {
+                                    val change = awaitPointerEvent().changes.firstOrNull { it.pressed } ?: break
+                                    hsv = floatArrayOf(
+                                        hsv[0],
+                                        (change.position.x / size.width).coerceIn(0f, 1f),
+                                        1f - (change.position.y / size.height).coerceIn(0f, 1f),
+                                    )
+                                }
+                            }
+                        }
+                ) {
+                    // 明度罩：底部黑色
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    listOf(androidx.compose.ui.graphics.Color.Transparent, androidx.compose.ui.graphics.Color.Black)
+                                )
+                            )
+                    )
+                    // 指示点
+                    if (panelSize != androidx.compose.ui.geometry.Size.Zero) {
+                        Box(
+                            Modifier
+                                .offset {
+                                    androidx.compose.ui.unit.IntOffset(
+                                        (hsv[1] * panelSize.width - markerPx).coerceAtLeast(0f).toInt(),
+                                        ((1f - hsv[2]) * panelSize.height - markerPx).coerceAtLeast(0f).toInt(),
+                                    )
+                                }
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(androidx.compose.ui.graphics.Color.White)
+                                .border(1.dp, androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.4f), CircleShape)
+                        )
+                    }
+                }
+                // 色相条
+                var hueWidth by remember { mutableStateOf(0f) }
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(22.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                (0..30).map { i ->
+                                    androidx.compose.ui.graphics.Color(
+                                        android.graphics.Color.HSVToColor(floatArrayOf(i * 12f, 1f, 1f))
+                                    )
+                                }
+                            )
+                        )
+                        .onSizeChanged { hueWidth = it.width.toFloat() }
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                hsv = floatArrayOf(
+                                    (down.position.x / size.width).coerceIn(0f, 1f) * 360f,
+                                    maxOf(hsv[1], 0.001f),
+                                    maxOf(hsv[2], 0.001f),
+                                )
+                                while (true) {
+                                    val change = awaitPointerEvent().changes.firstOrNull { it.pressed } ?: break
+                                    hsv = floatArrayOf(
+                                        (change.position.x / size.width).coerceIn(0f, 1f) * 360f,
+                                        maxOf(hsv[1], 0.001f),
+                                        maxOf(hsv[2], 0.001f),
+                                    )
+                                }
+                            }
+                        },
+                ) {
+                    Box(
+                        Modifier
+                            .offset {
+                                androidx.compose.ui.unit.IntOffset(
+                                    (hsv[0] / 360f * hueWidth - markerPx).coerceAtLeast(0f).toInt(),
+                                    0,
+                                )
+                            }
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(androidx.compose.ui.graphics.Color.White)
+                            .border(1.dp, androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.4f), CircleShape)
+                    )
+                }
+                // 预览 + 手动 HEX 输入（合法则实时预览）
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(
+                        Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(current)
+                    )
+                    OutlinedTextField(
+                        value = String.format("#%06X", current.toArgb() and 0xFFFFFF),
+                        onValueChange = { input ->
+                            if (input.length <= 7) {
+                                val raw = input.trim().removePrefix("#")
+                                if (raw.length == 6 && raw.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) {
+                                    val argb = raw.toLong(16).toInt() or 0xFF000000.toInt()
+                                    val h = floatArrayOf(0f, 0f, 0f)
+                                    android.graphics.Color.colorToHSV(argb, h)
+                                    hsv = h
+                                }
+                            }
+                        },
+                        label = { Text("HEX") },
+                        placeholder = { Text("#00FFFF") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(current.toArgb()) }) { Text("确定") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }
 
 /** 手风琴行：标题 + 摘要 + 旋转箭头 */

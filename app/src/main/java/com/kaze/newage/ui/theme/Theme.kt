@@ -21,14 +21,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kaze.newage.core.console.LineType
-import com.materialkolor.PaletteStyle
-import com.materialkolor.dynamicColorScheme
 
 // ══════════════════════════════════════════════════════════════
 // 主题系统（照搬 BiliPai 主题设置体系，GPL-3.0）：
 //  - 主题模式：跟随系统 / 浅色 / 深色（AppThemeMode）
 //  - 深色样式：普通黑 / AMOLED 纯黑（DarkThemeStyle）
-//  - 主题样式：Material 3（动态取色/自定义种子色 + 取色风格）/ 液态玻璃
+//  - 主题样式：Material 3（壁纸动态取色 / 自定义主色，operit 式生成）
 //  - 液态玻璃模式：清晰 CLEAR / 均衡 BALANCED / 磨砂 FROSTED
 //    （参数照搬 BiliPai LiquidGlassTuning 的 progress 线性映射）
 // ══════════════════════════════════════════════════════════════
@@ -188,13 +186,62 @@ fun parseSeedColor(hex: String?): Int? {
     return raw.toLong(16).toInt() or 0xFF000000.toInt()
 }
 
+// ───────────────────────────────────────────────
+// 自定义主色 → 完整 ColorScheme（逻辑改编自 operit Theme.kt，LGPL-3.0）：
+// 亮/暗变换 + 自动对比文字色，不依赖取色风格算法
+// ───────────────────────────────────────────────
+
+private fun lightenColor(color: Color, factor: Float): Color {
+    val r = color.red + (1f - color.red) * factor
+    val g = color.green + (1f - color.green) * factor
+    val b = color.blue + (1f - color.blue) * factor
+    return Color(r, g, b, color.alpha)
+}
+
+private fun darkenColor(color: Color, factor: Float): Color {
+    val r = color.red * (1f - factor)
+    val g = color.green * (1f - factor)
+    val b = color.blue * (1f - factor)
+    return Color(r, g, b, color.alpha)
+}
+
+private fun isColorLight(color: Color): Boolean {
+    val luminance = 0.299f * color.red + 0.587f * color.green + 0.114f * color.blue
+    return luminance > 0.5f
+}
+
+private fun contrastingText(color: Color): Color =
+    if (isColorLight(color)) Color(0xFF1A1C20) else Color.White
+
+/** 从主色种子生成全套 ColorScheme（operit 式） */
+private fun seedColorScheme(seed: Int, isDark: Boolean): ColorScheme {
+    val primary = Color(seed)
+    // 深色下主色提亮（可读性），浅色保持原型（operit 同款处理）
+    val effectivePrimary = if (isDark) lightenColor(primary, 0.25f) else primary
+    val secondary = if (isDark) lightenColor(primary, 0.45f) else lightenColor(primary, 0.35f)
+    val primaryContainer = if (isDark) darkenColor(primary, 0.3f) else lightenColor(primary, 0.7f)
+    val secondaryContainer = if (isDark) darkenColor(primary, 0.2f) else lightenColor(primary, 0.75f)
+    val base = if (isDark) M3Dark else M3Light
+    return base.copy(
+        primary = effectivePrimary,
+        onPrimary = contrastingText(effectivePrimary),
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = if (isDark) Color.White else contrastingText(primaryContainer),
+        secondary = secondary,
+        onSecondary = contrastingText(secondary),
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = contrastingText(secondaryContainer),
+        tertiary = if (isDark) lightenColor(primary, 0.6f) else lightenColor(primary, 0.5f),
+        onTertiary = Color.White,
+    )
+}
+
 /**
  * 主题入口。
  * @param darkTheme 是否深色（由「主题模式」与系统共同解析）
  * @param amoledDark AMOLED 纯黑深色样式（照搬 BiliPai DarkThemeStyle）
  * @param colorSource MD3 颜色来源：wallpaper / custom（照搬 BiliPai Md3ColorSource）
- * @param customColorHex 自定义种子色
- * @param paletteStyle 取色风格（materialkolor PaletteStyle）
+ * @param customColorHex 自定义主色（hex）
  * @param glassMode 液态玻璃模式（clear/balanced/frosted）
  */
 @Composable
@@ -203,27 +250,20 @@ fun NewAgeTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     amoledDark: Boolean = false,
     colorSource: String = "wallpaper",
-    customColorHex: String = "#007AFF",
-    paletteStyle: String = "TonalSpot",
+    customColorHex: String = "#00FFFF",
     glassMode: GlassMode = GlassMode.BALANCED,
     glassIntensity: Float = 1f,
     fgColorMode: FgColorMode = FgColorMode.AUTO,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    val style = runCatching { PaletteStyle.valueOf(paletteStyle) }.getOrDefault(PaletteStyle.TonalSpot)
     val seed = if (colorSource == "custom") parseSeedColor(customColorHex) else null
 
     val scheme: ColorScheme = when (mode) {
         AppThemeMode.M3 -> {
             when {
-                // materialkolor 2.x：seedColor 为 Compose Color；原生支持 isAmoled 纯黑
-                seed != null -> dynamicColorScheme(
-                    seedColor = Color(seed),
-                    isDark = darkTheme,
-                    isAmoled = amoledDark,
-                    style = style,
-                )
+                // 自定义主色：operit 式生成（lighten/darken + 自动对比色），不依赖取色风格
+                seed != null -> seedColorScheme(seed, darkTheme)
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
                     if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
                 else -> if (darkTheme) M3Dark else M3Light

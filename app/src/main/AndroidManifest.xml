@@ -36,12 +36,6 @@
             </intent-filter>
         </activity>
 
-        <!-- 裁剪 Activity 需要 AppCompat 主题（库 manifest 未指定） -->
-        <activity
-            android:name="com.canhub.cropper.CropImageActivity"
-            android:theme="@style/Theme.KazeCrop"
-            tools:replace="android:theme" />
-
         <!-- 服务端守护前台服务：specialUse 类型（无 6 小时时限）+ 显式子类型属性（缺一即 SecurityException） -->
         <service
             android:name=".core.service.ServerGuardService"

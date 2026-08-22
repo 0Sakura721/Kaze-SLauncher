@@ -13,6 +13,7 @@ import java.io.File
  */
 class SettingsPrefs(context: Context) {
 
+    private val appContext: Context = context.applicationContext
     private val prefs = context.getSharedPreferences("kaze_ui_settings", Context.MODE_PRIVATE)
     private val bgFile = File(context.filesDir, "background.png")
 
@@ -54,8 +55,8 @@ class SettingsPrefs(context: Context) {
     /** MD3 颜色来源（照搬 BiliPai Md3ColorSource）：wallpaper=跟随系统壁纸 / custom=自定义颜色 */
     val md3ColorSource = mutableStateOf(prefs.getString("md3_color_source", "wallpaper") ?: "wallpaper")
 
-    /** MD3 自定义种子色（hex，如 #007AFF） */
-    val md3CustomColor = mutableStateOf(prefs.getString("md3_custom_color", "#007AFF") ?: "#007AFF")
+    /** MD3 自定义种子色（hex，默认 #00FFFF 青色） */
+    val md3CustomColor = mutableStateOf(prefs.getString("md3_custom_color", "#00FFFF") ?: "#00FFFF")
 
     /** 取色风格（materialkolor PaletteStyle 名） */
     val paletteStyle = mutableStateOf(prefs.getString("palette_style", "TonalSpot") ?: "TonalSpot")
@@ -116,9 +117,14 @@ class SettingsPrefs(context: Context) {
 
     fun backgroundImagePath(): String? = bgFile.takeIf { it.exists() }?.absolutePath
 
-    /** 保存选中的背景图（压缩到屏幕尺寸，避免大图内存问题） */
-    fun saveBackgroundImage(sourcePath: String) {
-        val src = BitmapFactory.decodeFile(sourcePath) ?: return
+    /** 保存选中的背景图（SAF Uri，压缩到屏幕尺寸，避免大图内存问题） */
+    fun saveBackgroundImage(uri: android.net.Uri) {
+        val src: Bitmap? = try {
+            appContext.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+        } catch (_: Exception) {
+            null
+        }
+        if (src == null) return
         val maxDim = 1600
         val scale = minOf(1f, maxDim.toFloat() / maxOf(src.width, src.height))
         val scaled = if (scale < 1f) {
@@ -127,18 +133,6 @@ class SettingsPrefs(context: Context) {
         bgFile.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         if (scaled != src) scaled.recycle()
         src.recycle()
-        bgExists.value = true
-    }
-
-    /** 保存裁剪页返回的背景位图（压缩到屏幕尺寸） */
-    fun saveBackgroundImage(bitmap: Bitmap) {
-        val maxDim = 1600
-        val scale = minOf(1f, maxDim.toFloat() / maxOf(bitmap.width, bitmap.height))
-        val out = if (scale < 1f) {
-            Bitmap.createScaledBitmap(bitmap, (bitmap.width * scale).toInt(), (bitmap.height * scale).toInt(), true)
-        } else bitmap
-        bgFile.outputStream().use { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }
-        if (out !== bitmap) out.recycle()
         bgExists.value = true
     }
 

@@ -66,7 +66,5 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.haze)
-    implementation(libs.materialkolor)
-    implementation(libs.android.image.cropper)
     debugImplementation(libs.androidx.ui.tooling)
 }

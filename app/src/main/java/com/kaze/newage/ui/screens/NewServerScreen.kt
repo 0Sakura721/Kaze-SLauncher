@@ -397,15 +397,15 @@ private fun VersionListPage(
                 )
             }
             else -> {
-                val shown = filtered.take(40)
+                // 列表全量展示（云端获取，LazyColumn 懒加载无压力；可搜索过滤）
                 LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
-                    items(shown) { v ->
+                    items(filtered) { v ->
                         VersionRow(version = v, onClick = { onSelect(v) })
                     }
-                    if (filtered.size > shown.size) {
+                    if (filtered.size > 200) {
                         item {
                             Text(
-                                "共 ${filtered.size} 个版本，输入关键字缩小范围",
+                                "共 ${filtered.size} 个版本",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
