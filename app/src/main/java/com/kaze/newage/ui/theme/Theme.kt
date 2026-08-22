@@ -26,7 +26,7 @@ import com.kaze.newage.core.console.LineType
 // 主题系统（照搬 BiliPai 主题设置体系，GPL-3.0）：
 //  - 主题模式：跟随系统 / 浅色 / 深色（AppThemeMode）
 //  - 深色样式：普通黑 / AMOLED 纯黑（DarkThemeStyle）
-//  - 主题样式：Material 3（壁纸动态取色 / 自定义主色，operit 式生成）
+//  - 主题样式：Material 3（壁纸动态取色 / 自定义二级色生成）
 //  - 液态玻璃模式：清晰 CLEAR / 均衡 BALANCED / 磨砂 FROSTED
 //    （参数照搬 BiliPai LiquidGlassTuning 的 progress 线性映射）
 // ══════════════════════════════════════════════════════════════
@@ -187,7 +187,7 @@ fun parseSeedColor(hex: String?): Int? {
 }
 
 // ───────────────────────────────────────────────
-// 自定义主色 → 完整 ColorScheme（逻辑改编自 operit Theme.kt，LGPL-3.0）：
+// 自定义二级色 → 完整 ColorScheme（亮/暗变换 + 自动对比色的通用算法）：
 // 亮/暗变换 + 自动对比文字色，不依赖取色风格算法
 // ───────────────────────────────────────────────
 
@@ -213,10 +213,10 @@ private fun isColorLight(color: Color): Boolean {
 private fun contrastingText(color: Color): Color =
     if (isColorLight(color)) Color(0xFF1A1C20) else Color.White
 
-/** 从主色种子生成全套 ColorScheme（operit 式） */
+/** 从二级色种子生成全套 ColorScheme（亮暗变换 + 自动对比色） */
 private fun seedColorScheme(seed: Int, isDark: Boolean): ColorScheme {
     val primary = Color(seed)
-    // 深色下主色提亮（可读性），浅色保持原型（operit 同款处理）
+    // 深色下主色提亮（可读性），浅色保持原型
     val effectivePrimary = if (isDark) lightenColor(primary, 0.25f) else primary
     val secondary = if (isDark) lightenColor(primary, 0.45f) else lightenColor(primary, 0.35f)
     val primaryContainer = if (isDark) darkenColor(primary, 0.3f) else lightenColor(primary, 0.7f)
@@ -262,7 +262,7 @@ fun NewAgeTheme(
     val scheme: ColorScheme = when (mode) {
         AppThemeMode.M3 -> {
             when {
-                // 自定义主色：operit 式生成（lighten/darken + 自动对比色），不依赖取色风格
+                // 自定义二级色：亮/暗变换 + 自动对比色生成，不依赖取色风格
                 seed != null -> seedColorScheme(seed, darkTheme)
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
                     if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)

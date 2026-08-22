@@ -89,7 +89,7 @@ import java.io.File
  */
 private val versionBadgeBackdrop: Color = Color(0xFFA87C27)
 
-/** 取色风格已移除：自定义颜色用取色器选主色，生成方式参考 operit（见 theme/Theme.kt seedColorScheme） */
+/** 取色风格已移除：自定义颜色用取色器选二级色，生成见 theme/Theme.kt seedColorScheme */
 
 /**
  * 设置：三区差异化布局——
@@ -232,7 +232,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     CheckChip(selected = uiPrefs.md3ColorSource.value == "custom", label = "自定义颜色", onClick = { uiPrefs.setMd3ColorSource("custom") })
                 }
                 if (uiPrefs.md3ColorSource.value == "custom") {
-                    // 二级色：取色器弹窗（参考 operit 的 colorpicker 交互，自研 HSV 取色器，支持手动输入 HEX）
+                    // 二级色：取色器弹窗（自研 HSV 取色器，支持手动输入 HEX）
                     var showColorPicker by remember { mutableStateOf(false) }
                     Row(
                         Modifier.padding(top = 8.dp),
@@ -636,7 +636,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
 
-                // 检查更新（GitHub Releases + 多线路加速下载，机制同 operit.app）
+                // 检查更新（GitHub Releases + 多线路加速下载，GitHub Releases 多线路加速）
                 AccordionRow(
                     title = "检查更新",
                     desc = "GitHub Releases · 自动选最快下载线路",
@@ -674,7 +674,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
     }
 }
 
-/** 检查更新：GitHub Releases API 查最新版（机制同 operit.app），多镜像测速择优下载后走系统安装器 */
+/** 检查更新：GitHub Releases API 查最新版（GitHub Releases 多线路加速），多镜像测速择优下载后走系统安装器 */
 @Composable
 private fun UpdateSection(appContext: android.content.Context, uiPrefs: com.kaze.newage.data.prefs.SettingsPrefs) {
     val scope = rememberCoroutineScope()
@@ -855,7 +855,7 @@ private sealed interface UpdateUiState {
     ) : UpdateUiState
 }
 
-/** 自研 HSV 取色器（参考 operit colorpicker 交互；无第三方依赖）：
+/** 自研 HSV 取色器（自研实现，无第三方依赖；无第三方依赖）：
  * 色相条 + 饱和度/明度面板 + 实时预览，确定后回调 ARGB */
 @Composable
 private fun ColorPickerDialog(

@@ -5,7 +5,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 检查更新：机制与 operit.app 官网一致 ——
+ * 检查更新：GitHub 生态常规方案——
  * 版本信息走 GitHub Releases API，APK 下载走 GitHub 原链 + 多个国内加速镜像，
  * 由 Downloader 并发测速选最快源、失败自动回退（断点续传）。
  *
@@ -19,7 +19,7 @@ object UpdateChecker {
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
     private const val API_LIST = "https://api.github.com/repos/$REPO/releases"
 
-    /** GitHub 下载加速镜像（operit.app 同款线路，前缀直拼 GitHub 原链） */
+    /** GitHub 下载加速镜像（社区常用线路，前缀直拼 GitHub 原链） */
     private val MIRRORS = listOf(
         "https://github.moeyy.xyz/",
         "https://mirror.ghproxy.com/",
