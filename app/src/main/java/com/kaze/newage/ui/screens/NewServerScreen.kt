@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -194,16 +195,20 @@ private fun CoreCard(type: CoreType, modifier: Modifier = Modifier, onClick: () 
         onClick = onClick,
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            // 统一高度：描述 1/2 行时卡片高度一致，网格不零乱
+            Modifier.fillMaxWidth().height(118.dp).padding(14.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
             InstanceIcon(type, Modifier.size(40.dp))
-            Text(type.displayName, style = MaterialTheme.typography.titleSmall)
-            Text(
-                type.description(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(type.displayName, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    type.description(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+            }
         }
     }
 }
@@ -393,7 +398,7 @@ private fun VersionListPage(
             }
             else -> {
                 val shown = filtered.take(40)
-                LazyColumn(Modifier.weight(1f).padding(top = 4.dp)) {
+                LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
                     items(shown) { v ->
                         VersionRow(version = v, onClick = { onSelect(v) })
                     }
@@ -669,7 +674,7 @@ private fun ConfigPage(
     }
 }
 
-/** 版本行：FCL 版本列表风格（整行可点，点击即进入配置页，行尾箭头提示进入） */
+/** 版本行：FCL 版本列表风格（图标位 + 版本号加粗 + 类型徽标 + 箭头，整行点击进入配置） */
 @Composable
 private fun VersionRow(
     version: GameVersion,
@@ -678,16 +683,34 @@ private fun VersionRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(cardShape())
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 10.dp),
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(version.id, style = MaterialTheme.typography.bodyMedium)
+        // 图标位：主色 12% 圆角方块 + 版本主号（FCL 方块图标位等效）
+        Box(
+            Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                version.id.split('.').take(2).joinToString("."),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                version.id,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            )
             Box(
                 Modifier
-                    .padding(top = 2.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(
                         if (version.isRelease) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)

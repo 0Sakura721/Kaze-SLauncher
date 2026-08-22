@@ -14,6 +14,7 @@ data class ModrinthSearchHit(
     val description: String = "",
     val project_type: String = "",
     val slug: String = "",
+    val icon_url: String = "",
     val downloads: Int = 0,
 )
 

@@ -30,6 +30,23 @@ object CoreSources {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    /** 版本号 → 数字段序列（26.2 → [26,2]；1.21.11 → [1,21,11]） */
+    private fun versionKey(v: String): List<Long> =
+        Regex("\\d+").findAll(v).map { it.value.toLong() }.toList()
+
+    /** 语义比较：a > b → 正（按数字段逐位比，不依赖 API 返回顺序） */
+    private fun compareVersions(a: String, b: String): Int {
+        val ka = versionKey(a)
+        val kb = versionKey(b)
+        val n = maxOf(ka.size, kb.size)
+        for (i in 0 until n) {
+            val x = ka.getOrNull(i) ?: 0
+            val y = kb.getOrNull(i) ?: 0
+            if (x != y) return x.compareTo(y)
+        }
+        return 0
+    }
+
     private fun httpGet(urlStr: String): String {
         var conn = URL(urlStr).openConnection() as HttpURLConnection
         conn.instanceFollowRedirects = true
@@ -125,7 +142,8 @@ object CoreSources {
                     url = (dl as? JsonObject)?.get("url")?.jsonPrimitive?.content ?: "",
                 )
             }
-            Result.success(list.reversed())
+            // build 按 id 数值降序（不依赖 API 返回顺序——fill API 顺序变化会导致拿到旧 build）
+            Result.success(list.sortedByDescending { it.id.toLongOrNull() ?: 0L })
         } catch (e: Exception) { Result.failure(e) }
     }
 
@@ -245,15 +263,22 @@ object CoreSources {
         CoreDownload("https://download.getbukkit.org/spigot/spigot-$version.jar", "spigot-$version.jar")
 
     // ── 统一入口 ──
-    suspend fun fetchVersions(type: CoreType): Result<List<GameVersion>> = when (type) {
-        CoreType.VANILLA -> fetchVanillaVersions()
-        CoreType.PAPER -> fetchPaperVersions()
-        CoreType.PURPUR -> fetchPurpurVersions()
-        CoreType.SPIGOT -> fetchSpigotVersions()
-        CoreType.FABRIC -> fetchFabricVersions()
-        CoreType.FORGE -> fetchForgeVersions()
-        CoreType.NEOFORGE -> fetchNeoForgeVersions()
-        CoreType.CUSTOM -> Result.failure(RuntimeException("自定义导入无下载源"))
+    /** 各源版本列表统一处理：按版本号语义降序（最新在前，不依赖 API 返回顺序）+ 去重 */
+    suspend fun fetchVersions(type: CoreType): Result<List<GameVersion>> {
+        val r = when (type) {
+            CoreType.VANILLA -> fetchVanillaVersions()
+            CoreType.PAPER -> fetchPaperVersions()
+            CoreType.PURPUR -> fetchPurpurVersions()
+            CoreType.SPIGOT -> fetchSpigotVersions()
+            CoreType.FABRIC -> fetchFabricVersions()
+            CoreType.FORGE -> fetchForgeVersions()
+            CoreType.NEOFORGE -> fetchNeoForgeVersions()
+            CoreType.CUSTOM -> Result.failure(RuntimeException("自定义导入无下载源"))
+        }
+        return r.map { list ->
+            list.distinctBy { it.id }
+                .sortedWith { a, b -> compareVersions(b.id, a.id) }
+        }
     }
 
     /** 获取最终下载链接 */

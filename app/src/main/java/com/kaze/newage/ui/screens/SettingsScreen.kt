@@ -1009,7 +1009,7 @@ private fun ThemeTile(
 @Composable
 private fun ThemePreview(mode: AppThemeMode, modifier: Modifier = Modifier) {
     when (mode) {
-        AppThemeMode.M3 -> Box(modifier.background(Color(0xFFF5F7FA))) {
+        AppThemeMode.M3 -> Box(modifier.background(Color(0xFFE9EDF3))) {
             Box(
                 Modifier
                     .padding(8.dp)
@@ -1017,6 +1017,10 @@ private fun ThemePreview(mode: AppThemeMode, modifier: Modifier = Modifier) {
                     .height(18.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(Color.White)
+                    .border(
+                        BorderStroke(1.dp, Color(0xFFD5DAE2)),
+                        RoundedCornerShape(4.dp),
+                    )
             )
             Box(
                 Modifier
@@ -1024,7 +1028,15 @@ private fun ThemePreview(mode: AppThemeMode, modifier: Modifier = Modifier) {
                     .padding(start = 10.dp, bottom = 8.dp)
                     .size(10.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF3563E9))
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = 8.dp)
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
             )
         }
         AppThemeMode.GLASS -> Box(
