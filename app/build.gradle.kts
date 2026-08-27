@@ -15,9 +15,25 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
-        ndk {
-            // 仅发布 arm64-v8a（真机主流 ABI；剔除 x86/x86_64/armeabi-v7a 减小体积）
-            abiFilters += "arm64-v8a"
+    }
+
+    // ABI flavor：每包只带本架构的 native 库与 rootfs 资产；universal 全量（分发用）
+    flavorDimensions += "abi"
+    productFlavors {
+        create("arm64") {
+            dimension = "abi"
+            ndk { abiFilters += "arm64-v8a" }
+        }
+        create("armhf") {
+            dimension = "abi"
+            ndk { abiFilters += "armeabi-v7a" }
+        }
+        create("universal") {
+            dimension = "abi"
+            ndk {
+                abiFilters += "arm64-v8a"
+                abiFilters += "armeabi-v7a"
+            }
         }
     }
 
@@ -48,6 +64,13 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+
+    // universal 变体：assets 直接复用 arm64 + armhf 两套（避免复制实体文件导致仓库膨胀）
+    sourceSets {
+        getByName("universal") {
+            assets.srcDirs("src/arm64/assets", "src/armhf/assets")
+        }
     }
 }
 

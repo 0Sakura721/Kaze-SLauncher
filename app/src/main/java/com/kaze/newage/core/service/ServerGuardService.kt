@@ -26,7 +26,8 @@ import com.kaze.newage.R
  *     `FOREGROUND_SERVICE_SPECIAL_USE` 权限 +
  *     `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` 属性（缺一即 SecurityException）；
  *  3. 通知渠道 IMPORTANCE_LOW（静默、常驻）；
- *  4. 每实例一行状态文本，随实例启停更新。
+ *  4. 单实例显示名称/端口，多开时由 DefaultServerManager.updateGuard 聚合为
+ *     "N 个实例运行中" + 实例名列表（单一通知，避免通知栏堆积）。
  */
 class ServerGuardService : Service() {
 

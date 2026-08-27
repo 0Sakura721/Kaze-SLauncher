@@ -279,6 +279,8 @@ private fun InstanceCard(
 
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
+    // 删除实例必须二次确认：会连目录内全部世界数据一起删掉，一次误触即丢档不可恢复
+    var confirmDelete by remember { mutableStateOf(false) }
 
     Surface(
         modifier = Modifier
@@ -396,10 +398,36 @@ private fun InstanceCard(
                     },
                     onClick = {
                         menuExpanded = false
-                        onDelete()
+                        confirmDelete = true
                     },
                 )
             }
+        }
+
+        // 删除确认弹窗
+        if (confirmDelete) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirmDelete = false },
+                title = { Text("删除「${instance.name}」？") },
+                text = {
+                    Text("将永久删除实例目录及其全部备份（世界存档、配置、插件/模组）。此操作不可恢复。")
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            confirmDelete = false
+                            onDelete()
+                        }
+                    ) {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) {
+                        Text("取消")
+                    }
+                },
+            )
         }
     }
 }

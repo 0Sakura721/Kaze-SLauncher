@@ -159,13 +159,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 if (!container.env.isReady) {
                     container.env.setup { p, m ->
-                        _javaTask.value = JavaTaskState(running = true, version = version, progress = p * 0.3f, message = "准备环境：$m")
+                        // 必须 copy 而非整体 new：整体替换会把 cancelRequested 冲回 false，
+                        // 用户在下载期间点取消即刻失效（下一个进度 tick ≤150ms 就洗掉标志）
+                        _javaTask.value = _javaTask.value.copy(
+                            running = true, progress = p * 0.3f, message = "准备环境：$m",
+                        )
                     }
                 }
                 container.javaManager.install(
                     version,
                     { p, m ->
-                        _javaTask.value = JavaTaskState(running = true, version = version, progress = 0.3f + p * 0.7f, message = m)
+                        _javaTask.value = _javaTask.value.copy(
+                            running = true, progress = 0.3f + p * 0.7f, message = m,
+                        )
                     },
                     { _javaTask.value.cancelRequested },
                 )
@@ -322,6 +328,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             instanceStore.remove(instance.id)
             runCatching { instance.dir.deleteRecursively() }
+            // 备份目录在实例目录之外，删除实例后无任何入口再能访问——一并清理防死数据
+            runCatching { com.kaze.newage.core.server.BackupManager.deleteAllBackups(instance) }
             if (_currentInstanceId.value == instance.id) _currentInstanceId.value = null
         }
     }
@@ -428,21 +436,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _addonInstall.value = DownloadState()
     }
 
-    /** 导入自定义 jar 创建实例 */
-    fun importJar(jarFile: File, name: String, javaMajor: Int, memoryMb: Int): ServerInstance? {
-        val dir = instanceStore.createInstanceDir(name)
-        val target = File(dir, jarFile.name)
-        jarFile.copyTo(target, overwrite = true)
-        val instance = ServerInstance(
-            name = name,
-            coreType = CoreType.CUSTOM,
-            javaMajor = javaMajor,
-            memoryMb = memoryMb,
-            dir = dir,
-        )
-        instanceStore.add(instance)
-        ServerProperties.ensureInitial(instance, instanceStore.instances.value)
-        _currentInstanceId.value = instance.id
-        return instance
+    /** 导入自定义 jar 创建实例（后台拷贝；大 jar 不能在主线程同步复制——会 ANR） */
+    fun importJar(jarFile: File, name: String, javaMajor: Int, memoryMb: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val dir = instanceStore.createInstanceDir(name)
+            val target = File(dir, jarFile.name)
+            try {
+                jarFile.copyTo(target, overwrite = true)
+                val instance = ServerInstance(
+                    name = name,
+                    coreType = CoreType.CUSTOM,
+                    javaMajor = javaMajor,
+                    memoryMb = memoryMb,
+                    dir = dir,
+                )
+                instanceStore.add(instance)
+                ServerProperties.ensureInitial(instance, instanceStore.instances.value)
+                _currentInstanceId.value = instance.id
+            } catch (e: Exception) {
+                // 拷贝失败清理半成品目录，避免被 rescan 误识别为实例
+                runCatching { dir.deleteRecursively() }
+            }
+        }
     }
 }

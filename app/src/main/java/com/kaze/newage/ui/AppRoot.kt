@@ -128,9 +128,11 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             } catch (_: Exception) { /* 静默：启动检查失败不影响使用 */ }
         }
     }
+    var updateCancelRequested by remember { mutableStateOf(false) }
     fun startUpdateDownload(info: UpdateChecker.ReleaseInfo) {
         if (updateBusy) return
         updateBusy = true
+        updateCancelRequested = false
         updateProgress = "准备下载…"
         scope.launch {
             val file = UpdateInstaller.download(
@@ -139,11 +141,16 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 onProgress = { done, total, _ ->
                     updateProgress = if (total > 0) "下载中 $done MB / $total MB" else "下载中 $done MB…"
                 },
+                shouldCancel = { updateCancelRequested },
             )
             updateBusy = false
             if (file != null) {
                 updateInfo = null
                 UpdateInstaller.install(appContext, file)
+            } else if (updateCancelRequested) {
+                // 用户主动取消：静默收起弹窗（下载已在 Downloader 内中止，断点保留）
+                updateInfo = null
+                updateProgress = null
             } else {
                 updateProgress = "下载失败，请稍后在设置中重试"
             }
@@ -252,7 +259,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         // ── 启动自动检查：发现新版本弹窗 ──
         updateInfo?.let { info ->
             AlertDialog(
-                onDismissRequest = { if (!updateBusy) updateInfo = null },
+                // 下载中不锁死弹窗：点击外部 = 请求取消（下载会中止，断点保留）
+                onDismissRequest = {
+                    if (updateBusy) updateCancelRequested = true else updateInfo = null
+                },
                 title = { Text("发现新版本 ${info.tag}") },
                 text = {
                     Column {
@@ -286,9 +296,12 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 },
                 dismissButton = {
                     TextButton(
-                        onClick = { updateInfo = null },
-                        enabled = !updateBusy,
-                    ) { Text("以后再说") }
+                        onClick = {
+                            if (updateBusy) updateCancelRequested = true else updateInfo = null
+                        },
+                    ) {
+                        Text(if (updateBusy) "取消下载" else "以后再说")
+                    }
                 },
             )
         }

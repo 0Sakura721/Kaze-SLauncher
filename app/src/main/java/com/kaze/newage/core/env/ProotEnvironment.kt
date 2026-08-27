@@ -71,12 +71,23 @@ class ProotEnvironment(
      *   - 修补版 proot 内置 SIGSYS 处理器，模拟被 zygote seccomp 拦截的 chdir/chmod/getcwd 等系统调用；
      *   - PROOT_LOADER 指向同目录的 loader，由它 mmap 加载 guest ELF（不触发 W^X）。
      */
-    private val prootBinary: File get() =
+    /** 非 arm64（v7a/模拟器）时的 proot 运行时目录：assets/bundled 的 termux 静态包 */
+    private val prootHomeDir: File get() = File(linuxDir, "proot-home")
+
+    private val prootBinary: File get() = if (isAarch64) {
         File(context.applicationInfo.nativeLibraryDir, "libproot.so").takeIf { it.exists() }
             ?: extractNativeProot("libproot.so")
-    private val prootLoader: File get() =
+    } else {
+        ensureProotRuntime()
+        File(prootHomeDir, "bin/proot")
+    }
+    private val prootLoader: File get() = if (isAarch64) {
         File(context.applicationInfo.nativeLibraryDir, "libproot-loader.so").takeIf { it.exists() }
             ?: extractNativeProot("libproot-loader.so")
+    } else {
+        ensureProotRuntime()
+        File(prootHomeDir, "libexec/loader")
+    }
     override val rootfsDir: File get() = File(linuxDir, "rootfs")
     val javaHomeDir: File get() = File(rootfsDir, "usr/lib/jvm")
 
@@ -103,6 +114,76 @@ class ProotEnvironment(
         return f
     }
 
+    /**
+     * 非 arm64（v7a/模拟器）时从 assets/bundled 解压 termux proot 静态运行时（v3 同款，
+     * 已验证）：bin/proot + libexec/loader + lib/{talloc,shmem}。API<29 的 filesDir 无
+     * W^X 限制可直接 exec；arm64 设备走 nativeLibraryDir 修补版 .so，不走此路径。
+     * 幂等；返回错误消息，成功返回 null。
+     */
+    @Synchronized
+    private fun ensureProotRuntime(): String? {
+        val bin = File(prootHomeDir, "bin/proot")
+        val loader = File(prootHomeDir, "libexec/loader")
+        if (bin.exists() && loader.exists() && bin.length() > 50_000L && loader.length() > 1_000L) {
+            return null
+        }
+        return try {
+            prootHomeDir.mkdirs()
+            val tarball = File(linuxDir, "proot.tar.gz")
+            if (!extractBundledAsset("proot-$archName.tar.gz", tarball)) {
+                // 内置缺失回退 termux 官方 release（与 v3 一致）
+                val url = "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-$archName.tar.gz"
+                com.kaze.newage.util.Downloader.download(url, tarball)
+            }
+            TarExtractor.extract(tarball, prootHomeDir)
+            fixProotSonameLinks()
+            File(prootHomeDir, "bin/proot").setExecutable(true)
+            File(prootHomeDir, "libexec/loader").setExecutable(true)
+            File(prootHomeDir, "libexec/loader32").takeIf { it.exists() }?.setExecutable(true)
+            // 解压完即删源归档（断点续传不需要）
+            tarball.delete()
+            null
+        } catch (e: Exception) {
+            e.message ?: "未知错误"
+        }
+    }
+
+    /** 标准 ARM cpuinfo（写一次，供 -b 覆盖 guest /proc/cpuinfo，apt 需要） */
+    private fun writeFakeCpuInfo(): File {
+        val f = File(linuxDir, "proot-cpuinfo")
+        if (!f.exists() || f.length() < 100) {
+            f.writeText(
+                "processor\t: 0\n" +
+                "BogoMIPS\t: 44.44\n" +
+                "Features\t: half thumb fastmult vfp edsp neon vfpv3 tls vfpv4 idiva idivt vfpd32 lpae evtstrm aes pmull sha1 sha2 crc32\n" +
+                "CPU implementer\t: 0x41\n" +
+                "CPU architecture: 7\n" +
+                "CPU variant\t: 0x1\n" +
+                "CPU part\t: 0xc09\n" +
+                "CPU revision\t: 3\n"
+            )
+        }
+        return f
+    }
+
+    /** termux proot 包的 soname 目录型条目（tar 提取成目录的软链）换成真文件副本 */
+    private fun fixProotSonameLinks() {
+        try {
+            val libDir = File(prootHomeDir, "lib")
+            libDir.listFiles()?.forEach { f ->
+                if (f.isDirectory) {
+                    val real = libDir.listFiles()?.firstOrNull {
+                        it.isFile && it.name != f.name && it.name.startsWith(f.name)
+                    }
+                    if (real != null) {
+                        f.deleteRecursively()
+                        real.copyTo(File(libDir, f.name), overwrite = true)
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+    }
+
     private val isAarch64: Boolean
         get() = Build.SUPPORTED_ABIS.any { it.contains("arm64-v8a", ignoreCase = true) || it.contains("aarch64", ignoreCase = true) }
     private val archName: String get() = if (isAarch64) "aarch64" else "armhf"
@@ -120,11 +201,62 @@ class ProotEnvironment(
         File(rootfsDir, path).inputStream().use { it.read() >= 0 }
     } catch (_: Exception) { false }
 
+    /** rootfs 健康检查：关键文件 + apt 后段条目。
+     *  dash/sh/apt-get 位于 tar 前段，解压早期就会落盘——只查它们会在解压完成前误判
+     *  "已解压完成"（实锤：toybox tar 丢 usr/share 整目录 → apt "Error reading the CPU table"）。
+     *  apt-helper 在 tar 后段，确保流式解压真正走完；usr/share/apt/cpu-table 由
+     *  ensureAptCpuTable 生成（tar 无此目录，不能作为健康项） */
     private fun rootfsHealthy(): Boolean =
-        readable("usr/bin/dash") && readable("usr/bin/sh") && readable("usr/bin/apt-get")
+        readable("usr/bin/dash") && readable("usr/bin/sh") && readable("usr/bin/apt-get") &&
+            readable("usr/lib/apt/apt-helper")
+
+    /**
+     * toybox tar 丢链兜底（幂等）：Ubuntu multiarch 顶层 soname 软链
+     *（usr/lib/ld-linux-armhf.so.3、libc.so.6 等 → arm-linux-gnueabihf/）在部分设备
+     * 解压时丢失——dash/apt 的 PT_INTERP 解析不到就 execve ENOENT（v7a 真机实锤）。
+     * 挂在 isReady 上：已部署过的老安装也能自愈。
+     */
+    private fun ensureMultiarchLinks() {
+        try {
+            val topLib = File(rootfsDir, "usr/lib")
+            val multiarch = File(topLib, "arm-linux-gnueabihf")
+            if (!multiarch.isDirectory) return
+            val base = if (isAarch64) "aarch64-linux-gnu" else "arm-linux-gnueabihf"
+            multiarch.listFiles()?.forEach { f ->
+                if (f.isFile && Regex("""\.so(\.\d+){1,3}$""").containsMatchIn(f.name)) {
+                    val link = File(topLib, f.name)
+                    if (!link.exists()) {
+                        runCatching {
+                            android.system.Os.symlink("$base/${f.name}", link.absolutePath)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+    }
+
+    /**
+     * Ubuntu-base 不含 /usr/share/apt/cpu-table（apt 包 postinst 生成物）——
+     * apt 读取失败报 "Error reading the CPU table"（v7a 真机实锤）。手动补最小表。
+     */
+    private fun ensureAptCpuTable() {
+        val f = File(rootfsDir, "usr/share/apt/cpu-table")
+        if (!f.exists()) {
+            try {
+                f.parentFile?.mkdirs()
+                f.writeText(
+                    "armv7\tarmhf\narmv7l\tarmhf\narmv7b\tarmhf\narmv6\tarmhf\n" +
+                        "aarch64\tarm64\narmv8\tarm64\narmv8l\tarm64\n"
+                )
+            } catch (_: Exception) { }
+        }
+    }
 
     override val isReady: Boolean
         get() {
+            // 自愈：解压丢链的老安装（先尝试修复再看状态）
+            ensureMultiarchLinks()
+            ensureAptCpuTable()
             val checks = listOf(
                 "prootBinary" to prootBinary.exists(),
                 "prootLoader" to prootLoader.exists(),
@@ -138,8 +270,12 @@ class ProotEnvironment(
         }
 
     fun isJdkInstalled(version: Int): Boolean {
+        // 不用 canExecute()：模拟器/FUSE 上该判定不可靠（isReady 早已弃用同类检查），
+        // 损坏的半成品也可能带执行位。改为真实体积判定：完整 java 二进制 >1MB
         val javaBin = File(javaHomeDir, "java-$version-openjdk-$rootfsArch/bin/java")
-        return javaBin.exists() && javaBin.canExecute()
+        return try {
+            javaBin.length() > 1_000_000L
+        } catch (_: Exception) { false }
     }
 
     fun installedJdkVersions(): List<Int> = listOf(8, 11, 17, 21, 25).filter { isJdkInstalled(it) }
@@ -159,16 +295,39 @@ class ProotEnvironment(
      * Java 安装由 JavaManager 按需调用（apt-get install openjdk-N-jdk-headless）。
      */
     override suspend fun setup(onProgress: (Float, String) -> Unit): Unit = withContext(Dispatchers.IO) {
-        if (isSetupRunning.get()) {
-            onProgress(0f, "部署正在进行中")
-            return@withContext
+        // CAS 抢锁（原 get+set 非原子：窗口内两入口可双双进入压榨 rootfs）。
+        // 没抢到：等待对方完成——成功直接收工；失败则自己整体重试，不再误报"正在进行"。
+        if (!isSetupRunning.compareAndSet(false, true)) {
+            onProgress(0f, "另一部署正在进行，等待其完成…")
+            val deadline = System.currentTimeMillis() + 900_000
+            var timedOut = true
+            while (isSetupRunning.get()) {
+                if (System.currentTimeMillis() >= deadline) break
+                kotlinx.coroutines.delay(500)
+                timedOut = false
+            }
+            if (timedOut && isSetupRunning.get()) {
+                _state.value = State.ERROR
+                onProgress(0f, "等待并发部署超时")
+                return@withContext
+            }
+            if (isReady) {
+                _state.value = State.READY
+                onProgress(1f, "环境已就绪")
+                return@withContext
+            }
+            // 对方失败/未成功：自己接手重试；抢不到说明又有新的部署进场，交给它
+            if (!isSetupRunning.compareAndSet(false, true)) {
+                onProgress(0f, "等待并发部署完成…")
+                return@withContext
+            }
         }
         if (isReady) {
             _state.value = State.READY
             onProgress(1f, "环境已就绪")
+            isSetupRunning.set(false)
             return@withContext
         }
-        isSetupRunning.set(true)
         _state.value = State.SETTING_UP
 
         fun log(msg: String) { _log.value = _log.value + msg }
@@ -177,6 +336,10 @@ class ProotEnvironment(
             // 阶段 1：proot 运行时（jniLibs 内置，无需解压）
             log(">>> 阶段 1/3：检查 proot 运行时 ($archName)")
             _items.value = listOf(SetupItem("proot", "proot 运行时", "内置，开箱即用", phase = "检查中"))
+            // 非 arm64：先确保 assets 的 termux 静态运行时解压就位（arm64 由 nativeLibraryDir 提供）
+            if (!isAarch64) {
+                ensureProotRuntime()?.let { throw RuntimeException("proot 运行时不可用：$it") }
+            }
             if (!prootBinary.exists() || !prootLoader.exists()) {
                 throw RuntimeException("proot 运行时缺失（nativeLibraryDir 无 libproot.so）")
             }
@@ -195,17 +358,23 @@ class ProotEnvironment(
             )
             if (!rootfsHealthy()) {
                 val rootfsTarball = File(linuxDir, "rootfs.tar.gz")
-                if (extractBundledAsset("ubuntu-base-24.04-$rootfsArch.tar.gz", rootfsTarball)) {
+                val bundledName = "ubuntu-base-24.04-$rootfsArch.tar.gz"
+                if (extractBundledAsset(bundledName, rootfsTarball)) {
                     log("  ✓ 内置提取成功")
-                    // 校验资产拷贝完整性：内部存储 FUSE 会静默截断批量写
-                    val assetName = "ubuntu-base-24.04-$rootfsArch.tar"
-                    val expected = context.assets.open("bundled/$assetName").use { it.available().toLong() }
+                    // 校验资产拷贝完整性：内部存储 FUSE 会静默截断批量写。
+                    // 注意：构建管线把 .tar.gz 资产以 .tar 形态打包进 APK（extractBundledAsset
+                    // 的 gz→tar 回退就是为此设计）——校验名必须与解压候选逻辑一致，双候选探测
+                    val expected = runCatching {
+                        context.assets.open("bundled/$bundledName").use { it.available().toLong() }
+                    }.getOrElse {
+                        context.assets.open("bundled/${bundledName.removeSuffix(".gz")}").use { it.available().toLong() }
+                    }
                     var copyTries = 0
                     while (rootfsTarball.length() != expected && copyTries < 3) {
                         copyTries++
                         log("  ! 资产拷贝不完整（${rootfsTarball.length()}/$expected），重拷 $copyTries")
                         rootfsTarball.delete()
-                        extractBundledAsset(assetName, rootfsTarball)
+                        extractBundledAsset(bundledName, rootfsTarball)
                     }
                     if (rootfsTarball.length() != expected) {
                         throw RuntimeException("rootfs 资产拷贝不完整（${rootfsTarball.length()}/$expected）")
@@ -233,14 +402,26 @@ class ProotEnvironment(
                 }
                 log("  解压 rootfs（约 200MB，请耐心等待）…")
                 // 解压 + 校验（内部存储批量写可能被丢，重试直到 rootfs 关键文件落盘）
+                // 用自研 TarExtractor：E6 等老设备的 toybox tar 处理长路径/扩展头会丢条目
+                // 且静默 exit 0（实锤：usr/share 整目录丢失 → apt "Error reading the CPU table"）
                 var extractTries = 0
                 while (true) {
                     extractTries++
                     if (rootfsDir.exists()) rootfsDir.deleteRecursively()
                     rootfsDir.mkdirs()
                     updateItem("rootfs") { item -> item.copy(phase = "解压中（第 $extractTries 次）", totalBytes = rootfsTarball.length()) }
-                    extractViaSystemTar(rootfsTarball, rootfsDir)
+                    try {
+                        TarExtractor.extract(rootfsTarball, rootfsDir) { done, total, speed ->
+                            updateItem("rootfs") { it.copy(phase = "解压中（第 $extractTries 次）", progress = if (total > 0) done.toFloat() / total else 0f, processedBytes = done, totalBytes = total, speedBytes = speed) }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("KazeSLauncher", "rootfs extract failed (try $extractTries)", e)
+                        throw e
+                    }
                     if (rootfsHealthy()) break
+                    // 诊断：缺哪些文件 / 解压出多少条目（v7a 设备解压中途丢目录问题）
+                    Log.w("KazeSLauncher",
+                        "rootfs unhealthy (try $extractTries): dash=${readable("usr/bin/dash")} sh=${readable("usr/bin/sh")} apt=${readable("usr/bin/apt-get")} helper=${readable("usr/lib/apt/apt-helper")} files=${rootfsDir.walkTopDown().count()} bytes=${rootfsDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }}")
                     if (extractTries >= 4) throw RuntimeException("rootfs 解压多次仍不完整（关键文件缺失）")
                     log("  ! 解压不完整（关键文件不可读），重试…")
                 }
@@ -254,6 +435,8 @@ class ProotEnvironment(
             // rootfs 符号链接修复（usrmerge：bin/lib/sbin 软链 + usr/bin/sh）
             // 必须在 rootfs 解压之后执行——沙箱上软链可能建不出来，这里做兜底
             repairRootfsLinks()
+            // apt 数据补丁：cpu-table（tar 无此目录，apt 读取缺失时报 CPU table 错）
+            ensureAptCpuTable()
             // 重建内建目录（阶段 1 创建、若本环境重建 rootfs 会被解压覆盖删除）：
             // .l2s（link2symlink 元数据）与 sys/.empty（selinux 空绑定）
             File(rootfsDir, ".l2s").mkdirs()
@@ -352,10 +535,15 @@ class ProotEnvironment(
     private fun prootEnvironment(): Map<String, String> {
         val env = mutableMapOf<String, String>()
         env["PROOT_LOADER"] = prootLoader.absolutePath
-        // 修补版为静态链接，nativeLibraryDir 兜底
+        // 注意：不能显式设 LD_PRELOAD=""——bionic 8.1 对空串预加载的解析会失控，
+        // 把 LD_LIBRARY_PATH 目录当文件读导致 CANNOT LINK（v7a 真机二分实测）。
+        // 厂商注入的 libdirect-coredump.so 加载失败只是 "ignored" 警告，无害
+        // 修补版为静态链接，nativeLibraryDir 兜底；非 arm64 时 termux 包的 lib/（talloc 等）
+        // 必须前置，否则 loader 找不到 soname
         val libDir = context.applicationInfo.nativeLibraryDir
         val existing = System.getenv("LD_LIBRARY_PATH") ?: ""
-        env["LD_LIBRARY_PATH"] = if (existing.isEmpty()) libDir else "$libDir:$existing"
+        val extra = if (isAarch64) libDir else "${File(prootHomeDir, "lib").absolutePath}:$libDir"
+        env["LD_LIBRARY_PATH"] = if (existing.isEmpty()) extra else "$extra:$existing"
         // 只关 proot 自己的 seccomp；zygote 过滤器由修补版 SIGSYS 处理器接管（oonid/pr 方案）
         env["PROOT_NO_SECCOMP"] = "1"
         // glue rootfs/f2fs 探测临时目录：内部 cacheDir 实测唯一可靠位置
@@ -370,6 +558,9 @@ class ProotEnvironment(
         env["HOME"] = "/root"
         env["LANG"] = "C.UTF-8"
         env["TERM"] = "xterm"
+        // 关键：guest 必须用 Linux PATH——父进程（zygote）的 PATH 是 Android 的
+        // /system/bin..., 不含 /usr/bin → command -v apt-get 直接 127（v7a 真机实锤）
+        env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         return env
     }
 
@@ -391,6 +582,13 @@ class ProotEnvironment(
             "-b", "${context.cacheDir.absolutePath}:/tmp",
             "-b", "${File(rootfsDir, "tmp").absolutePath}:/dev/shm",
         )
+        // Android 的 /proc/cpuinfo 非标准 Linux 格式（缺 implementer/Features 字段）——
+        // Ubuntu 24.04 的 apt 解析失败报 "Error reading the CPU table"（v7a 真机实锤）。
+        // 用标准 ARM cpuinfo 覆盖绑定到 guest 的 /proc/cpuinfo（specific 绑定优先于 /proc）
+        if (!isAarch64) {
+            val fake = writeFakeCpuInfo()
+            args.add("-b"); args.add("$fake:/proc/cpuinfo")
+        }
         if (workDir != null && workDir.exists()) {
             // 工作目录绑定到 guest 的 /mnt（真实存在的目录，避免在 glue 里物化
             // 深层 /storage/... 路径；外部 FUSE 上深层路径 sanitize 曾失败）
@@ -419,7 +617,10 @@ class ProotEnvironment(
         } catch (e: java.io.IOException) {
             Log.w("KazeSLauncher", "直接 exec proot 失败(${e.message})，退回 linker64 加载")
             try {
-                val args = mutableListOf("/system/bin/linker64") + pb.command()
+                // arm64 用 linker64（64 位进程被拒时加载 64 位 ELF）；v7a 用 32 位 linker
+                val args = mutableListOf(
+                    if (isAarch64) "/system/bin/linker64" else "/system/bin/linker"
+                ) + pb.command()
                 val pb2 = ProcessBuilder(args).redirectErrorStream(true)
                 pb2.environment().putAll(pb.environment())
                 pb2.start()
@@ -455,16 +656,32 @@ class ProotEnvironment(
     /**
      * 用系统 tar 二进制解压（前人经验：Termux pkg / proot-distro 均走系统 tar，
      * 久经验证，避免手写解压器在厂商 FUSE 上的兼容问题；toybox tar 自动识别 gzip）。
+     * 输出必须消费：toybox tar 遇到大量符号链接/权限警告（rootfs 内数百条）会写满
+     * stderr 管道，无消费线程则进程永久 pipe_wait 卡死（v7a 真机实测 6 分钟不动）。
      */
     private fun extractViaSystemTar(tarFile: File, destDir: File) {
         destDir.mkdirs()
-        val proc = Runtime.getRuntime().exec(
-            arrayOf("/system/bin/sh", "-c", "tar xf '${tarFile.absolutePath}' -C '${destDir.absolutePath}'")
+        val pb = ProcessBuilder(
+            "/system/bin/sh", "-c", "tar xf '${tarFile.absolutePath}' -C '${destDir.absolutePath}'"
         )
-        val code = proc.waitFor()
-        if (code != 0) {
-            val err = proc.errorStream.bufferedReader().readText().take(300)
-            throw RuntimeException("系统 tar 解压失败（exit=$code）：$err")
+        pb.redirectErrorStream(true)
+        val proc = pb.start()
+        // 后台消费输出（丢弃即可；纯防管道写满）
+        val sink = object : java.io.OutputStream() {
+            override fun write(b: Int) {}
+            override fun write(b: ByteArray, off: Int, len: Int) {}
+        }
+        Thread {
+            try { proc.inputStream.use { it.copyTo(sink) } } catch (_: Exception) { }
+        }.apply { isDaemon = true; name = "tar-sink" }.start()
+        // 老设备/坏归档可能极慢：超时强杀，避免部署界面无限挂起
+        val exited = proc.waitFor(600_000, java.util.concurrent.TimeUnit.MILLISECONDS)
+        if (!exited) {
+            proc.destroyForcibly()
+            throw RuntimeException("系统 tar 解压超时（600s）")
+        }
+        if (proc.exitValue() != 0) {
+            throw RuntimeException("系统 tar 解压失败（exit=${proc.exitValue()}）")
         }
     }
 

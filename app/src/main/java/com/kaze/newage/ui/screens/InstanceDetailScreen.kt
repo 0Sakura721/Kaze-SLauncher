@@ -47,6 +47,7 @@ import com.kaze.newage.core.server.BackupManager
 import com.kaze.newage.core.server.ServerProperties
 import com.kaze.newage.core.server.ServerState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.BackgroundCard
@@ -239,6 +240,7 @@ fun InstanceDetailScreen(
         var backupBusy by remember { mutableStateOf(false) }
         var backupMsg by remember { mutableStateOf<String?>(null) }
         var exportTarget by remember { mutableStateOf<java.io.File?>(null) }
+        var restoreTarget by remember { mutableStateOf<java.io.File?>(null) }
         val backups = remember(instanceId, backupRefresh) { BackupManager.list(instance) }
         val backupScope = rememberCoroutineScope()
         val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
@@ -288,8 +290,22 @@ fun InstanceDetailScreen(
                         backupBusy = true
                         backupScope.launch(Dispatchers.IO) {
                             backupMsg = try {
-                                val f = BackupManager.backup(instance)
-                                "已备份：${f.name}"
+                                // 运行中备份：先让服务端把世界数据完整落盘（MC 标准做法），
+                                // 否则直接拷 region 文件可能备出损坏世界
+                                val wasRunning = state == ServerState.Running
+                                if (wasRunning) {
+                                    viewModel.serverManager.sendCommand(instance, "save-off")
+                                    viewModel.serverManager.sendCommand(instance, "save-all flush")
+                                    delay(1500)
+                                }
+                                try {
+                                    val f = BackupManager.backup(instance)
+                                    "已备份：${f.name}"
+                                } finally {
+                                    if (wasRunning) {
+                                        viewModel.serverManager.sendCommand(instance, "save-on")
+                                    }
+                                }
                             } catch (e: Exception) {
                                 "备份失败：${e.message}"
                             }
@@ -335,14 +351,7 @@ fun InstanceDetailScreen(
                                     if (state == ServerState.Running) {
                                         backupMsg = "请先停止服务端再恢复备份"
                                     } else {
-                                        backupScope.launch(Dispatchers.IO) {
-                                            backupMsg = try {
-                                                BackupManager.restore(instance, f)
-                                                "已恢复：${f.name}"
-                                            } catch (e: Exception) {
-                                                "恢复失败：${e.message}"
-                                            }
-                                        }
+                                        restoreTarget = f
                                     }
                                 }
                                 .padding(4.dp),
@@ -380,6 +389,38 @@ fun InstanceDetailScreen(
                     )
                 }
             }
+        }
+
+        // 恢复确认弹窗：恢复会用备份整体替换当前实例目录
+        restoreTarget?.let { target ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { restoreTarget = null },
+                title = { Text("恢复「${target.name.removeSuffix(".zip")}」？") },
+                text = {
+                    Text("当前实例目录（世界存档、配置、插件/模组）将被备份内容完整覆盖。此操作不可撤销。")
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            val f = target
+                            restoreTarget = null
+                            backupScope.launch(Dispatchers.IO) {
+                                backupMsg = try {
+                                    BackupManager.restore(instance, f)
+                                    "已恢复：${f.name}"
+                                } catch (e: Exception) {
+                                    "恢复失败：${e.message}"
+                                }
+                            }
+                        }
+                    ) { Text("恢复", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { restoreTarget = null }) {
+                        Text("取消")
+                    }
+                },
+            )
         }
 
         // ── server.properties 编辑器 ──

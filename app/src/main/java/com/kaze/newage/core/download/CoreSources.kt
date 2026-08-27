@@ -48,26 +48,25 @@ object CoreSources {
     }
 
     private fun httpGet(urlStr: String): String {
-        var conn = URL(urlStr).openConnection() as HttpURLConnection
-        conn.instanceFollowRedirects = true
-        conn.connectTimeout = 15000
-        conn.readTimeout = 30000
-        conn.setRequestProperty("User-Agent", "KazeSLauncher/3.0 (Android; Minecraft Server Launcher)")
+        var current = urlStr
         var redirects = 0
-        while (redirects < 5 && conn.responseCode in listOf(301, 302, 303, 307, 308)) {
-            val loc = conn.getHeaderField("Location") ?: break
+        while (true) {
+            val conn = URL(current).openConnection() as HttpURLConnection
+            // 自动跟随开启时 3xx 由底层处理；手动循环主要为兼容相对 Location
+            val code = conn.responseCode
+            if (code in listOf(301, 302, 303, 307, 308)) {
+                val loc = conn.getHeaderField("Location") ?: throw RuntimeException("重定向无 Location")
+                conn.disconnect()
+                if (++redirects > 5) throw RuntimeException("重定向过多")
+                // 相对 Location（/path 或相对路径）必须基于当前 URL 解析，直接 new URL(loc) 会抛异常
+                current = if (loc.startsWith("http")) loc else URL(URL(current), loc).toString()
+                continue
+            }
+            if (code != HttpURLConnection.HTTP_OK) { conn.disconnect(); throw RuntimeException("HTTP $code") }
+            val text = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
-            conn = URL(loc).openConnection() as HttpURLConnection
-            conn.instanceFollowRedirects = true
-            conn.connectTimeout = 15000
-            conn.readTimeout = 30000
-            conn.setRequestProperty("User-Agent", "KazeSLauncher/3.0 (Android; Minecraft Server Launcher)")
-            redirects++
+            return text
         }
-        if (conn.responseCode != HttpURLConnection.HTTP_OK) throw RuntimeException("HTTP ${conn.responseCode}")
-        val text = conn.inputStream.bufferedReader().use { it.readText() }
-        conn.disconnect()
-        return text
     }
 
     // ── Vanilla（manifest type 字段：release/snapshot/old_beta/old_alpha） ──
@@ -208,9 +207,10 @@ object CoreSources {
         try {
             val html = httpGet("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
+            // build 段放宽为任意位数：老版本如 1.12.2-14.23.5.2860 是四段，原三段正则会漏
             val mcVersions = versions.mapNotNull { v ->
-                Regex("^(\\d+\\.\\d+(\\.\\d+)?)-\\d+\\.\\d+\\.\\d+$").find(v)?.groupValues?.get(1)
-            }.distinct().reversed()
+                Regex("^(\\d+\\.\\d+(?:\\.\\d+)?)-[\\d.]+$").find(v)?.groupValues?.get(1)
+            }.distinct()
             Result.success(mcVersions.map { GameVersion(it) })
         } catch (e: Exception) { Result.failure(e) }
     }
@@ -219,20 +219,38 @@ object CoreSources {
         try {
             val html = httpGet("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
-            val match = versions.lastOrNull { it.startsWith("$mcVersion-") }
+            // 不依赖 XML 行序：按 build 号语义取最大（中间可能夹 RC/回移植行）
+            val match = versions.filter { it.startsWith("$mcVersion-") }
+                .maxWithOrNull(Comparator { x, y -> compareVersions(x.substringAfter('-'), y.substringAfter('-')) })
                 ?: return@withContext Result.failure(RuntimeException("Forge 不支持 $mcVersion"))
-            Result.success(CoreDownload("https://maven.minecraftforge.net/net/minecraftforge/forge/$match/forge-$match-installer.jar", "forge-$match-installer.jar"))
+            Result.success(CoreDownload(
+                "https://maven.minecraftforge.net/net/minecraftforge/forge/$match/forge-$match-installer.jar",
+                "forge-$match-installer.jar"))
         } catch (e: Exception) { Result.failure(e) }
     }
 
     // ── NeoForge ──
+    // 版本 id 两代格式：
+    //  - 现代（1.20.2 起）：无前缀统一 id「20.4.236 / 21.1.77」，major.minor 即 MC
+    //    「1.major.minor」去掉前导 1.——旧正则要求 `-x.y.z` 前缀，对现代 id 全不命中
+    //    → 列表恒空、"NeoForge 不支持 x.y"；
+    //  - 极早期 fork 产物：`1.20.1-x.y.z` 带 MC 前缀，兼容保留。
+    private fun neoForgeMcFromUnified(id: String): String? {
+        val m = Regex("^(\\d+)\\.(\\d+)\\.\\d+").find(id) ?: return null
+        return "1.${m.groupValues[1]}.${m.groupValues[2]}"
+    }
+
     suspend fun fetchNeoForgeVersions(): Result<List<GameVersion>> = withContext(Dispatchers.IO) {
         try {
             val html = httpGet("https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml")
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
-            val mcVersions = versions.mapNotNull { v ->
-                Regex("^(\\d+\\.\\d+(\\.\\d+)?)-\\d+\\.\\d+\\.\\d+$").find(v)?.groupValues?.get(1)
-            }.distinct().reversed()
+            val mcVersions = versions.flatMap { v ->
+                if ('-' in v) {
+                    listOfNotNull(Regex("^(\\d+\\.\\d+(?:\\.\\d+)?)-").find(v)?.groupValues?.get(1))
+                } else {
+                    listOfNotNull(neoForgeMcFromUnified(v))
+                }
+            }.distinct()
             Result.success(mcVersions.map { GameVersion(it) })
         } catch (e: Exception) { Result.failure(e) }
     }
@@ -241,9 +259,19 @@ object CoreSources {
         try {
             val html = httpGet("https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml")
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
-            val match = versions.lastOrNull { it.startsWith("$mcVersion-") }
+            // 前缀双路匹配："1.21.1-" 命中极早期带前缀 id；现代 id 去 "1." 化成 "21.1."
+            val unifiedBase = if (Regex("^1\\.\\d+\\.\\d+$").matches(mcVersion)) mcVersion.removePrefix("1.")
+            else mcVersion
+            val match = versions.filter { v ->
+                v.startsWith("$mcVersion-") ||
+                    Regex("^${Regex.escape(unifiedBase)}\\.\\d+").containsMatchIn(v)
+            }.maxWithOrNull(Comparator { x, y ->
+                compareVersions(x.substringAfterLast('-'), y.substringAfterLast('-'))
+            })
                 ?: return@withContext Result.failure(RuntimeException("NeoForge 不支持 $mcVersion"))
-            Result.success(CoreDownload("https://maven.neoforged.net/releases/net/neoforged/neoforge/$match/neoforge-$match-installer.jar", "neoforge-$match-installer.jar"))
+            Result.success(CoreDownload(
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/$match/neoforge-$match-installer.jar",
+                "neoforge-$match-installer.jar"))
         } catch (e: Exception) { Result.failure(e) }
     }
 

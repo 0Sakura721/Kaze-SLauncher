@@ -17,6 +17,10 @@ import java.io.File
  */
 class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
 
+    /** 任务互斥：install/uninstall 共用（原互斥只在 DefaultServerManager 启动链上，
+     *  设置的 installJava/uninstallJava 可绕过——与自动安装并发写同一目录/tar 包会损坏） */
+    private val taskMutex = java.util.concurrent.atomic.AtomicBoolean(false)
+
     override fun installed(): List<JavaRuntime> =
         env.installedJdkVersions().map { version ->
             JavaRuntime(
@@ -27,6 +31,19 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
         }
 
     override suspend fun install(
+        majorVersion: Int,
+        onProgress: (Float, String) -> Unit,
+        shouldCancel: () -> Boolean,
+    ): JavaRuntime {
+        acquireMutex(shouldCancel)
+        try {
+            return doInstall(majorVersion, onProgress, shouldCancel)
+        } finally {
+            taskMutex.set(false)
+        }
+    }
+
+    private suspend fun doInstall(
         majorVersion: Int,
         onProgress: (Float, String) -> Unit,
         shouldCancel: () -> Boolean,
@@ -54,11 +71,15 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
 
         // 回退：apt 安装
         onProgress(0.35f, "直接下载失败，回退 apt 安装 Java $majorVersion（约 100MB）…")
-        if (env.runCommand("command -v apt-get", timeoutMs = 30_000).isFailure) {
-            throw RuntimeException("环境内 apt 不可用（rootfs 可能损坏，将在下次启动时自动重建）")
+        if (shouldCancel()) throw InterruptedException("安装已取消")
+        val probe = env.runCommand("command -v apt-get", timeoutMs = 30_000)
+        if (probe.isFailure) {
+            android.util.Log.e("KazeSLauncher", "apt probe failed", probe.exceptionOrNull())
+            throw RuntimeException("环境内 apt 探测失败：${probe.exceptionOrNull()?.message}")
         }
         env.runCommand("DEBIAN_FRONTEND=noninteractive apt-get update -qq", timeoutMs = 600_000)
             .onFailure { /* 忽略 update 失败，直接尝试安装 */ }
+        if (shouldCancel()) throw InterruptedException("安装已取消")
         val result = env.runCommand(
             "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openjdk-$majorVersion-jdk-headless",
             timeoutMs = 900_000,
@@ -74,6 +95,15 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
     }
 
     override suspend fun uninstall(majorVersion: Int) {
+        acquireMutex(shouldCancel = { false })
+        try {
+            doUninstall(majorVersion)
+        } finally {
+            taskMutex.set(false)
+        }
+    }
+
+    private suspend fun doUninstall(majorVersion: Int) {
         val jvmDir = File(env.javaHomeDir, "java-$majorVersion-openjdk-${archSuffix()}")
         runCatching { jvmDir.deleteRecursively() }
         // 清理下载残留（tar 包与临时解压目录）
@@ -95,6 +125,12 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
         shouldCancel: () -> Boolean,
         onProgress: (Float, String) -> Unit,
     ): JavaRuntime? = withContext(Dispatchers.IO) {
+        if (archSuffix() != "arm64") {
+            // Adoptium 官方只出 aarch64/amd64 等；32 位 ARM 无官方包，TUNA/华为镜像同源。
+            // 直接走 install() 的 apt 兜底（Ubuntu ports 有 openjdk-*-jdk-headless armhf）
+            onProgress(0.05f, "32 位设备：官方包仅 aarch64，改用 apt 安装…")
+            return@withContext null
+        }
         val targetDir = File(env.javaHomeDir, "java-$majorVersion-openjdk-${archSuffix()}")
         val tmpDir = File(env.javaHomeDir, "openjdk-$majorVersion-tmp")
         try {
@@ -111,7 +147,10 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
             if (File(legacyExt, "bin/java").exists() && !File(targetDir, "bin/java").exists()) {
                 onProgress(0f, "迁移已有 JDK 到内部存储（约 2 分钟）…")
                 try {
-                    legacyExt.copyRecursively(targetDir, overwrite = true)
+                    copyDirChecked(legacyExt, targetDir, shouldCancel)
+                } catch (e: InterruptedException) {
+                    runCatching { targetDir.deleteRecursively() }
+                    return@withContext null
                 } catch (_: Exception) { }
                 if (File(targetDir, "bin/java").exists()) {
                     File(targetDir, "bin/java").setExecutable(true)
@@ -194,7 +233,18 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                 val proc = Runtime.getRuntime().exec(
                     arrayOf("/system/bin/sh", "-c", "tar xf '${tarFile.absolutePath}' -C '${tmpDir.absolutePath}'")
                 )
-                proc.waitFor() == 0
+                // 轮询等待 + 可取消：裸 waitFor() 无超时不可中断——FUSE 卡死会永久
+                // 占住 Java 互斥锁，后续所有实例全排队超时
+                var done = false
+                while (!done) {
+                    if (proc.waitFor(500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        done = true
+                    } else if (shouldCancel()) {
+                        proc.destroyForcibly()
+                        throw InterruptedException("解压已取消")
+                    }
+                }
+                proc.exitValue() == 0
             }.getOrDefault(false)
             if (!systemTarOk) {
                 if (shouldCancel()) return@withContext null
@@ -231,6 +281,9 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
             installed().firstOrNull { it.version == majorVersion.toString() }
                 ?: JavaRuntime(majorVersion.toString(), targetDir, archSuffix())
         } catch (e: InterruptedException) {
+            // 取消清理半成品（tar 包保留用于断点续传）
+            runCatching { tmpDir.deleteRecursively() }
+            runCatching { targetDir.deleteRecursively() }
             null
         } catch (e: Exception) {
             // 失败/取消清理：半成品解压目录与目标目录删除（tar 包保留用于断点续传）
@@ -244,6 +297,41 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
 
     private fun archSuffix(): String =
         if (android.os.Build.SUPPORTED_ABIS.any { it.contains("arm64-v8a", true) || it.contains("aarch64", true) }) "arm64" else "armhf"
+
+    /** 任务互斥等锁：期间检查取消（取消不等锁，直接抛出由调用方退出） */
+    private suspend fun acquireMutex(shouldCancel: () -> Boolean) {
+        while (!taskMutex.compareAndSet(false, true)) {
+            if (shouldCancel()) throw InterruptedException("操作已取消")
+            kotlinx.coroutines.delay(300)
+        }
+    }
+
+    /** 可取消目录复制：每 ~8MB 检一次取消标志（copyRecursively 全量拷贝无法中断） */
+    private fun copyDirChecked(src: File, dst: File, shouldCancel: () -> Boolean) {
+        val buf = ByteArray(256 * 1024)
+        var sinceCheck = 0L
+        src.walkTopDown().forEach { f ->
+            val out = File(dst, f.relativeTo(src).path)
+            if (f.isDirectory) out.mkdirs()
+            else {
+                out.parentFile?.mkdirs()
+                java.io.FileInputStream(f).use { ins ->
+                    java.io.FileOutputStream(out).use { o ->
+                        while (true) {
+                            val n = ins.read(buf)
+                            if (n < 0) break
+                            o.write(buf, 0, n)
+                            sinceCheck += n
+                            if (sinceCheck > 8_000_000) {
+                                sinceCheck = 0
+                                if (shouldCancel()) throw InterruptedException("迁移已取消")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     /** gzip 魔数（0x1f 0x8b）检查：拦截 HTML 错误页等无效下载内容 */
     private fun isGzipTar(f: File): Boolean = try {

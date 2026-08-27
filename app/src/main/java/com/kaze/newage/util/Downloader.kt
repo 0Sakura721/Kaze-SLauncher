@@ -103,6 +103,11 @@ object Downloader {
             if (downloaded == 0L && dest.length() == 0L && total != 0L) {
                 throw RuntimeException("下载内容为空（Content-Length=$total）")
             }
+            // 提前 FIN 对账：实收 < 总长视为截断（弱网下连接可能正常关闭而非抛错），
+            // 头部魔数校验抓不到尾部缺损；抛出走外层换源/重试，断点保留续传补完
+            if (total > 0 && downloaded < total) {
+                throw RuntimeException("下载不完整（$downloaded/$total 字节，源提前断开）")
+            }
             onProgress(downloaded, downloaded)
             conn.disconnect()
             // 内容校验：部分镜像对不存在的大文件返回 200+HTML 错误页，仅靠 HTTP 码无法识别
@@ -130,7 +135,12 @@ object Downloader {
                     val loc = conn.getHeaderField("Location") ?: throw RuntimeException("重定向无 Location")
                     conn.disconnect()
                     if (++redirects > MAX_REDIRECTS) throw RuntimeException("重定向过多")
-                    current = loc
+                    // 相对 Location 基于当前 URL 解析（与 download() 同款写法）
+                    current = if (loc.startsWith("http")) {
+                        loc
+                    } else {
+                        URL(URL(current), loc).toString()
+                    }
                     continue
                 }
                 200 -> {
@@ -227,11 +237,21 @@ object Downloader {
     ): String? {
         val candidates = urls.filter { it.isNotBlank() }.distinct()
         if (candidates.isEmpty()) return null
+        // 断点归属：部分内容假定只属于某一个源。换源即清除——
+        // 不同镜像可能残留不同的历史构建/内容，跨源续传会拼出前后矛盾的半成品
+        // （魔数校验挡不住"半 A 半 B"），宁可重下不可拼错。
+        var partialOwner: String? = null
         for (round in 1..maxRounds) {
             // 每轮重新探测最快源：断网恢复后最优镜像可能变化
             val best = probeFastest(candidates)
             val ordered = (listOfNotNull(best) + candidates.filter { it != best })
             for (u in ordered) {
+                if (partialOwner != u) {
+                    if (partialOwner != null && dest.exists() && dest.length() > 0L) {
+                        runCatching { dest.delete() }
+                    }
+                    partialOwner = u
+                }
                 var attempt = 0
                 while (attempt <= perSourceRetries) {
                     if (shouldCancel()) return null

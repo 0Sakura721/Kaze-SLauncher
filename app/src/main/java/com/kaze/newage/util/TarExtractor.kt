@@ -80,19 +80,48 @@ object TarExtractor {
             return String(header, 0, end, Charsets.UTF_8)
         }
 
+        val destCanonical = destDir.canonicalPath + File.separator
+
+        /** 条目名 → 目标文件（路径穿越防护：../ 或拼进绝对路径时拒绝写出 destDir） */
+        fun resolvedTarget(path: String): File {
+            val t = File(destDir, path)
+            if (!t.canonicalPath.startsWith(destCanonical)) {
+                throw RuntimeException("解压条目路径越界：$path")
+            }
+            return t
+        }
+
         try {
             val buffer = ByteArray(64 * 1024)
+            var pendingLongName: String? = null
             while (readHeader()) {
                 val size = octal(header.copyOfRange(124, 136))
                 val type = header[156].toInt().toChar()
-                val path = name()
-                val target = File(destDir, path)
+                val pathName = pendingLongName ?: name()
+                pendingLongName = null
                 val isRegular = type == '0' || type == '\u0000'
 
                 when {
+                    // GNU 长文件名（'L'）：数据区就是下一条目的完整路径（>100 字节的名靠它承载）
+                    type == 'L' -> {
+                        val n = size.toInt()
+                        if (n in 1..4096) {
+                            val data = ByteArray(n)
+                            var read = 0
+                            while (read < n) {
+                                val r = rawInput.read(data, read, n - read)
+                                if (r == -1) throw RuntimeException("tar 长文件名数据截断")
+                                read += r
+                            }
+                            pendingLongName = String(data, 0, n, Charsets.UTF_8).trimEnd('\u0000').trim()
+                        }
+                        // 超长/非法值按普通条目跳过，保证流对齐
+                    }
                     // 目录条目：tar 目录标记、以 / 结尾、或根路径
-                    type == '5' || path.endsWith("/") || path.isBlank() || path == "." || path == "./" -> {
-                        if (path.isNotBlank() && path != "." && path != "./") target.mkdirs()
+                    type == '5' || pathName.endsWith("/") || pathName.isBlank() || pathName == "." || pathName == "./" -> {
+                        if (pathName.isNotBlank() && pathName != "." && pathName != "./") {
+                            resolvedTarget(pathName).mkdirs()
+                        }
                     }
                     // 符号链接：兼容两种 tar 变体——
                     // 标准格式：目标在 header 的 linkname 字段（offset 157），数据区 size=0；
@@ -113,18 +142,34 @@ object TarExtractor {
                             .trimEnd('\u0000')
                             .trim()
                         val linkName = headerLink.ifEmpty { dataLink }
-                        if (path.contains("/")) target.parentFile?.mkdirs()
+                        val target = resolvedTarget(pathName)
+                        if (pathName.contains("/")) target.parentFile?.mkdirs()
                         if (linkName.isNotEmpty()) {
                             pendingLinks.add(PendingLink(target, linkName))
                         }
                     }
+                    // 硬链接（'1'）：数据 = 归档内另一条目的路径（header linkname），复制为该文件
+                    type == '1' -> {
+                        val linkName = String(header, 157, 100, Charsets.UTF_8).trimEnd('\u0000').trim()
+                        if (linkName.isNotEmpty()) {
+                            val src = resolvedTarget(linkName)
+                            val tgt = resolvedTarget(pathName)
+                            if (pathName.contains("/")) tgt.parentFile?.mkdirs()
+                            if (src.exists() && src.absolutePath != tgt.absolutePath) {
+                                src.copyTo(tgt, overwrite = true)
+                            }
+                        }
+                    }
                     isRegular -> {
-                        if (path.contains("/")) target.parentFile?.mkdirs()
+                        val target = resolvedTarget(pathName)
+                        if (pathName.contains("/")) target.parentFile?.mkdirs()
                         var remaining = size
                         FileOutputStream(target).use { out ->
                             while (remaining > 0) {
                                 val chunk = rawInput.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
-                                if (chunk == -1) break
+                                if (chunk == -1) {
+                                    throw RuntimeException("tar 数据区提前结束：$pathName（归档损坏/截断）")
+                                }
                                 out.write(buffer, 0, chunk)
                                 remaining -= chunk
                             }
@@ -132,10 +177,10 @@ object TarExtractor {
                             // 极慢且可能触发回刷缺陷；改用提取完成后的全局 sync()。
                         }
                         // 可执行位
-                        if (path.contains("bin/") || path.contains("libexec/")) target.setExecutable(true)
+                        if (pathName.contains("bin/") || pathName.contains("libexec/")) target.setExecutable(true)
                     }
                     else -> {
-                        // 其他类型（'L' 长文件名、'x' 扩展头等）：跳过数据
+                        // 其他类型（'x' 扩展头等）：跳过数据
                         var remaining = size
                         while (remaining > 0) {
                             val n = rawInput.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
@@ -167,11 +212,14 @@ object TarExtractor {
                     // 沙箱限制符号链接时，复制链接目标，保证 soname 存在
                     try {
                         val resolved = File(link.target.parentFile ?: destDir, link.linkRel)
-                        when {
-                            resolved.isFile -> resolved.copyTo(link.target, overwrite = true)
-                            resolved.isDirectory -> {
-                                // 目录型链接（usrmerge 的 bin/lib/sbin 等）：文件副本代价过高，
-                                // 交上层修复（Os.symlink 尝试或运行时 proot -b 绑定）
+                        // ../ 型链接目标同样禁止逃逸
+                        if (resolved.canonicalPath.startsWith(destCanonical)) {
+                            when {
+                                resolved.isFile -> resolved.copyTo(link.target, overwrite = true)
+                                resolved.isDirectory -> {
+                                    // 目录型链接（usrmerge 的 bin/lib/sbin 等）：文件副本代价过高，
+                                    // 交上层修复（Os.symlink 尝试或运行时 proot -b 绑定）
+                                }
                             }
                         }
                     } catch (_: Exception) { }

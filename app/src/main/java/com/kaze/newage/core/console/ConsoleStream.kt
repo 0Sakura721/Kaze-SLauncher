@@ -12,7 +12,14 @@ data class ConsoleLine(
     val text: String,
     val type: LineType = LineType.Info,
     val timestamp: Long = System.currentTimeMillis(),
-)
+    /** 进程内唯一序号：LazyColumn key 需要唯一性（同毫秒同文本的两行会造成键冲突崩溃） */
+    val seq: Long = nextSeq(),
+) {
+    companion object {
+        private val counter = java.util.concurrent.atomic.AtomicLong(0)
+        private fun nextSeq(): Long = counter.incrementAndGet()
+    }
+}
 
 /**
  * 控制台日志流：全局共享，UI 订阅实时渲染。

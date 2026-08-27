@@ -10,8 +10,9 @@ object ConsoleParser {
 
     private val LIST_PATTERN =
         Regex("""There are \d+ of a max of \d+ players online:\s*(.*)""")
-    private val JOIN_PATTERN = Regex("""(\w+) joined the game""")
-    private val LEAVE_PATTERN = Regex("""(\w+) left the game""")
+    // \S+ 而非 \w+：离线服玩家名常含中文等非 ASCII 字符，\w 会漏解析导致在线人数不准
+    private val JOIN_PATTERN = Regex("""(\S+) joined the game""")
+    private val LEAVE_PATTERN = Regex("""(\S+) left the game""")
 
     /** 若该行是玩家列表响应，返回名单（可能为空列表）；否则返回 null */
     fun parseOnlinePlayers(line: String): List<String>? {

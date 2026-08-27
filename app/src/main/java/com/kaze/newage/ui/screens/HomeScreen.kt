@@ -19,10 +19,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -194,11 +196,15 @@ fun HomeScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) {
                                     }
                                 },
                                 trailingIcon = {
-                                    IconButton(onClick = {
-                                        listOpen = false
-                                        viewModel.selectInstance(inst)
-                                        viewModel.startInstance(inst)
-                                    }) {
+                                    IconButton(
+                                        onClick = {
+                                            if (busy) return@IconButton
+                                            listOpen = false
+                                            viewModel.selectInstance(inst)
+                                            viewModel.startInstance(inst)
+                                        },
+                                        enabled = !busy,
+                                    ) {
                                         Icon(
                                             Icons.Filled.PlayArrow,
                                             contentDescription = "启动 ${inst.name}",
@@ -288,6 +294,21 @@ fun HomeScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) {
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) {
+            // 动作语义图标：视觉锚点让"当前会做什么"无需读字即知
+            when {
+                current == null -> Icon(
+                    Icons.Filled.Add, null,
+                    Modifier.size(20.dp).padding(end = 6.dp),
+                )
+                serverState == ServerState.Running -> Icon(
+                    Icons.Filled.Stop, null,
+                    Modifier.size(20.dp).padding(end = 6.dp),
+                )
+                !busy -> Icon(
+                    Icons.Filled.PlayArrow, null,
+                    Modifier.size(20.dp).padding(end = 6.dp),
+                )
+            }
             Text(
                 when {
                     current == null -> "新建服务端"

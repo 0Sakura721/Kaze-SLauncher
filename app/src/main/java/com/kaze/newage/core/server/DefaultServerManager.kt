@@ -59,6 +59,15 @@ class DefaultServerManager(
     private val envInitializing = AtomicBoolean(false)
     private val javaInitializing = AtomicBoolean(false)
 
+    /** 需要保活前台服务的生命周期状态（Starting 等阶段 process 尚未创建，不能只看 isAlive） */
+    private val guardActiveStates = setOf(
+        ServerState.Starting,
+        ServerState.FirstRun,
+        ServerState.AcceptingEula,
+        ServerState.Running,
+        ServerState.Stopping,
+    )
+
     // ── 每实例运行会话 ──
     private inner class RuntimeSlot(val instance: ServerInstance) {
         val console: ConsoleStream = consoles.getOrPut(instance.id) { ConsoleStream() }
@@ -121,8 +130,10 @@ class DefaultServerManager(
     // ── 启动 ──
     override suspend fun start(instance: ServerInstance) {
         val existing = slots[instance.id]
-        if (existing?.process?.isAlive == true) {
-            existing.log("> 服务器已在运行", LineType.Warn)
+        // 按生命周期状态防重入：Starting/FirstRun 等部署阶段 process 尚为 null，
+        // 只看 isAlive 会漏——重复触发会双进程共写同一世界目录
+        if (existing != null && existing.state.value in guardActiveStates) {
+            existing.log("> 已处于启动/运行中，忽略重复启动", LineType.Warn)
             return
         }
         val slot = existing ?: RuntimeSlot(instance).also { slots[instance.id] = it }
@@ -170,9 +181,27 @@ class DefaultServerManager(
                         }
                     }
                     else -> {
-                        val waited = waitFor { javaManager.installed().any { it.version == javaMajor.toString() } }
-                        if (!waited) throw RuntimeException("等待 Java 安装超时")
-                        javaManager.installed().first { it.version == javaMajor.toString() }
+                        // 别的实例在装 Java——可能是不同版本！旧实现只轮询"自己要的版本出现"，
+                        // 获胜者装完的是它自己的版本 → 第二实例必然 300s 超时。
+                        // 改为：轮询期间只要互斥空闲就自己动手装目标版本
+                        var runtime: com.kaze.newage.core.java.JavaRuntime? = null
+                        val deadline = System.currentTimeMillis() + 300_000
+                        while (System.currentTimeMillis() < deadline) {
+                            runtime = javaManager.installed().firstOrNull { it.version == javaMajor.toString() }
+                            if (runtime != null) break
+                            if (javaInitializing.compareAndSet(false, true)) {
+                                try {
+                                    javaManager.install(javaMajor, onProgress = { _, message ->
+                                        slot.log("> $message", LineType.System)
+                                    })
+                                } finally {
+                                    javaInitializing.set(false)
+                                }
+                                continue // 再查一遍已装列表
+                            }
+                            kotlinx.coroutines.delay(1000)
+                        }
+                        runtime ?: throw RuntimeException("等待 Java 安装超时")
                     }
                 }
             } catch (e: Exception) {
@@ -218,7 +247,9 @@ class DefaultServerManager(
             slot.log("> 启动失败：${e.message}", LineType.Error)
             slot.setState(ServerState.Error)
             // 启动失败且没有其他实例在跑：撤下保活前台服务
-            if (slots.values.none { it.process?.isAlive == true }) {
+            // （按生命周期状态判断——其他实例处于启动部署阶段时 process 为 null，
+            //   用 process.isAlive 会误判"无实例在跑"而提前撤下它的保活）
+            if (slots.values.none { it.state.value in guardActiveStates }) {
                 com.kaze.newage.core.service.ServerGuardService.stop(appContext)
             }
         }
@@ -367,25 +398,28 @@ class DefaultServerManager(
                 // \n = 普通行。readLine 会把 \r 也当分隔符，无法区分，故手写分割。
                 val reader = proc.inputStream.bufferedReader()
                 val sb = StringBuilder()
-                while (true) {
-                    val c = reader.read()
-                    if (c < 0) break
-                    when (c.toChar()) {
-                        '\r' -> {
-                            val text = sb.toString().trim()
-                            sb.clear()
-                            if (text.isNotEmpty()) slot.logReplace(text, classify(text))
-                        }
-                        '\n' -> {
-                            val text = sb.toString().trim()
-                            sb.clear()
-                            if (text.isNotEmpty()) slot.log(text, classify(text))
-                        }
-                        else -> sb.append(c.toChar())
+                // 块读取：syscall 从"每字符一次"降到每 8KB 一次，其余行为不变
+                val buf = CharArray(8 * 1024)
+                fun flushLine(replace: Boolean) {
+                    val text = sb.toString().trim()
+                    sb.setLength(0)
+                    if (text.isNotEmpty()) {
+                        if (replace) slot.logReplace(text, classify(text))
+                        else slot.log(text, classify(text))
                     }
                 }
-                val tail = sb.toString().trim()
-                if (tail.isNotEmpty()) slot.log(tail, classify(tail))
+                while (true) {
+                    val n = reader.read(buf)
+                    if (n < 0) break
+                    for (i in 0 until n) {
+                        when (buf[i]) {
+                            '\r' -> flushLine(replace = true)
+                            '\n' -> if (sb.isNotEmpty()) flushLine(replace = false)
+                            else -> sb.append(buf[i])
+                        }
+                    }
+                }
+                if (sb.isNotEmpty()) flushLine(replace = false)
             } catch (_: Exception) { }
         }
 
@@ -471,20 +505,42 @@ class DefaultServerManager(
         slot.restartCount = 0
         slot.setState(ServerState.Stopped)
         slots.remove(slot.instance.id)
-        // 全部实例停止后撤下守护前台服务
-        if (slots.values.none { it.process?.isAlive == true }) {
+        // 全部实例停止后撤下守护前台服务；仍有活跃实例则刷新聚合通知
+        // （同上按状态判断：其他实例 Starting 部署中 process 为 null，不能只看 isAlive）
+        val remaining = slots.values.filter { it.state.value in guardActiveStates }
+        if (remaining.isEmpty()) {
             com.kaze.newage.core.service.ServerGuardService.stop(appContext)
+        } else {
+            updateGuard(remaining)
+        }
+    }
+
+    /** 守护通知内容：单实例显示详情，多开聚合成一行 */
+    private fun updateGuard(active: List<RuntimeSlot>) {
+        if (active.isEmpty()) return
+        if (active.size == 1) {
+            val s = active.first()
+            val port = runCatching {
+                ServerProperties.load(s.instance.dir)["server-port"] ?: "25565"
+            }.getOrDefault("25565")
+            com.kaze.newage.core.service.ServerGuardService.start(
+                appContext,
+                "Kaze SLauncher · ${s.instance.name}",
+                "MC ${s.instance.mcVersion} 服务端运行中 · 端口 $port",
+            )
+        } else {
+            com.kaze.newage.core.service.ServerGuardService.start(
+                appContext,
+                "Kaze SLauncher · ${active.size} 个实例运行中",
+                active.joinToString("、") { it.instance.name },
+            )
         }
     }
 
     /** 启动/更新守护前台服务（防止应用退后台后服务端进程被系统回收） */
     private fun startGuard(instance: ServerInstance) {
-        val port = ServerProperties.load(instance.dir)["server-port"] ?: "25565"
-        com.kaze.newage.core.service.ServerGuardService.start(
-            appContext,
-            "Kaze SLauncher · ${instance.name}",
-            "MC ${instance.mcVersion} 服务端运行中 · 端口 $port",
-        )
+        // 以"当前全部活跃实例"为准聚合（本实例已 setState 过，slots 里能查到）
+        updateGuard(slots.values.filter { it.state.value in guardActiveStates })
     }
 
     // ── 内部工具 ──

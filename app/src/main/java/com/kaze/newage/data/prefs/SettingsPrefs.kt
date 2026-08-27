@@ -58,9 +58,6 @@ class SettingsPrefs(context: Context) {
     /** MD3 自定义种子色（hex，默认 #00FFFF 青色） */
     val md3CustomColor = mutableStateOf(prefs.getString("md3_custom_color", "#00FFFF") ?: "#00FFFF")
 
-    /** 取色风格（materialkolor PaletteStyle 名） */
-    val paletteStyle = mutableStateOf(prefs.getString("palette_style", "TonalSpot") ?: "TonalSpot")
-
     /** 液态玻璃模式（照搬 BiliPai LiquidGlassMode）：clear/balanced/frosted */
     val glassMode = mutableStateOf(prefs.getString("glass_mode", "balanced") ?: "balanced")
 
@@ -175,11 +172,6 @@ class SettingsPrefs(context: Context) {
     fun setMd3CustomColor(v: String) {
         md3CustomColor.value = v
         prefs.edit().putString("md3_custom_color", v).apply()
-    }
-
-    fun setPaletteStyle(v: String) {
-        paletteStyle.value = v
-        prefs.edit().putString("palette_style", v).apply()
     }
 
     fun setGlassMode(v: String) {

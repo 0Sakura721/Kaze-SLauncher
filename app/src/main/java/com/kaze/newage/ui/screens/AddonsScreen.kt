@@ -265,19 +265,46 @@ fun AddonsScreen(
     }
 }
 
+/** 远程图标内存缓存（LRU；Modrinth 图标重复进入页面不重新下载） */
+private val remoteIconCache = androidx.collection.LruCache<String, ImageBitmap>(48)
+
 /** 远程图标（Modrinth icon_url）异步加载；失败/空显示灰色占位块 */
 @Composable
 private fun RemoteIcon(url: String, size: androidx.compose.ui.unit.Dp) {
-    var bmp by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    var bmp by remember(url) { mutableStateOf(remoteIconCache.get(url)) }
     LaunchedEffect(url) {
-        if (url.isBlank()) return@LaunchedEffect
+        if (url.isBlank() || bmp != null) return@LaunchedEffect
         bmp = withContext(Dispatchers.IO) {
             runCatching {
                 val conn = URL(url).openConnection().apply {
                     connectTimeout = 6000
                     readTimeout = 6000
                 }
-                conn.getInputStream().use { android.graphics.BitmapFactory.decodeStream(it)?.asImageBitmap() }
+                conn.getInputStream().use { ins ->
+                    // 降采样两段式：先读边界，再按显示尺寸（~96px 上限）取 inSampleSize，
+                    // 避免 512px 图标整图解码占内存
+                    val bounds = android.graphics.BitmapFactory.Options().apply {
+                        inJustDecodeBounds = true
+                    }
+                    android.graphics.BitmapFactory.decodeStream(ins, null, bounds)
+                    val target = 96
+                    var sample = 1
+                    while (bounds.outWidth / (sample * 2) >= target ||
+                        bounds.outHeight / (sample * 2) >= target
+                    ) sample *= 2
+                    // 边界读完后流已消费，重新开连接拿完整数据
+                    val conn2 = URL(url).openConnection().apply {
+                        connectTimeout = 6000
+                        readTimeout = 6000
+                    }
+                    conn2.getInputStream().use { ins2 ->
+                        val opts = android.graphics.BitmapFactory.Options().apply {
+                            inSampleSize = sample
+                        }
+                        android.graphics.BitmapFactory.decodeStream(ins2, null, opts)
+                            ?.asImageBitmap()
+                    }
+                }?.also { remoteIconCache.put(url, it) }
             }.getOrNull()
         }
     }

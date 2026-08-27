@@ -72,7 +72,9 @@ class InstanceStore(
         rescan()
     }
 
-    /** 重新加载：读 JSON + 扫描实例根目录（切换自定义目录后调用，可直接识别新目录里的既有服务端） */
+    /** 重新加载：读 JSON + 扫描实例根目录（切换自定义目录后调用，可直接识别新目录里的既有服务端）。
+     *  与 add/remove/rename 同锁：多个协程（下载完成/删实例/切目录）并发时防丢更新 */
+    @Synchronized
     fun rescan() {
         _instances.value = load()
         save() // 目录扫描恢复出的实例回存 JSON
@@ -92,17 +94,20 @@ class InstanceStore(
     fun createInstanceDir(name: String): File =
         File(instancesRoot(), sanitize(name)).apply { mkdirs() }
 
+    @Synchronized
     fun add(instance: ServerInstance) {
         _instances.value = _instances.value + instance
         save()
     }
 
+    @Synchronized
     fun remove(id: String) {
         _instances.value = _instances.value.filterNot { it.id == id }
         save()
     }
 
     /** 重命名实例（只改软件里的显示名，不影响目录/server.properties/MOTD） */
+    @Synchronized
     fun rename(id: String, newName: String) {
         val trimmed = newName.trim()
         if (trimmed.isEmpty()) return

@@ -36,20 +36,23 @@ object AddonManager {
     fun addonDir(instance: ServerInstance, kind: AddonKind): File =
         File(instance.dir, kind.dirName).apply { mkdirs() }
 
-    /** 已安装组件文件（启用在前，禁用在后） */
+    /** 已安装组件文件（启用在前，禁用在后）。禁用产物 `<name>.jar.disabled` 必须包含在列——
+     *  否则点停用后文件从列表蒸发，用户再也无法从界面恢复启用 */
     fun installed(instance: ServerInstance, kind: AddonKind): List<File> =
-        addonDir(instance, kind).listFiles { f -> f.isFile && f.name.endsWith(".jar", true) }
-            ?.sortedBy { it.name.endsWith(".jar.disabled", true) }
+        addonDir(instance, kind).listFiles { f ->
+            f.isFile && (f.name.endsWith(".jar", true) || f.name.endsWith(".jar.disabled", true))
+        }?.sortedBy { it.name.endsWith(".jar.disabled", true) }
             ?: emptyList()
 
     /** 是否启用（未带 .disabled 后缀） */
     fun isEnabled(file: File): Boolean = !file.name.endsWith(".jar.disabled", true)
 
-    /** 启用/禁用切换 */
+    /** 启用/禁用切换。目标名冲突时不覆盖（避免悄悄吞掉用户的另一份副本），返回当前实际状态 */
     fun toggleEnabled(file: File): Boolean {
         val enabled = isEnabled(file)
         val newName = if (enabled) file.name + ".disabled" else file.name.removeSuffix(".disabled")
         val target = File(file.parentFile, newName)
+        if (target.exists()) return enabled
         return if (file.renameTo(target)) !enabled else enabled
     }
 
@@ -75,10 +78,30 @@ object AddonManager {
             ?: throw RuntimeException("版本无下载文件")
         val dest = File(addonDir(instance, kind), file.filename.ifBlank { "$projectId.jar" })
         onProgress(0f, "下载 ${file.filename}（${version.version_number}）…")
-        Downloader.download(file.url, dest, onProgress = { done, total ->
-            val progress = if (total > 0) done.toFloat() / total else 0f
-            onProgress(progress, "下载中 ${(done / 1024 / 1024)}MB / ${(total / 1024 / 1024)}MB")
-        })
+        // 先下到临时名再原子换入：直写最终路径时，续传会把旧文件字节当前缀拼出损坏 jar，
+        // 且服务器不认 Range 时会先截掉旧文件——失败后用户原有的可用插件就没了。
+        // validate 用 ZIP 魔数（jar 均以 PK\x03\x04 开头），拦镜像 HTML 错误页。
+        val part = File(addonDir(instance, kind), dest.name + ".part")
+        Downloader.download(
+            file.url,
+            part,
+            onProgress = { done, total ->
+                val progress = if (total > 0) done.toFloat() / total else 0f
+                onProgress(progress, "下载中 ${(done / 1024 / 1024)}MB / ${(total / 1024 / 1024)}MB")
+            },
+            validate = { f -> runCatching {
+                f.inputStream().use { ins ->
+                    val head = ByteArray(4)
+                    ins.read(head) == 4 &&
+                        head.contentEquals(byteArrayOf(0x50, 0x4B, 0x03, 0x04))
+                }
+            }.getOrDefault(false) },
+        )
+        if (dest.exists()) dest.delete()
+        if (!part.renameTo(dest)) {
+            part.copyTo(dest, overwrite = true)
+            part.delete()
+        }
         return dest
     }
 }

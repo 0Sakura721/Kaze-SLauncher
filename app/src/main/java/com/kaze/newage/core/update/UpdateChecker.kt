@@ -81,16 +81,57 @@ object UpdateChecker {
     fun sources(apkUrl: String): List<String> =
         listOf(apkUrl) + MIRRORS.map { it + apkUrl }
 
-    /** 版本号比较：a < b → true（支持 0.1.0 / v1.2.3-beta.1 形式） */
+    /**
+     * 版本号比较：latest 比 current 新 → true。
+     * 支持 0.1.0 / v1.2.3-beta.1 / 26.2 形式；关键修复：预发布段不再数字化归零——
+     * 同主版本下「正式版 > 预发布」，否则 beta 用户永远收不到同号转正的提示。
+     */
     fun isNewer(latest: String, current: String): Boolean {
-        val a = latest.split('.', '-').filter { it.isNotEmpty() }
-        val b = current.split('.', '-').filter { it.isNotEmpty() }
-        val n = maxOf(a.size, b.size)
+        fun split(v: String): Pair<List<Long>, List<String>> {
+            val main = v.substringBefore('-').trimStart('v', 'V')
+            val pre = v.substringAfter('-', "").split('.', ' ').filter { it.isNotEmpty() }
+            val nums = Regex("\\d+").findAll(main).map { it.value.toLong() }.toList()
+            return nums to pre
+        }
+        fun rank(tok: String): Long = when (tok.lowercase()) {
+            "dev" -> 0L
+            "alpha", "a" -> 1L
+            "beta", "b" -> 2L
+            "preview", "rc", "cr", "milestone" -> 3L
+            else -> Long.MAX_VALUE // 未知段视作最"正式"
+        }
+        fun comparePre(a: List<String>, b: List<String>): Int {
+            val n = maxOf(a.size, b.size)
+            for (i in 0 until n) {
+                val at = a.getOrNull(i)
+                val bt = b.getOrNull(i)
+                if (at == bt) continue
+                if (at == null) return -1          // beta < beta.1（缺段更早）
+                if (bt == null) return 1
+                val ar = at.toLongOrNull()
+                val br = bt.toLongOrNull()
+                val cmp = when {
+                    ar != null && br != null -> ar.compareTo(br)
+                    ar != null -> 1                 // 数字段视为更接近正式
+                    br != null -> -1
+                    else -> rank(at).compareTo(rank(bt))
+                }
+                if (cmp != 0) return cmp
+            }
+            return 0
+        }
+        val (lv, lp) = split(latest)
+        val (cv, cp) = split(current)
+        val n = maxOf(lv.size, cv.size)
         for (i in 0 until n) {
-            val x = a.getOrNull(i)?.toIntOrNull() ?: 0
-            val y = b.getOrNull(i)?.toIntOrNull() ?: 0
+            val x = lv.getOrNull(i) ?: 0L
+            val y = cv.getOrNull(i) ?: 0L
             if (x != y) return x > y
         }
-        return false
+        return when {
+            lp.isEmpty() && cp.isNotEmpty() -> true   // latest 正式 vs current 预发布 → 已转正
+            lp.isNotEmpty() && cp.isEmpty() -> false  // latest 预发布 vs current 正式 → 不是更新
+            else -> comparePre(lp, cp) > 0
+        }
     }
 }

@@ -443,7 +443,7 @@ fun glassNavBarHazeStyle(): dev.chrisbanes.haze.HazeStyle {
     val intensity = LocalGlassIntensity.current
     val white = dev.chrisbanes.haze.HazeTint(Color.White.copy(alpha = lerpF(0.04f, 0.10f, mode.progress)))
     return dev.chrisbanes.haze.HazeStyle(
-        blurRadius = 100.dp, // 极端值诊断：验证 Haze blur 是否在真机执行，验证后回调
+        blurRadius = (lerpF(3f, 30f, mode.progress) * intensity).dp,
         noiseFactor = 0.05f,
         fallbackTint = white,
         tints = listOf(

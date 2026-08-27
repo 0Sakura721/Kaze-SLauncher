@@ -247,15 +247,29 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             ) {
                 if (lines.isEmpty()) {
                     item {
-                        Text(
-                            "启动服务端后，日志将实时显示在这里。\n首次启动会自动生成 eula.txt 并接受条款后重启。",
-                            color = consoleLineColor(com.kaze.newage.core.console.LineType.System),
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(8.dp),
-                        )
+                        Column(
+                            Modifier.fillParentMaxWidth().padding(vertical = 48.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Icon(
+                                Icons.Filled.ArrowDownward,
+                                contentDescription = null,
+                                tint = consoleLineColor(com.kaze.newage.core.console.LineType.System)
+                                    .copy(alpha = 0.45f),
+                                modifier = Modifier.size(34.dp),
+                            )
+                            Text(
+                                "启动服务端后，日志将实时显示在这里\n首次启动会自动生成 eula.txt 并接受条款后重启",
+                                color = consoleLineColor(com.kaze.newage.core.console.LineType.System)
+                                    .copy(alpha = 0.75f),
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
+                        }
                     }
                 }
-                items(lines.size, key = { "${lines[it].timestamp}-${lines[it].text}" }) { i ->
+                items(lines.size, key = { lines[it].seq }) { i ->
                     Text(
                         lines[i].text,
                         color = consoleLineColor(lines[i].type),
@@ -287,16 +301,35 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                 // 停止时禁用：避免能输入但发不出去，且残留文字顶掉 placeholder
                 enabled = serverState == ServerState.Running,
             )
-            IconButton(
-                onClick = {
-                    if (input.isNotBlank()) {
-                        viewModel.sendCommand(input.trim())
-                        input = ""
-                    }
-                },
-                enabled = serverState == ServerState.Running,
+            // 发送键：主色填充圆钮（比裸 IconButton 的可点面积/视觉分量更明确）
+            val sendEnabled = serverState == ServerState.Running
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (sendEnabled) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "发送")
+                IconButton(
+                    onClick = {
+                        if (input.isNotBlank()) {
+                            viewModel.sendCommand(input.trim())
+                            input = ""
+                        }
+                    },
+                    enabled = sendEnabled,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "发送",
+                        tint = if (sendEnabled) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }

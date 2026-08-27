@@ -28,7 +28,13 @@ object UpdateInstaller {
     ): File? = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         val file = File(dir, "kaze-slauncher-${info.tag}.apk")
-        if (file.exists() && file.length() > 1_000_000 && isApk(file)) return@withContext file
+        // 完成哨兵：仅当一次下载走完才写。半成品 APK 往往已 >1MB 且以 PK 开头——
+        // 若只看这两个条件复用，取消一次后每次重试都被短路当作完整包，
+        // 装出"解析包失败"，且断点续传永远没有机会补完剩余字节
+        val doneMarker = File(dir, "kaze-slauncher-${info.tag}.apk.done")
+        if (file.exists() && doneMarker.exists() && file.length() > 1_000_000 && isApk(file)) {
+            return@withContext file
+        }
         val used = Downloader.downloadFromSources(
             urls = UpdateChecker.sources(info.apkUrl),
             dest = file,
@@ -38,7 +44,11 @@ object UpdateInstaller {
             shouldCancel = shouldCancel,
             validate = { f -> f.length() > 1_000_000 && isApk(f) },
         )
-        if (used == null) null else file
+        if (used == null) null
+        else {
+            runCatching { doneMarker.writeText(info.tag) }
+            file
+        }
     }
 
     /** 校验 APK 魔数 PK\x03\x04（防镜像返回 HTML 错误页） */
