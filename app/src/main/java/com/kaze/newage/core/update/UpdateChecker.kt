@@ -65,16 +65,44 @@ object UpdateChecker {
         }
         val tag = json.optString("tag_name", "").removePrefix("v")
         val assets = json.optJSONArray("assets") ?: return null
-        val apkUrl = (0 until assets.length())
-            .map { assets.getJSONObject(it).optString("browser_download_url") }
-            .firstOrNull { it.endsWith(".apk", ignoreCase = true) }
-            ?: return null
+        // 按设备架构选对应 APK（release 三版本：arm64-v8a / armeabi-v7a / universal）
+        val apkUrl = pickApkUrl(assets) ?: return null
         return ReleaseInfo(
             tag = tag,
             name = json.optString("name", tag),
             body = json.optString("body", "").trim(),
             apkUrl = apkUrl,
         )
+    }
+
+    /** 当前设备架构在发布命名中的后缀（asset 名形如 Kaze-SLauncher-v0.1.1-<arch>.apk） */
+    fun archSuffix(): String = when {
+        android.os.Build.SUPPORTED_ABIS.any { it.contains("arm64-v8a", true) || it.contains("aarch64", true) } ->
+            "arm64-v8a"
+        android.os.Build.SUPPORTED_ABIS.any { it.contains("armeabi-v7a", true) || it.contains("armeabi", true) } ->
+            "armeabi-v7a"
+        else -> "universal"
+    }
+
+    /**
+     * 按架构挑下载地址：当前架构 → 旧命名兼容（-arm64）→ universal → 任意 apk。
+     * 不匹配时永远有 universal 兜底，不会拿到装不上的架构包（如 v7a 设备拿到 arm64 包）。
+     */
+    private fun pickApkUrl(assets: JSONArray): String? {
+        val urls = (0 until assets.length())
+            .map { assets.getJSONObject(it).optString("browser_download_url") }
+            .filter { it.isNotBlank() }
+        val arch = archSuffix()
+        val candidates = buildList {
+            add("-$arch.apk")
+            if (arch == "arm64-v8a") add("-arm64.apk") // 旧发布命名兼容
+            add("-universal.apk")
+            add(".apk")
+        }
+        for (suffix in candidates) {
+            urls.firstOrNull { it.endsWith(suffix, ignoreCase = true) }?.let { return it }
+        }
+        return null
     }
 
     /** GitHub 原链 + 全部镜像（下载时由 Downloader 测速择优） */
