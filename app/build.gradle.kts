@@ -13,8 +13,8 @@ android {
         applicationId = "com.kaze.newage"
         minSdk = 27
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.1.2"
     }
 
     // ABI flavor：每包只带本架构的 native 库与 rootfs 资产；universal 全量（分发用）
