@@ -485,6 +485,12 @@ class DefaultServerManager(
             slot.setState(ServerState.Starting)
             scope.launch {
                 delay(3000)
+                // 重启窗口内用户可能已删除实例：目录没了就不再拉起（否则重建半成品实例）
+                if (!slot.instance.dir.exists()) {
+                    slot.log("> 实例目录已删除，取消自动重启", LineType.System)
+                    finalizeStop(slot)
+                    return@launch
+                }
                 start(slot.instance)
             }
         } else {

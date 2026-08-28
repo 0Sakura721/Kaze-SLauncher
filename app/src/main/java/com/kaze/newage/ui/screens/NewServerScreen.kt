@@ -323,6 +323,7 @@ private fun VersionConfigPhase(
                         onComplete = { if (it != null) onExit() },
                     )
                 },
+                onCancelDownload = { viewModel.cancelDownload() },
                 onBack = { selected = null },
             )
         }
@@ -441,6 +442,7 @@ private fun ConfigPage(
     freePort: Int,
     download: DownloadState,
     onCreate: () -> Unit,
+    onCancelDownload: () -> Unit,
     onBack: () -> Unit,
 ) {
     // 滑块显示值：自动模式显示系统建议值（只读），手动模式显示滑块值
@@ -618,8 +620,18 @@ private fun ConfigPage(
                     progress = { download.progress.coerceIn(0f, 1f) },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                download.message.let {
-                    if (it.isNotBlank()) Text(it, style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    download.message.let {
+                        if (it.isNotBlank()) {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    // 取消：下载中止保留断点（重试续传）
+                    TextButton(onClick = onCancelDownload) { Text("取消") }
                 }
             }
             download.error?.let {

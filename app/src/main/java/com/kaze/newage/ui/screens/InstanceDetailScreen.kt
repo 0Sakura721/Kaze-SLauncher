@@ -348,7 +348,11 @@ fun InstanceDetailScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .clickable {
-                                    if (state == ServerState.Running) {
+                                    // 运行/启动/停止中都不允许恢复（目录正被进程使用）
+                                    if (state == ServerState.Running ||
+                                        state == ServerState.Starting ||
+                                        state == ServerState.Stopping
+                                    ) {
                                         backupMsg = "请先停止服务端再恢复备份"
                                     } else {
                                         restoreTarget = f

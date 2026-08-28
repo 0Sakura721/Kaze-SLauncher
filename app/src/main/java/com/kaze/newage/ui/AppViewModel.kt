@@ -112,6 +112,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _versionsLoading = MutableStateFlow(false)
     val versionsLoading: StateFlow<Boolean> = _versionsLoading.asStateFlow()
 
+    /** 版本列表加载竞态：快速切换核心类型时丢弃过期的旧请求（collectLatest 语义） */
+    private var versionsJob: kotlinx.coroutines.Job? = null
+
     /** Java 安装/卸载任务（用户可选下载/删除） */
     private val _javaTask = MutableStateFlow(JavaTaskState())
     val javaTask: StateFlow<JavaTaskState> = _javaTask.asStateFlow()
@@ -318,11 +321,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun removeInstance(instance: ServerInstance) {
         viewModelScope.launch(Dispatchers.IO) {
-            // 运行中先停止，避免进程占用目录文件导致删除失败/残留
-            if (serverManager.isRunning(instance.id)) {
+            // 运行中先停止（按生命周期状态等待彻底退出：Starting/Running 部署中也要先撤下）
+            val activeStates = setOf(
+                ServerState.Starting, ServerState.FirstRun, ServerState.AcceptingEula,
+                ServerState.Running, ServerState.Stopping,
+            )
+            val now = serverManager.states.value[instance.id]
+            if (now in activeStates) {
                 serverManager.stop(instance)
-                val deadline = System.currentTimeMillis() + 15_000
-                while (serverManager.isRunning(instance.id) && System.currentTimeMillis() < deadline) {
+                val deadline = System.currentTimeMillis() + 20_000
+                while (System.currentTimeMillis() < deadline) {
+                    val s = serverManager.states.value[instance.id]
+                    if (s == null || s !in activeStates) break
                     kotlinx.coroutines.delay(500)
                 }
             }
@@ -336,15 +346,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── 动作：版本列表 ──
     fun loadVersions(type: CoreType) {
-        _versionsLoading.value = true
-        _versions.value = emptyList()
-        viewModelScope.launch(Dispatchers.IO) {
+        versionsJob?.cancel()
+        versionsJob = viewModelScope.launch(Dispatchers.IO) {
+            _versionsLoading.value = true
+            _versions.value = emptyList()
             _versions.value = CoreSources.fetchVersions(type).getOrDefault(emptyList())
             _versionsLoading.value = false
         }
     }
 
     // ── 动作：下载并创建实例 ──
+    /** 下载取消标志（downloadAndCreate 内部轮询；取消保留 .part 断点） */
+    @Volatile
+    private var downloadCancelRequested = false
+
+    /** 取消进行中的实例下载（仅在 download.running 时有效） */
+    fun cancelDownload() {
+        downloadCancelRequested = true
+    }
+
     fun downloadAndCreate(
         name: String,
         type: CoreType,
@@ -353,6 +373,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         javaMajorOverride: Int = 0,
         onComplete: (ServerInstance?) -> Unit,
     ) {
+        downloadCancelRequested = false
         viewModelScope.launch(Dispatchers.IO) {
             _download.value = DownloadState(running = true, progress = 0f, message = "解析下载地址…")
             var dir: File? = null
@@ -363,16 +384,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val part = File(dir, dl.fileName + ".part")
                 val target = File(dir, dl.fileName)
                 _download.value = DownloadState(running = true, progress = 0f, message = "下载 ${dl.fileName}")
-                // 多源回退 + 断网自动重试（断点保留，失败可再次点下载续传）
-                val used = Downloader.downloadFromSources(listOf(dl.url), part, onProgress = { done, total ->
-                    val progress = if (total > 0) done.toFloat() / total else 0f
-                    _download.value = DownloadState(
-                        running = true,
-                        progress = progress,
-                        message = "下载中 ${(done / 1024 / 1024)}MB${if (total > 0) " / ${(total / 1024 / 1024)}MB" else ""}",
-                    )
-                })
-                if (used == null) throw RuntimeException("下载失败：所有源不可用（请检查网络后重试）")
+                // 多源回退 + 断网自动重试（断点保留，失败可再次点下载续传）；可取消
+                val used = Downloader.downloadFromSources(
+                    listOf(dl.url),
+                    part,
+                    onProgress = { done, total ->
+                        val progress = if (total > 0) done.toFloat() / total else 0f
+                        _download.value = DownloadState(
+                            running = true,
+                            progress = progress,
+                            message = "下载中 ${(done / 1024 / 1024)}MB${if (total > 0) " / ${(total / 1024 / 1024)}MB" else ""}",
+                        )
+                    },
+                    shouldCancel = { downloadCancelRequested },
+                )
+                if (used == null) {
+                    if (downloadCancelRequested) {
+                        _download.value = DownloadState(message = "已取消（已下载部分保留，可重试续传）")
+                        withContext(Dispatchers.Main) { onComplete(null) }
+                        return@launch
+                    }
+                    throw RuntimeException("下载失败：所有源不可用（请检查网络后重试）")
+                }
                 if (!part.renameTo(target)) {
                     part.copyTo(target, overwrite = true)
                     part.delete()
@@ -453,9 +486,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 instanceStore.add(instance)
                 ServerProperties.ensureInitial(instance, instanceStore.instances.value)
                 _currentInstanceId.value = instance.id
+                android.widget.Toast.makeText(container.appContext, "已导入：${instance.name}", android.widget.Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 // 拷贝失败清理半成品目录，避免被 rescan 误识别为实例
                 runCatching { dir.deleteRecursively() }
+                android.widget.Toast.makeText(container.appContext, "导入失败：${e.message}", android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }

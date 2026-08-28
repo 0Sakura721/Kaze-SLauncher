@@ -29,7 +29,9 @@ object ServerProperties {
         return map
     }
 
-    /** 写入（追加未知键：原文件里存在但 map 中没有的键会被丢弃；顺序 = 模板顺序 + 未知键） */
+    /** 写入（追加未知键）。原子写：先写临时文件再 rename——写入中断不产生半截配置文件
+     *  （否则下次载入为空 → 按默认 25565 重新生成,端口可能与他人冲突） */
+    @Synchronized
     fun save(dir: File, props: Map<String, String>) {
         val file = File(dir, "server.properties")
         file.parentFile?.mkdirs()
@@ -49,7 +51,16 @@ object ServerProperties {
                 written.add(k)
             }
         }
-        file.writeText(sb.toString())
+        val tmp = File(dir, "server.properties.tmp")
+        tmp.writeText(sb.toString())
+        if (!tmp.renameTo(file)) {
+            // rename 失败（跨设备/占用等）：删旧再搬
+            file.delete()
+            if (!tmp.renameTo(file)) {
+                tmp.copyTo(file, overwrite = true)
+                tmp.delete()
+            }
+        }
     }
 
     /** 默认模板（新实例初始化用） */
@@ -76,7 +87,9 @@ object ServerProperties {
         "pause-when-empty-seconds" to "-1",
     )
 
-    /** 为新实例分配空闲端口（25565 起，跳过已占用的） */
+    /** 为新实例分配空闲端口（25565 起，跳过已占用的）。同步：两个实例并发创建时
+     *  ensureInitial 会竞态看到同一份列表 → 撞端口；加对象锁串行化 */
+    @Synchronized
     fun findFreePort(instances: List<ServerInstance>): Int {
         val used = instances.mapNotNull { inst ->
             load(inst.dir)["server-port"]?.toIntOrNull()
