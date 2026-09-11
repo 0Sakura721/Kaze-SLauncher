@@ -7,11 +7,63 @@
 
 ## [Unreleased]
 
+---
+
+## [0.2.0] — 2026-09-11
+
+> ⚠️ **本版更换了签名密钥**：旧版（≤ v0.1.2）用公开的 Android 调试密钥签名，本版起改用正式发布密钥。
+> Android 不允许签名不同的包互相覆盖，**安装前必须先卸载旧版**（实例与存档在外部存储，不受影响）。
+
+### Security
+- **发布签名密钥轮换**：`release` 构建类型此前未配置 `signingConfig`，实际发布的是用仓库内公开
+  `debug.keystore`（口令明文写在构建脚本里）签名的包 —— 任何人都能伪造一个「签名匹配、版本号更高」的 APK
+  被系统当作合法升级安装。现在改为从环境变量 / `local.properties` 读取正式密钥，取不到时产出未签名包
+  而**不会**回退到 debug 密钥。轮换步骤与发版检查清单见 [`docs/RELEASE-SIGNING.md`](docs/RELEASE-SIGNING.md)。
+- **下载校验补强**：vanilla 服务端下载接上官方清单里的 SHA-1（此前被丢弃）；proot 运行时下载补 gzip
+  魔数校验（此前零校验即解压并执行）；`Downloader.validate` 取消「默认放行」的兜底值，强制调用方显式校验。
+- `.gitignore` 移除 `!release-keystore.jks` 白名单，避免发布密钥被误提交。
+
 ### Fixed
+- **删除实例会清空其它实例的备份**：备份原先全部平铺在所有实例共享的 `backups/` 目录，而删除实例时对该
+  目录整体递归删除。现在每个实例的备份各占独立目录，删除只影响自己；旧版留下的备份仍可正常列出与恢复。
+- **`survival` 实例会列出 `survival2` 的备份**：列表匹配由实例名前缀改为完整前缀（带分隔符）。
+- **服务端可能停不掉**：在「部署 / 首次启动」阶段点停止，旧实现会让界面显示已停止、而 java 进程仍在后台
+  运行且无法再停止（占用端口与内存）。现在会置取消标志、由启动流程自行收尾。
+- **重新启动实例时误杀新进程**：优雅停止的 10 秒强杀逻辑读取的是「当前 slot 的进程」而非启动时的那个，
+  且遗留任务未取消；现在捕获当时进程并在重启前取消旧任务。
+- **首启探测进程失控**：探测进程此前未登记进实例会话，用户点停止时既不被强杀路径覆盖、也无人持有引用。
+- **并发部署超时判断失效**：`setup()` 的超时分支因标志位恒为 false 而不可达，真卡住时界面永远停在「部署中」。
+- **命令拼接转义不完整**：只对含空格的参数加引号，`server(1).jar`、带引号或 `&` 的文件名会导致服务端
+  启动即退出且没有可读提示。改为完整 POSIX 单引号转义。
+- **控制台切换到运行中的实例显示空白**：实时流不带 replay，而用于回填历史的 `snapshot()` 定义了却无人调用。
+- **控制台高负载下静默丢日志**：缓冲区溢出策略改为丢弃最旧，保证最新输出一定到达界面。
+- **聊天内容被误判为玩家事件**：玩家说一句 "Alex joined the game" 会凭空多出一个在线玩家；聊天含
+  `error`/`warn` 也会整行染色。两者现均按聊天行排除。
+- **日志轮转上限失效**：改名失败时仍继续追加，8MB 上限形同虚设并可能撑满存储；现在检查改名结果并退化为截断。
+- **版本列表请求无超时**：网络卡住时界面永久转圈且取消不掉（同步 IO 不可中断）；补上连接与读取超时，
+  并修掉重定向缺少 Location 时的连接泄漏。
+- **设置页显示错误版本号**：硬编码 `v0.1.0`，与 `versionName` 长期不一致；改为读 `BuildConfig.VERSION_NAME`。
 - **命令输入框 placeholder 闪烁/消失**：停止时输入框仍可输入（发送按钮禁用），残留文字顶掉 placeholder；运行/停止切换时 placeholder 文字不一致。修复：停止时 `enabled=false` 并清空 input 残留，placeholder 恒定显示「服务端运行后可输入命令」；运行时显示「输入命令（stop / op 玩家名 / say …）」。
 - **命令输入框键盘遮挡**：键盘弹出时输入框距键盘上方 96dp（底栏占位未收起）。修复：`WindowInsets.isImeVisible` 监听键盘状态，键盘可见时自动去掉 96dp 底部 padding，输入框紧贴输入法上方。
 
+### Changed
+- **开启 R8 代码压缩与资源裁剪**（`isMinifyEnabled` + `isShrinkResources`）。应用实际只用到 28 个图标，
+  此前却把整套 Material 图标打进包（dex 内 5.7 万处 `material/icons/` 引用）：arm64 release 的 dex
+  由 16.75 MB 降至 1.24 MB，三个架构的安装包分别缩小约 40% / 42% / 29%。
+- **Forge / NeoForge 的失败提示改为明确说明**：这两类核心下载到的是 `-installer.jar`，需先执行
+  `--installServer` 生成运行环境，该步骤尚未实现。此前只提示「没有服务端核心 jar」，让用户对着已存在的
+  installer 无从判断。**该功能仍不可用**，请使用 Paper / Purpur / Fabric 或「导入 jar」。
+- 备份导入的文件名做了路径穿越防护。
+
+### Removed
+- 删除 `ui/theme/blur/**`（22 个文件、4881 行）与 `ui/theme/shader/**`（2 个文件、178 行）：整包引入的
+  compose-miuix-ui 实现，包外唯一引用是 `AppRoot.kt` 中 5 行从未被调用的 import。实际生效的玻璃效果走
+  `LiquidGlassEffect` + `util/StackBlur.java`。
+
 ### Added
+- **单元测试**：25 个纯 JVM 测试（无需设备）—— 版本比较（含「同号正式版 > 预发布」的预发布段语义）、
+  `server.properties` 读写与端口分配、控制台解析的聊天误判防护。
+- [`docs/RELEASE-SIGNING.md`](docs/RELEASE-SIGNING.md)：发布密钥轮换步骤与发版检查清单。
 - **控制台「复制日志」按钮**：右上角「保存日志」左侧新增复制按钮。复制内容改为控制台内存流（与原屏幕所见一致），不再读文件；空日志 Toast「暂无日志」。
 - **保存日志同步修改**：「保存日志」导出逻辑改为导出控制台内存流内容（与复制、屏幕三者一致）。
 
@@ -73,5 +125,7 @@
 
 ---
 
-[Unreleased]: https://github.com/0Sakura721/Kaze-SLauncher/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/0Sakura721/Kaze-SLauncher/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/0Sakura721/Kaze-SLauncher/releases/tag/v0.2.0
+[0.1.2]: https://github.com/0Sakura721/Kaze-SLauncher/releases/tag/v0.1.2
 [0.1.0]: https://github.com/0Sakura721/Kaze-SLauncher/releases/tag/v0.1.0
