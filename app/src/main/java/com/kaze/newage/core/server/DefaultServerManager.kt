@@ -68,6 +68,20 @@ class DefaultServerManager(
         ServerState.Stopping,
     )
 
+    /**
+     * `start()` 协程正在推进、进程可能尚未创建的状态。
+     * 处于这些状态时收到停止请求，必须置取消标志让 start() 自己收尾，
+     * 不能直接 finalizeStop（否则 start() 收不到信号，稍后仍会拉起一个停不掉的进程）。
+     */
+    private val startingStates = setOf(
+        ServerState.Starting,
+        ServerState.FirstRun,
+        ServerState.AcceptingEula,
+    )
+
+    /** start() 被用户中止——属于正常收尾，不应记为 Error */
+    private class StartCancelled : Exception("用户已请求停止")
+
     // ── 每实例运行会话 ──
     private inner class RuntimeSlot(val instance: ServerInstance) {
         val console: ConsoleStream = consoles.getOrPut(instance.id) { ConsoleStream() }
@@ -79,6 +93,15 @@ class DefaultServerManager(
         var restartCount = 0
         var waitJob: Job? = null
         var uptimeJob: Job? = null
+
+        /** 「优雅停止 → 10s 后强杀」的延时任务。重启前必须取消，否则它会杀掉新进程。
+         *  见 stop() 的说明。 */
+        var stopTimeoutJob: Job? = null
+
+        /** start() 各阶段的取消检查点：用户点停止后尽快中止后续重活（部署/装 Java/首启探测） */
+        fun checkCancelled() {
+            if (manualStop) throw StartCancelled()
+        }
 
         /** 日志落盘锁：系统消息（slot.log）与服务器 stdout 可能并发写同一文件 */
         private val logLock = Any()
@@ -106,15 +129,23 @@ class DefaultServerManager(
                 synchronized(logLock) {
                     val f = java.io.File(instance.dir, "console-output.log")
                     f.parentFile?.mkdirs()
-                    // 日志轮转：超过 8MB 时把旧日志改名保留，避免无限膨胀
+                    // 日志轮转：超过 8MB 时把旧日志改名保留，避免无限膨胀。
+                    // renameTo 的返回值必须检查：失败时（文件被占用/权限）旧写法会继续往超限文件里
+                    // append，8MB 上限形同虚设 → 退化为直接截断，保证上限一定生效。
                     if (f.length() > 8L * 1024 * 1024) {
                         val old = java.io.File(instance.dir, "console-output.old.log")
                         old.delete()
-                        f.renameTo(old)
+                        if (!f.renameTo(old)) {
+                            runCatching { f.writeText("") }
+                        }
                     }
                     f.appendText(text + "\n")
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                // 不再完全静默：实例目录不可写（SD 卡拔出/空间满）时日志会停止落盘，
+                // 至少留下一条线索
+                android.util.Log.w("KazeSLauncher", "日志落盘失败: ${e.message}")
+            }
         }
     }
 
@@ -163,6 +194,7 @@ class DefaultServerManager(
                 if (!env.isReady) throw RuntimeException("Linux 环境部署失败，请查看部署日志")
             }
             slot.log("> Linux 环境就绪", LineType.System)
+            slot.checkCancelled()
 
             // 2. Java（多实例互斥）
             val javaMajor = instance.javaMajor
@@ -208,10 +240,25 @@ class DefaultServerManager(
                 throw RuntimeException("Java $javaMajor 安装失败：${e.message}")
             }
             slot.log("> Java ${runtime.version} 就绪", LineType.System)
+            slot.checkCancelled()
 
             // 3. 服务端 jar
             val jar = instance.jarFile
-            if (!jar.exists()) throw RuntimeException("实例目录中没有服务端核心 jar：${jar.path}")
+            if (!jar.exists()) {
+                // Forge / NeoForge 下载到的是 -installer.jar，它不是可直接运行的服务端：
+                // 必须先执行 `java -jar <installer> --installServer` 生成 libraries/ 与启动入口。
+                // 该步骤当前尚未实现（jarFile 也刻意排除了含 installer 的文件），
+                // 所以这里给出确切原因，而不是让用户对着 installer 已经躺在目录里、
+                // 却提示"没有服务端核心 jar"去猜。
+                if (instance.coreType == CoreType.FORGE || instance.coreType == CoreType.NEOFORGE) {
+                    throw RuntimeException(
+                        "${instance.coreType.displayName} 暂不支持启动：当前只下载了 installer，" +
+                            "缺少 --installServer 安装步骤。请改用 Paper / Purpur / Fabric，" +
+                            "或自行安装后以「导入 jar」方式创建实例。"
+                    )
+                }
+                throw RuntimeException("实例目录中没有服务端核心 jar：${jar.path}")
+            }
 
             // 3.5 patched 核心（Paper/Purpur）预置原版 jar + 修补 rootfs 结构
             ensureVanillaJar(slot, instance)
@@ -235,6 +282,8 @@ class DefaultServerManager(
                     slot.log("> （等待自动退出后自动改写 eula=true 并重启）", LineType.System)
                     val exitCode = runEulaProbe(slot, runtime.version, jar.name)
                     slot.log("> 首启进程已退出（exit=$exitCode）", LineType.System)
+                    // 首启探测期间用户可能点了停止：此时不应再改写 eula / 重新拉起服务端
+                    slot.checkCancelled()
                     if (!EulaHandler.isAccepted(instance.dir)) {
                         slot.log("> 正在改写 eula.txt → true…", LineType.System)
                         EulaHandler.flipToTrue(instance.dir)
@@ -243,6 +292,10 @@ class DefaultServerManager(
                     launchServer(slot, runtime.version, jar.name)
                 }
             }
+        } catch (e: StartCancelled) {
+            // 用户主动中止：走正常收尾，不置 Error
+            slot.log("> 已取消启动", LineType.System)
+            finalizeStop(slot)
         } catch (e: Exception) {
             slot.log("> 启动失败：${e.message}", LineType.Error)
             slot.setState(ServerState.Error)
@@ -370,12 +423,29 @@ class DefaultServerManager(
         }
     }
 
-    /** 首启探测：直接跑一次服务端，输出逐行转发，等它自动退出 */
+    /**
+     * 首启探测：直接跑一次服务端，输出逐行转发，等它自动退出。
+     *
+     * 这里用 launch() 而不是 execute()，是为了把探测进程登记到 `slot.process`：
+     * 旧实现走 execute()，该进程游离在 slot 之外，用户点停止时它既不进 10 秒强杀路径，
+     * 也没有任何代码持有它的引用，只能干等它自己退出（首启探测会跑完整个服务端启动过程）。
+     */
     private suspend fun runEulaProbe(slot: RuntimeSlot, javaVersion: String, jarName: String): Int? {
         val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
         val args = javaArgs(slot.instance, javaBin, jarName)
-        return env.execute(args, slot.instance.dir) { line ->
-            slot.log(line, classify(line))
+        val proc = env.launch(args, slot.instance.dir) ?: return null
+        slot.process = proc
+        return try {
+            proc.inputStream.bufferedReader().useLines { lines ->
+                lines.forEach { line -> slot.log(line, classify(line)) }
+            }
+            proc.waitFor()
+            proc.exitValue()
+        } catch (e: Exception) {
+            proc.destroyForcibly()
+            null
+        } finally {
+            if (slot.process === proc) slot.process = null
         }
     }
 
@@ -386,6 +456,9 @@ class DefaultServerManager(
         val proc = env.launch(args, slot.instance.dir)
             ?: throw RuntimeException("无法启动 proot 进程（环境异常）")
         slot.process = proc
+        // 上一轮的「10s 强杀」若还挂着，必须取消：它捕获的是旧进程，留着只会误杀本次新进程
+        slot.stopTimeoutJob?.cancel()
+        slot.stopTimeoutJob = null
         slot.launchedAtMs = System.currentTimeMillis()
         slot.setState(ServerState.Running)
         slot.log("> 服务器启动中", LineType.System)
@@ -441,6 +514,17 @@ class DefaultServerManager(
         }
         val proc = slot.process
         if (proc == null || !proc.isAlive) {
+            // 进程还没创建，但 start() 的协程仍在推进（部署 / 装 Java / 首启探测）：
+            // 必须置取消标志让 start() 自己收尾。旧实现在这里直接 finalizeStop ——
+            // 它跳过了下一行的 manualStop = true，于是 start() 收不到任何信号、
+            // 稍后照常拉起进程，而 slot 已被移除 → UI 显示"已停止"、实际有 java 在跑，
+            // 且再点停止只会走 slots[id] == null 分支，进程永远停不掉。
+            if (slot.state.value in startingStates) {
+                slot.manualStop = true
+                slot.setState(ServerState.Stopping)
+                slot.log("> 已请求停止：等待当前启动流程收尾…", LineType.System)
+                return
+            }
             finalizeStop(slot)
             return
         }
@@ -448,12 +532,16 @@ class DefaultServerManager(
         slot.setState(ServerState.Stopping)
         slot.log("> 正在停止服务器…", LineType.System)
         sendCommand(instance, "stop")
-        // 优雅停止等待 10s，超时强杀
-        scope.launch {
+        // 优雅停止等待 10s，超时强杀。
+        // 注意捕获当前的 proc，而不是在延时回调里读 slot.process ——
+        // 若用户在 10s 内重新启动，slot.process 已指向新进程，旧写法会把刚启动的服务端杀掉；
+        // 同时把 Job 存起来，重启前取消它。
+        slot.stopTimeoutJob?.cancel()
+        slot.stopTimeoutJob = scope.launch {
             delay(10_000)
-            if (slot.process?.isAlive == true) {
+            if (proc.isAlive) {
                 slot.log("> 停止超时，强制结束进程", LineType.Warn)
-                slot.process?.destroyForcibly()
+                proc.destroyForcibly()
             }
         }
     }
@@ -579,10 +667,16 @@ class DefaultServerManager(
             if (instance.nogui) add("nogui")
         }
 
+    /** 玩家聊天行：`... [Server thread/INFO]: <Steve> 内容` */
+    private val CHAT_LINE = Regex(""":\s*<[^>]{1,32}>\s""")
+
     private fun classify(line: String): LineType = when {
+        // 本应用的命令回显/系统消息优先：否则 `> say error` 会被下面的 ERROR 子串判成错误
+        line.startsWith("> ") -> LineType.System
+        // 聊天行永远是普通输出：玩家说一句 "there is an error" 不该让整行变红
+        CHAT_LINE.containsMatchIn(line) -> LineType.Info
         line.contains("ERROR", ignoreCase = true) -> LineType.Error
         line.contains("WARN", ignoreCase = true) || line.contains("WARNING", ignoreCase = true) -> LineType.Warn
-        line.startsWith("> ") -> LineType.System
         else -> LineType.Info
     }
 

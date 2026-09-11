@@ -14,6 +14,15 @@ object ConsoleParser {
     private val JOIN_PATTERN = Regex("""(\S+) joined the game""")
     private val LEAVE_PATTERN = Regex("""(\S+) left the game""")
 
+    /**
+     * 玩家聊天行：`[12:34:56] [Server thread/INFO]: <Steve> 内容`。
+     *
+     * 加入/离开事件必须排除聊天行，否则玩家在游戏里说一句 "Steve joined the game"
+     * （或 "<Steve> I joined the game"）就会被当成真实的加入事件，在线名单里凭空多出一个人；
+     * leave 同理会误删。
+     */
+    private val CHAT_LINE = Regex(""":\s*<[^>]{1,32}>\s""")
+
     /** 若该行是玩家列表响应，返回名单（可能为空列表）；否则返回 null */
     fun parseOnlinePlayers(line: String): List<String>? {
         val m = LIST_PATTERN.find(line) ?: return null
@@ -22,9 +31,13 @@ object ConsoleParser {
         return tail.split(",").map { it.trim() }.filter { it.isNotEmpty() }
     }
 
-    /** 玩家加入事件 → 玩家名；否则 null */
-    fun parseJoin(line: String): String? = JOIN_PATTERN.find(line)?.groupValues?.get(1)
+    /** 玩家加入事件 → 玩家名；否则 null（聊天内容不算事件） */
+    fun parseJoin(line: String): String? =
+        if (CHAT_LINE.containsMatchIn(line)) null
+        else JOIN_PATTERN.find(line)?.groupValues?.get(1)
 
-    /** 玩家离开事件 → 玩家名；否则 null */
-    fun parseLeave(line: String): String? = LEAVE_PATTERN.find(line)?.groupValues?.get(1)
+    /** 玩家离开事件 → 玩家名；否则 null（聊天内容不算事件） */
+    fun parseLeave(line: String): String? =
+        if (CHAT_LINE.containsMatchIn(line)) null
+        else LEAVE_PATTERN.find(line)?.groupValues?.get(1)
 }

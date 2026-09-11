@@ -1,9 +1,32 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// ── 发布签名凭据 ──
+// 优先取环境变量（CI Secret），其次取 local.properties（已被 .gitignore 忽略）。
+// 绝不硬编码口令，也绝不用 debug.keystore 签正式包：该密钥连同口令都在公开仓库里，
+// 任何人都能伪造一个「签名匹配、versionCode 更高」的 APK 被系统当作合法升级安装。
+// 详见 docs/RELEASE-SIGNING.md
+// 注意：这里必须用顶部 import 进来的 Properties，不能写 `java.util.Properties()` ——
+// 在 Gradle Kotlin DSL 里裸写 `java` 会被解析成 java 插件扩展而不是包名。
+val localProps = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun secret(envKey: String, propKey: String): String? =
+    (System.getenv(envKey) ?: localProps.getProperty(propKey))?.takeIf { it.isNotBlank() }
+
+val releaseStorePath = secret("KAZE_KEYSTORE", "kaze.keystore")
+val releaseStorePass = secret("KAZE_STORE_PASS", "kaze.storePassword")
+val releaseKeyAlias = secret("KAZE_KEY_ALIAS", "kaze.keyAlias")
+val releaseKeyPass = secret("KAZE_KEY_PASS", "kaze.keyPassword")
+val hasReleaseKey = listOf(releaseStorePath, releaseStorePass, releaseKeyAlias, releaseKeyPass)
+    .all { it != null }
 
 android {
     namespace = "com.kaze.newage"
@@ -13,8 +36,8 @@ android {
         applicationId = "com.kaze.newage"
         minSdk = 27
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.1.3"
     }
 
     // ABI flavor：每包只带本架构的 native 库与 rootfs 资产；universal 全量（分发用）
@@ -37,22 +60,37 @@ android {
         }
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-        }
-        debug {
-            // 工作区内 keystore（沙箱环境无法写 ~/.android）
-            signingConfig = signingConfigs.getByName("debug")
-        }
-    }
+    // 注意：signingConfigs 必须写在 buildTypes **之前** —— Kotlin DSL 顺序执行，
+    // 否则 buildTypes 里 getByName("release") 会因配置尚未创建而失败。
     signingConfigs {
         getByName("debug") {
             storeFile = rootProject.file("debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+        }
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = rootProject.file(releaseStorePath!!)
+                storePassword = releaseStorePass
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPass
+            }
+        }
+    }
+    buildTypes {
+        release {
+            // 开启 R8：未使用的 Material 图标此前会被整包打进 APK
+            // （实测 dex 里有 5.7 万处 material/icons/ 引用，而代码只用到 28 个图标）
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // 拿不到发布密钥时不签名（产出 unsigned 包），而不是回退到 debug 密钥
+            signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else null
+        }
+        debug {
+            // 工作区内 keystore（沙箱环境无法写 ~/.android）
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -64,6 +102,12 @@ android {
     }
     buildFeatures {
         compose = true
+        // 设置页要显示真实版本号（此前硬编码 "v0.1.0"，与 versionName 长期不一致）
+        buildConfig = true
+    }
+    testOptions {
+        // 单测只覆盖纯逻辑（版本比较 / server.properties 读写 / 控制台解析），不触碰 Android API
+        unitTests.isReturnDefaultValues = true
     }
 
     // universal 变体：assets 直接复用 arm64 + armhf 两套（避免复制实体文件导致仓库膨胀）
@@ -90,4 +134,5 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.haze)
     debugImplementation(libs.androidx.ui.tooling)
+    testImplementation(libs.junit)
 }

@@ -142,7 +142,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     .background(versionBadgeBackdrop)
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
-                Text("v0.1.0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text("v${com.kaze.newage.BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
             }
         }
 
@@ -651,7 +651,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 // 关于与许可证
                 AccordionRow(
                     title = "关于与许可证",
-                    desc = "v0.1.0 · GNU GPL-3.0",
+                    desc = "v${com.kaze.newage.BuildConfig.VERSION_NAME} · GNU GPL-3.0",
                     expanded = openSection == "about",
                     onClick = { openSection = if (openSection == "about") null else "about" },
                 )

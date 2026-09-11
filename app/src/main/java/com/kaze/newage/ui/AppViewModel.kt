@@ -131,18 +131,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 跟随当前实例切换控制台（每实例独立日志流），并跟踪在线玩家
         viewModelScope.launch(Dispatchers.IO) {
             _currentInstanceId.collectLatest { id ->
-                _consoleLines.value = emptyList()
                 _onlinePlayers.value = emptyList()
-                if (id != null) {
-                    serverManager.consoleFor(id).lines.collect { line ->
-                        _consoleLines.value = (_consoleLines.value + line).takeLast(2000)
-                        ConsoleParser.parseOnlinePlayers(line.text)?.let { _onlinePlayers.value = it }
-                        ConsoleParser.parseJoin(line.text)?.let { name ->
-                            if (name !in _onlinePlayers.value) _onlinePlayers.value = _onlinePlayers.value + name
-                        }
-                        ConsoleParser.parseLeave(line.text)?.let { name ->
-                            _onlinePlayers.value = _onlinePlayers.value - name
-                        }
+                if (id == null) {
+                    _consoleLines.value = emptyList()
+                    return@collectLatest
+                }
+                val stream = serverManager.consoleFor(id)
+                // 先用环形缓冲回填历史：ConsoleStream 的实时流是 replay=0，
+                // 不预填的话切到一个**已经在运行**的实例会看到空控制台
+                // （snapshot() 之前定义了却没有任何调用点）
+                _consoleLines.value = stream.snapshot().takeLast(2000)
+                stream.lines.collect { line ->
+                    _consoleLines.value = (_consoleLines.value + line).takeLast(2000)
+                    ConsoleParser.parseOnlinePlayers(line.text)?.let { _onlinePlayers.value = it }
+                    ConsoleParser.parseJoin(line.text)?.let { name ->
+                        if (name !in _onlinePlayers.value) _onlinePlayers.value = _onlinePlayers.value + name
+                    }
+                    ConsoleParser.parseLeave(line.text)?.let { name ->
+                        _onlinePlayers.value = _onlinePlayers.value - name
                     }
                 }
             }
@@ -397,6 +403,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     },
                     shouldCancel = { downloadCancelRequested },
+                    // 官方清单给了 sha1 就必须校验（旧实现完全不校验 → 镜像的 200+HTML
+                    // 错误页会被当作 jar 重命名入库，直到启动时才报"没有核心 jar"）
+                    validate = { f ->
+                        f.length() > 1_000_000L &&
+                            (dl.sha1 == null ||
+                                Downloader.sha1Of(f)?.equals(dl.sha1, ignoreCase = true) == true)
+                    },
                 )
                 if (used == null) {
                     if (downloadCancelRequested) {

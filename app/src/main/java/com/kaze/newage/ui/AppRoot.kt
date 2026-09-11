@@ -80,11 +80,6 @@ import com.kaze.newage.ui.theme.LocalGlassIntensity
 import com.kaze.newage.ui.theme.LocalGlassMode
 import com.kaze.newage.ui.theme.glassBackdropBlur
 import com.kaze.newage.ui.theme.liquidGlassLensSafe
-import com.kaze.newage.ui.theme.blur.Backdrop
-import com.kaze.newage.ui.theme.blur.blur
-import com.kaze.newage.ui.theme.blur.drawBackdrop
-import com.kaze.newage.ui.theme.blur.layerBackdrop
-import com.kaze.newage.ui.theme.blur.rememberLayerBackdrop
 
 enum class Dest(
     val route: String,
