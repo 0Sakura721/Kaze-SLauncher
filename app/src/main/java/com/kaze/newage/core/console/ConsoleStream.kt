@@ -1,5 +1,6 @@
 package com.kaze.newage.core.console
 
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -24,8 +25,8 @@ data class ConsoleLine(
 /**
  * 控制台日志流：全局共享，UI 订阅实时渲染。
  * 实现要点：
- *  - MutableSharedFlow 带 replay，界面重建后能补看最近日志
- *  - 行数上限保护（内存），超出后裁剪
+ *  - 环形缓冲保留最近 [maxLines] 行，供 [snapshot] 回填（切换实例 / 重建界面时用）
+ *  - 实时流不带 replay，缓冲满时丢**最旧**的行，保证最新输出一定到得了界面
  */
 class ConsoleStream(
     private val maxLines: Int = 2000,
@@ -33,6 +34,10 @@ class ConsoleStream(
     private val _lines = MutableSharedFlow<ConsoleLine>(
         replay = 0,
         extraBufferCapacity = 256,
+        // 订阅者跟不上时（例如服务端刷屏）丢最旧的行，而不是让 tryEmit 直接失败把新行扔掉。
+        // 旧实现用默认的 SUSPEND 策略 + 忽略 tryEmit 返回值：无订阅者或 UI 卡顿时新日志
+        // 会被静默丢弃，且没有任何地方能察觉。
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val lines: SharedFlow<ConsoleLine> = _lines.asSharedFlow()
 

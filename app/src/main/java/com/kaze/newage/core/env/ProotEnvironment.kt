@@ -133,7 +133,9 @@ class ProotEnvironment(
             if (!extractBundledAsset("proot-$archName.tar.gz", tarball)) {
                 // 内置缺失回退 termux 官方 release（与 v3 一致）
                 val url = "https://github.com/termux/proot/releases/download/v5.1.107.86/proot-$archName.tar.gz"
-                com.kaze.newage.util.Downloader.download(url, tarball)
+                // proot 运行时要被解压并 exec，必须校验是 gzip 归档（旧实现用默认 validate = { true }，
+                // 等于零校验：镜像返回 HTML 错误页也会被解压，环境从此起不来）
+                com.kaze.newage.util.Downloader.download(url, tarball, validate = { isGzipTar(it) })
             }
             TarExtractor.extract(tarball, prootHomeDir)
             fixProotSonameLinks()
@@ -300,13 +302,19 @@ class ProotEnvironment(
         if (!isSetupRunning.compareAndSet(false, true)) {
             onProgress(0f, "另一部署正在进行，等待其完成…")
             val deadline = System.currentTimeMillis() + 900_000
-            var timedOut = true
+            // timedOut 只在「deadline 真的到期」时置位。
+            // 旧写法初始为 true、在循环里每次 delay 后置 false，而 15 分钟的 deadline
+            // 不可能在首次迭代前到达 —— 于是超时分支永远不可达：真卡住时只会在
+            // 循环结束后静默返回，既不置 ERROR 也不通知调用方，UI 永远停在"部署中"。
+            var timedOut = false
             while (isSetupRunning.get()) {
-                if (System.currentTimeMillis() >= deadline) break
+                if (System.currentTimeMillis() >= deadline) {
+                    timedOut = true
+                    break
+                }
                 kotlinx.coroutines.delay(500)
-                timedOut = false
             }
-            if (timedOut && isSetupRunning.get()) {
+            if (timedOut) {
                 _state.value = State.ERROR
                 onProgress(0f, "等待并发部署超时")
                 return@withContext
@@ -564,6 +572,20 @@ class ProotEnvironment(
         return env
     }
 
+    /**
+     * POSIX 单引号转义：把参数整体包进单引号，参数内部的 ' 写成 '\''（闭合-转义-重开）。
+     *
+     * 命令最终由 guest 的 `/bin/sh -c` 解释，因此每个参数都必须转义。原实现只对
+     * 「含空格」的参数加引号，导致 ' " $ ` ; & | ( ) \ * ~ 等字符裸露在外：
+     *  - 正常文件名会直接坏掉，例如 `server(1).jar`、`我的服务端'正式版'.jar` —— sh 语法错误，
+     *    服务端秒退且没有任何可读提示；
+     *  - 构造的文件名可逃逸引号，以应用身份在 guest 内执行任意命令（jarName 来自实例目录下
+     *    第一个 .jar，实例名 sanitize 不过滤这些字符）。
+     * 全量加引号不会影响现有调用：execute()/launch() 传的都是字面量 argv（-Xmx、guest 路径等），
+     * runCommand() 传入的整条命令字符串本就依赖外层引号包裹。
+     */
+    private fun shellQuote(arg: String): String = "'" + arg.replace("'", "'\\''") + "'"
+
     private fun buildProotCommand(command: List<String>, workDir: File?): ProcessBuilder {
         val args = mutableListOf(
             prootBinary.absolutePath,
@@ -599,7 +621,7 @@ class ProotEnvironment(
             add("/bin/sh")
             add("-c")
             val cd = if (workDir != null && workDir.exists()) "cd '/mnt' && " else ""
-            add(cd + command.joinToString(" ") { if (it.contains(' ')) "'$it'" else it })
+            add(cd + command.joinToString(" ") { shellQuote(it) })
         }
         args.addAll(wrapped)
         val pb = ProcessBuilder(args).redirectErrorStream(true)

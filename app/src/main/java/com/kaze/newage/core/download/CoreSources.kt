@@ -19,7 +19,12 @@ import java.net.URL
 data class CoreBuild(val id: String, val name: String, val fileName: String? = null, val url: String = "")
 
 /** 下载结果：URL + 建议文件名 */
-data class CoreDownload(val url: String, val fileName: String)
+data class CoreDownload(
+    val url: String,
+    val fileName: String,
+    /** 官方清单里给出的 SHA-1（有则下载后必须校验）。无哈希来源的核心为 null。 */
+    val sha1: String? = null,
+)
 
 /**
  * 核心源：统一获取各类型服务端的版本/构建/下载链接。
@@ -47,19 +52,35 @@ object CoreSources {
         return 0
     }
 
+    /**
+     * 拉取版本清单等小体积文本。
+     *
+     * 必须显式设超时：这是 IO 线程上的同步阻塞调用，没有超时的话
+     * `versionsJob.cancel()` 也中断不了它，网络一卡 UI 就永久转圈（只能杀应用）。
+     * Downloader 那边是设了超时的，这里原来漏了。
+     */
     private fun httpGet(urlStr: String): String {
         var current = urlStr
         var redirects = 0
         while (true) {
             val conn = URL(current).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 30_000
             // 自动跟随开启时 3xx 由底层处理；手动循环主要为兼容相对 Location
-            val code = conn.responseCode
-            if (code in listOf(301, 302, 303, 307, 308)) {
-                val loc = conn.getHeaderField("Location") ?: throw RuntimeException("重定向无 Location")
+            val code = try {
+                conn.responseCode
+            } catch (e: Exception) {
                 conn.disconnect()
+                throw e
+            }
+            if (code in listOf(301, 302, 303, 307, 308)) {
+                val loc = conn.getHeaderField("Location")
+                conn.disconnect()   // 先断开再抛，否则抛异常这条路径会漏掉连接
+                if (loc.isNullOrBlank()) throw RuntimeException("重定向无 Location")
                 if (++redirects > 5) throw RuntimeException("重定向过多")
-                // 相对 Location（/path 或相对路径）必须基于当前 URL 解析，直接 new URL(loc) 会抛异常
-                current = if (loc.startsWith("http")) loc else URL(URL(current), loc).toString()
+                // 相对 Location（/path 或相对路径）必须基于当前 URL 解析，直接 new URL(loc) 会抛异常。
+                // 绝对地址经此转换结果不变，因此无需再判断 startsWith("http")。
+                current = URL(URL(current), loc).toString()
                 continue
             }
             if (code != HttpURLConnection.HTTP_OK) { conn.disconnect(); throw RuntimeException("HTTP $code") }
@@ -100,7 +121,14 @@ object CoreSources {
                 ?: return@withContext Result.failure(RuntimeException("未找到版本 $mcVersion"))
             val vJson = json.parseToJsonElement(httpGet(entry.jsonObject["url"]!!.jsonPrimitive.content)).jsonObject
             val jar = vJson["downloads"]!!.jsonObject["server"]!!.jsonObject
-            Result.success(CoreDownload(jar["url"]!!.jsonPrimitive.content, "vanilla-$mcVersion.jar"))
+            Result.success(
+                CoreDownload(
+                    url = jar["url"]!!.jsonPrimitive.content,
+                    fileName = "vanilla-$mcVersion.jar",
+                    // 官方清单本来就有 sha1，旧实现丢弃了它 → 镜像返回 HTML 错误页也会被当 jar 入库
+                    sha1 = jar["sha1"]?.jsonPrimitive?.content,
+                )
+            )
         } catch (e: Exception) { Result.failure(e) }
     }
 

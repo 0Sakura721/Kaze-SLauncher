@@ -26,7 +26,8 @@ captures/
 *.jks
 *.keystore
 !debug.keystore
-!release-keystore.jks
+# 发布密钥一律不入库：这里刻意不再为任何 release keystore 开白名单
+# （原 `!release-keystore.jks` 会把误放进来的发布密钥放行入库 → 密钥泄露 = 任何人都能伪造更新包）
 
 # 构建产物（严禁入库）
 *.apk

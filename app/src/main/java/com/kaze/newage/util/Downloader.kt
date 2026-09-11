@@ -15,6 +15,25 @@ object Downloader {
     private const val USER_AGENT = "KazeSLauncher/3.0 (Android; Minecraft Server Launcher)"
 
     /**
+     * 计算文件 SHA-1（十六进制小写）；失败返回 null。
+     * 用于校验官方清单已给出哈希的下载物（例如 vanilla 的 `downloads.server.sha1`）。
+     */
+    fun sha1Of(file: File): String? = try {
+        val md = java.security.MessageDigest.getInstance("SHA-1")
+        file.inputStream().use { ins ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = ins.read(buf)
+                if (n <= 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        md.digest().joinToString("") { "%02x".format(it) }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
      * 下载文件（支持断点续传：目标文件已有部分时用 Range 追加；
      * 服务器不支持 Range 时自动从头开始）。
      * @param urlStr 下载地址
@@ -30,7 +49,7 @@ object Downloader {
         dest: File,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
         shouldCancel: () -> Boolean = { false },
-        validate: (File) -> Boolean = { true },
+        validate: (File) -> Boolean,
     ) {
         dest.parentFile?.mkdirs()
         var url: URL? = null
@@ -229,7 +248,7 @@ object Downloader {
         onProgress: (Long, Long) -> Unit = { _, _ -> },
         onSourceError: (String, String) -> Unit = { _, _ -> },
         shouldCancel: () -> Boolean = { false },
-        validate: (File) -> Boolean = { true },
+        validate: (File) -> Boolean,
         maxRounds: Int = 4,
         roundDelayMs: Long = 5000,
         perSourceRetries: Int = 2,
