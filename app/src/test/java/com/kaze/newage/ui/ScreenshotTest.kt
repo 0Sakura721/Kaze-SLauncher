@@ -1,6 +1,8 @@
 package com.kaze.newage.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
@@ -15,6 +17,7 @@ import com.kaze.newage.ui.components.StatusOrb
 import com.kaze.newage.ui.components.StatusTone
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.NewAgeTheme
+import com.kaze.newage.ui.theme.ThemeBackdrop
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,7 +45,12 @@ class ScreenshotTest {
     private fun capture(name: String, dark: Boolean = false, content: @Composable () -> Unit) {
         composeRule.setContent {
             NewAgeTheme(mode = AppThemeMode.M3, darkTheme = dark, colorSource = "custom") {
-                content()
+                // 同 ScreenScreenshotTest：不铺主题背景层的话，深色模式会截成
+                // "浅色文字 + 宿主默认白底"，看着像主题坏了
+                Box(Modifier.fillMaxSize()) {
+                    ThemeBackdrop(Modifier.matchParentSize())
+                    content()
+                }
             }
         }
         composeRule.onRoot().captureRoboImage("build/screenshots/$name.png")

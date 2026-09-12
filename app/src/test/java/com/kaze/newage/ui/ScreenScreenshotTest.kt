@@ -1,6 +1,9 @@
 package com.kaze.newage.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.test.core.app.ApplicationProvider
@@ -13,6 +16,7 @@ import com.kaze.newage.ui.screens.ServerScreen
 import com.kaze.newage.ui.screens.SettingsScreen
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.NewAgeTheme
+import com.kaze.newage.ui.theme.ThemeBackdrop
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -46,7 +50,14 @@ class ScreenScreenshotTest {
     private fun captureScreen(name: String, dark: Boolean = false, content: @Composable () -> Unit) {
         composeRule.setContent {
             NewAgeTheme(mode = AppThemeMode.M3, darkTheme = dark, colorSource = "custom") {
-                content()
+                // 必须自己铺上主题背景层。真机上这一层由 AppRoot 的 AppBackground 负责，
+                // 测试里直接渲染屏幕 Composable 的话背景是宿主给的默认白底——
+                // 深色模式下内容用浅色文字、背景却是白的，截出来像"主题坏了"，
+                // 实际只是少画了一层。见 ThemeBackdrop（M3=纵向渐变，GLASS=光斑）。
+                Box(Modifier.fillMaxSize()) {
+                    ThemeBackdrop(Modifier.matchParentSize())
+                    content()
+                }
             }
         }
         composeRule.onRoot().captureRoboImage("build/screenshots/$name.png")
