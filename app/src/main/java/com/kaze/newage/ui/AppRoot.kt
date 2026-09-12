@@ -204,7 +204,15 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable("server/new") {
                     NewServerScreen(
                         viewModel = viewModel,
-                        onBack = { navController.popBackStack() },
+                        // 只在向导仍处于栈顶时才回退。
+                        // 向导的 onExit 会在**下载完成时**被调用，而下载是跨页面继续跑的：
+                        // 用户完全可能点了「下载并创建」后按返回离开向导，去干别的。此时再无条件
+                        // popBackStack() 就会把用户当前所在的页面弹掉（表现为"下载完自己退了一层"）。
+                        onBack = {
+                            if (navController.currentDestination?.route == "server/new") {
+                                navController.popBackStack()
+                            }
+                        },
                     )
                 }
                 composable(Dest.Console.route) { ConsoleScreen(viewModel) }

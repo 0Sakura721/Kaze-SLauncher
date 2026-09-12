@@ -78,6 +78,13 @@ fun AddonsScreen(
     val searching by viewModel.addonSearching.collectAsStateWithLifecycle()
     val installState by viewModel.addonInstall.collectAsStateWithLifecycle()
 
+    // 安装是异步的：原来只在点击「安装」时 refresh++，那时文件还没落盘，
+    // `remember(instanceId, refresh)` 读到的是旧目录内容，于是「已安装（N）」列表与
+    // 计数停在上一次快照，必须退出页面再进才更新。改为安装真正完成后刷新。
+    LaunchedEffect(installState.done) {
+        if (installState.done) refresh++
+    }
+
     val kindLabel = if (kind == AddonKind.PLUGIN) "插件" else "模组"
 
     Column(

@@ -366,6 +366,15 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 viewModel.rescanInstances()
                 Toast.makeText(appContext, "实例目录已切换，正在扫描所选目录…", Toast.LENGTH_LONG).show()
             }
+            // Android 11 以下没有「所有文件访问」开关，走传统的 WRITE_EXTERNAL_STORAGE 运行时权限。
+            // 之前无论什么版本都只弹一句「请去系统设置授予所有文件访问」，而这些系统上
+            // 那个设置页根本不存在（Intent 解析失败还被 runCatching 吞掉），用户完全无从下手。
+            val legacyStoreLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { granted ->
+                if (granted) dirPicker.launch(null)
+                else Toast.makeText(appContext, "未授予存储权限，无法选择自定义目录", Toast.LENGTH_LONG).show()
+            }
             Row(
                 Modifier.fillMaxWidth().padding(top = 2.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -379,21 +388,25 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     modifier = Modifier.weight(1f),
                 )
                 OutlinedButton(onClick = {
-                    if (StorageDirUtil.hasAllFilesAccess(appContext)) {
-                        dirPicker.launch(null)
-                    } else {
-                        // 先引导授予「所有文件访问」（Android 11+ 分区存储下 File API 读写任意目录的前提）
-                        Toast.makeText(
-                            appContext,
-                            "请在系统设置中授予「所有文件访问」后，再次点击选择目录",
-                            Toast.LENGTH_LONG,
-                        ).show()
-                        runCatching {
-                            val intent = Intent(
-                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                Uri.parse("package:com.kaze.newage"),
-                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            appContext.startActivity(intent)
+                    when {
+                        StorageDirUtil.hasAllFilesAccess(appContext) -> dirPicker.launch(null)
+                        // API < 30：直接申请传统存储权限（有权限才能用 File API 写任意目录）
+                        StorageDirUtil.needsLegacyStoragePermission() ->
+                            legacyStoreLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        else -> {
+                            // Android 11+：先引导授予「所有文件访问」（分区存储下 File API 读写任意目录的前提）
+                            Toast.makeText(
+                                appContext,
+                                "请在系统设置中授予「所有文件访问」后，再次点击选择目录",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                            runCatching {
+                                val intent = Intent(
+                                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                                    Uri.parse("package:com.kaze.newage"),
+                                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                appContext.startActivity(intent)
+                            }
                         }
                     }
                 }) { Text("选择目录") }

@@ -109,6 +109,18 @@ data class ServerInstance(
 object JavaVersionInference {
 
     fun infer(mcVersion: String): Int {
+        // 快照版命名（25w03a = 2025 年第 3 周）里没有点号，旧实现直接落到最后的 `return 17`，
+        // 于是 2024 年之后的快照（需要 Java 21/25）会被配上一个跑不起来的 Java：
+        // 实例能建出来、一启动就 UnsupportedClassVersionError。按年份映射。
+        Regex("""(\d{2})w\d{2}[a-z]""").find(mcVersion.trim())?.let { m ->
+            val year = 2000 + m.groupValues[1].toInt()
+            return when {
+                year >= 26 -> 25   // 与正式版 26.x 对齐
+                year >= 24 -> 21   // 1.20.5 起需要 21
+                year >= 21 -> 17   // 1.17–1.20.4
+                else -> 8          // 1.16 及更早
+            }
+        }
         val m = Regex("""(\d+)\.(\d+)(?:\.(\d+))?""").find(mcVersion) ?: return 17
         val major = m.groupValues[1].toInt()
         val minor = m.groupValues[2].toInt()

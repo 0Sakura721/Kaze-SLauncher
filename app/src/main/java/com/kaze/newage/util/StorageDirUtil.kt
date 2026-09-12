@@ -1,8 +1,12 @@
 package com.kaze.newage.util
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import androidx.core.content.ContextCompat
 import java.io.File
 
 /**
@@ -52,7 +56,23 @@ object StorageDirUtil {
         if (path.length <= 48) path
         else path.take(20) + "…" + path.takeLast(24)
 
-    /** 是否有「所有文件访问」权限（自定义目录的 File API 读写前提，Android 11+ 分区存储限制） */
-    fun hasAllFilesAccess(context: Context): Boolean =
-        Environment.isExternalStorageManager()
+    /**
+     * 是否有权把实例目录放到任意位置。
+     *
+     * `Environment.isExternalStorageManager()` 是 **API 30 才加入**的，而本应用 minSdk 27：
+     * 不加版本判断会在 Android 8.0–10 上抛 `NoSuchMethodError`（属于 Error，不会被
+     * `catch (Exception)` 接住）→ 点「选择目录」直接崩。这些系统没有「所有文件访问」这个概念，
+     * 走的是传统的 `WRITE_EXTERNAL_STORAGE` 运行时权限（manifest 已按 maxSdkVersion=28 声明）。
+     */
+    fun hasAllFilesAccess(context: Context): Boolean = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()
+        else -> ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Android 11 以下需要单独申请传统存储权限（11+ 用「所有文件访问」开关） */
+    fun needsLegacyStoragePermission(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.R
 }

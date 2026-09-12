@@ -112,16 +112,15 @@ fun ServerScreen(
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
-            val name = "导入-${System.currentTimeMillis() % 10000}"
-            val dir = viewModel.instanceStore.createInstanceDir(name)
-            val target = java.io.File(dir, "server.jar")
-            try {
-                appContext.contentResolver.openInputStream(uri)?.use { ins ->
-                    target.outputStream().use { outs -> ins.copyTo(outs) }
-                }
-                viewModel.importJar(target, name, javaMajor = 17, memoryMb = 1024)
-            } catch (_: Exception) { }
+        // 复制挪到 ViewModel 的 IO 协程里：主线程同步拷贝几十 MB 的 jar 会 ANR，
+        // 而且原来的 `catch (_: Exception) { }` 会把失败全吞掉（用户点完毫无反应）。
+        uri?.let {
+            viewModel.importJar(
+                uri = it,
+                name = "导入-" + java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+                    .format(java.util.Date()),
+                memoryMb = 1024,
+            )
         }
     }
 

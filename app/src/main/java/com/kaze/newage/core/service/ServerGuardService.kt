@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
@@ -57,7 +58,10 @@ class ServerGuardService : Service() {
                 it.getStringExtra(EXTRA_TEXT) ?: "服务端运行中",
             )
         }
-        return START_STICKY
+        // START_NOT_STICKY：进程被系统回收后不要自动重建。
+        // START_STICKY 会用 null Intent 重建服务，于是通知又挂出"服务端运行中"——
+        // 而此时进程已死、服务端早就不在了，且没有任何代码会再撤下这条假通知。
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -75,6 +79,17 @@ class ServerGuardService : Service() {
             .setOngoing(true)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            // 点击回到应用：原来没有 contentIntent，点常驻通知毫无反应，用户回不到界面
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this,
+                    0,
+                    Intent(this, com.kaze.newage.MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+            )
             .build()
 
     companion object {

@@ -265,7 +265,7 @@ class DefaultServerManager(
                 }
                 instance.eulaFile.exists() -> {
                     slot.log("> eula.txt 为 false，正在改写为 true…", LineType.System)
-                    EulaHandler.flipToTrue(instance.dir)
+                    acceptEula(slot, instance)
                     launchServer(slot, runtime.version)
                 }
                 else -> {
@@ -279,7 +279,7 @@ class DefaultServerManager(
                     slot.checkCancelled()
                     if (!EulaHandler.isAccepted(instance.dir)) {
                         slot.log("> 正在改写 eula.txt → true…", LineType.System)
-                        EulaHandler.flipToTrue(instance.dir)
+                        acceptEula(slot, instance)
                     }
                     slot.log("> 重新启动服务器…", LineType.System)
                     launchServer(slot, runtime.version)
@@ -423,6 +423,24 @@ class DefaultServerManager(
      * 旧实现走 execute()，该进程游离在 slot 之外，用户点停止时它既不进 10 秒强杀路径，
      * 也没有任何代码持有它的引用，只能干等它自己退出（首启探测会跑完整个服务端启动过程）。
      */
+    /**
+     * 把 eula.txt 改成已接受；改不动就明确报错。
+     *
+     * `flipToTrue` 是**按正则替换** `eula=false` 这类写法的：用户手改过的 eula.txt
+     * （`eula = False`、行尾带注释、混杂 CRLF…）可能匹配不到而原样返回。旧实现不看返回值
+     * 就直接拉起服务端 → 服务端立即退出，界面只报「环境或配置问题」，用户重试多少次都一样，
+     * 也完全不知道问题出在 eula.txt。
+     */
+    private fun acceptEula(slot: RuntimeSlot, instance: ServerInstance) {
+        if (EulaHandler.flipToTrue(instance.dir).accepted) return
+        slot.log("> 未能按常规改写 eula.txt，改为直接覆盖写入", LineType.Warn)
+        if (!EulaHandler.accept(instance.dir).accepted) {
+            throw RuntimeException(
+                "eula.txt 存在但无法自动改写为 eula=true（可能被占用或目录只读），请手动改成 eula=true 后重试"
+            )
+        }
+    }
+
     private suspend fun runEulaProbe(slot: RuntimeSlot, javaVersion: String): Int? {
         val args = serverArgs(slot.instance, javaVersion) ?: return null
         val proc = env.launch(args, slot.instance.dir) ?: return null

@@ -2,6 +2,7 @@ package com.kaze.newage.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -103,19 +104,22 @@ fun NewServerScreen(
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
-        if (uri != null) {
-            val name = "导入-${System.currentTimeMillis() % 10000}"
-            val dir = viewModel.instanceStore.createInstanceDir(name)
-            val target = java.io.File(dir, "server.jar")
-            try {
-                appContext.contentResolver.openInputStream(uri)?.use { ins ->
-                    target.outputStream().use { outs -> ins.copyTo(outs) }
-                }
-                viewModel.importJar(target, name, javaMajor = 17, memoryMb = 1024)
-                onBack()
-            } catch (_: Exception) { }
+        // 同 ServerScreen：复制在 ViewModel 的 IO 协程里做，失败有 Toast（原实现主线程拷贝 + 静默吞异常）
+        uri?.let {
+            viewModel.importJar(
+                uri = it,
+                name = "导入-" + java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+                    .format(java.util.Date()),
+                memoryMb = 1024,
+            )
+            onBack()
         }
     }
+
+    // 系统返回键先回退向导**内部**的一步，而不是整页弹出（否则页内箭头只退一级、
+    // 系统返回直接关掉整个向导，已填的名称/端口/EULA 一起丢）。
+    // 配置页还有一层更深的 BackHandler（回版本列表），它注册得更晚、优先级更高。
+    BackHandler(enabled = coreType != null) { coreType = null }
 
     if (coreType == null) {
         CoreSelectPhase(
@@ -307,6 +311,9 @@ private fun VersionConfigPhase(
     LaunchedEffect(coreType) {
         viewModel.loadVersions(coreType)
     }
+
+    // 配置页按系统返回 → 回版本列表（与页内返回箭头行为一致）
+    BackHandler(enabled = selected != null) { selected = null }
 
     // 选中版本进配置页时：拉该版本的可选构建 + 给一个可改的默认实例名（FCL 行为）
     LaunchedEffect(selected) {
@@ -634,8 +641,12 @@ private fun ConfigPage(
     // Java 不给用户选择：按 MC 版本自动推断最优版本
     val autoJava = JavaVersionInference.infer(version.id)
     val exceeded = effectiveMb > totalMemGb * 1024f * 0.8f
-    // EULA 未同意时不允许创建（此前是首次启动静默写入 eula=true）
-    val canCreate = name.isNotBlank() && !download.running && eulaAgreed
+    // EULA 未同意时不允许创建（此前是首次启动静默写入 eula=true）；
+    // 端口冲突/越界同样阻断——只给红字提示却照样能点，会建出两个抢同一端口的实例，
+    // 后启动的那个 bind 失败直接退出。
+    val portValue = portText.toIntOrNull()
+    val portBad = portValue != null && (portValue !in 1024..65535 || portValue in usedPorts)
+    val canCreate = name.isNotBlank() && !download.running && eulaAgreed && !portBad
 
     // adjustNothing 下窗口不随键盘缩放：实例名/端口等输入框与底部按钮都会被键盘盖住
     Column(Modifier.fillMaxSize().imePadding().padding(16.dp)) {

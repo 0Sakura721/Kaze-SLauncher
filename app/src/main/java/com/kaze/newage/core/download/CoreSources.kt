@@ -39,14 +39,41 @@ object CoreSources {
     private fun versionKey(v: String): List<Long> =
         Regex("\\d+").findAll(v).map { it.value.toLong() }.toList()
 
-    /** 语义比较：a > b → 正（按数字段逐位比，不依赖 API 返回顺序） */
+    /** 预发布标记（Paper 的 26.2-rc-2 / 1.21.11-pre5 / 1.21.9-rc1…） */
+    private val PRERELEASE = Regex("-(rc|pre|beta|alpha|snapshot)", RegexOption.IGNORE_CASE)
+
+    /** 是否预发布版：从版本号本身判断，不依赖 API 字段（见 [fetchPaperVersions]） */
+    private fun isPreRelease(id: String): Boolean = PRERELEASE.containsMatchIn(id)
+
+    /** 去掉预发布后缀的基础版本号（26.2-rc-2 → 26.2） */
+    private fun baseVersion(v: String): String = v.substringBefore('-')
+
+    /**
+     * 语义比较：a > b → 正（按数字段逐位比，不依赖 API 返回顺序）。
+     *
+     * 基础版本相同时**正式版排在预发布版之上**。旧实现直接对整串取数字段，
+     * "-rc-2" 里的 2 会被当成第三个版本段，于是 `26.2-rc-2`([26,2,2]) > `26.2`([26,2])——
+     * 「正式版」筛选下的第一行成了候选版，用户按默认选项建服就会下到 rc。
+     */
     private fun compareVersions(a: String, b: String): Int {
-        val ka = versionKey(a)
-        val kb = versionKey(b)
+        val ka = versionKey(baseVersion(a))
+        val kb = versionKey(baseVersion(b))
         val n = maxOf(ka.size, kb.size)
         for (i in 0 until n) {
             val x = ka.getOrNull(i) ?: 0
             val y = kb.getOrNull(i) ?: 0
+            if (x != y) return x.compareTo(y)
+        }
+        val pa = isPreRelease(a)
+        val pb = isPreRelease(b)
+        if (pa != pb) return if (pa) -1 else 1
+        // 同为预发布：按完整数字段比，保证 rc-3 排在 rc-2 之上
+        val fa = versionKey(a)
+        val fb = versionKey(b)
+        val m = maxOf(fa.size, fb.size)
+        for (i in 0 until m) {
+            val x = fa.getOrNull(i) ?: 0
+            val y = fb.getOrNull(i) ?: 0
             if (x != y) return x.compareTo(y)
         }
         return 0
@@ -143,7 +170,15 @@ object CoreSources {
                 val v = el.jsonObject["version"]?.jsonObject ?: return@mapNotNull null
                 GameVersion(
                     id = v["id"]!!.jsonPrimitive.content,
-                    type = if (v["releaseChannel"]?.jsonPrimitive?.content == "experimental") VersionType.SNAPSHOT else VersionType.RELEASE,
+                    // v3 API 的 version 对象只有 id / support / java，**没有 releaseChannel**
+                    // （旧代码读这个字段恒为 null → 66 个版本全判成正式版，12 个 rc/pre 混在其中）。
+                    // support.status 也不能当依据：正常版本（如 26.1.1）同样是 UNSUPPORTED。
+                    // 因此按版本号里的预发布标记判断。
+                    type = if (isPreRelease(v["id"]!!.jsonPrimitive.content)) {
+                        VersionType.SNAPSHOT
+                    } else {
+                        VersionType.RELEASE
+                    },
                 )
             }
             Result.success(list)
@@ -337,7 +372,10 @@ object CoreSources {
     }
 
     fun getSpigotDownload(version: String): CoreDownload =
-        CoreDownload("https://download.getbukkit.org/spigot/spigot-$version.jar", "spigot-$version.jar")
+        // download.getbukkit.org 已 NXDOMAIN（2026-09 实测域名解析失败），
+        // 换到仍在服务的 cdn.getbukkit.org（同路径，实测 HTTP 200）。
+        // Spigot 没有官方构建 API，该 CDN 是社区常用来源，仍无官方哈希可校验。
+        CoreDownload("https://cdn.getbukkit.org/spigot/spigot-$version.jar", "spigot-$version.jar")
 
     // ── 统一入口 ──
     /** 各源版本列表统一处理：按版本号语义降序（最新在前，不依赖 API 返回顺序）+ 去重 */

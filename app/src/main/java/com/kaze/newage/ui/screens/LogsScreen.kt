@@ -66,7 +66,15 @@ fun LogsScreen(
     val latestLog = remember(instanceId, refresh) { File(instance.dir, "logs/latest.log") }
     val runLog = remember(instanceId, refresh) { File(instance.dir, "console-output.log") }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            // 崩溃报告是 forEach 全量展开的，不滚动的话报告一多，下面「运行日志 / 服务器日志」
+            // 两张卡会被推出视口且完全触达不到（反复崩溃的服务端必然产生多份报告）
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
         // ── 顶部栏 ──
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(onClick = { if (selected != null) selected = null else onBack() }) {

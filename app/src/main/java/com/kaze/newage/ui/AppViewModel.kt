@@ -55,6 +55,15 @@ data class JavaTaskState(
     val cancelRequested: Boolean = false,
 )
 
+/**
+ * 服务端核心 jar 的最小可接受体积（64KB）。
+ *
+ * 只用来兜底"明显不是包"的响应，真正的防伪是 ZIP 魔数与官方哈希。
+ * **下限不能定高**：Fabric 的 server launcher jar 实测只有 178KB（181,840 字节），
+ * 历史上 1MB 的阈值使 Fabric 每次下载都被判为非法、删文件重试，最终报"所有源不可用"。
+ */
+private const val MIN_CORE_JAR_BYTES = 64L * 1024L
+
 /** 共享 ViewModel：接线 core 各组件与 UI（多开：每实例独立状态/控制台） */
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -174,8 +183,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 可选下载：安装指定 Java 版本（8/17/21/25）；失败可再次调用重试（断点续传） */
     fun installJava(version: Int) {
         if (_javaTask.value.running) return // 任务进行中（含取消中）：等其退出后再点即续传
+        // 状态必须在这里同步置位，不能放进协程体：launch 只是把协程体派发出去、不会立即执行，
+        // 而 UI 的 enabled 还要等下一次重组才更新 —— 这段窗口内再点一次就会并发跑两个任务。
+        _javaTask.value = JavaTaskState(running = true, version = version, message = "准备安装 Java $version…")
         viewModelScope.launch(Dispatchers.IO) {
-            _javaTask.value = JavaTaskState(running = true, version = version, message = "准备安装 Java $version…")
             try {
                 if (!container.env.isReady) {
                     container.env.setup { p, m ->
@@ -215,8 +226,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 删除指定 Java 版本 */
     fun uninstallJava(version: Int) {
         if (_javaTask.value.running) return
+        // 同 installJava：同步置位，否则连点会并发卸载同一个版本
+        _javaTask.value = JavaTaskState(running = true, version = version, message = "卸载 Java $version…")
         viewModelScope.launch(Dispatchers.IO) {
-            _javaTask.value = JavaTaskState(running = true, version = version, message = "卸载 Java $version…")
             try {
                 container.javaManager.uninstall(version)
                 refreshJava()
@@ -229,8 +241,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── 动作：环境 ──
     fun setupEnv() {
+        // 部署是长任务（下载 rootfs + apt）：连点两次会同时跑两套部署、互相踩文件
+        if (_download.value.running) return
+        // 同步置位，理由同 installJava
+        _download.value = DownloadState(running = true, progress = 0f, message = "准备部署…")
         viewModelScope.launch(Dispatchers.IO) {
-            _download.value = DownloadState(running = true, progress = 0f, message = "准备部署…")
             try {
                 env.setup { progress, message ->
                     _download.value = DownloadState(running = true, progress = progress, message = message)
@@ -300,8 +315,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         sendCommand("list")
     }
 
-    /** 清空当前实例控制台显示（不影响后端日志流） */
+    /**
+     * 清空当前实例控制台显示。
+     *
+     * 必须**同时**清后端环形缓冲：只清 UI 列表的话，切走再切回时订阅会重建并
+     * `snapshot()` 回填历史，刚清掉的日志整段复活（用户以为清空没生效）；
+     * 而此时「复制/导出」用的是清空后的短列表，与屏幕上看到的内容也对不上。
+     */
     fun clearConsole() {
+        _currentInstanceId.value?.let { id -> serverManager.consoleFor(id).clear() }
         _consoleLines.value = emptyList()
     }
 
@@ -406,9 +428,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         buildId: String = "",
         onComplete: (ServerInstance?) -> Unit,
     ) {
+        // 连点守卫 + 同步置位：两个并发下载会写同一个 .part 文件，把包写坏。
+        // （UI 上的 enabled 要等重组才更新，靠它拦不住快速双击或脚本连续点击）
+        if (_download.value.running) return
+        _download.value = DownloadState(running = true, progress = 0f, message = "解析下载地址…")
         downloadCancelRequested = false
         viewModelScope.launch(Dispatchers.IO) {
-            _download.value = DownloadState(running = true, progress = 0f, message = "解析下载地址…")
             var dir: File? = null
             try {
                 val dl = CoreSources.resolveDownload(type, mcVersion, buildId).getOrThrow()
@@ -430,12 +455,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     },
                     shouldCancel = { downloadCancelRequested },
+                    // 重试/换源期间给出文案：不接线的话弱网下进度条会一直冻在"下载中 X MB"，
+                    // 最长静默约 9 分钟（4 轮 × 3 次 × (15s 连接 + 30s 读)），用户只能看着不动
+                    onSourceError = { _, msg ->
+                        _download.value = DownloadState(running = true, progress = 0f, message = msg)
+                    },
                     // 官方清单给了 sha1 就必须校验（旧实现完全不校验 → 镜像的 200+HTML
                     // 错误页会被当作 jar 重命名入库，直到启动时才报"没有核心 jar"）
                     validate = { f ->
                         // 大小 + ZIP 魔数：服务端核心都是 jar，魔数能挡住镜像的 HTML 错误页
                         // （Spigot/Fabric/Forge 没有官方哈希可对，此前只查大小）
-                        f.length() > 1_000_000L &&
+                        //
+                        // 下限必须放得很低：Fabric 的 server launcher jar 实测只有 178KB
+                        // （181,840 字节），原来 1MB 的阈值让 Fabric **永远**校验失败——
+                        // 文件被删、重试 4 轮后报"所有源不可用"。防伪交给魔数与官方哈希。
+                        f.length() > MIN_CORE_JAR_BYTES &&
                             Downloader.isZip(f) &&
                             (dl.sha1 == null ||
                                 Downloader.sha1Of(f)?.equals(dl.sha1, ignoreCase = true) == true)
@@ -501,8 +535,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun installAddon(instance: ServerInstance, kind: AddonKind, hit: ModrinthSearchHit) {
         if (_addonInstall.value.running) return
+        // 同步置位，理由同 installJava：否则连点会并发装同一个插件
+        _addonInstall.value = DownloadState(running = true, message = "解析 ${hit.title} 版本…")
         viewModelScope.launch(Dispatchers.IO) {
-            _addonInstall.value = DownloadState(running = true, message = "解析 ${hit.title} 版本…")
             try {
                 val file = AddonManager.install(instance, kind, hit.project_id, instance.mcVersion) { p, m ->
                     _addonInstall.value = DownloadState(running = true, progress = p, message = m)
@@ -518,29 +553,78 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _addonInstall.value = DownloadState()
     }
 
-    /** 导入自定义 jar 创建实例（后台拷贝；大 jar 不能在主线程同步复制——会 ANR） */
-    fun importJar(jarFile: File, name: String, javaMajor: Int, memoryMb: Int) {
+    /**
+     * 导入 jar：把用户选中的文件复制进一个新实例目录并登记实例。
+     *
+     * 复制必须在这里（IO）做，不能让调用方在主线程 `copyTo`：几十 MB 的 jar 会阻塞 UI（ANR 风险），
+     * 而且调用方原来用 `catch (_: Exception) { }` 把失败全吞了——用户选完文件毫无反应，
+     * 目录里可能留下半截 server.jar。
+     *
+     * Toast 一律回到主线程发：`Toast.show()` 需要当前线程有 Looper，
+     * 在 Dispatchers.IO 上直接调用会抛 "Can't create handler inside thread that has not called Looper.prepare()"
+     * ——导入成功/失败两条路径都会走到 Toast，等于每次导入都崩。
+     */
+    fun importJar(uri: android.net.Uri, name: String, memoryMb: Int) {
         viewModelScope.launch(Dispatchers.IO) {
-            val dir = instanceStore.createInstanceDir(name)
-            val target = File(dir, jarFile.name)
+            val ctx = container.appContext
+            var dir: File? = null
             try {
-                jarFile.copyTo(target, overwrite = true)
+                dir = instanceStore.createInstanceDir(name)
+                val target = File(dir, "server.jar")
+                ctx.contentResolver.openInputStream(uri)?.use { ins ->
+                    target.outputStream().use { outs -> ins.copyTo(outs) }
+                } ?: throw RuntimeException("无法读取所选文件")
+                if (!target.isFile || target.length() == 0L) throw RuntimeException("所选文件为空")
                 val instance = ServerInstance(
                     name = name,
                     coreType = CoreType.CUSTOM,
-                    javaMajor = javaMajor,
+                    // 按 jar 内 class 文件版本推断（导入路径没法从 MC 版本号推）：
+                    // 原来硬编码 17，导入 1.20.5+ 的服务端会在启动时 UnsupportedClassVersionError
+                    javaMajor = inferJavaFromJar(target),
                     memoryMb = memoryMb,
                     dir = dir,
                 )
                 instanceStore.add(instance)
                 ServerProperties.ensureInitial(instance, instanceStore.instances.value)
                 _currentInstanceId.value = instance.id
-                android.widget.Toast.makeText(container.appContext, "已导入：${instance.name}", android.widget.Toast.LENGTH_SHORT).show()
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(ctx, "已导入：${instance.name}", android.widget.Toast.LENGTH_SHORT).show()
+                }
             } catch (e: Exception) {
-                // 拷贝失败清理半成品目录，避免被 rescan 误识别为实例
-                runCatching { dir.deleteRecursively() }
-                android.widget.Toast.makeText(container.appContext, "导入失败：${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                // 只清理本次新建的半成品目录；用户的源文件是 SAF 只读流，不会被改动
+                runCatching { dir?.deleteRecursively() }
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        ctx, "导入失败：${e.message ?: "未知错误"}", android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }
     }
+
+    /**
+     * 从 jar 内的 class 文件推断所需 Java 主版本（导入自定义核心用）。
+     *
+     * class 文件的第 6-7 字节是 major version：52=Java 8、61=Java 17、65=Java 21、69=Java 25。
+     * 导入路径无法从 MC 版本号推断，读 class 版本是最直接的依据；
+     * 读不出来时退回 17（覆盖面最广，用户也可以在实例详情里看到实际推断值）。
+     */
+    private fun inferJavaFromJar(jar: File): Int = runCatching {
+        java.util.zip.ZipFile(jar).use { zip ->
+            val entry = zip.entries().asSequence().firstOrNull {
+                it.name.endsWith(".class") && !it.name.startsWith("META-INF/")
+            } ?: return@use 17
+            zip.getInputStream(entry).use { ins ->
+                val head = ByteArray(8)
+                if (ins.read(head) < 8) return@use 17
+                val major = ((head[6].toInt() and 0xFF) shl 8) or (head[7].toInt() and 0xFF)
+                when {
+                    major >= 69 -> 25
+                    major >= 65 -> 21
+                    major >= 61 -> 17
+                    else -> 8
+                }
+            }
+        }
+    }.getOrDefault(17)
 }
