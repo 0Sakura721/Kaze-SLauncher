@@ -49,7 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -95,9 +95,9 @@ fun ServerScreen(
     onOpenInstance: (ServerInstance) -> Unit,
     onNewServer: () -> Unit,
 ) {
-    val instances by viewModel.instances.collectAsState()
-    val states by viewModel.serverStates.collectAsState()
-    val currentInstanceId by viewModel.currentInstanceId.collectAsState()
+    val instances by viewModel.instances.collectAsStateWithLifecycle()
+    val states by viewModel.serverStates.collectAsStateWithLifecycle()
+    val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()
     val appContext = LocalContext.current.applicationContext
 
     // 分类筛选（Zalith VersionCategory：全部/官方/性能优化/模组加载）

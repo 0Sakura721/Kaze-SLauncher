@@ -56,7 +56,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -239,12 +239,12 @@ private fun VersionConfigPhase(
     onBackToCore: () -> Unit,
     onExit: () -> Unit,
 ) {
-    val versions by viewModel.versions.collectAsState()
-    val versionsLoading by viewModel.versionsLoading.collectAsState()
-    val download by viewModel.download.collectAsState()
+    val versions by viewModel.versions.collectAsStateWithLifecycle()
+    val versionsLoading by viewModel.versionsLoading.collectAsStateWithLifecycle()
+    val download by viewModel.download.collectAsStateWithLifecycle()
     // 选定版本后的可选构建（Paper 有构建列表，其余核心为空）
-    val builds by viewModel.builds.collectAsState()
-    val buildsLoading by viewModel.buildsLoading.collectAsState()
+    val builds by viewModel.builds.collectAsStateWithLifecycle()
+    val buildsLoading by viewModel.buildsLoading.collectAsStateWithLifecycle()
     var buildId by remember { mutableStateOf("") }          // "" = 最新构建
     var showBuildPicker by remember { mutableStateOf(false) }
 

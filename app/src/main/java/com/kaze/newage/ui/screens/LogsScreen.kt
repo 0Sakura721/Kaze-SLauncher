@@ -20,7 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +49,7 @@ fun LogsScreen(
     instanceId: String,
     onBack: () -> Unit,
 ) {
-    val instances by viewModel.instances.collectAsState()
+    val instances by viewModel.instances.collectAsStateWithLifecycle()
     val instance = instances.firstOrNull { it.id == instanceId }
     if (instance == null) {
         androidx.compose.runtime.LaunchedEffect(Unit) { onBack() }

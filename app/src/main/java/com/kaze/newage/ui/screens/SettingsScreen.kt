@@ -46,7 +46,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -100,8 +100,8 @@ private val versionBadgeBackdrop: Color = Color(0xFFA87C27)
  */
 @Composable
 fun SettingsScreen(viewModel: AppViewModel) {
-    val javaVersions by viewModel.envJavaVersions.collectAsState()
-    val javaTask by viewModel.javaTask.collectAsState()
+    val javaVersions by viewModel.envJavaVersions.collectAsStateWithLifecycle()
+    val javaTask by viewModel.javaTask.collectAsStateWithLifecycle()
     val appContext = LocalContext.current.applicationContext
     val uiPrefs = viewModel.uiPrefs
 

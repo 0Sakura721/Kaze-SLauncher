@@ -32,7 +32,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -74,9 +74,9 @@ fun InstanceDetailScreen(
     onOpenAddons: (AddonKind) -> Unit,
     onOpenLogs: () -> Unit,
 ) {
-    val instances by viewModel.instances.collectAsState()
-    val states by viewModel.serverStates.collectAsState()
-    val uptime by viewModel.uptimeSec.collectAsState()
+    val instances by viewModel.instances.collectAsStateWithLifecycle()
+    val states by viewModel.serverStates.collectAsStateWithLifecycle()
+    val uptime by viewModel.uptimeSec.collectAsStateWithLifecycle()
     val instance = instances.firstOrNull { it.id == instanceId }
     if (instance == null) {
         androidx.compose.runtime.LaunchedEffect(Unit) { onBack() }
@@ -476,7 +476,7 @@ private fun PlayerManageCard(
     instanceId: String,
     running: Boolean,
 ) {
-    val players by viewModel.onlinePlayers.collectAsState()
+    val players by viewModel.onlinePlayers.collectAsStateWithLifecycle()
     var name by remember(instanceId) { mutableStateOf("") }
 
     fun doCmd(cmd: String) {

@@ -28,7 +28,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -63,7 +63,7 @@ fun AddonsScreen(
     kind: AddonKind,
     onBack: () -> Unit,
 ) {
-    val instances by viewModel.instances.collectAsState()
+    val instances by viewModel.instances.collectAsStateWithLifecycle()
     val instance = instances.firstOrNull { it.id == instanceId }
     if (instance == null) {
         androidx.compose.runtime.LaunchedEffect(Unit) { onBack() }
@@ -74,9 +74,9 @@ fun AddonsScreen(
     var searched by remember { mutableStateOf(false) }
     var refresh by remember { mutableIntStateOf(0) }
     val installed = remember(instanceId, refresh) { AddonManager.installed(instance, kind) }
-    val results by viewModel.addonResults.collectAsState()
-    val searching by viewModel.addonSearching.collectAsState()
-    val installState by viewModel.addonInstall.collectAsState()
+    val results by viewModel.addonResults.collectAsStateWithLifecycle()
+    val searching by viewModel.addonSearching.collectAsStateWithLifecycle()
+    val installState by viewModel.addonInstall.collectAsStateWithLifecycle()
 
     val kindLabel = if (kind == AddonKind.PLUGIN) "插件" else "模组"
 

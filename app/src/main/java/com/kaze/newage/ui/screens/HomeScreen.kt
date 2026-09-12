@@ -36,7 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -75,14 +75,14 @@ fun HomeScreen(
     onNavigate: (String) -> Unit,
     onNewServer: () -> Unit,
 ) {
-    val envState by viewModel.envState.collectAsState()
-    val javaVersions by viewModel.envJavaVersions.collectAsState()
-    val download by viewModel.download.collectAsState()
-    val serverState by viewModel.serverState.collectAsState()
-    val instances by viewModel.instances.collectAsState()
-    val currentInstanceId by viewModel.currentInstanceId.collectAsState()
-    val uptime by viewModel.uptimeSec.collectAsState()
-    val onlinePlayers by viewModel.onlinePlayers.collectAsState()
+    val envState by viewModel.envState.collectAsStateWithLifecycle()
+    val javaVersions by viewModel.envJavaVersions.collectAsStateWithLifecycle()
+    val download by viewModel.download.collectAsStateWithLifecycle()
+    val serverState by viewModel.serverState.collectAsStateWithLifecycle()
+    val instances by viewModel.instances.collectAsStateWithLifecycle()
+    val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()
+    val uptime by viewModel.uptimeSec.collectAsStateWithLifecycle()
+    val onlinePlayers by viewModel.onlinePlayers.collectAsStateWithLifecycle()
 
     val current = instances.firstOrNull { it.id == currentInstanceId } ?: instances.firstOrNull()
     val tone = serverState.toTone()

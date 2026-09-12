@@ -36,7 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,8 +62,8 @@ import com.kaze.newage.ui.toTone
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ConsoleScreen(viewModel: AppViewModel) {
-    val lines by viewModel.consoleLines.collectAsState()
-    val serverState by viewModel.serverState.collectAsState()
+    val lines by viewModel.consoleLines.collectAsStateWithLifecycle()
+    val serverState by viewModel.serverState.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     var follow by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
@@ -106,10 +106,10 @@ fun ConsoleScreen(viewModel: AppViewModel) {
     }
 
     // 实例切换器（多开：每实例独立控制台）
-    val instances by viewModel.instances.collectAsState()
-    val currentInstanceId by viewModel.currentInstanceId.collectAsState()
+    val instances by viewModel.instances.collectAsStateWithLifecycle()
+    val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()
     val current = instances.firstOrNull { it.id == currentInstanceId }
-    val states by viewModel.serverStates.collectAsState()
+    val states by viewModel.serverStates.collectAsStateWithLifecycle()
     var showSwitcher by remember { mutableStateOf(false) }
 
     Column(
