@@ -267,6 +267,10 @@ class DefaultServerManager(
             // 3.5 patched 核心（Paper/Purpur）预置原版 jar + 修补 rootfs 结构
             ensureVanillaJar(slot, instance)
             patchRootfs(slot)
+            // 取消检查点：ensureVanillaJar 可能要下几十 MB 的原版 jar，这是启动流程里最长的一段。
+            // 没有这个检查点的话，用户在下载中原版 jar 时点「停止」只会置上标志，
+            // start() 却一路走到 launchServer —— 界面显示"已停止"，服务端照样被拉起来。
+            slot.checkCancelled()
 
             // 4. eula 三段式
             when {
@@ -368,6 +372,8 @@ class DefaultServerManager(
                 Downloader.download(
                     url,
                     tmp,
+                    // 让下载本身也能被「停止」打断，而不是下完这几十 MB 才发现被取消
+                    shouldCancel = { slot.manualStop },
                     onProgress = { d, t ->
                         val mb = d / 1024 / 1024
                         if (mb - lastMb >= 10) { // 10MB 一条，避免刷屏
