@@ -15,6 +15,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -68,6 +69,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import java.util.Locale
@@ -912,10 +914,12 @@ private fun ConfigPage(
             // 此前是首次启动时静默写入 eula=true（用户从未看到过条款）
             val context = LocalContext.current
             Row(
-                Modifier.fillMaxWidth().clickable { onEulaAgreedChange(!eulaAgreed) },
+                Modifier.fillMaxWidth().toggleable(value = eulaAgreed, role = Role.Checkbox, onValueChange = onEulaAgreedChange),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Checkbox(checked = eulaAgreed, onCheckedChange = onEulaAgreedChange)
+                // onCheckedChange = null：整行的 clickable 已是唯一触控目标。
+                    // 否则同一个动作有两个可聚焦节点，TalkBack 会把"同意"读两遍。
+                    Checkbox(checked = eulaAgreed, onCheckedChange = null)
                 Column(Modifier.weight(1f)) {
                     Text(
                         "我已阅读并同意 Minecraft EULA",

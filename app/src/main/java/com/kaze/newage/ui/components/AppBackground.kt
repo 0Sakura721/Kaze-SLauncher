@@ -45,7 +45,9 @@ fun AppBackground(
 fun BackdropLayer(prefs: SettingsPrefs, modifier: Modifier = Modifier) {
     Box(modifier) {
         val path = if (prefs.bgEnabled.value) prefs.backgroundImagePath() else null
-        val bitmap = remember(path) { path?.let { BitmapFactory.decodeFile(it) } }
+        // 带上版本号：背景图固定写同一路径，只用 path 作 key 的话换图不会重新解码
+    val revision = prefs.bgRevision.value
+    val bitmap = remember(path, revision) { path?.let { BitmapFactory.decodeFile(it) } }
         if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),

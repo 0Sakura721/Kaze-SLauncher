@@ -19,6 +19,15 @@ class SettingsPrefs(context: Context) {
 
     /** 背景图是否存在（State：保存/清除后自动刷新 UI） */
     private val bgExists = mutableStateOf(bgFile.exists())
+
+    /**
+     * 背景图版本号：每次换图/清除都自增。
+     *
+     * 背景图始终写同一个路径（filesDir/background.png），只靠 
+emember(path) 缓存位图的话，
+     * 换一张新图后 path 没变 → 不会重新解码，界面仍显示旧图，必须重启应用才生效。
+     */
+    val bgRevision = mutableStateOf(0)
     val hasBackgroundImage: Boolean get() = bgExists.value
 
     /** 是否启用背景图 */
@@ -131,11 +140,15 @@ class SettingsPrefs(context: Context) {
         if (scaled != src) scaled.recycle()
         src.recycle()
         bgExists.value = true
+        // 让依赖背景图的 UI（AppBackground 的位图缓存）知道内容变了
+        bgRevision.value = bgRevision.value + 1
     }
 
     fun clearBackgroundImage() {
         bgFile.delete()
         bgExists.value = false
+        // 让依赖背景图的 UI（AppBackground 的位图缓存）知道内容变了
+        bgRevision.value = bgRevision.value + 1
     }
 
     fun setBgEnabled(v: Boolean) {

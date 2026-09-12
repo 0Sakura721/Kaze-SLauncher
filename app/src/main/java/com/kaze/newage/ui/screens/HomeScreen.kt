@@ -78,7 +78,8 @@ fun HomeScreen(
 ) {
     val envState by viewModel.envState.collectAsStateWithLifecycle()
     val javaVersions by viewModel.envJavaVersions.collectAsStateWithLifecycle()
-    val download by viewModel.download.collectAsStateWithLifecycle()
+    // 部署进度走独立状态：与核心下载分开后，部署中进新建向导不会再串进度、下载中点部署也有反馈
+    val download by viewModel.envTask.collectAsStateWithLifecycle()
     val serverState by viewModel.serverState.collectAsStateWithLifecycle()
     val instances by viewModel.instances.collectAsStateWithLifecycle()
     val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()

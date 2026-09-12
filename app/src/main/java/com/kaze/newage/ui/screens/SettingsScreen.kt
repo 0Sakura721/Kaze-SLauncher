@@ -212,6 +212,12 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 }
 
                 // 深色样式（BiliPai DarkThemeStyle：普通黑/AMOLED纯黑）
+                // AMOLED 只在深色下有意义，先算出当前实际是不是深色（"跟随系统"要看系统）
+                val darkNow = when (uiPrefs.themeMode.value) {
+                    "light" -> false
+                    "dark" -> true
+                    else -> androidx.compose.foundation.isSystemInDarkTheme()
+                }
                 Text("深色样式", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 14.dp))
                 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
                 androidx.compose.foundation.layout.FlowRow(
@@ -221,6 +227,16 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 ) {
                     CheckChip(selected = uiPrefs.darkStyle.value == 0, label = "普通黑", onClick = { uiPrefs.setDarkStyle(0) })
                     CheckChip(selected = uiPrefs.darkStyle.value == 1, label = "AMOLED 纯黑", onClick = { uiPrefs.setDarkStyle(1) })
+                }
+                // AMOLED 只在深色下有意义：浅色（或跟随系统且系统为浅色）时点了界面毫无变化，
+                // 用户会以为设置没保存。这里把前提写清楚。
+                if (!darkNow) {
+                    Text(
+                        "「AMOLED 纯黑」只在深色模式下生效，当前是浅色",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
                 }
 
                 // MD3 颜色来源（BiliPai Md3ColorSource：跟随系统壁纸/自定义颜色）
@@ -382,7 +398,16 @@ fun SettingsScreen(viewModel: AppViewModel) {
             ) {
                 Text(
                     if (uiPrefs.instanceDirPath.value.isBlank()) "默认：应用外部目录 instances/"
-                    else "当前：${StorageDirUtil.displayPath(uiPrefs.instanceDirPath.value)}",
+                    else {
+                        // 目录失效时要说明：InstanceStore 会静默回落到默认目录（新实例建在
+                        // 用户找不到的地方），而这里仍显示旧路径 → 两边说法不一致
+                        if (java.io.File(uiPrefs.instanceDirPath.value).isDirectory) {
+                            "当前：${StorageDirUtil.displayPath(uiPrefs.instanceDirPath.value)}"
+                        } else {
+                            "自定义目录当前不可用（已回落到默认目录）：" +
+                                StorageDirUtil.displayPath(uiPrefs.instanceDirPath.value)
+                        }
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -1011,26 +1036,34 @@ private fun ColorPickerDialog(
                     )
                 }
                 // 预览 + 手动 HEX 输入（合法则实时预览）
+                //
+                // 输入框必须有**独立的**文本状态：把 value 直接绑到 hsv 派生出的
+                // "#RRGGBB" 上时，已显示文本固定 7 字符，用户按一个键就变 8 字符（>7 被丢弃）
+                // 或删成 5 位（非法被丢弃），状态不变 → 输入被回滚，手动输入根本打不进字。
+                var hexText by remember { mutableStateOf(String.format("#%06X", current.toArgb() and 0xFFFFFF)) }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Box(
                         Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(current)
                     )
                     OutlinedTextField(
-                        value = String.format("#%06X", current.toArgb() and 0xFFFFFF),
+                        value = hexText,
                         onValueChange = { input ->
-                            if (input.length <= 7) {
-                                val raw = input.trim().removePrefix("#")
-                                if (raw.length == 6 && raw.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) {
-                                    val argb = raw.toLong(16).toInt() or 0xFF000000.toInt()
-                                    val h = floatArrayOf(0f, 0f, 0f)
-                                    android.graphics.Color.colorToHSV(argb, h)
-                                    hsv = h
-                                }
+                            // 只保留 HEX 允许的字符并限长，剩下的交给"合法才应用"的判定
+                            val cleaned = input.filter { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == '#' }
+                                .take(7)
+                            hexText = cleaned
+                            val raw = cleaned.removePrefix("#")
+                            if (raw.length == 6) {
+                                val argb = raw.toLong(16).toInt() or 0xFF000000.toInt()
+                                val h = floatArrayOf(0f, 0f, 0f)
+                                android.graphics.Color.colorToHSV(argb, h)
+                                hsv = h
                             }
                         },
                         label = { Text("HEX") },
                         placeholder = { Text("#00FFFF") },
                         singleLine = true,
+                        isError = hexText.removePrefix("#").length != 6,
                         modifier = Modifier.weight(1f),
                     )
                 }

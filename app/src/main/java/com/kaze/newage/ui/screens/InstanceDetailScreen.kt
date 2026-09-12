@@ -38,6 +38,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -360,10 +362,15 @@ fun InstanceDetailScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .clickable {
-                                    // 运行/启动/停止中都不允许恢复（目录正被进程使用）
+                                    // 任何"目录可能正被占用"的状态都不允许恢复：
+                                    // 补上 FirstRun / AcceptingEula —— 首启探测期间服务端进程是活着的
+                                    // （正在生成世界、稍后会被改写 eula 再重启），此时把实例目录整体
+                                    // 换掉，运行中的进程会继续往已被改名的旧目录写，恢复结果不可预期。
                                     if (state == ServerState.Running ||
                                         state == ServerState.Starting ||
-                                        state == ServerState.Stopping
+                                        state == ServerState.Stopping ||
+                                        state == ServerState.FirstRun ||
+                                        state == ServerState.AcceptingEula
                                     ) {
                                         backupMsg = "请先停止服务端再恢复备份"
                                     } else {
@@ -544,8 +551,13 @@ private fun PropertiesEditor(
     isRunning: Boolean,
     onSave: (Map<String, String>) -> Unit,
 ) {
-    var props by remember(dir) { mutableStateOf(ServerProperties.load(dir)) }
-    var saved by remember(dir) { mutableStateOf(false) }
+                            // rememberSaveable：普通 remember 不进 SaveableStateHolder，导航到
+                            // 插件/日志页再返回时会重新 ServerProperties.load(dir)，
+                            // 用户没保存的修改与「已保存」标记会被静默回滚
+                            var props by rememberSaveable(dir, stateSaver = propsSaver) {
+                                mutableStateOf(ServerProperties.load(dir))
+                            }
+                            var saved by rememberSaveable(dir) { mutableStateOf(false) }
     val p = props
 
     fun value(key: String, default: String): String = p[key] ?: default
@@ -601,7 +613,14 @@ private fun PropertiesEditor(
 
             // 游戏模式
             Text("游戏模式", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
-            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // FlowRow 而不是 Row：普通 Row 里靠后的 chip 只能用剩余宽度测量，
+            // 系统字体放大后会被压到 0 宽或裁字（同文件「空服自动暂停」已用 FlowRow）
+            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+            androidx.compose.foundation.layout.FlowRow(
+                Modifier.padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 listOf("survival" to "生存", "creative" to "创造", "adventure" to "冒险", "spectator" to "旁观").forEach { (id, label) ->
                     CheckChip(selected = gamemode == id, label = label, onClick = { set("gamemode", id) })
                 }
@@ -699,3 +718,29 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }
+
+/**
+ * `Map<String, String>` 的 Saver（详情页 server.properties 的编辑态）。
+ *
+ * `rememberSaveable` 只接受能进 Bundle 的类型，Map 不在其中，所以摊平成 String 列表存取。
+ * 用它是因为普通 `remember` 不进 SaveableStateHolder：导航到插件/日志页再返回时
+ * 会重新 `ServerProperties.load(dir)`，用户未保存的修改与「已保存」标记会被静默回滚。
+ */private val propsSaver: Saver<LinkedHashMap<String, String>, ArrayList<String>> = Saver(
+    save = { map: LinkedHashMap<String, String> ->
+        ArrayList<String>(map.size * 2).apply {
+            map.forEach { (k, v) ->
+                add(k)
+                add(v)
+            }
+        }
+    },
+    restore = { flat: ArrayList<String> ->
+        LinkedHashMap<String, String>().apply {
+            var i = 0
+            while (i + 1 < flat.size) {
+                put(flat[i], flat[i + 1])
+                i += 2
+            }
+        }
+    },
+)

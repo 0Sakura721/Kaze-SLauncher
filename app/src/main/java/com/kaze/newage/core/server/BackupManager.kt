@@ -136,9 +136,28 @@ object BackupManager {
             } catch (e: Exception) {
                 false
             }
-            if (!movedIn && !instance.dir.exists()) {
-                // 换入失败：旧目录原样滚回
-                if (keepOld.exists()) keepOld.renameTo(instance.dir)
+            if (!movedIn) {
+                // 换入失败：**一律**回滚，并且绝不删 keepOld。
+                //
+                // 旧实现的条件是 `!movedIn && !instance.dir.exists()`：只要失败期间实例目录被
+                // 重新创建（日志落盘的 parentFile.mkdirs()、或仍在运行的进程往目录里写文件），
+                // 这个分支就会被跳过，紧接着的 `keepOld.deleteRecursively()` 会把旧数据删掉，
+                // 而 finally 又删掉 tmp —— 两份数据同时消失，而界面还提示"已恢复"。
+                if (instance.dir.exists()) {
+                    // 目标位置被占：先挪开，再把旧目录放回去
+                    val conflict = File(parent, "restore_conflict_$ts")
+                    if (instance.dir.renameTo(conflict)) {
+                        if (keepOld.exists()) keepOld.renameTo(instance.dir)
+                        conflict.deleteRecursively()
+                    } else {
+                        // 挪不动就什么都不删，把旧数据留在原地并告知路径
+                        throw IllegalStateException(
+                            "恢复换入失败，且实例目录被占用；原数据保留在 ${keepOld.absolutePath}"
+                        )
+                    }
+                } else if (keepOld.exists()) {
+                    keepOld.renameTo(instance.dir)
+                }
                 throw IllegalStateException("恢复换入失败，已回滚（实例数据未受影响）")
             }
             if (keepOld.exists()) keepOld.deleteRecursively()

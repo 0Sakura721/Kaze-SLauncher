@@ -285,6 +285,9 @@ fun NewAgeTheme(
             surfaceContainerLow = Color(0xFF050608),
             surfaceContainerLowest = Color.Black,
             surfaceContainerHighest = Color(0xFF101216),
+            // surfaceBright 也必须覆盖：M3 的卡片底色 cardColor() 用的正是它，
+            // 漏掉的话「AMOLED 纯黑」下卡片仍是原来的亮灰，看着一点都不纯黑
+            surfaceBright = Color(0xFF14161A),
         )
     } else scheme
 

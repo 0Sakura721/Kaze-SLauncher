@@ -116,6 +116,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _download = MutableStateFlow(DownloadState())
     val download: StateFlow<DownloadState> = _download.asStateFlow()
 
+    /** 环境部署的独立进度（与核心下载分开，见 [setupEnv]） */
+    private val _envTask = MutableStateFlow(DownloadState())
+    val envTask: StateFlow<DownloadState> = _envTask.asStateFlow()
+
     private val _versions = MutableStateFlow<List<GameVersion>>(emptyList())
     val versions: StateFlow<List<GameVersion>> = _versions.asStateFlow()
 
@@ -162,7 +166,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 // （snapshot() 之前定义了却没有任何调用点）
                 _consoleLines.value = stream.snapshot().takeLast(2000)
                 stream.lines.collect { line ->
-                    _consoleLines.value = (_consoleLines.value + line).takeLast(2000)
+                    // 覆盖行（服务端 \r 原地进度）要替换上一行而不是追加：
+                        // 只让环形缓冲去替换的话，实时视图仍会把每个百分比都追加成一行
+                        val cur = _consoleLines.value
+                        _consoleLines.value = if (line.replaceLast && cur.isNotEmpty()) {
+                            (cur.dropLast(1) + line).takeLast(2000)
+                        } else {
+                            (cur + line).takeLast(2000)
+                        }
                     ConsoleParser.parseOnlinePlayers(line.text)?.let { _onlinePlayers.value = it }
                     ConsoleParser.parseJoin(line.text)?.let { name ->
                         if (name !in _onlinePlayers.value) _onlinePlayers.value = _onlinePlayers.value + name
@@ -260,21 +271,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ── 动作：环境 ──
+    /**
+     * 部署 Linux 环境。
+     *
+     * 进度写到**独立的** [envTask] 而不是 [download]：两者共用同一个状态字段时，
+     * 「部署中进新建向导」会让向导把部署进度当成核心下载进度显示、并禁用创建按钮；
+     * 反过来「下载核心时点部署」又会静默早退、按钮毫无反馈。
+     */
     fun setupEnv() {
         // 部署是长任务（下载 rootfs + apt）：连点两次会同时跑两套部署、互相踩文件
-        if (_download.value.running) return
+        if (_envTask.value.running) return
         // 同步置位，理由同 installJava
-        _download.value = DownloadState(running = true, progress = 0f, message = "准备部署…")
+        _envTask.value = DownloadState(running = true, progress = 0f, message = "准备部署…")
         // 部署要跑几分钟（下载 rootfs + apt），退出界面不应中断
         container.appScope.launch {
             try {
                 env.setup { progress, message ->
-                    _download.value = DownloadState(running = true, progress = progress, message = message)
+                    _envTask.value = DownloadState(running = true, progress = progress, message = message)
                 }
                 refreshJava()
-                _download.value = DownloadState(done = true, message = "环境部署完成")
+                _envTask.value = DownloadState(done = true, message = "环境部署完成")
             } catch (e: Exception) {
-                _download.value = DownloadState(error = e.message ?: "部署失败")
+                _envTask.value = DownloadState(error = e.message ?: "部署失败")
             }
         }
     }

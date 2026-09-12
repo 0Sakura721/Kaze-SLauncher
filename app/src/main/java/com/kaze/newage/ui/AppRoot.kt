@@ -146,7 +146,13 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             updateBusy = false
             if (file != null) {
                 updateInfo = null
-                UpdateInstaller.install(appContext, file)
+                // 检查安装器是否真的被拉起：失败时（没有「安装未知应用」权限、
+                // FileProvider 取不到文件等）旧实现直接收掉弹窗、什么都不说，
+                // 用户以为更新完成了，实际什么都没发生
+                if (!UpdateInstaller.install(appContext, file)) {
+                    updateInfo = null
+                    updateProgress = "无法启动安装器：请在系统设置中允许本应用「安装未知应用」后重试"
+                }
             } else if (updateCancelRequested) {
                 // 用户主动取消：静默收起弹窗（下载已在 Downloader 内中止，断点保留）
                 updateInfo = null

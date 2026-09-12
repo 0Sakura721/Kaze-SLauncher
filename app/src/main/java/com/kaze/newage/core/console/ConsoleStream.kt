@@ -15,6 +15,12 @@ data class ConsoleLine(
     val timestamp: Long = System.currentTimeMillis(),
     /** 进程内唯一序号：LazyColumn key 需要唯一性（同毫秒同文本的两行会造成键冲突崩溃） */
     val seq: Long = nextSeq(),
+    /**
+     * 该行应**替换**上一行（服务端用 `\r` 输出的原地进度行）。
+     * 只有环形缓冲知道要替换是不够的：实时订阅者是"收到一行就追加一行"，
+     * 不把这个意图传下去的话，「Preparing spawn area: x%」照样会刷出几百行。
+     */
+    val replaceLast: Boolean = false,
 ) {
     companion object {
         private val counter = java.util.concurrent.atomic.AtomicLong(0)
@@ -45,19 +51,20 @@ class ConsoleStream(
     private val buffer = ArrayDeque<ConsoleLine>()
 
     @Synchronized
-    fun emit(text: String, type: LineType = LineType.Info) {
-        val line = ConsoleLine(text, type)
+    fun emit(text: String, type: LineType = LineType.Info, replaceLast: Boolean = false) {
+        val line = ConsoleLine(text, type, replaceLast = replaceLast)
         buffer.addLast(line)
         while (buffer.size > maxLines) buffer.removeFirst()
         _lines.tryEmit(line)
     }
 
     /** 覆盖式输出（服务端用 \r 原地更新进度，如 "Preparing spawn area: 50%"）：
-     *  替换最后一行，控制台不刷屏、观感与原始日志一致 */
+     *  替换最后一行，控制台不刷屏、观感与原始日志一致。
+     *  注意要同时带上 replaceLast 标记：订阅者是"收到就追加"，只改缓冲的话实时视图仍会刷屏。 */
     @Synchronized
     fun emitReplace(text: String, type: LineType = LineType.Info) {
         if (buffer.isNotEmpty()) buffer.removeLast()
-        emit(text, type)
+        emit(text, type, replaceLast = true)
     }
 
     @Synchronized

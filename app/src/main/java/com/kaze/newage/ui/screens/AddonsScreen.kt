@@ -36,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -251,6 +253,11 @@ fun AddonsScreen(
                     onCheckedChange = {
                         AddonManager.toggleEnabled(file)
                         refresh++
+                    },
+                    // TalkBack：开关本身没有文字（文件名在旁边），补上语义标签，
+                    // 否则读屏只会念一个孤立的"开关"，不知道是哪个插件、开还是关
+                    modifier = Modifier.semantics {
+                        contentDescription = "${file.name}，${if (enabled) "已启用" else "已禁用"}"
                     },
                 )
                 IconButton(onClick = {
