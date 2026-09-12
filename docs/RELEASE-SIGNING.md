@@ -22,7 +22,7 @@ Android 用**签名证书**作为应用身份。系统安装器只认签名：�
 在官方发布的 Kaze-SLauncher-v0.1.2-arm64-v8a.apk 字节流中检索该证书 DER：
     命中，byte offset 51016617        → 发布包确实由这个公开密钥签名
 
-**更正（2026-09-11）**：发布包与作者本地 `app/build/outputs/apk/*/debug/app-*-debug.apk`
+**更正（2026-09-11）**：v0.1.2 发布包与作者本地 `app/build/outputs/apk/*/debug/app-*-debug.apk`
 字节级完全一致（SHA-256 与 GitHub 报告的 digest 相同），且 `aapt2 dump badging` 报出
 `application-debuggable` → 发布的就是 `assembleDebug` 的产物直接改名：
 **debug 构建 + debug 密钥签名**。
@@ -30,6 +30,17 @@ Android 用**签名证书**作为应用身份。系统安装器只认签名：�
 deflate 压缩存储的，在原始字节里搜字符串不可能命中，"搜不到"不构成证据。）
 除签名外，`debuggable=true` 还允许任何能连 adb 的人附加调试器、
 用 `run-as com.kaze.newage` 读写应用私有数据并在运行时注入代码。
+
+**适用范围（2026-09-12 实测补注）**：以上"debug 构建 + debug 密钥"仅适用于
+**≤ v0.1.2** 的发布包。从 **v0.2.0 起发布的是真正的 release 构建**：
+
+| 发布包 | 签名证书 | `application-debuggable` |
+|---|---|---|
+| ≤ v0.1.2 | `CN=Android Debug`（公开调试密钥） | 是 |
+| ≥ v0.2.0 | `CN=Kaze SLauncher`（发布密钥） | 否 |
+
+（v0.2.0 的 arm64 包实测 30.6 MB，与开启 R8 的 release 产物一致；
+v0.1.2 为 51.0 MB，未压缩。）
 ```
 
 **后果**：任何人都可以克隆仓库，构建一个同包名、同签名、`versionCode` 更高的 APK，发布出去并被用户设备当作正式更新安装。结合应用持有的 `MANAGE_EXTERNAL_STORAGE`（全盘读写）、`REQUEST_INSTALL_PACKAGES`、`INTERNET` 与前台服务权限，等同于完全接管用户设备。
