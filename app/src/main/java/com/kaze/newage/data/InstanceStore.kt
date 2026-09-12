@@ -91,8 +91,41 @@ class InstanceStore(
         return (custom ?: File(context.getExternalFilesDir(null), "instances")).apply { mkdirs() }
     }
 
-    fun createInstanceDir(name: String): File =
-        File(instancesRoot(), sanitize(name)).apply { mkdirs() }
+    /**
+     * 取一个可用的实例目录（不与已有非空目录冲突）。
+     *
+     * 两道防线：
+     *  1. [sanitize] 去掉首尾点号，使 "." / ".." 不可能成为目录名；
+     *  2. 这里再用 canonicalPath 断言结果确实落在实例根之内。
+     *
+     * 为什么必须防：`File(instancesRoot(), "..")` 会被系统解析到实例根的**父目录**
+     * （默认 = 应用外部私有目录 `files/`，里面装着全部实例、世界存档与 instances.json），
+     * 而删除实例时会 `deleteRecursively()`——一个名为 ".." 的实例被删除就等于清空全部数据；
+     * 名为 "." 则直接指向实例根本身，同样一次删光。
+     *
+     * 同名不再复用：向导的默认名是「核心-版本」，用户不改名连续建两次会落到同一目录，
+     * 第二条实例的 core jar 覆盖第一条的、新建时的 propsOverride 还会改写第一条的
+     * server.properties（端口/正版验证/游戏模式被换掉），而两条记录指向同一目录互相踩。
+     */
+    fun createInstanceDir(name: String): File {
+        val root = instancesRoot()
+        val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { root.absoluteFile }
+        val base = sanitize(name)
+        var dir = File(canonicalRoot, base)
+        var n = 2
+        // 已存在且非空才让位；空目录可以复用（下载失败后重试的场景）
+        while (dir.exists() && !dir.listFiles().isNullOrEmpty()) {
+            dir = File(canonicalRoot, "$base ($n)")
+            n++
+        }
+        val canonicalDir = runCatching { dir.canonicalFile }.getOrElse { dir.absoluteFile }
+        check(
+            canonicalDir.path == canonicalRoot.path ||
+                canonicalDir.path.startsWith(canonicalRoot.path + File.separator)
+        ) { "实例名不合法：$name" }
+        canonicalDir.mkdirs()
+        return canonicalDir
+    }
 
     @Synchronized
     fun add(instance: ServerInstance) {
@@ -186,6 +219,16 @@ class InstanceStore(
         } catch (_: Exception) { }
     }
 
+    /**
+     * 目录名净化。
+     *
+     * 除了替换文件系统非法字符，还必须 `trim('.')`：`.` 与 `..` 不含任何会被替换的字符，
+     * 原样传给 `File(root, name)` 会被解析成 root 自身 / root 的父目录（见 [createInstanceDir]）；
+     * 顺带也避免生成 `.hidden` 这类隐藏目录。
+     */
     private fun sanitize(name: String): String =
-        name.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_").ifBlank { "instance" }
+        name.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+            .trim()
+            .trim('.')
+            .ifBlank { "instance" }
 }
