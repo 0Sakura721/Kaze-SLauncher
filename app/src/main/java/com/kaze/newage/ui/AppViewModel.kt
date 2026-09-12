@@ -186,7 +186,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 状态必须在这里同步置位，不能放进协程体：launch 只是把协程体派发出去、不会立即执行，
         // 而 UI 的 enabled 还要等下一次重组才更新 —— 这段窗口内再点一次就会并发跑两个任务。
         _javaTask.value = JavaTaskState(running = true, version = version, message = "准备安装 Java $version…")
-        viewModelScope.launch(Dispatchers.IO) {
+        // 下载 JDK 是长任务：退出界面后仍应装完（成果在磁盘上）
+        container.appScope.launch {
             try {
                 if (!container.env.isReady) {
                     container.env.setup { p, m ->
@@ -226,9 +227,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 删除指定 Java 版本 */
     fun uninstallJava(version: Int) {
         if (_javaTask.value.running) return
-        // 同 installJava：同步置位，否则连点会并发卸载同一个版本
+        // 正在运行/启动、且用这个 Java 版本的实例：拒绝卸载。
+        // 运行中的 JVM 被摘掉 jmods/rt 后按需加载类会失败（服务端可能中途崩），
+        // 而且 apt purge 会与被运行进程使用的同一 rootfs 并发写。
+        val busy = setOf(
+            ServerState.Starting, ServerState.FirstRun, ServerState.AcceptingEula,
+            ServerState.Running, ServerState.Stopping,
+        )
+        val inUse = instanceStore.instances.value.firstOrNull {
+            it.javaMajor == version && serverManager.states.value[it.id] in busy
+        }
+        if (inUse != null) {
+            android.widget.Toast.makeText(
+                container.appContext,
+                "实例「${inUse.name}」正在使用 Java $version，请先停止它再卸载",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
+        // 同步置位，否则连点会并发卸载同一个版本
         _javaTask.value = JavaTaskState(running = true, version = version, message = "卸载 Java $version…")
-        viewModelScope.launch(Dispatchers.IO) {
+        // 同上：换 appScope
+        container.appScope.launch {
             try {
                 container.javaManager.uninstall(version)
                 refreshJava()
@@ -245,7 +265,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_download.value.running) return
         // 同步置位，理由同 installJava
         _download.value = DownloadState(running = true, progress = 0f, message = "准备部署…")
-        viewModelScope.launch(Dispatchers.IO) {
+        // 部署要跑几分钟（下载 rootfs + apt），退出界面不应中断
+        container.appScope.launch {
             try {
                 env.setup { progress, message ->
                     _download.value = DownloadState(running = true, progress = progress, message = message)
@@ -279,7 +300,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _currentInstanceId.value = instance.id
         // 电池优化白名单：首次启动服务端时自动弹系统请求（防止后台被杀）；拒绝可去设置页重试
         requestBatteryWhitelistOnce()
-        viewModelScope.launch(Dispatchers.IO) {
+        container.appScope.launch {
             serverManager.start(instance)
         }
     }
@@ -300,7 +321,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stopInstance(instance: ServerInstance) {
-        viewModelScope.launch(Dispatchers.IO) {
+        container.appScope.launch {
             serverManager.stop(instance)
         }
     }
@@ -359,7 +380,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun removeInstance(instance: ServerInstance) {
-        viewModelScope.launch(Dispatchers.IO) {
+        // 删除要先等实例停稳（最长 20s），不能因为用户切页就被取消在半途
+        container.appScope.launch {
             // 运行中先停止（按生命周期状态等待彻底退出：Starting/Running 部署中也要先撤下）
             val activeStates = setOf(
                 ServerState.Starting, ServerState.FirstRun, ServerState.AcceptingEula,
@@ -373,6 +395,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val s = serverManager.states.value[instance.id]
                     if (s == null || s !in activeStates) break
                     kotlinx.coroutines.delay(500)
+                }
+                // 还没停下来就**不能删目录**：启动流程可能仍在推进（Forge 安装器要跑几分钟），
+                // 删掉目录后它会立刻把目录重新建出来；而旧版 Forge 安装器落下的顶层 forge-*.jar
+                // 还会在下次扫描时被当成新实例"复活"。宁可拒绝删除、让用户稍后重试。
+                if (serverManager.states.value[instance.id] in activeStates) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            container.appContext,
+                            "实例仍在停止中（可能正在安装或部署），请稍后再试删除",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                    return@launch
                 }
             }
             instanceStore.remove(instance.id)
@@ -433,7 +468,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_download.value.running) return
         _download.value = DownloadState(running = true, progress = 0f, message = "解析下载地址…")
         downloadCancelRequested = false
-        viewModelScope.launch(Dispatchers.IO) {
+        // 核心 jar 可能几十 MB：用户点返回键去干别的，下载应继续完成并建出实例
+        container.appScope.launch {
             var dir: File? = null
             try {
                 val dl = CoreSources.resolveDownload(type, mcVersion, buildId).getOrThrow()

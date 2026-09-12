@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -324,25 +325,35 @@ fun HomeScreen(
             }
         }
 
-        // ── 底部大启动按钮（Zalith launch button，全宽锚底）──
+    // 主页会在 currentInstanceId 为空时用 firstOrNull 兜底显示某个实例，但 serverState/uptimeSec
+    // 只由 currentInstanceId 派生 —— 两者不同源时（例如刚删掉当前实例），运行中的实例会显示
+    // 「启动服务端」且点了没反应（start() 判定"已在运行"直接忽略）。这里把兜底选择同步回 ViewModel。
+    LaunchedEffect(currentInstanceId, instances.size) {
+        if (currentInstanceId == null && instances.isNotEmpty()) {
+            viewModel.selectInstance(instances.first())
+        }
+    }
+
+    // ── 底部大启动按钮（Zalith launch button，全宽锚底）──
         // 只在有实例时出现：无实例时主按钮已在引导块内，避免同屏两个「新建服务端」
         if (current != null) {
             Button(
                 onClick = {
                     val c = current
-                    if (serverState == ServerState.Running) viewModel.stopInstance(c)
+                    // 运行中或启动中（部署/装 Java/下载核心/Forge 安装）都走停止。
+                    // 原来 busy 时按钮被禁用，用户在长达几分钟的启动过程里没有任何中止手段。
+                    if (serverState == ServerState.Running || busy) viewModel.stopInstance(c)
                     else viewModel.startInstance(c)
                 },
-                enabled = !busy,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
             ) {
                 // 动作语义图标：视觉锚点让"当前会做什么"无需读字即知
                 when {
-                    serverState == ServerState.Running -> Icon(
+                    serverState == ServerState.Running || busy -> Icon(
                         Icons.Filled.Stop, null,
                         Modifier.size(20.dp).padding(end = 6.dp),
                     )
-                    !busy -> Icon(
+                    else -> Icon(
                         Icons.Filled.PlayArrow, null,
                         Modifier.size(20.dp).padding(end = 6.dp),
                     )
@@ -350,7 +361,7 @@ fun HomeScreen(
                 Text(
                     when {
                         serverState == ServerState.Running -> "停止服务端"
-                        busy -> "处理中…"
+                        busy -> "取消启动"
                         else -> "启动服务端"
                     }
                 )

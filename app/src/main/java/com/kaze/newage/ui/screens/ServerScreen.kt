@@ -43,6 +43,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -397,12 +398,23 @@ private fun InstanceCard(
 
             // 右侧动作：启动/停止 + ⋮ 菜单（Zalith 动作列）
             // 不再写死 size(36/32)：那会把 M3 的 48dp 触控区一起缩小，容易误触
-            if (running) {
-                FilledIconButton(onClick = onStop) {
+            //
+            // running **或** busy 都显示「停止」：启动流程里包含部署、装 Java、下载核心、
+            // Forge --installServer，可能要几分钟。此前 busy 时给的是一个禁用的「启动」，
+            // 用户在整个启动过程中没有任何中止手段，只能删掉实例。
+            // stop() 已能处理"进程还没创建"的启动期（置取消标志让 start() 自己收尾）。
+            if (running || busy) {
+                FilledIconButton(
+                    onClick = onStop,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
                     Icon(Icons.Filled.Stop, contentDescription = "停止", modifier = Modifier.size(18.dp))
                 }
             } else {
-                FilledIconButton(onClick = onStart, enabled = !busy) {
+                FilledIconButton(onClick = onStart) {
                     Icon(Icons.Filled.PlayArrow, contentDescription = "启动", modifier = Modifier.size(18.dp))
                 }
             }

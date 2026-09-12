@@ -25,6 +25,19 @@ class NewAgeApp : Application() {
 class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
 
+    /**
+     * **应用级**协程作用域：给"不能因为用户退出界面就中断"的长任务用。
+     *
+     * `viewModelScope` 绑在 Activity 的 ViewModelStore 上——按返回键退出应用时会被 clear，
+     * 于是环境部署 / Java 安装 / 核心下载 / 服务端启动都会在挂起点被静默取消，
+     * 而应用文案承诺的是"前台服务守护、后台不被打断"（按 Home 键确实成立，按返回键却不成立）。
+     * 这些任务的成果都落在磁盘上，退出界面后继续跑完才是正确行为。
+     */
+    val appScope: kotlinx.coroutines.CoroutineScope =
+        kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+        )
+
     val console: ConsoleStream = ConsoleStream()
 
     val uiPrefs: SettingsPrefs = SettingsPrefs(appContext)

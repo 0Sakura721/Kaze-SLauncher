@@ -86,7 +86,8 @@ class DefaultServerManager(
     private inner class RuntimeSlot(val instance: ServerInstance) {
         val console: ConsoleStream = consoles.getOrPut(instance.id) { ConsoleStream() }
         val state = MutableStateFlow(ServerState.Idle)
-        val uptimeSec = MutableStateFlow(0L)
+        /** 与 [uptimeFlows] 共用同一个流：slot 会在停止时被移除，流不能跟着消失（否则重启后时长恒 0） */
+        val uptimeSec: MutableStateFlow<Long> get() = uptimeFlows.getOrPut(instance.id) { MutableStateFlow(0L) }
         var process: Process? = null
         var manualStop = false
         var launchedAtMs = 0L
@@ -152,8 +153,18 @@ class DefaultServerManager(
     override fun consoleFor(instanceId: String): ConsoleStream =
         consoles.getOrPut(instanceId) { ConsoleStream() }
 
+    /**
+     * 运行时长流。
+     *
+     * 必须**长期持有**每个实例的流：旧实现是 `slots[id]?.uptimeSec ?: MutableStateFlow(0L)`，
+     * 而 finalizeStop 会把 slot 从表里移除，同一实例再启动时会换成一个新的 slot 对象；
+     * 上层（AppViewModel）用 `flatMapLatest { currentInstanceId }` 订阅，实例 id 没变就不会重订阅，
+     * 于是"停止→再启动"之后运行时长永远显示 0 秒。
+     */
+    private val uptimeFlows = java.util.concurrent.ConcurrentHashMap<String, MutableStateFlow<Long>>()
+
     override fun uptimeSec(instanceId: String): StateFlow<Long> =
-        slots[instanceId]?.uptimeSec ?: MutableStateFlow(0L)
+        uptimeFlows.getOrPut(instanceId) { MutableStateFlow(0L) }
 
     override fun isRunning(instanceId: String): Boolean =
         slots[instanceId]?.process?.isAlive == true
@@ -268,6 +279,13 @@ class DefaultServerManager(
                     acceptEula(slot, instance)
                     launchServer(slot, runtime.version)
                 }
+                // 导入的自定义核心不一定是 Minecraft 服务端（Velocity / BungeeCord / 自研代理…）：
+                // 它们既不读 eula.txt、也不会"生成后自动退出"。走首启探测会永久卡在 FirstRun——
+                // 服务其实正常在跑，但控制台不能发命令、也没有任何停止入口。直接常驻启动。
+                instance.coreType == CoreType.CUSTOM -> {
+                    slot.log("> 自定义核心：跳过 eula 首启探测，直接启动", LineType.System)
+                    launchServer(slot, runtime.version)
+                }
                 else -> {
                     // 首启：生成 eula.txt 后服务端自动退出
                     slot.setState(ServerState.FirstRun)
@@ -289,6 +307,13 @@ class DefaultServerManager(
             // 用户主动中止：走正常收尾，不置 Error
             slot.log("> 已取消启动", LineType.System)
             finalizeStop(slot)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // 协程被取消（进程退出/作用域结束）不是"启动失败"，必须原样抛出：
+            // 旧实现让它落到下面的 catch(Exception)，于是界面留下一条永久的
+            // "启动失败：Job was cancelled"，还把状态置成 Error、撤下保活前台服务。
+            slot.log("> 启动已中断", LineType.Warn)
+            finalizeStop(slot)
+            throw e
         } catch (e: Exception) {
             slot.log("> 启动失败：${e.message}", LineType.Error)
             slot.setState(ServerState.Error)
@@ -550,7 +575,20 @@ class DefaultServerManager(
         slot.stopTimeoutJob = scope.launch {
             delay(10_000)
             if (proc.isAlive) {
-                slot.log("> 停止超时，强制结束进程", LineType.Warn)
+                // 先 SIGTERM，而不是直接 SIGKILL：proot 收到 SIGTERM 才有机会执行 `--kill-on-exit`
+                // 的清理，把它 trace 的 guest 进程（java）一起带走。
+                // 旧实现直接 destroyForcibly()（SIGKILL）→ proot 被瞬间杀死、来不及清理，
+                // 它下面的 java 会脱离继续运行：界面显示"已停止"，实际仍有 java 占着端口
+                // 和世界文件；用户再点启动就会在同一个世界目录上拉起第二个 java。
+                slot.log("> 停止超时，正在结束进程（SIGTERM，让 proot 清理 guest）…", LineType.Warn)
+                proc.destroy()
+                delay(5_000)
+            }
+            if (proc.isAlive) {
+                slot.log(
+                    "> 进程仍未退出，强制结束。若随后端口仍被占用，说明 guest 里的 java 未被回收",
+                    LineType.Warn,
+                )
                 proc.destroyForcibly()
             }
         }
@@ -580,7 +618,10 @@ class DefaultServerManager(
         if (!earlyExit && slot.instance.autoRestart && slot.restartCount < slot.instance.maxRestarts) {
             slot.restartCount++
             slot.log("> 服务器异常退出，第 ${slot.restartCount} 次自动重启", LineType.Warn)
-            slot.setState(ServerState.Starting)
+            // 必须先把状态退回 Stopped 再重启：start() 的防重入判定把 Starting 也算作"已在运行"
+            // 而直接 return，于是自动重启永远不会真的发生，状态永久卡在 Starting——
+            // 四个页面全是禁用态、没有任何停止入口，只能杀掉应用。
+            slot.setState(ServerState.Stopped)
             scope.launch {
                 delay(3000)
                 // 重启窗口内用户可能已删除实例：目录没了就不再拉起（否则重建半成品实例）

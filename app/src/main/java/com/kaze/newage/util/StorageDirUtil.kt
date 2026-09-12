@@ -37,7 +37,15 @@ object StorageDirUtil {
             "primary", "emulated" -> Environment.getExternalStorageDirectory().absolutePath
             else -> "/storage/$volume"
         }
-        return File(base, rel).let { if (it.isDirectory) it else null }
+        // rel 为空 = 用户选了卷根（主存储 / SD 卡根目录）：拒绝。
+        // 接受的话实例扫描会把存储根下任何直接含 .jar 的顶层目录登记成"实例"
+        // （Download、Documents、其它应用的数据目录都会中招），而且每次启动都要浅扫一遍存储根。
+        if (rel.isBlank()) return null
+        val dir = File(base, rel)
+        // 系统目录同样拒绝：即便写得进去，也不该把实例放在这里
+        val lower = dir.absolutePath.lowercase()
+        if (lower.contains("/android/data") || lower.contains("/android/obb")) return null
+        return dir.takeIf { it.isDirectory }
     }
 
     /** 目录可写探测（创建并删除探针文件） */

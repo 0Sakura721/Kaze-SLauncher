@@ -320,6 +320,8 @@ class ProotEnvironment(
                 return@withContext
             }
             if (isReady) {
+                ensureAptStage(onProgress)
+                if (_state.value == State.ERROR) return@withContext
                 _state.value = State.READY
                 onProgress(1f, "环境已就绪")
                 return@withContext
@@ -331,6 +333,14 @@ class ProotEnvironment(
             }
         }
         if (isReady) {
+            // rootfs 已解压 ≠ 部署完整：阶段 3（写 apt 源 + apt-get update）可能从未成功。
+            // 旧实现无条件短路返回"环境已就绪"，于是部署中途失败后无论重试多少次，
+            // apt 都补不上，后续 `apt-get install`（装 Java）全部失败。
+            ensureAptStage(onProgress)
+            if (_state.value == State.ERROR) {
+                isSetupRunning.set(false)
+                return@withContext
+            }
             _state.value = State.READY
             onProgress(1f, "环境已就绪")
             isSetupRunning.set(false)
@@ -456,6 +466,7 @@ class ProotEnvironment(
                 SetupItem("apt", "apt 包管理器", "更新软件源索引", phase = "初始化中")
             setupAptSources()
             runCommand("apt-get update -qq")
+            markAptInitialized()
             updateItem("apt") { item -> item.copy(done = true, phase = "") }
             log("  ✓ apt 就绪")
 
@@ -748,6 +759,34 @@ class ProotEnvironment(
                 }
             }
         }
+    }
+
+    /** apt 阶段（写源 + apt-get update）是否已完成；老安装没有该标记，视为未完成（重跑一次很便宜） */
+    private fun aptInitialized(): Boolean = runCatching { File(linuxDir, ".apt-initialized").exists() }.getOrDefault(false)
+
+    private fun markAptInitialized() {
+        runCatching { File(linuxDir, ".apt-initialized").writeText("ok") }
+    }
+
+    /**
+     * rootfs 已就绪但 apt 阶段未完成时补做「阶段 3」。
+     *
+     * 为什么需要：部署中途失败（用户按返回键退出应用导致协程被取消、apt 源写入失败、磁盘满…）时
+     * rootfs 往往已经解压完 → `isReady` 为 true，而 setup() 开头会短路返回"环境已就绪"，
+     * 阶段 3 永远不会再执行。之后所有 `apt-get install`（装 Java）都会失败，且用户重试也没用。
+     */
+    private suspend fun ensureAptStage(onProgress: (Float, String) -> Unit) {
+        if (aptInitialized()) return
+        onProgress(0.92f, "补齐 apt 初始化…")
+        runCatching { setupAptSources() }
+        val res = runCommand("apt-get update -qq")
+        if (res.isFailure) {
+            _state.value = State.ERROR
+            onProgress(0f, "apt 初始化失败：${res.exceptionOrNull()?.message ?: "未知错误"}")
+            return
+        }
+        markAptInitialized()
+        _items.value = _items.value.map { if (it.id == "apt") it.copy(done = true, phase = "") else it }
     }
 
     /** Ubuntu 24.04 使用 deb822 源格式（ports.ubuntu.com） */

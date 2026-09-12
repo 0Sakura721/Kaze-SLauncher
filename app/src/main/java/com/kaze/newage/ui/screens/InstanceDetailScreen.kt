@@ -191,9 +191,18 @@ fun InstanceDetailScreen(
                             Text("停止", Modifier.padding(start = 4.dp))
                         }
                     } else {
-                        Button(onClick = { viewModel.startInstance(instance) }, enabled = !state.isBusy()) {
-                            Icon(Icons.Filled.PlayArrow, null, Modifier.size(18.dp))
-                            Text(if (state.isBusy()) "处理中…" else "启动", Modifier.padding(start = 4.dp))
+                        // 启动中（busy）也给「停止」：部署/装 Java/Forge 安装可能几分钟，
+                        // 原来这里是个禁用的"处理中…"，用户全程无法中止
+                        Button(
+                            onClick = { if (state.isBusy()) viewModel.stopInstance(instance) else viewModel.startInstance(instance) },
+                        ) {
+                            if (state.isBusy()) {
+                                Icon(Icons.Filled.Stop, null, Modifier.size(18.dp))
+                                Text("取消启动", Modifier.padding(start = 4.dp))
+                            } else {
+                                Icon(Icons.Filled.PlayArrow, null, Modifier.size(18.dp))
+                                Text("启动", Modifier.padding(start = 4.dp))
+                            }
                         }
                     }
                 }
