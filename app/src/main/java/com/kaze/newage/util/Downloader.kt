@@ -34,6 +34,24 @@ object Downloader {
     }
 
     /**
+     * 是否为 ZIP/JAR 归档（前 4 字节 `PK\x03\x04`）。
+     *
+     * 所有 Minecraft 服务端核心都是 jar（即 zip），而 Spigot/Fabric/Forge 这类
+     * **没有官方哈希可对**的来源此前只校验文件大小——镜像返回一个 >1MB 的 HTML 错误页
+     * 就能混过去。加一道魔数校验，代价极低。
+     */
+    fun isZip(file: File): Boolean = try {
+        file.inputStream().use { ins ->
+            val head = ByteArray(4)
+            ins.read(head) == 4 &&
+                head[0] == 0x50.toByte() && head[1] == 0x4B.toByte() &&
+                head[2] == 0x03.toByte() && head[3] == 0x04.toByte()
+        }
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
      * 下载文件（支持断点续传：目标文件已有部分时用 Range 追加；
      * 服务器不支持 Range 时自动从头开始）。
      * @param urlStr 下载地址

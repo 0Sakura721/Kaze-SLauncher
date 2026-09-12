@@ -200,9 +200,11 @@ object CoreSources {
         CoreDownload("https://api.purpurmc.org/v2/purpur/$version/latest/download", "purpur-$version.jar")
 
     // ── Fabric（stable 字段 → 正式/快照） ──
+    private const val FABRIC_META = "https://meta.fabricmc.net/v2/versions"
+
     suspend fun fetchFabricVersions(): Result<List<GameVersion>> = withContext(Dispatchers.IO) {
         try {
-            val arr = json.parseToJsonElement(httpGet("https://meta.fabricmc.net/v2/versions/game")) as JsonArray
+            val arr = json.parseToJsonElement(httpGet("$FABRIC_META/game")) as JsonArray
             Result.success(arr.mapNotNull {
                 val o = it.jsonObject
                 val stable = o["stable"]?.jsonPrimitive?.booleanOrNull ?: true
@@ -215,18 +217,37 @@ object CoreSources {
         } catch (e: Exception) { Result.failure(e) }
     }
 
-    suspend fun getFabricDownload(mcVersion: String): Result<CoreDownload> = withContext(Dispatchers.IO) {
+    suspend fun getFabricDownload(mcVersion: String, loaderVersion: String = ""): Result<CoreDownload> = withContext(Dispatchers.IO) {
         try {
-            val loaderArr = json.parseToJsonElement(httpGet("https://meta.fabricmc.net/v2/versions/loader/$mcVersion")) as JsonArray
-            val loader = loaderArr.first().jsonObject["loader"]!!.jsonObject["version"]!!.jsonPrimitive.content
-            val installerArr = json.parseToJsonElement(httpGet("https://meta.fabricmc.net/v2/versions/installer")) as JsonArray
+            val loader = if (loaderVersion.isNotBlank()) loaderVersion else {
+                val loaderArr = json.parseToJsonElement(httpGet("$FABRIC_META/loader/$mcVersion")) as JsonArray
+                loaderArr.first().jsonObject["loader"]!!.jsonObject["version"]!!.jsonPrimitive.content
+            }
+            val installerArr = json.parseToJsonElement(httpGet("$FABRIC_META/installer")) as JsonArray
             val installer = installerArr.first().jsonObject["version"]!!.jsonPrimitive.content
             Result.success(
                 CoreDownload(
-                    "https://meta.fabricmc.net/v2/versions/loader/$mcVersion/$loader/$installer/server/jar",
+                    "$FABRIC_META/loader/$mcVersion/$loader/$installer/server/jar",
                     "fabric-server-mc.$mcVersion-loader.$loader-launcher.$installer.jar"
                 )
             )
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * Fabric 的 loader 版本列表 → 作为"可选构建"暴露（与 Paper 的 build 选择对齐）。
+     * loader 列表里混着大量测试版，这里只保留 stable=true 的，否则下拉里没法选。
+     */
+    suspend fun fetchFabricLoaders(mcVersion: String): Result<List<CoreBuild>> = withContext(Dispatchers.IO) {
+        try {
+            val arr = json.parseToJsonElement(httpGet("$FABRIC_META/loader/$mcVersion")) as JsonArray
+            val list = arr.mapNotNull { el ->
+                val loader = el.jsonObject["loader"]?.jsonObject ?: return@mapNotNull null
+                val v = loader["version"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                if (loader["stable"]?.jsonPrimitive?.booleanOrNull == false) return@mapNotNull null
+                CoreBuild(id = v, name = "loader $v")
+            }
+            Result.success(list.take(30))
         } catch (e: Exception) { Result.failure(e) }
     }
 
@@ -337,6 +358,17 @@ object CoreSources {
         }
     }
 
+    /**
+     * 拉取某 MC 版本下的**可选构建**列表（FCL「加载器版本」的对应物）。
+     * Paper 有 build 列表、Fabric 有 loader 版本列表；其余核心没有可选构建
+     * （始终取最新），返回空列表，UI 据此隐藏"选择"入口。
+     */
+    suspend fun fetchBuilds(type: CoreType, mcVersion: String): Result<List<CoreBuild>> = when (type) {
+        CoreType.PAPER -> fetchPaperBuilds(mcVersion)
+        CoreType.FABRIC -> fetchFabricLoaders(mcVersion)
+        else -> Result.success(emptyList())
+    }
+
     /** 获取最终下载链接 */
     suspend fun resolveDownload(type: CoreType, mcVersion: String, buildId: String = ""): Result<CoreDownload> =
         when (type) {
@@ -344,7 +376,7 @@ object CoreSources {
             CoreType.PAPER -> getPaperDownload(mcVersion, buildId)
             CoreType.PURPUR -> Result.success(getPurpurDownload(mcVersion))
             CoreType.SPIGOT -> Result.success(getSpigotDownload(mcVersion))
-            CoreType.FABRIC -> getFabricDownload(mcVersion)
+            CoreType.FABRIC -> getFabricDownload(mcVersion, buildId)
             CoreType.FORGE -> getForgeLatestBuild(mcVersion)
             CoreType.NEOFORGE -> getNeoForgeLatestBuild(mcVersion)
             CoreType.CUSTOM -> Result.failure(RuntimeException("自定义导入无下载源"))

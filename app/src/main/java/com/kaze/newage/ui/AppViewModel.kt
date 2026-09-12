@@ -10,6 +10,7 @@ import com.kaze.newage.core.addons.ModrinthApi
 import com.kaze.newage.core.addons.ModrinthSearchHit
 import com.kaze.newage.core.console.ConsoleLine
 import com.kaze.newage.core.console.ConsoleParser
+import com.kaze.newage.core.download.CoreBuild
 import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.server.ServerProperties
@@ -112,8 +113,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _versionsLoading = MutableStateFlow(false)
     val versionsLoading: StateFlow<Boolean> = _versionsLoading.asStateFlow()
 
+    /** 选定 MC 版本后的可选构建（目前仅 Paper 提供；FCL「加载器版本」的对应物） */
+    private val _builds = MutableStateFlow<List<CoreBuild>>(emptyList())
+    val builds: StateFlow<List<CoreBuild>> = _builds.asStateFlow()
+
+    private val _buildsLoading = MutableStateFlow(false)
+    val buildsLoading: StateFlow<Boolean> = _buildsLoading.asStateFlow()
+
     /** 版本列表加载竞态：快速切换核心类型时丢弃过期的旧请求（collectLatest 语义） */
     private var versionsJob: kotlinx.coroutines.Job? = null
+
+    /** 构建列表加载竞态：快速切换版本时丢弃过期请求 */
+    private var buildsJob: kotlinx.coroutines.Job? = null
 
     /** Java 安装/卸载任务（用户可选下载/删除） */
     private val _javaTask = MutableStateFlow(JavaTaskState())
@@ -361,6 +372,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 拉取选定版本的可选构建（无构建列表的核心会立刻返回空列表） */
+    fun loadBuilds(type: CoreType, mcVersion: String) {
+        buildsJob?.cancel()
+        buildsJob = viewModelScope.launch(Dispatchers.IO) {
+            _buildsLoading.value = true
+            _builds.value = emptyList()
+            _builds.value = CoreSources.fetchBuilds(type, mcVersion).getOrDefault(emptyList())
+            _buildsLoading.value = false
+        }
+    }
+
     // ── 动作：下载并创建实例 ──
     /** 下载取消标志（downloadAndCreate 内部轮询；取消保留 .part 断点） */
     @Volatile
@@ -377,6 +399,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         mcVersion: String,
         memoryMb: Int,
         javaMajorOverride: Int = 0,
+        /** 安装时用户选定的 server.properties 覆盖项（端口 / 最大玩家 / 在线模式 / 游戏模式）。
+         *  参考 FCL 安装页的"可选项"：建服时就把关键参数定下来，省得建完再进实例详情改。 */
+        propsOverride: Map<String, String> = emptyMap(),
+        /** 指定的核心构建 id（Paper 用；空 = 最新构建） */
+        buildId: String = "",
         onComplete: (ServerInstance?) -> Unit,
     ) {
         downloadCancelRequested = false
@@ -384,7 +411,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _download.value = DownloadState(running = true, progress = 0f, message = "解析下载地址…")
             var dir: File? = null
             try {
-                val dl = CoreSources.resolveDownload(type, mcVersion).getOrThrow()
+                val dl = CoreSources.resolveDownload(type, mcVersion, buildId).getOrThrow()
                 dir = instanceStore.createInstanceDir(name)
                 // 半成品用 .part 后缀：断点续传保留，且不会被实例目录扫描误识别为已装 jar
                 val part = File(dir, dl.fileName + ".part")
@@ -406,7 +433,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     // 官方清单给了 sha1 就必须校验（旧实现完全不校验 → 镜像的 200+HTML
                     // 错误页会被当作 jar 重命名入库，直到启动时才报"没有核心 jar"）
                     validate = { f ->
+                        // 大小 + ZIP 魔数：服务端核心都是 jar，魔数能挡住镜像的 HTML 错误页
+                        // （Spigot/Fabric/Forge 没有官方哈希可对，此前只查大小）
                         f.length() > 1_000_000L &&
+                            Downloader.isZip(f) &&
                             (dl.sha1 == null ||
                                 Downloader.sha1Of(f)?.equals(dl.sha1, ignoreCase = true) == true)
                     },
@@ -435,6 +465,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 instanceStore.add(instance)
                 ServerProperties.ensureInitial(instance, instanceStore.instances.value)
+                if (propsOverride.isNotEmpty()) {
+                    // 读回再覆盖：ensureInitial 写下的其它键（view-distance 等）不能被丢掉
+                    val props = ServerProperties.load(dir)
+                    props.putAll(propsOverride)
+                    ServerProperties.save(dir, props)
+                }
                 _currentInstanceId.value = instance.id
                 _download.value = DownloadState(done = true, message = "下载完成")
                 // 导航/UI 回调必须回主线程（否则 Compose 报 setCurrentState 或静默失败不跳转）
