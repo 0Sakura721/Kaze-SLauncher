@@ -242,22 +242,15 @@ class DefaultServerManager(
             slot.log("> Java ${runtime.version} 就绪", LineType.System)
             slot.checkCancelled()
 
-            // 3. 服务端 jar
-            val jar = instance.jarFile
-            if (!jar.exists()) {
-                // Forge / NeoForge 下载到的是 -installer.jar，它不是可直接运行的服务端：
-                // 必须先执行 `java -jar <installer> --installServer` 生成 libraries/ 与启动入口。
-                // 该步骤当前尚未实现（jarFile 也刻意排除了含 installer 的文件），
-                // 所以这里给出确切原因，而不是让用户对着 installer 已经躺在目录里、
-                // 却提示"没有服务端核心 jar"去猜。
-                if (instance.coreType == CoreType.FORGE || instance.coreType == CoreType.NEOFORGE) {
-                    throw RuntimeException(
-                        "${instance.coreType.displayName} 暂不支持启动：当前只下载了 installer，" +
-                            "缺少 --installServer 安装步骤。请改用 Paper / Purpur / Fabric，" +
-                            "或自行安装后以「导入 jar」方式创建实例。"
-                    )
-                }
-                throw RuntimeException("实例目录中没有服务端核心 jar：${jar.path}")
+            // 3. 服务端核心
+            // Forge/NeoForge 下载到的是 installer：必须先 `--installServer` 生成启动入口，
+            // 之后才能像其它核心一样启动（安装过程本身会联网下载依赖，可能几分钟）
+            val isForgeLike = instance.coreType == CoreType.FORGE || instance.coreType == CoreType.NEOFORGE
+            if (isForgeLike) {
+                ensureForgeInstalled(slot, instance, runtime.version)
+            } else {
+                val jar = instance.jarFile
+                if (!jar.exists()) throw RuntimeException("实例目录中没有服务端核心 jar：${jar.path}")
             }
 
             // 3.5 patched 核心（Paper/Purpur）预置原版 jar + 修补 rootfs 结构
@@ -268,19 +261,19 @@ class DefaultServerManager(
             when {
                 EulaHandler.isAccepted(instance.dir) -> {
                     slot.log("> eula 已接受", LineType.System)
-                    launchServer(slot, runtime.version, jar.name)
+                    launchServer(slot, runtime.version)
                 }
                 instance.eulaFile.exists() -> {
                     slot.log("> eula.txt 为 false，正在改写为 true…", LineType.System)
                     EulaHandler.flipToTrue(instance.dir)
-                    launchServer(slot, runtime.version, jar.name)
+                    launchServer(slot, runtime.version)
                 }
                 else -> {
                     // 首启：生成 eula.txt 后服务端自动退出
                     slot.setState(ServerState.FirstRun)
                     slot.log("> 首次启动：服务端将生成 eula.txt 并自动退出", LineType.System)
                     slot.log("> （等待自动退出后自动改写 eula=true 并重启）", LineType.System)
-                    val exitCode = runEulaProbe(slot, runtime.version, jar.name)
+                    val exitCode = runEulaProbe(slot, runtime.version)
                     slot.log("> 首启进程已退出（exit=$exitCode）", LineType.System)
                     // 首启探测期间用户可能点了停止：此时不应再改写 eula / 重新拉起服务端
                     slot.checkCancelled()
@@ -289,7 +282,7 @@ class DefaultServerManager(
                         EulaHandler.flipToTrue(instance.dir)
                     }
                     slot.log("> 重新启动服务器…", LineType.System)
-                    launchServer(slot, runtime.version, jar.name)
+                    launchServer(slot, runtime.version)
                 }
             }
         } catch (e: StartCancelled) {
@@ -430,9 +423,8 @@ class DefaultServerManager(
      * 旧实现走 execute()，该进程游离在 slot 之外，用户点停止时它既不进 10 秒强杀路径，
      * 也没有任何代码持有它的引用，只能干等它自己退出（首启探测会跑完整个服务端启动过程）。
      */
-    private suspend fun runEulaProbe(slot: RuntimeSlot, javaVersion: String, jarName: String): Int? {
-        val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
-        val args = javaArgs(slot.instance, javaBin, jarName)
+    private suspend fun runEulaProbe(slot: RuntimeSlot, javaVersion: String): Int? {
+        val args = serverArgs(slot.instance, javaVersion) ?: return null
         val proc = env.launch(args, slot.instance.dir) ?: return null
         slot.process = proc
         return try {
@@ -450,9 +442,9 @@ class DefaultServerManager(
     }
 
     /** 正常启动：进程常驻 + 后台消费输出 + 退出监控 */
-    private fun launchServer(slot: RuntimeSlot, javaVersion: String, jarName: String) {
-        val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
-        val args = javaArgs(slot.instance, javaBin, jarName)
+    private fun launchServer(slot: RuntimeSlot, javaVersion: String) {
+        val args = serverArgs(slot.instance, javaVersion)
+            ?: throw RuntimeException("找不到可启动的服务端入口（核心未安装完成？）")
         val proc = env.launch(args, slot.instance.dir)
             ?: throw RuntimeException("无法启动 proot 进程（环境异常）")
         slot.process = proc
@@ -666,6 +658,97 @@ class DefaultServerManager(
             add(jarName)
             if (instance.nogui) add("nogui")
         }
+
+    /**
+     * 该实例的启动参数。
+     *  - 普通核心：`java <jvm 参数> -jar <核心 jar> nogui`
+     *  - Forge/NeoForge：走 [forgeArgs]（现代版是 `@unix_args.txt`，旧版是 `-jar forge-*.jar`）
+     * 返回 null 表示找不到可启动入口（核心缺失或未安装完成）。
+     */
+    private fun serverArgs(instance: ServerInstance, javaVersion: String): List<String>? {
+        val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
+        val isForgeLike = instance.coreType == CoreType.FORGE || instance.coreType == CoreType.NEOFORGE
+        return if (isForgeLike) {
+            forgeArgs(instance, javaBin)
+        } else {
+            val jar = instance.jarFile
+            if (jar.exists()) javaArgs(instance, javaBin, jar.name) else null
+        }
+    }
+
+    /**
+     * Forge / NeoForge 的启动参数。
+     *  - 现代版（Forge 1.17+ / NeoForge）：安装生成 `libraries/.../unix_args.txt`，
+     *    用 Java 的 @argfile 语法传入；`nogui` 必须由命令行追加（args 文件里没有）
+     *  - 旧版（≤1.16.5）：安装生成可直接 `-jar` 的 forge-*.jar
+     */
+    private fun forgeArgs(instance: ServerInstance, javaBin: String): List<String>? {
+        val argsFile = instance.forgeArgsFile()
+        val legacyJar = instance.legacyForgeJar()
+        if (argsFile == null && legacyJar == null) return null
+        return buildList {
+            add(javaBin)
+            add("-Xmx${instance.memoryMb}M")
+            add("-Xms${instance.memoryMb}M")
+            add("-XX:+PerfDisableSharedMem")
+            add("-XX:MaxGCPauseMillis=200")
+            add("-Djava.security.egd=file:/dev/urandom")
+            if (argsFile != null) {
+                // user_jvm_args.txt 是 Forge 留给用户覆盖 JVM 参数的位置，存在就一并传入
+                if (File(instance.dir, "user_jvm_args.txt").isFile) add("@user_jvm_args.txt")
+                val rel = argsFile.relativeTo(File(instance.dir, "libraries")).path.replace('\\', '/')
+                add("@libraries/$rel")
+            } else if (legacyJar != null) {
+                add("-jar")
+                add(legacyJar.name)
+            }
+            if (instance.nogui) add("nogui")
+        }
+    }
+
+    /**
+     * Forge / NeoForge 首启安装。
+     *
+     * 下载到的是 `*-installer.jar`，**不能直接当服务端跑**：必须先执行
+     * `java -jar <installer> --installServer` 生成 `libraries/` 与启动入口。
+     * 安装过程本身要联网下载 Minecraft 与 Forge 依赖，可能数分钟；
+     * 用 [ServerInstance.forgeInstalled] 判断是否已完成，避免每次启动重装。
+     */
+    private suspend fun ensureForgeInstalled(
+        slot: RuntimeSlot,
+        instance: ServerInstance,
+        javaVersion: String,
+    ) {
+        if (instance.forgeInstalled()) {
+            slot.log("> ${instance.coreType.displayName} 已安装", LineType.System)
+            return
+        }
+        val installer = instance.installerJar ?: throw RuntimeException(
+            "实例目录里没有找到 ${instance.coreType.displayName} 安装器（*-installer.jar）"
+        )
+        slot.log(
+            "> 首次启动：正在安装 ${instance.coreType.displayName}（需联网下载依赖，可能数分钟）",
+            LineType.System,
+        )
+        val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
+        val code = env.execute(
+            listOf(javaBin, "-jar", installer.name, "--installServer"),
+            instance.dir,
+        ) { line -> slot.log(line, classify(line)) }
+        // 安装期间用户可能点了停止
+        slot.checkCancelled()
+        if (code != 0) {
+            throw RuntimeException("${instance.coreType.displayName} 安装失败（退出码 $code），请看上方日志")
+        }
+        if (!instance.forgeInstalled()) {
+            throw RuntimeException(
+                "${instance.coreType.displayName} 安装器已退出，但没有生成启动入口" +
+                    "（unix_args.txt / forge-*.jar），请查看上方安装日志"
+            )
+        }
+        runCatching { instance.forgeMarker.writeText(javaVersion.toString()) }
+        slot.log("> ${instance.coreType.displayName} 安装完成", LineType.System)
+    }
 
     /** 玩家聊天行：`... [Server thread/INFO]: <Steve> 内容` */
     private val CHAT_LINE = Regex(""":\s*<[^>]{1,32}>\s""")

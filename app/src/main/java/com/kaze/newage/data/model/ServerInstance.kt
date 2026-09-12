@@ -63,6 +63,41 @@ data class ServerInstance(
             ?: File(dir, "server.jar")
 
     val eulaFile: File get() = File(dir, "eula.txt")
+
+    /**
+     * Forge / NeoForge 下载到的是 `*-installer.jar`——它**不是**可直接运行的服务端，
+     * 必须先执行 `java -jar <installer> --installServer` 生成 libraries/ 与启动入口。
+     */
+    val installerJar: File?
+        get() = dir.listFiles()?.firstOrNull {
+            it.isFile && it.name.endsWith(".jar", ignoreCase = true) &&
+                it.name.contains("installer", ignoreCase = true)
+        }
+
+    /** 安装完成标记（installer 跑过一次就写，避免每次启动重装） */
+    val forgeMarker: File get() = File(dir, ".forge-installed")
+
+    /**
+     * 现代 Forge(1.17+) / NeoForge 安装后生成 `libraries/.../unix_args.txt`：
+     * 里面是 main class 与 classpath，用 Java 的 `@argfile` 语法启动。
+     */
+    fun forgeArgsFile(): File? {
+        val libs = File(dir, "libraries")
+        if (!libs.isDirectory) return null
+        return libs.walkTopDown().maxDepth(8)
+            .firstOrNull { it.isFile && it.name == "unix_args.txt" }
+    }
+
+    /** 旧版 Forge（≤1.16.5）安装后生成的可直接 `-jar` 的启动器 */
+    fun legacyForgeJar(): File? =
+        dir.listFiles()?.firstOrNull {
+            it.isFile && it.name.startsWith("forge-") &&
+                it.name.endsWith(".jar", ignoreCase = true) &&
+                !it.name.contains("installer", ignoreCase = true)
+        }
+
+    /** Forge/NeoForge 是否已安装完成（有启动入口即算） */
+    fun forgeInstalled(): Boolean = forgeArgsFile() != null || legacyForgeJar() != null
 }
 
 /**
