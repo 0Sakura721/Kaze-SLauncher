@@ -7,9 +7,11 @@
 
 ## [Unreleased]
 
+_（暂无未发布内容；下次发版时把本节内容并入对应版本号）_
+
 ---
 
-## [0.2.0] — 2026-09-11
+## [0.2.0] — 2026-09-11 · 替换构建 2026-09-12
 
 > 本版本为**替换构建**（2026-09-12）：0.2.0 已发布的安装包替换为含完整审计修复的构建，
 > 版本号与签名不变，可直接覆盖升级。
@@ -81,7 +83,7 @@
   改用 GitHub asset 的 `digest`（取自直连的 api.github.com，不经过镜像）做比对。
 - 核心 jar 增加 ZIP 魔数校验；卸载/安装类操作的连点竞态统一加了同步守卫。
 
-### 0.2.0 原有内容（2026-09-11）
+### 0.2.0 首发内容（2026-09-11）
 
 > ⚠️ **本版更换了签名密钥**：旧版（≤ v0.1.2）用公开的 Android 调试密钥签名，本版起改用正式发布密钥。
 > Android 不允许签名不同的包互相覆盖，**安装前必须先卸载旧版**（实例与存档在外部存储，不受影响）。
@@ -138,6 +140,52 @@
 - [`docs/RELEASE-SIGNING.md`](docs/RELEASE-SIGNING.md)：发布密钥轮换步骤与发版检查清单。
 - **控制台「复制日志」按钮**：右上角「保存日志」左侧新增复制按钮。复制内容改为控制台内存流（与原屏幕所见一致），不再读文件；空日志 Toast「暂无日志」。
 - **保存日志同步修改**：「保存日志」导出逻辑改为导出控制台内存流内容（与复制、屏幕三者一致）。
+
+#### 体积对比（开启 R8 后）
+
+| 架构 | 0.2.0 | v0.1.2 | 降幅 |
+|---|---|---|---|
+| arm64-v8a | **30.6 MB** | 51.0 MB | −40% |
+| armeabi-v7a | **27.7 MB** | 47.2 MB | −41% |
+| universal | **56.6 MB** | 79.8 MB | −29% |
+
+arm64 的 dex 由 16.75 MB 降至 1.24 MB。
+
+---
+
+## [0.1.2] — 2026-08-28
+
+### Fixed
+- **更新检查会下到装不上的包**：改为按设备架构挑下载地址。此前取 assets 里第一个 `.apk`，
+  armeabi-v7a 设备会拿到 arm64 包，下载完成后安装失败。选取顺序：
+  当前架构 → 旧命名兼容（`-arm64`）→ `universal` → 任意 apk（永远有 universal 兜底）。
+
+### Changed
+- `versionCode` 2 → 3。
+
+---
+
+## [0.1.1] — 2026-08-28
+
+### Added
+- **应用内更新检查**：走 GitHub Releases API，GitHub 原链 + 多个国内加速镜像测速择优下载，
+  经 FileProvider 调起系统安装器（新增 `UpdateChecker`、`UpdateInstaller`、`file_paths.xml`）。
+- **armeabi-v7a 支持**：补 `libtalloc.so`，32 位老设备可以安装运行（0.1.0 仅 arm64-v8a）。
+- **CHANGELOG.md**：采用 Keep a Changelog 格式，替代原先放在仓库里的 `MEMORY.md`（后者已移出仓库）。
+
+### Changed
+- **新建服务端流程重写**：筛选 + 实时搜索 + 版本列表全量展示；启动速度优化。
+- **空服自动暂停默认关闭**：默认模板写 `pause-when-empty-seconds=-1`，旧实例缺该键时自动补 -1
+  —— proot 下暂停唤醒会卡死，进而触发 Watchdog 崩溃循环。
+- 主题取色方案调整；背景图免裁剪；设置页版本徽章由硬编码 `v1.0.0` 修正为 `v0.1.0`。
+
+### Fixed
+- **24 项逻辑修复 + 备份/下载/UI 加固**，其中：
+  - 下载支持取消；端口分配同步；配置文件原子写（避免写一半掉电损坏）
+  - 停止等待与重启守卫；恢复备份守卫；导入 jar 补上结果反馈
+  - 键盘弹出时输入框悬浮在屏幕中部（`adjustNothing` 与 `imePadding` 双重压缩）
+  - 控制台输入框与底部导航栏重叠
+  - 版本检测失效
 
 ---
 
@@ -200,4 +248,5 @@
 [Unreleased]: https://github.com/0Sakura721/Kaze-SLauncher/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/0Sakura721/Kaze-SLauncher/releases/tag/v0.2.0
 [0.1.2]: https://github.com/0Sakura721/Kaze-SLauncher/releases/tag/v0.1.2
+[0.1.1]: https://github.com/0Sakura721/Kaze-SLauncher/releases/tag/v0.1.1
 [0.1.0]: https://github.com/0Sakura721/Kaze-SLauncher/releases/tag/v0.1.0
