@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+# 只读即可：本工作流不写仓库、不发版
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-test:
+    name: 单元测试 + 截图
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 SDK 组件
+        run: |
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      # 处理 Gradle 缓存与并发；首次运行会下载 Gradle 发行版
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Robolectric 首次运行会下载 android-all jar（约 190MB）到 ~/.m2，
+      # 不缓存的话每次 CI 都要重下
+      - name: 缓存 Robolectric 运行时
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: robolectric-${{ runner.os }}-
+
+      # 不需要签名密钥：debug 变体的单元测试与截图都不碰发布签名。
+      #
+      # 必须用 recordRoborazzi* 而不是 test*：Roborazzi 只在 record 任务下才把渲染结果
+      # 写盘，直接跑 testArm64DebugUnitTest 会全部通过却一张图都不产出。
+      # record 任务依赖单元测试任务，所以其余测试同样会跑。
+      - name: 跑单元测试 + 渲染截图
+        run: ./gradlew :app:recordRoborazziArm64Debug --console=plain --stacktrace
+
+      # 截图是测试进程的副作用产物；上传出来方便直接在 CI 里看界面
+      - name: 上传截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: app/build/screenshots
+          if-no-files-found: warn
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: app/build/reports/tests
+          if-no-files-found: ignore
