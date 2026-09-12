@@ -6,6 +6,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
@@ -20,6 +21,7 @@ import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.LocalAppTheme
 import com.kaze.newage.ui.theme.reducedMotion
 import com.kaze.newage.ui.theme.statusPalette
+import com.kaze.newage.ui.theme.uiIsResumed
 
 /**
  * 服务状态基调（由 ServerState 映射而来）。
@@ -43,16 +45,22 @@ fun StatusOrb(
         StatusTone.Idle -> palette.idle
         StatusTone.Error -> palette.error
     }
+    // 注意：size 必须在这里落到 Modifier 上。
+    // 此前 `size` 只被层层传递、从未应用，而调用方都是 StatusOrb(tone, size = 40.dp) 这种写法
+    // （不传 Modifier.size）——Canvas 因此没有尺寸约束，被测量成 0×0：
+    // 这个"应用签名元素"在真机上完全不渲染、也不占位（首页标题左侧的空缺就是它）。
+    val sized = modifier.size(size)
     when (LocalAppTheme.current) {
-        AppThemeMode.M3 -> ClearOrb(tone, color, modifier, size)
-        AppThemeMode.GLASS -> GlassOrb(tone, color, modifier, size)
+        AppThemeMode.M3 -> ClearOrb(tone, color, sized)
+        AppThemeMode.GLASS -> GlassOrb(tone, color, sized)
     }
 }
 
 /** CLEAR：扁平圆环 + 中心点，Busy 时脉动 */
 @Composable
-private fun ClearOrb(tone: StatusTone, color: Color, modifier: Modifier, size: Dp) {
-    val still = reducedMotion()
+private fun ClearOrb(tone: StatusTone, color: Color, modifier: Modifier) {
+    // 后台不跑无限动画：本应用常驻前台服务，界面可能长时间在后台，动画时钟纯耗电
+    val still = reducedMotion() || !uiIsResumed()
     val transition = rememberInfiniteTransition(label = "orb")
     val pulse by transition.animateFloat(
         initialValue = 0.3f,
@@ -82,8 +90,9 @@ private fun ClearOrb(tone: StatusTone, color: Color, modifier: Modifier, size: D
 
 /** GLASS：玻璃球体——白色镜面高光 + 彩色核心 + 柔和倒影感，Running 呼吸 / Busy 脉动 */
 @Composable
-private fun GlassOrb(tone: StatusTone, color: Color, modifier: Modifier, size: Dp) {
-    val still = reducedMotion()
+private fun GlassOrb(tone: StatusTone, color: Color, modifier: Modifier) {
+    // 同上：后台钉成静态值，回到前台自然恢复
+    val still = reducedMotion() || !uiIsResumed()
     val transition = rememberInfiniteTransition(label = "orb")
     val breath by transition.animateFloat(
         initialValue = 0.30f,

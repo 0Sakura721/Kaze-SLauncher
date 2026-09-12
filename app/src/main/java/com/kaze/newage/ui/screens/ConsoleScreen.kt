@@ -134,7 +134,8 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                             IconButton(
                                 onClick = { showSwitcher = true },
                                 enabled = instances.isNotEmpty(),
-                                modifier = Modifier.size(28.dp),
+                                // 不设 size：M3 默认 40dp 容器 + 48dp 触控区。
+                                // 原来写死 28dp，连触控区一起缩到了 28dp，很难点中
                             ) {
                                 Icon(
                                     Icons.Filled.ArrowDropDown,

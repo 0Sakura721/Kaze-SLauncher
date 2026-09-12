@@ -12,6 +12,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -42,6 +47,33 @@ fun reducedMotion(): Boolean {
             ) == 0f
         }.getOrDefault(false)
     }
+}
+
+/**
+ * 界面是否处于前台（RESUMED）。
+ *
+ * `rememberInfiniteTransition` 之类的无限动画在应用退到后台后**仍在继续跑帧**。
+ * 本应用跑服务端时依赖常驻前台服务，界面长时间待在后台，这部分是纯粹的耗电。
+ * 把动画在后台钉成静态值即可（回到前台会自然恢复动画）。
+ */
+@Composable
+fun uiIsResumed(): Boolean {
+    val owner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    var resumed by remember(owner) {
+        mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(owner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> resumed = true
+                Lifecycle.Event.ON_PAUSE -> resumed = false
+                else -> Unit
+            }
+        }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+    return resumed
 }
 
 /** 按当前主题渲染背景 */

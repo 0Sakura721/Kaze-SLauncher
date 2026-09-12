@@ -9,7 +9,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import com.kaze.newage.ui.AppRoot
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.FgColorMode
@@ -56,6 +59,18 @@ class MainActivity : ComponentActivity() {
                 glassIntensity = glassIntensity,
                 fgColorMode = FgColorMode.fromId(fgColorModeId),
             ) {
+                // 系统栏图标明暗必须跟随**应用内**的主题选择，而不是系统主题。
+                // enableEdgeToEdge() 的默认行为是按 isSystemInDarkTheme() 决定的：
+                // 系统深色 + 应用手动切浅色时，状态栏图标是白色，画在浅色背景上完全看不见
+                // （真机实测：顶部时钟/电量整条消失）。
+                val view = LocalView.current
+                SideEffect {
+                    val window = (view.context as android.app.Activity).window
+                    WindowCompat.getInsetsController(window, view).apply {
+                        isAppearanceLightStatusBars = !darkTheme
+                        isAppearanceLightNavigationBars = !darkTheme
+                    }
+                }
                 AppRoot()
             }
         }

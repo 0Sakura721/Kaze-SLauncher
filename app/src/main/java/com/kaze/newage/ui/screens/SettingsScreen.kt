@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -122,6 +123,8 @@ fun SettingsScreen(viewModel: AppViewModel) {
     Column(
         Modifier
             .fillMaxSize()
+            // 自定义颜色 HEX 等输入框在 adjustNothing 下会被键盘盖住
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
             // 底部空白承载常驻栏：滚动中内容充分透过底栏玻璃，滚到底时最后内容不被遮挡
@@ -1092,68 +1095,98 @@ private fun ThemeTile(
     }
 }
 
-/** 主题迷你预览：M3=白卡片蓝点 / GLASS=柔光玻璃 */
+/**
+ * 主题迷你预览：画一个"迷你界面"（背景 + 卡片 + 文字条 + 主色按钮）。
+ *
+ * 旧实现只画了背景色块和一个小圆点，两个预览在真机上都呈现为几乎一样的白框，
+ * 用户根本看不出 M3 与液态玻璃的区别——预览没起到预览作用。
+ */
 @Composable
 private fun ThemePreview(mode: AppThemeMode, modifier: Modifier = Modifier) {
     when (mode) {
         AppThemeMode.M3 -> Box(modifier.background(Color(0xFFE9EDF3))) {
-            Box(
+            Column(
                 Modifier
-                    .padding(8.dp)
+                    .padding(7.dp)
                     .fillMaxWidth()
-                    .height(18.dp)
-                    .clip(RoundedCornerShape(4.dp))
+                    .clip(RoundedCornerShape(6.dp))
                     .background(Color.White)
-                    .border(
-                        BorderStroke(1.dp, Color(0xFFD5DAE2)),
-                        RoundedCornerShape(4.dp),
-                    )
-            )
-            Box(
-                Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 10.dp, bottom = 8.dp)
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-            )
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 8.dp, end = 8.dp)
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
-            )
+                    .border(BorderStroke(1.dp, Color(0xFFD5DAE2)), RoundedCornerShape(6.dp))
+                    .padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                PreviewBar(Color(0xFFC3CAD4), 0.66f)
+                PreviewBar(Color(0xFFE3E8EF), 1f)
+                Box(
+                    Modifier
+                        .padding(top = 1.dp)
+                        .fillMaxWidth(0.52f)
+                        .height(9.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFF4A6CF7))
+                )
+            }
         }
         AppThemeMode.GLASS -> Box(
             modifier.background(Brush.verticalGradient(listOf(Color(0xFFF2F6FC), Color(0xFFCCDFF4))))
         ) {
-            // 柔光斑
+            // 柔光斑（玻璃质感的来源之一）
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 4.dp, end = 6.dp)
-                    .size(30.dp)
+                    .padding(top = 1.dp, end = 3.dp)
+                    .size(26.dp)
                     .clip(CircleShape)
-                    .background(Brush.radialGradient(listOf(Color(0xFF7FADFF).copy(alpha = 0.95f), Color.Transparent)))
+                    .background(
+                        Brush.radialGradient(
+                            listOf(Color(0xFF7FADFF).copy(alpha = 0.95f), Color.Transparent)
+                        )
+                    )
             )
-            // 玻璃面板 + 顶部镜面高光
-            Column(Modifier.padding(8.dp).fillMaxWidth()) {
+            // 半透明玻璃面板：顶部镜面高光 + 透出底色
+            Column(
+                Modifier
+                    .padding(7.dp)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color.White.copy(alpha = 0.42f))
+                    .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.75f)), RoundedCornerShape(6.dp))
+                    .padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(2.dp)
-                        .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.95f), Color.Transparent)))
+                        .height(1.5.dp)
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(Color.White, Color.White.copy(alpha = 0.1f))
+                            )
+                        )
                 )
+                PreviewBar(Color(0xFF8FA8C4), 0.66f)
+                PreviewBar(Color(0xFFB9CCE0), 1f)
                 Box(
                     Modifier
-                        .fillMaxWidth()
-                        .height(20.dp)
-                        .clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
-                        .background(Color.White.copy(alpha = 0.45f))
+                        .padding(top = 1.dp)
+                        .fillMaxWidth(0.52f)
+                        .height(9.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = 0.9f))
                 )
             }
         }
     }
+}
+
+/** 预览里的"文字条" */
+@Composable
+private fun PreviewBar(color: Color, widthFraction: Float) {
+    Box(
+        Modifier
+            .fillMaxWidth(widthFraction)
+            .height(5.dp)
+            .clip(RoundedCornerShape(3.dp))
+            .background(color)
+    )
 }

@@ -70,7 +70,11 @@ import com.kaze.newage.ui.toTone
  * 导航一律走底栏（FCL/Zalith 同款），不再堆快捷入口。
  */
 @Composable
-fun HomeScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) {
+fun HomeScreen(
+    viewModel: AppViewModel,
+    onNavigate: (String) -> Unit,
+    onNewServer: () -> Unit,
+) {
     val envState by viewModel.envState.collectAsState()
     val javaVersions by viewModel.envJavaVersions.collectAsState()
     val download by viewModel.download.collectAsState()
@@ -281,42 +285,76 @@ fun HomeScreen(viewModel: AppViewModel, onNavigate: (String) -> Unit) {
                 }
         }
 
-        // ── 底部大启动按钮（Zalith launch button，全宽锚底）──
-        Button(
-            onClick = {
-                val c = current
-                when {
-                    c == null -> onNavigate(Dest.Server.route)
-                    serverState == ServerState.Running -> viewModel.stopInstance(c)
-                    else -> viewModel.startInstance(c)
+        // 无实例时的引导：放在滚动内容之外，在剩余空间里垂直居中，并把主按钮收进来——
+        // 避免"内容挤在顶部、按钮钉在底部、中间一大片空白"的观感
+        if (current == null) {
+            Box(
+                Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.CloudDownload,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.size(48.dp),
+                    )
+                    Text("还没有服务端", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "下载 Vanilla / Paper 服务端，\n或在「服务端」页导入已有的 server.jar",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                    )
+                    Button(
+                        onClick = onNewServer,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp)
+                            .height(52.dp),
+                    ) {
+                        Icon(Icons.Filled.Add, null, Modifier.size(20.dp).padding(end = 6.dp))
+                        Text("新建服务端")
+                    }
                 }
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth().height(56.dp),
-        ) {
-            // 动作语义图标：视觉锚点让"当前会做什么"无需读字即知
-            when {
-                current == null -> Icon(
-                    Icons.Filled.Add, null,
-                    Modifier.size(20.dp).padding(end = 6.dp),
-                )
-                serverState == ServerState.Running -> Icon(
-                    Icons.Filled.Stop, null,
-                    Modifier.size(20.dp).padding(end = 6.dp),
-                )
-                !busy -> Icon(
-                    Icons.Filled.PlayArrow, null,
-                    Modifier.size(20.dp).padding(end = 6.dp),
+            }
+        }
+
+        // ── 底部大启动按钮（Zalith launch button，全宽锚底）──
+        // 只在有实例时出现：无实例时主按钮已在引导块内，避免同屏两个「新建服务端」
+        if (current != null) {
+            Button(
+                onClick = {
+                    val c = current
+                    if (serverState == ServerState.Running) viewModel.stopInstance(c)
+                    else viewModel.startInstance(c)
+                },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+            ) {
+                // 动作语义图标：视觉锚点让"当前会做什么"无需读字即知
+                when {
+                    serverState == ServerState.Running -> Icon(
+                        Icons.Filled.Stop, null,
+                        Modifier.size(20.dp).padding(end = 6.dp),
+                    )
+                    !busy -> Icon(
+                        Icons.Filled.PlayArrow, null,
+                        Modifier.size(20.dp).padding(end = 6.dp),
+                    )
+                }
+                Text(
+                    when {
+                        serverState == ServerState.Running -> "停止服务端"
+                        busy -> "处理中…"
+                        else -> "启动服务端"
+                    }
                 )
             }
-            Text(
-                when {
-                    current == null -> "新建服务端"
-                    serverState == ServerState.Running -> "停止服务端"
-                    busy -> "处理中…"
-                    else -> "启动服务端"
-                }
-            )
         }
     }
 }
