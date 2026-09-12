@@ -41,6 +41,16 @@ object UpdateChecker {
         val name: String,
         val body: String,
         val apkUrl: String,
+        /**
+         * 发布方给出的 APK SHA-256（GitHub asset 的 `digest` 字段，形如 `sha256:ab12…`）。
+         *
+         * APK 是从多个**第三方加速镜像**下载的（见 [sources]），任一镜像被控制就能返回一个
+         * 「魔数合法、体积足够」的篡改包，而应用会引导用户安装它。这个值取自
+         * `api.github.com`（直连、可信），是这条链路上唯一的完整性依据。
+         *
+         * 取不到时为 null（见 [matchesDigest] 的处理）。
+         */
+        val apkSha256: String? = null,
     )
 
     /**
@@ -66,13 +76,25 @@ object UpdateChecker {
         val tag = json.optString("tag_name", "").removePrefix("v")
         val assets = json.optJSONArray("assets") ?: return null
         // 按设备架构选对应 APK（release 三版本：arm64-v8a / armeabi-v7a / universal）
-        val apkUrl = pickApkUrl(assets) ?: return null
+        val asset = pickApkAsset(assets) ?: return null
         return ReleaseInfo(
             tag = tag,
             name = json.optString("name", tag),
             body = json.optString("body", "").trim(),
-            apkUrl = apkUrl,
+            apkUrl = asset.optString("browser_download_url"),
+            apkSha256 = parseSha256(asset.optString("digest", "")),
         )
+    }
+
+    /**
+     * 解析 GitHub 的 `digest` 字段（形如 `sha256:ab12…`）。
+     * 只认 sha256 且必须是 64 位十六进制，其余（空/其它算法/格式异常）一律返回 null。
+     */
+    internal fun parseSha256(digest: String): String? {
+        val v = digest.trim()
+        if (!v.startsWith("sha256:", ignoreCase = true)) return null
+        val hex = v.substringAfter(':').trim().lowercase()
+        return hex.takeIf { it.length == 64 && it.all { c -> c in "0123456789abcdef" } }
     }
 
     /** 当前设备架构在发布命名中的后缀（asset 名形如 Kaze-SLauncher-v0.1.1-<arch>.apk） */
@@ -85,13 +107,16 @@ object UpdateChecker {
     }
 
     /**
-     * 按架构挑下载地址：当前架构 → 旧命名兼容（-arm64）→ universal → 任意 apk。
+     * 按架构挑下载资产：当前架构 → 旧命名兼容（-arm64）→ universal → 任意 apk。
      * 不匹配时永远有 universal 兜底，不会拿到装不上的架构包（如 v7a 设备拿到 arm64 包）。
+     *
+     * 返回整个 asset 对象（而不只是 URL）：这样 URL 与它的 `digest` 一定成对取到，
+     * 不会出现「URL 取 A、哈希取 B」的错配。
      */
-    private fun pickApkUrl(assets: JSONArray): String? {
-        val urls = (0 until assets.length())
-            .map { assets.getJSONObject(it).optString("browser_download_url") }
-            .filter { it.isNotBlank() }
+    private fun pickApkAsset(assets: JSONArray): JSONObject? {
+        val items = (0 until assets.length())
+            .mapNotNull { assets.optJSONObject(it) }
+            .filter { it.optString("browser_download_url").isNotBlank() }
         val arch = archSuffix()
         val candidates = buildList {
             add("-$arch.apk")
@@ -100,7 +125,9 @@ object UpdateChecker {
             add(".apk")
         }
         for (suffix in candidates) {
-            urls.firstOrNull { it.endsWith(suffix, ignoreCase = true) }?.let { return it }
+            items.firstOrNull {
+                it.optString("browser_download_url").endsWith(suffix, ignoreCase = true)
+            }?.let { return it }
         }
         return null
     }

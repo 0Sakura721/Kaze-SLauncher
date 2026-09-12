@@ -18,8 +18,17 @@ object Downloader {
      * 计算文件 SHA-1（十六进制小写）；失败返回 null。
      * 用于校验官方清单已给出哈希的下载物（例如 vanilla 的 `downloads.server.sha1`）。
      */
-    fun sha1Of(file: File): String? = try {
-        val md = java.security.MessageDigest.getInstance("SHA-1")
+    fun sha1Of(file: File): String? = digestOf(file, "SHA-1")
+
+    /**
+     * 计算文件 SHA-256（十六进制小写）；失败返回 null。
+     * 用于校验更新包——GitHub 的 release asset 带 `digest: sha256:…`，
+     * 而 APK 实际是从多个第三方加速镜像下载的，见 [com.kaze.newage.core.update.UpdateInstaller]。
+     */
+    fun sha256Of(file: File): String? = digestOf(file, "SHA-256")
+
+    private fun digestOf(file: File, algorithm: String): String? = try {
+        val md = java.security.MessageDigest.getInstance(algorithm)
         file.inputStream().use { ins ->
             val buf = ByteArray(64 * 1024)
             while (true) {
