@@ -465,7 +465,16 @@ class ProotEnvironment(
             _items.value = _items.value.map { if (it.id == "rootfs") it.copy(done = true, phase = "") else it } +
                 SetupItem("apt", "apt 包管理器", "更新软件源索引", phase = "初始化中")
             setupAptSources()
-            runCommand("apt-get update -qq")
+            val aptRes = runCommand("apt-get update -qq")
+            if (aptRes.isFailure) {
+                // 不能静默继续：没有 apt 索引，后续 `apt-get install` 装 Java 必然失败，
+                // 而用户看到的却是"环境已就绪"，只能对着一个装不上 Java 的环境反复重试。
+                // 明确报错即可——联网后再点一次「部署」，会走 ensureAptStage 把这一步补上。
+                throw IllegalStateException(
+                    "apt 初始化失败（${aptRes.exceptionOrNull()?.message ?: "未知错误"}）。" +
+                        "请检查网络后重新点「部署」，已解压的环境不会重复下载。"
+                )
+            }
             markAptInitialized()
             updateItem("apt") { item -> item.copy(done = true, phase = "") }
             log("  ✓ apt 就绪")
