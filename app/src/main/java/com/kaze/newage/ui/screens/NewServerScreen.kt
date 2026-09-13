@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -563,6 +564,21 @@ private fun VersionListPage(
             }
         }
 
+        // 结果反馈：换筛选后列表顶部**可能看起来完全一样** —— 快照版往往就是最新的那些版本，
+        // 例如 Vanilla 的「快照版(750)」与「全部(913)」首屏都是 26w14a，用户会以为筛选没生效。
+        // 把匹配数量常驻在顶部（原来只在列表底部、且 >200 才显示，等于看不到）。
+        if (!loading && versions.isNotEmpty()) {
+            Text(
+                buildString {
+                    append("匹配 ${filtered.size} 个版本")
+                    if (filtered.size != versions.size) append("（共 ${versions.size} 个）")
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp, start = 4.dp),
+            )
+        }
+
         // 版本列表：独立页内直接用 LazyColumn（合理利用整页空间）
         when {
             loading -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
@@ -575,20 +591,14 @@ private fun VersionListPage(
                 )
             }
             else -> {
+                val listState = rememberLazyListState()
+                // 换筛选/改搜索词后回到顶部：LazyColumn 会保留滚动位置，
+                // 用户可能停在列表中间，看到的内容与刚选中的分类对不上
+                LaunchedEffect(typeFilter, q) { listState.scrollToItem(0) }
                 // 列表全量展示（云端获取，LazyColumn 懒加载无压力；可搜索过滤）
-                LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
+                LazyColumn(state = listState, modifier = Modifier.weight(1f).padding(top = 8.dp)) {
                     items(filtered) { v ->
                         VersionRow(version = v, onClick = { onSelect(v) })
-                    }
-                    if (filtered.size > 200) {
-                        item {
-                            Text(
-                                "共 ${filtered.size} 个版本",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                            )
-                        }
                     }
                 }
             }
