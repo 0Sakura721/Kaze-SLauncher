@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** 服务端下载状态 */
 data class DownloadState(
@@ -451,24 +452,69 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ── 动作：版本列表 ──
+
+    /**
+     * 在独立线程上跑"不可中断的阻塞调用"，并给出**界面可见的超时**。
+     *
+     * [CoreSources] 的抓取是阻塞式 `HttpURLConnection`：虽然设了 connect/read 超时，
+     * 但 **DNS 解析不受 connectTimeout 约束**，设备离线时可能长时间不返回；
+     * 而阻塞调用不会在挂起点让出，`withTimeout` 拦不住它（超时只在挂起点生效，
+     * 它仍然会一直等到阻塞调用自己返回）。
+     *
+     * 所以把阻塞调用放到独立线程，用 `deferred.await()` 参与协程取消：超时后界面立即恢复，
+     * 那个线程跑完自行丢弃（抓取本身有超时兜底，不会无限积累线程）。
+     */
+    private suspend fun <T> blockingWithTimeout(timeoutMs: Long, fallback: T, block: suspend () -> T): T {
+        val deferred = kotlinx.coroutines.CompletableDeferred<T>()
+        kotlin.concurrent.thread(isDaemon = true, name = "kaze-fetch") {
+            // 抓取是阻塞实现（内部不挂起），所以在这个独立线程里用 runBlocking 跑即可；
+            // 关键是这个线程不在 viewModelScope 上，超时后协程能正常结束。
+            deferred.complete(runCatching { kotlinx.coroutines.runBlocking { block() } }.getOrDefault(fallback))
+        }
+        return withTimeoutOrNull(timeoutMs) { deferred.await() } ?: fallback
+    }
+
+    /** 版本列表加载：用递增序号标识"最新一次请求"，只有它有权复位 loading */
+    @Volatile
+    private var versionsRequestId = 0
+
+    @Volatile
+    private var buildsRequestId = 0
+
     fun loadVersions(type: CoreType) {
         versionsJob?.cancel()
+        val requestId = ++versionsRequestId
         versionsJob = viewModelScope.launch(Dispatchers.IO) {
             _versionsLoading.value = true
             _versions.value = emptyList()
-            _versions.value = CoreSources.fetchVersions(type).getOrDefault(emptyList())
-            _versionsLoading.value = false
+            try {
+                _versions.value = blockingWithTimeout(VERSION_FETCH_TIMEOUT_MS, emptyList()) {
+                    CoreSources.fetchVersions(type).getOrDefault(emptyList())
+                }
+            } finally {
+                // finally 而不是顺序执行：任务被 cancel（快速换核心类型）或抛异常时
+                // 也要复位，否则 loading 永久为 true → 版本页那个进度条常驻。
+                // 带序号是因为：旧任务的 finally 可能晚于新任务置位，无条件复位会把
+                // 新任务的进度条提前关掉。
+                if (requestId == versionsRequestId) _versionsLoading.value = false
+            }
         }
     }
 
     /** 拉取选定版本的可选构建（无构建列表的核心会立刻返回空列表） */
     fun loadBuilds(type: CoreType, mcVersion: String) {
         buildsJob?.cancel()
+        val requestId = ++buildsRequestId
         buildsJob = viewModelScope.launch(Dispatchers.IO) {
             _buildsLoading.value = true
             _builds.value = emptyList()
-            _builds.value = CoreSources.fetchBuilds(type, mcVersion).getOrDefault(emptyList())
-            _buildsLoading.value = false
+            try {
+                _builds.value = blockingWithTimeout(VERSION_FETCH_TIMEOUT_MS, emptyList()) {
+                    CoreSources.fetchBuilds(type, mcVersion).getOrDefault(emptyList())
+                }
+            } finally {
+                if (requestId == buildsRequestId) _buildsLoading.value = false
+            }
         }
     }
 
@@ -696,3 +742,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }.getOrDefault(17)
 }
+
+/**
+ * 版本 / 构建列表抓取的**界面可见超时**。
+ *
+ * 抓取本身有 connect 15s + read 30s，但 DNS 解析不受 connectTimeout 约束，
+ * 设备离线时可能长时间不返回。超过这个时间就放弃等待、复位状态，
+ * 让用户看到"加载失败 + 重试"，而不是一个永远转的进度条。
+ */
+private const val VERSION_FETCH_TIMEOUT_MS = 45_000L

@@ -58,34 +58,51 @@ fun WavyLinearProgress(
     trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
     /** 关闭波浪，退回官方经典样式（4dp 直线） */
     wavy: Boolean = true,
+    /**
+     * 是否让波浪持续流动。**步骤指示这类"静态进度"应传 false**：
+     * 定量态的相位原本也一直在动，于是每一页的步骤条都在无休止流动，
+     * 看起来像"有个进度条一直卡在那里转"（用户实报）。
+     * 进度条用于真实任务（部署/下载）时才需要动。
+     */
+    animated: Boolean = true,
 ) {
-    val animating = !reducedMotion() && uiIsResumed()
-    val transition = rememberInfiniteTransition(label = "wavy-progress")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(WAVE_PERIOD_MS, easing = LinearEasing),
-            RepeatMode.Restart,
-        ),
-        label = "wavy-phase",
-    )
-
-    // 不定态：指示段来回生长/收缩（官方的不定态是四段关键帧；这里用一个等价的
-    // 往返生长，观感一致但少一份关键帧表 —— 本应用的进度基本都是确定态的）
-    val indeterminatePhase by transition.animateFloat(
-        initialValue = 0.06f,
-        targetValue = 0.94f,
-        animationSpec = infiniteRepeatable(
-            tween(WAVE_PERIOD_MS * 3, easing = M3Motion.emphasized),
-            RepeatMode.Reverse,
-        ),
-        label = "wavy-sweep",
-    )
+    val animating = animated && !reducedMotion() && uiIsResumed()
+    // 不动画时**不要创建** InfiniteTransition：它仍会每帧推一次值，
+    // 即使下面把相位固定成 0，读值本身也会让这个 Composable 每帧重组（白烧 CPU 与电量）。
+    val phase: Float
+    val indeterminatePhase: Float
+    if (animating) {
+        val transition = rememberInfiniteTransition(label = "wavy-progress")
+        val p by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                tween(WAVE_PERIOD_MS, easing = LinearEasing),
+                RepeatMode.Restart,
+            ),
+            label = "wavy-phase",
+        )
+        // 不定态：指示段来回生长/收缩（官方的不定态是四段关键帧；这里用一个等价的
+        // 往返生长，观感一致但少一份关键帧表 —— 本应用的进度基本都是确定态的）
+        val s by transition.animateFloat(
+            initialValue = 0.06f,
+            targetValue = 0.94f,
+            animationSpec = infiniteRepeatable(
+                tween(WAVE_PERIOD_MS * 3, easing = M3Motion.emphasized),
+                RepeatMode.Reverse,
+            ),
+            label = "wavy-sweep",
+        )
+        phase = p
+        indeterminatePhase = s
+    } else {
+        phase = 0f
+        indeterminatePhase = 0.5f
+    }
 
     val wavelength = if (progress == null) INDETERMINATE_WAVELENGTH else DETERMINATE_WAVELENGTH
-    val p = if (animating) phase else 0f
-    val sweep = if (animating) indeterminatePhase else 0.5f
+    val p = phase
+    val sweep = indeterminatePhase
 
     Canvas(
         modifier

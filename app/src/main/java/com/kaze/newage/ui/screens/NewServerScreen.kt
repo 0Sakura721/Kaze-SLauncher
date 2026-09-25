@@ -100,6 +100,7 @@ import com.kaze.newage.ui.components.WavyLinearProgress
 import com.kaze.newage.ui.theme.M3Motion
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
+import androidx.compose.material3.OutlinedButton
 
 /**
  * 新建服务端 —— 三步向导：选核心 → 选版本与资源 → 确认安装。
@@ -182,7 +183,9 @@ private fun WizardProgress(step: Int, total: Int, title: String) {
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        WavyLinearProgress(progress = (step - 1).toFloat() / total)
+        // animated = false：这是"第几步"的静态指示，不是正在跑的任务。
+        // 开着动画时相位会一直流动，观感像有个进度条卡在那儿转。
+        WavyLinearProgress(progress = (step - 1).toFloat() / total, animated = false)
     }
 }
 
@@ -444,6 +447,7 @@ private fun VersionConfigPhase(
                 onTypeFilter = { typeFilterName = it?.name ?: "" },
                 onSelect = { selected = it },
                 onBack = onBackToCore,
+                onRetry = { viewModel.loadVersions(coreType) },
             )
         } else {
             ConfigPage(
@@ -600,6 +604,7 @@ private fun VersionListPage(
     onTypeFilter: (VersionType?) -> Unit,
     onSelect: (GameVersion) -> Unit,
     onBack: () -> Unit,
+    onRetry: () -> Unit,
 ) {
     val q = query.trim()
     // 类型筛选 + 关键词搜索（FCL：先按类型分档，再在档内搜）
@@ -675,12 +680,22 @@ private fun VersionListPage(
 
             when {
                 loading -> WavyLinearProgress(progress = null)
-                filtered.isEmpty() -> Text(
-                    if (versions.isEmpty()) "版本列表加载失败，请检查网络" else "没有匹配的版本",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 16.dp),
-                )
+                filtered.isEmpty() -> Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        if (versions.isEmpty()) "版本列表加载失败，请检查网络" else "没有匹配的版本",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // 加载失败给一个就地重试：此前只能返回上一页再进来一次
+                    // （离线/DNS 卡住时尤其需要，否则用户对着一个空页无路可走）
+                    if (versions.isEmpty()) {
+                        OutlinedButton(onClick = onRetry) { Text("重试") }
+                    }
+                }
                 else -> {
                     val listState = rememberLazyListState()
                     // 换筛选/改搜索词后回到顶部：LazyColumn 会保留滚动位置，
