@@ -321,19 +321,103 @@ class ProotEnvironment(
             return failed.isEmpty()
         }
 
-    fun isJdkInstalled(version: Int): Boolean {
-        // 不用 canExecute()：模拟器/FUSE 上该判定不可靠（isReady 早已弃用同类检查），
-        // 损坏的半成品也可能带执行位。改为真实体积判定：完整 java 二进制 >1MB
-        val javaBin = File(javaHomeDir, "java-$version-openjdk-$rootfsArch/bin/java")
-        return try {
-            javaBin.length() > 1_000_000L
-        } catch (_: Exception) { false }
+    /**
+     * rootfs 里实际装着的 JDK：主版本 → 目录名。
+     *
+     * 不用「`java-N-openjdk-<arch>/bin/java` 且 >1MB」那种写死判定，两个坑都踩过：
+     *  1. OpenJDK 的 `bin/java` 只是个约 100KB 的启动器（真正的大头是 lib/server/libjvm.so，20MB+），
+     *     1MB 阈值把**正常安装**判成"未安装"——真机上服务端用 Java 17 跑得好好的，
+     *     设置页却写着「Java 17 未安装」。
+     *  2. 目录名不统一：apt 装出来是 `java-1.17.0-openjdk-arm64`，Adoptium 解压出来是
+     *     `java-17-openjdk-arm64`，写死名字必然漏判。
+     * 改为扫描 usr/lib/jvm 下的每个子目录，优先读 release 文件里的 JAVA_VERSION（权威），
+     * 读不到再从目录名解析，这样任何来源装的 JDK 都能认出来。
+     * （注意别在这段注释里写出斜杠加星号的路径通配——Kotlin 的块注释**可嵌套**，
+     *   那会开一个嵌套注释，整个 KDoc 再也闭合不了，后面所有代码都被注释掉。）
+     */
+    fun installedJdks(): Map<Int, String> {
+        val root = javaHomeDir
+        if (!root.isDirectory) return emptyMap()
+        val found = mutableMapOf<Int, String>()
+        runCatching {
+            root.listFiles()?.forEach { dir ->
+                if (!dir.isDirectory) return@forEach
+                val javaBin = File(dir, "bin/java")
+                // 只要不是空壳就认（0 字节/几 KB 的是半成品；不用 canExecute，FUSE 上不可靠）
+                if (!javaBin.isFile || javaBin.length() < 10_000L) return@forEach
+                val major = readJavaMajor(dir) ?: parseMajorFromName(dir.name) ?: return@forEach
+                // 同一主版本有多个目录时保留第一个（通常是先前装的那个）
+                found.putIfAbsent(major, dir.name)
+            }
+        }
+        return found
     }
 
-    fun installedJdkVersions(): List<Int> = listOf(8, 11, 17, 21, 25).filter { isJdkInstalled(it) }
+    /**
+     * 主版本 → release 文件里的完整版本号（如 "17.0.20.1"）。
+     * 设置页显示"已安装 · 17.0.20.1"，比只写"已安装"更有用（用户能看到确切是哪个小版本）。
+     */
+    fun installedJdkFullVersions(): Map<Int, String> {
+        val root = javaHomeDir
+        if (!root.isDirectory) return emptyMap()
+        val out = mutableMapOf<Int, String>()
+        runCatching {
+            root.listFiles()?.forEach { dir ->
+                if (!dir.isDirectory) return@forEach
+                val major = readJavaMajor(dir) ?: parseMajorFromName(dir.name) ?: return@forEach
+                val full = readJavaVersionString(dir) ?: return@forEach
+                out.putIfAbsent(major, full)
+            }
+        }
+        return out
+    }
 
-    /** rootfs 内 java 路径（供启动脚本使用） */
-    fun getJavaPath(version: Int): String = "/usr/lib/jvm/java-$version-openjdk-$rootfsArch/bin/java"
+    /** 读 JDK 的 release 文件里 JAVA_VERSION 的原始值，拿不到返回 null */
+    private fun readJavaVersionString(dir: File): String? = runCatching {
+        val release = File(dir, "release")
+        if (!release.isFile) return@runCatching null
+        release.useLines { lines -> lines.firstOrNull { it.startsWith("JAVA_VERSION=") } }
+            ?.substringAfter('=')?.trim()?.trim('"')
+    }.getOrNull()
+
+    /** 读 JDK 的 release 文件（`JAVA_VERSION="17.0.20.1"`），拿不到返回 null */
+    private fun readJavaMajor(dir: File): Int? = runCatching {
+        val release = File(dir, "release")
+        if (!release.isFile) return@runCatching null
+        val raw = release.useLines { lines ->
+            lines.firstOrNull { it.startsWith("JAVA_VERSION=") }
+        } ?: return@runCatching null
+        majorOf(raw.substringAfter('=').trim().trim('"'))
+    }.getOrNull()
+
+    /** 从目录名解析主版本：java-17-openjdk-arm64 / java-1.17.0-openjdk-arm64 / jdk-17.0.20.1+1 / jdk8u402 */
+    private fun parseMajorFromName(name: String): Int? {
+        Regex("""(?:^|[-_])1\.(\d+)""").find(name)?.let { return it.groupValues[1].toIntOrNull() }
+        Regex("""(?:jdk|java)[-_]?(\d+)""", RegexOption.IGNORE_CASE).find(name)?.let {
+            return it.groupValues[1].toIntOrNull()
+        }
+        return null
+    }
+
+    /** "17.0.20.1" → 17；"1.8.0_402" → 8 */
+    private fun majorOf(version: String): Int? {
+        val v = version.trim().trim('"').removePrefix("jdk-")
+        return if (v.startsWith("1.")) {
+            v.substring(2).substringBefore('.').toIntOrNull()
+        } else {
+            v.substringBefore('.').toIntOrNull()
+        }
+    }
+
+    fun isJdkInstalled(version: Int): Boolean = installedJdks().containsKey(version)
+
+    /** 实际检测到的版本（不再写死 8/11/17/21/25，装了什么就报什么） */
+    fun installedJdkVersions(): List<Int> = installedJdks().keys.sorted()
+
+    /** rootfs 内 java 路径（供启动脚本使用）；未检测到时退回传统命名 */
+    fun getJavaPath(version: Int): String =
+        installedJdks()[version]?.let { "/usr/lib/jvm/$it/bin/java" }
+            ?: "/usr/lib/jvm/java-$version-openjdk-$rootfsArch/bin/java"
 
     fun resolveJavaPath(preferred: Int?): String? {
         val candidates = (listOfNotNull(preferred) + listOf(21, 17, 11, 8)).distinct()

@@ -82,6 +82,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val envJavaVersions: StateFlow<List<Int>> =
         MutableStateFlow(emptyList()) // 刷新见 refreshJava()
 
+    /**
+     * 主版本 → release 文件里的完整版本号（如 17 → "17.0.20.1"）。
+     * 设置页显示「已安装 · 17.0.20.1」，比只写「已安装」更能说明检测到了什么。
+     */
+    val envJavaVersionDetails: StateFlow<Map<Int, String>> =
+        MutableStateFlow(emptyMap()) // 刷新见 refreshJava()
+
     val instances = instanceStore.instances
 
     /** 所有实例状态：instanceId -> ServerState */
@@ -192,7 +199,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refreshJava() {
+        // 扫描 rootfs 的 usr/lib/jvm 得出实际安装情况（装了什么就报什么，
+        // 不再按写死的 8/11/17/21/25 列表逐个猜）
         (envJavaVersions as MutableStateFlow).value = env.installedJdkVersions()
+        (envJavaVersionDetails as MutableStateFlow).value = env.installedJdkFullVersions()
     }
 
     /** 可选下载：安装指定 Java 版本（8/17/21/25）；失败可再次调用重试（断点续传） */
