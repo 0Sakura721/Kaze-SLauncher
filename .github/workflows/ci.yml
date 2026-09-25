@@ -34,9 +34,19 @@ jobs:
       # 只装本项目需要的组件即可。
       - name: 安装 Android SDK 组件
         run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          # runner 预装的 cmdline-tools 不保证在 PATH 上（原先由 setup-android 负责，那个 action 已坏）
+          CMDLINE="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$CMDLINE" ]; then
+            echo "找不到 cmdline-tools，SDK 目录内容："; ls -la "$SDK" 2>&1 || true; exit 1
+          fi
+          export PATH="$CMDLINE:$PATH"
+          sdkmanager --version
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$CMDLINE" >> "$GITHUB_PATH"
 
       # 处理 Gradle 缓存与并发；首次运行会下载 Gradle 发行版
       - name: 配置 Gradle
