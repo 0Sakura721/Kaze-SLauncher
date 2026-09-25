@@ -1,0 +1,1737 @@
+{
+  "groups": [
+    {
+      "id": "gg",
+      "x": 0,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bof",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 0,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g4",
+      "x": 16,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "lo2",
+          "kind": "loadingIndicator",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 40,
+          "note": "服务状态指示：运行中缓慢旋转，启动中加速，停止时静止成一个固定造型"
+        }
+      ]
+    },
+    {
+      "id": "g5",
+      "x": 64,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ch3",
+          "kind": "chip",
+          "label": "运行中 02:14:37",
+          "icon": "bolt",
+          "variant": "tonal",
+          "checked": true,
+          "note": "状态胶囊：状态色圆点 + 已运行时长"
+        }
+      ]
+    },
+    {
+      "id": "g7",
+      "x": 16,
+      "y": 160,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca6",
+          "kind": "card",
+          "label": "生存服",
+          "icon": "dns",
+          "variant": "elevated",
+          "noImage": true,
+          "supporting": "Paper 1.21.4 · Java 21 · 4096 MB · 端口 25565 · 在线 0 人 · 内存 1.8 / 4.0 GB",
+          "size2": 112,
+          "note": "当前实例卡：点一下展开实例列表切换，卡片本身就是选择器（取代原来的下拉菜单）。正文那行带上「在线人数 / 内存 / 端口」，所以这一屏不再单独放一张运行概况卡"
+        }
+      ]
+    },
+    {
+      "id": "ga",
+      "x": 16,
+      "y": 280,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bu8",
+          "kind": "button",
+          "label": "启动服务端",
+          "icon": "play_arrow",
+          "variant": "filled",
+          "note": "主行动：停止状态下是「启动服务端」；启动过程中变成「取消启动」，全程可点，用户在任何阶段都能中止",
+          "action": {
+            "to": "f12",
+            "transition": "expand"
+          }
+        },
+        {
+          "id": "bu9",
+          "kind": "button",
+          "label": "停止",
+          "icon": "stop",
+          "variant": "tonal",
+          "note": "只在运行中或启动中可点"
+        }
+      ]
+    },
+    {
+      "id": "gc",
+      "x": 16,
+      "y": 348,
+      "axis": "x",
+      "items": [
+        {
+          "id": "cab",
+          "kind": "card",
+          "label": "已运行 02:14:37",
+          "icon": "monitoring",
+          "variant": "outlined",
+          "noImage": true,
+          "supporting": "在线 3 人 · 内存 1.8 / 4.0 GB",
+          "size2": 88,
+          "note": "运行时长用大号等宽数字，一眼可读；服务器没跑时显示「未运行」，不要显示 00:00:00"
+        }
+      ]
+    },
+    {
+      "id": "ge",
+      "x": 16,
+      "y": 444,
+      "axis": "x",
+      "items": [
+        {
+          "id": "lid",
+          "kind": "listItem",
+          "label": "Linux 环境已就绪",
+          "icon": "check_circle",
+          "variant": "filled",
+          "supporting": "proot + Ubuntu 24.04 · 已安装 Java 17 / 21",
+          "iconFill": "primaryContainer",
+          "note": "环境状态行：未部署时行尾出现「部署」按钮；部署中这一行变成波浪进度条 + 当前步骤文案"
+        }
+      ]
+    },
+    {
+      "id": "g11",
+      "x": 552,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bo10",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 1,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "gk",
+      "x": 568,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bui",
+          "kind": "button",
+          "label": "新建",
+          "icon": "add",
+          "variant": "filled",
+          "note": "打开新建向导",
+          "action": {
+            "to": "f1u",
+            "transition": "slideUp"
+          }
+        }
+      ]
+    },
+    {
+      "id": "gl",
+      "x": 662,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "buj",
+          "kind": "button",
+          "label": "导入 jar",
+          "icon": "file_open",
+          "variant": "tonal",
+          "note": "用系统文件选择器挑一个已有的 server.jar 导入"
+        }
+      ]
+    },
+    {
+      "id": "gq",
+      "x": 568,
+      "y": 168,
+      "axis": "x",
+      "items": [
+        {
+          "id": "chm",
+          "kind": "chip",
+          "label": "全部 3",
+          "icon": null,
+          "variant": "tonal",
+          "checked": true,
+          "note": "分段筛选的选中项"
+        },
+        {
+          "id": "chn",
+          "kind": "chip",
+          "label": "官方 1",
+          "icon": null,
+          "variant": "outlined",
+          "note": "Vanilla / Paper"
+        },
+        {
+          "id": "cho",
+          "kind": "chip",
+          "label": "性能 1",
+          "icon": null,
+          "variant": "outlined",
+          "note": "Purpur / Spigot"
+        },
+        {
+          "id": "chp",
+          "kind": "chip",
+          "label": "模组 1",
+          "icon": null,
+          "variant": "outlined",
+          "note": "Fabric / Forge / NeoForge"
+        }
+      ]
+    },
+    {
+      "id": "gu",
+      "x": 568,
+      "y": 208,
+      "axis": "x",
+      "items": [
+        {
+          "id": "lir",
+          "kind": "listItem",
+          "label": "生存服",
+          "icon": "dns",
+          "variant": "filled",
+          "supporting": "Paper 1.21.4 · Java 21 · 4096 MB · 运行中",
+          "iconFill": "primaryContainer",
+          "note": "实例行：点开实例详情；左侧是运行状态徽标；行尾是启停按钮与 ⋮ 菜单",
+          "action": {
+            "to": "f1b",
+            "transition": "slide"
+          }
+        }
+      ]
+    },
+    {
+      "id": "gv",
+      "x": 568,
+      "y": 288,
+      "axis": "x",
+      "items": [
+        {
+          "id": "lis",
+          "kind": "listItem",
+          "label": "创造服",
+          "icon": "dns",
+          "variant": "filled",
+          "supporting": "Paper 1.20.4 · Java 17 · 2048 MB · 已停止",
+          "iconFill": "secondaryContainer"
+        }
+      ]
+    },
+    {
+      "id": "gw",
+      "x": 568,
+      "y": 368,
+      "axis": "x",
+      "items": [
+        {
+          "id": "lit",
+          "kind": "listItem",
+          "label": "模组服",
+          "icon": "extension",
+          "variant": "filled",
+          "supporting": "Fabric 1.21.1 · Java 21 · 6144 MB · EULA 未接受",
+          "iconFill": "tertiaryContainer",
+          "note": "EULA 未接受的实例必须在行内直接点出来，不能藏进详情页"
+        }
+      ]
+    },
+    {
+      "id": "gz",
+      "x": 568,
+      "y": 452,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bux",
+          "kind": "button",
+          "label": "启动全部",
+          "icon": "play_arrow",
+          "variant": "filled",
+          "note": "启动当前筛选出的全部实例"
+        },
+        {
+          "id": "buy",
+          "kind": "button",
+          "label": "停止全部",
+          "icon": "stop",
+          "variant": "tonal",
+          "note": "停止全部运行中的实例"
+        }
+      ]
+    },
+    {
+      "id": "g1a",
+      "x": 1104,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bo19",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 2,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g14",
+      "x": 1120,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ch13",
+          "kind": "chip",
+          "label": "运行中",
+          "icon": null,
+          "variant": "tonal",
+          "checked": true,
+          "note": "状态胶囊，带状态色圆点"
+        }
+      ]
+    },
+    {
+      "id": "g16",
+      "x": 1120,
+      "y": 144,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca15",
+          "kind": "card",
+          "label": "[12:04:31 INFO]: Preparing level \"world\"\n[12:04:33 INFO]: Preparing spawn area: 46%\n[12:04:35 INFO]: Done (4.812s)! For help, type \"help\"",
+          "icon": null,
+          "variant": "filled",
+          "fill": "inverseSurface",
+          "size2": 500,
+          "noImage": true,
+          "checked": true,
+          "note": "终端面板：等宽字体，按日志级别着色（INFO 用高对比浅色、WARN 琥珀、ERROR 红、命令回显蓝）。这是「终端画布」而不是普通卡片，除圆角外不要加装饰。新日志到达时自动滚到底；用户手动上滑就暂停跟随，并出现「回到底部」按钮"
+        }
+      ]
+    },
+    {
+      "id": "g18",
+      "x": 1120,
+      "y": 652,
+      "axis": "x",
+      "items": [
+        {
+          "id": "te17",
+          "kind": "textField",
+          "label": "输入命令…",
+          "icon": null,
+          "variant": "outlined",
+          "width": 316,
+          "note": "命令输入：服务端没运行时禁用，占位文字换成「服务端运行后可输入命令」"
+        }
+      ]
+    },
+    {
+      "id": "g1t",
+      "x": 1656,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bo1s",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 1,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1d",
+      "x": 1672,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "te1c",
+          "kind": "text",
+          "label": "生存服",
+          "icon": null,
+          "variant": "text",
+          "size": 22,
+          "width": 120,
+          "bold": true,
+          "note": "实例名，点一下可以重命名"
+        }
+      ]
+    },
+    {
+      "id": "g1f",
+      "x": 1672,
+      "y": 152,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ta1e",
+          "kind": "tabs",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 380,
+          "selected": 0,
+          "tabs": [
+            {
+              "icon": "",
+              "label": "运行"
+            },
+            {
+              "icon": "",
+              "label": "配置"
+            },
+            {
+              "icon": "",
+              "label": "世界"
+            },
+            {
+              "icon": "",
+              "label": "附加"
+            }
+          ],
+          "note": "实例内的四个分区：运行状态 / server.properties / 世界与备份 / 插件与模组"
+        }
+      ]
+    },
+    {
+      "id": "g1h",
+      "x": 1672,
+      "y": 208,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca1g",
+          "kind": "card",
+          "label": "运行状态",
+          "icon": "monitoring",
+          "variant": "elevated",
+          "noImage": true,
+          "supporting": "已运行 02:14:37 · 在线 3 人 · 内存 1.8 / 4.0 GB · 端口 25565",
+          "size2": 112,
+          "note": "状态卡：左侧大号运行时长，右侧内存占用；内存超过 80% 时换成 error 色"
+        }
+      ]
+    },
+    {
+      "id": "g1j",
+      "x": 1672,
+      "y": 328,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li1i",
+          "kind": "linearProgress",
+          "label": "内存占用",
+          "icon": null,
+          "variant": "filled",
+          "value": 45,
+          "wavy": true,
+          "note": "内存占用，波浪进度条；超过 80% 换成 error 色"
+        }
+      ]
+    },
+    {
+      "id": "g1n",
+      "x": 1672,
+      "y": 360,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li1k",
+          "kind": "listItem",
+          "label": "自动备份",
+          "icon": "history",
+          "variant": "filled",
+          "supporting": "每 30 分钟 · 最近 今天 12:00 · 共 4 份",
+          "iconFill": "secondaryContainer"
+        }
+      ]
+    },
+    {
+      "id": "g1o",
+      "x": 1672,
+      "y": 440,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li1l",
+          "kind": "listItem",
+          "label": "查看启动日志",
+          "icon": "receipt_long",
+          "variant": "filled",
+          "supporting": "每次启动的完整输出与退出码",
+          "iconFill": "secondaryContainer",
+          "action": {
+            "to": "f2u",
+            "transition": "slide"
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1p",
+      "x": 1672,
+      "y": 520,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li1m",
+          "kind": "listItem",
+          "label": "插件 / 模组",
+          "icon": "extension",
+          "variant": "filled",
+          "supporting": "从 Modrinth 搜索并安装",
+          "iconFill": "secondaryContainer",
+          "action": {
+            "to": "f2b",
+            "transition": "slide"
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1r",
+      "x": 1672,
+      "y": 604,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bu1q",
+          "kind": "button",
+          "label": "停止服务端",
+          "icon": "stop",
+          "variant": "filled",
+          "width": 380,
+          "note": "主行动：运行中是「停止服务端」，已停止是「启动服务端」"
+        }
+      ]
+    },
+    {
+      "id": "g2a",
+      "x": 2208,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bo29",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 1,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g1w",
+      "x": 2224,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "te1v",
+          "kind": "text",
+          "label": "新建服务端",
+          "icon": null,
+          "variant": "text",
+          "size": 22,
+          "width": 140,
+          "bold": true,
+          "note": "向导标题"
+        }
+      ]
+    },
+    {
+      "id": "g1y",
+      "x": 2224,
+      "y": 152,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li1x",
+          "kind": "linearProgress",
+          "label": "第 1 步，共 3 步",
+          "icon": null,
+          "variant": "filled",
+          "value": 33,
+          "wavy": true,
+          "note": "向导进度：三步分别是「选核心」「选版本与资源」「确认安装」"
+        }
+      ]
+    },
+    {
+      "id": "g23",
+      "x": 2224,
+      "y": 184,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca1z",
+          "kind": "card",
+          "label": "Vanilla 官方原版",
+          "icon": "deployed_code",
+          "variant": "filled",
+          "noImage": true,
+          "supporting": "Mojang 官方 · 兼容性最好",
+          "size2": 96,
+          "note": "选中的核心：主色容器色底 + 右上角对勾，三选一"
+        }
+      ]
+    },
+    {
+      "id": "g24",
+      "x": 2224,
+      "y": 288,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca20",
+          "kind": "card",
+          "label": "Paper 性能优化",
+          "icon": "bolt",
+          "variant": "outlined",
+          "noImage": true,
+          "supporting": "插件生态最好 · 性能更强",
+          "size2": 96
+        }
+      ]
+    },
+    {
+      "id": "g25",
+      "x": 2224,
+      "y": 392,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca21",
+          "kind": "card",
+          "label": "导入自定义 jar",
+          "icon": "folder_open",
+          "variant": "outlined",
+          "noImage": true,
+          "supporting": "已经有 server.jar？直接导入",
+          "size2": 96
+        }
+      ]
+    },
+    {
+      "id": "g26",
+      "x": 2224,
+      "y": 496,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca22",
+          "kind": "card",
+          "label": "可选项（建服时就定下来）",
+          "icon": "tune",
+          "variant": "outlined",
+          "noImage": true,
+          "supporting": "端口 25565 · 最大玩家 20 · 正版验证 开 · 游戏模式 生存",
+          "size2": 96,
+          "note": "这一组是可选覆盖项：留空就用默认值，省得建完再进实例详情改"
+        }
+      ]
+    },
+    {
+      "id": "g28",
+      "x": 2224,
+      "y": 604,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bu27",
+          "kind": "button",
+          "label": "下一步",
+          "icon": "arrow_forward",
+          "variant": "filled",
+          "note": "第一步必须选中一个核心才能点"
+        }
+      ]
+    },
+    {
+      "id": "g2t",
+      "x": 2760,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bo2s",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 1,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g2d",
+      "x": 2776,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "te2c",
+          "kind": "text",
+          "label": "插件",
+          "icon": null,
+          "variant": "text",
+          "size": 22,
+          "width": 90,
+          "bold": true,
+          "note": "标题：插件 / 模组，跟着实例的核心类型变"
+        }
+      ]
+    },
+    {
+      "id": "g2f",
+      "x": 2776,
+      "y": 152,
+      "axis": "x",
+      "items": [
+        {
+          "id": "se2e",
+          "kind": "searchBar",
+          "label": "搜索 Modrinth",
+          "icon": "search",
+          "variant": "filled",
+          "width": 380,
+          "note": "搜索框：回车发起搜索，搜索中变成加载指示器"
+        }
+      ]
+    },
+    {
+      "id": "g2j",
+      "x": 2776,
+      "y": 216,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ch2g",
+          "kind": "chip",
+          "label": "适合 1.21.4",
+          "icon": null,
+          "variant": "tonal",
+          "checked": true,
+          "note": "按当前实例的 MC 版本过滤"
+        },
+        {
+          "id": "ch2h",
+          "kind": "chip",
+          "label": "服务端",
+          "icon": null,
+          "variant": "outlined",
+          "note": "只显示服务端可用的项目"
+        },
+        {
+          "id": "ch2i",
+          "kind": "chip",
+          "label": "下载最多",
+          "icon": null,
+          "variant": "outlined",
+          "note": "排序方式"
+        }
+      ]
+    },
+    {
+      "id": "g2n",
+      "x": 2776,
+      "y": 256,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li2k",
+          "kind": "listItem",
+          "label": "LuckPerms",
+          "icon": "key",
+          "variant": "filled",
+          "supporting": "权限管理 · 128M 下载",
+          "iconFill": "primaryContainer",
+          "note": "搜索结果行：点开项目详情；行尾是安装按钮，安装中变成进度"
+        }
+      ]
+    },
+    {
+      "id": "g2o",
+      "x": 2776,
+      "y": 336,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li2l",
+          "kind": "listItem",
+          "label": "EssentialsX",
+          "icon": "handyman",
+          "variant": "filled",
+          "supporting": "基础指令集 · 96M 下载",
+          "iconFill": "secondaryContainer"
+        }
+      ]
+    },
+    {
+      "id": "g2p",
+      "x": 2776,
+      "y": 416,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li2m",
+          "kind": "listItem",
+          "label": "WorldEdit",
+          "icon": "brush",
+          "variant": "filled",
+          "supporting": "地形编辑 · 210M 下载",
+          "iconFill": "tertiaryContainer"
+        }
+      ]
+    },
+    {
+      "id": "g2r",
+      "x": 2776,
+      "y": 500,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ex2q",
+          "kind": "extendedFab",
+          "label": "安装所选",
+          "icon": "download",
+          "variant": "tonal",
+          "note": "批量安装；下载中显示波浪进度，并且可以取消"
+        }
+      ]
+    },
+    {
+      "id": "g3a",
+      "x": 3312,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bo39",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 1,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g2w",
+      "x": 3328,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "te2v",
+          "kind": "text",
+          "label": "启动日志",
+          "icon": null,
+          "variant": "text",
+          "size": 22,
+          "width": 110,
+          "bold": true,
+          "note": "标题"
+        }
+      ]
+    },
+    {
+      "id": "g2z",
+      "x": 3328,
+      "y": 152,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ch2x",
+          "kind": "chip",
+          "label": "全部",
+          "icon": null,
+          "variant": "tonal",
+          "checked": true,
+          "note": "筛选：全部"
+        },
+        {
+          "id": "ch2y",
+          "kind": "chip",
+          "label": "失败",
+          "icon": null,
+          "variant": "outlined",
+          "note": "只看启动失败的那几次"
+        }
+      ]
+    },
+    {
+      "id": "g33",
+      "x": 3328,
+      "y": 192,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li30",
+          "kind": "listItem",
+          "label": "今天 12:04 · 成功",
+          "icon": "check_circle",
+          "variant": "filled",
+          "supporting": "启动耗时 4.8s · 退出码 0 · Java 21",
+          "iconFill": "primaryContainer",
+          "note": "一次启动一行，图标和颜色直接表达成功 / 失败，不要让用户点进去才知道结果"
+        }
+      ]
+    },
+    {
+      "id": "g34",
+      "x": 3328,
+      "y": 272,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li31",
+          "kind": "listItem",
+          "label": "今天 09:31 · 失败",
+          "icon": "error",
+          "variant": "filled",
+          "supporting": "UnsupportedClassVersionError · 需要 Java 21，当前 17",
+          "iconFill": "tertiaryContainer",
+          "note": "失败原因直接写在摘要里"
+        }
+      ]
+    },
+    {
+      "id": "g35",
+      "x": 3328,
+      "y": 352,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li32",
+          "kind": "listItem",
+          "label": "昨天 21:12 · 成功",
+          "icon": "check_circle",
+          "variant": "filled",
+          "supporting": "启动耗时 5.1s · 退出码 0 · Java 21",
+          "iconFill": "primaryContainer"
+        }
+      ]
+    },
+    {
+      "id": "g38",
+      "x": 3328,
+      "y": 436,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bu36",
+          "kind": "button",
+          "label": "导出全部",
+          "icon": "download",
+          "variant": "filled",
+          "note": "打包导出为一个 txt 或 zip"
+        },
+        {
+          "id": "bu37",
+          "kind": "button",
+          "label": "清空记录",
+          "icon": "delete_sweep",
+          "variant": "text",
+          "note": "清空历史，必须二次确认"
+        }
+      ]
+    },
+    {
+      "id": "g3r",
+      "x": 3864,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bo3q",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 3,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g3g",
+      "x": 3880,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca3c",
+          "kind": "card",
+          "label": "外观",
+          "icon": "palette",
+          "variant": "elevated",
+          "noImage": true,
+          "supporting": "主题模式 · 颜色来源 · 玻璃强度",
+          "size2": 112,
+          "note": "分组卡：一张卡就是一个设置分组，卡片内是若干设置行"
+        }
+      ]
+    },
+    {
+      "id": "g3h",
+      "x": 3880,
+      "y": 224,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li3d",
+          "kind": "listItem",
+          "label": "主题模式",
+          "icon": "brightness_6",
+          "variant": "filled",
+          "supporting": "跟随系统",
+          "iconFill": "secondaryContainer",
+          "note": "跟随系统 / 浅色 / 深色，点开是分段选择"
+        }
+      ]
+    },
+    {
+      "id": "g3i",
+      "x": 3880,
+      "y": 304,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li3e",
+          "kind": "listItem",
+          "label": "颜色来源",
+          "icon": "colorize",
+          "variant": "filled",
+          "supporting": "壁纸动态取色",
+          "iconFill": "secondaryContainer",
+          "note": "壁纸动态取色 / 自定义主色（点开是取色器）"
+        }
+      ]
+    },
+    {
+      "id": "g3j",
+      "x": 3880,
+      "y": 384,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li3f",
+          "kind": "listItem",
+          "label": "深色样式",
+          "icon": "dark_mode",
+          "variant": "filled",
+          "supporting": "普通黑",
+          "iconFill": "secondaryContainer",
+          "note": "普通黑 / AMOLED 纯黑"
+        }
+      ]
+    },
+    {
+      "id": "g3n",
+      "x": 3880,
+      "y": 468,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca3k",
+          "kind": "card",
+          "label": "字体与动效",
+          "icon": "animation",
+          "variant": "elevated",
+          "noImage": true,
+          "supporting": "强调字重 · 动效方案",
+          "size2": 88
+        }
+      ]
+    },
+    {
+      "id": "g3o",
+      "x": 3880,
+      "y": 564,
+      "axis": "x",
+      "items": [
+        {
+          "id": "sw3l",
+          "kind": "switch",
+          "label": "标题与标签使用强调字重",
+          "icon": null,
+          "variant": "filled",
+          "checked": true,
+          "note": "M3 Expressive 的 emphasized 字体样式"
+        }
+      ]
+    },
+    {
+      "id": "g3p",
+      "x": 3880,
+      "y": 620,
+      "axis": "x",
+      "items": [
+        {
+          "id": "sw3m",
+          "kind": "switch",
+          "label": "表现力弹簧动效",
+          "icon": null,
+          "variant": "filled",
+          "checked": true,
+          "note": "关掉则退回标准的匀速过渡"
+        }
+      ]
+    },
+    {
+      "id": "g4a",
+      "x": 4416,
+      "y": 876,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bo49",
+          "kind": "bottomNav",
+          "label": "",
+          "icon": null,
+          "variant": "filled",
+          "size": 412,
+          "selected": 3,
+          "tabs": [
+            {
+              "icon": "home",
+              "label": "主页"
+            },
+            {
+              "icon": "dns",
+              "label": "服务端"
+            },
+            {
+              "icon": "terminal",
+              "label": "控制台"
+            },
+            {
+              "icon": "settings",
+              "label": "设置"
+            }
+          ],
+          "note": "常驻底栏：**这一处保留现有设计，本次重构不动它**。列在草图里只为了确认它相对内容的位置与高度。",
+          "actions": {
+            "tab:0": {
+              "to": "f1",
+              "transition": "fade"
+            },
+            "tab:1": {
+              "to": "fh",
+              "transition": "fade"
+            },
+            "tab:2": {
+              "to": "f12",
+              "transition": "fade"
+            },
+            "tab:3": {
+              "to": "f3b",
+              "transition": "fade"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "g3w",
+      "x": 4432,
+      "y": 104,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca3t",
+          "kind": "card",
+          "label": "存储",
+          "icon": "folder",
+          "variant": "elevated",
+          "noImage": true,
+          "supporting": "实例目录 · 占用空间",
+          "size2": 88,
+          "note": "分组卡"
+        }
+      ]
+    },
+    {
+      "id": "g3x",
+      "x": 4432,
+      "y": 200,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li3u",
+          "kind": "listItem",
+          "label": "实例目录",
+          "icon": "folder_open",
+          "variant": "filled",
+          "supporting": "默认位置 · 已用 2.4 GB",
+          "iconFill": "secondaryContainer",
+          "note": "点开用系统目录选择器换位置，换完自动重新扫描已有服务端"
+        }
+      ]
+    },
+    {
+      "id": "g3y",
+      "x": 4432,
+      "y": 280,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li3v",
+          "kind": "listItem",
+          "label": "已安装的 Java",
+          "icon": "coffee",
+          "variant": "filled",
+          "supporting": "Java 17 · Java 21",
+          "iconFill": "secondaryContainer",
+          "note": "点开可以单独安装或卸载某个 Java 版本"
+        }
+      ]
+    },
+    {
+      "id": "g43",
+      "x": 4432,
+      "y": 364,
+      "axis": "x",
+      "items": [
+        {
+          "id": "ca3z",
+          "kind": "card",
+          "label": "后台与更新",
+          "icon": "tune",
+          "variant": "elevated",
+          "noImage": true,
+          "supporting": "电池优化 · 更新通道 · 自动检查",
+          "size2": 88
+        }
+      ]
+    },
+    {
+      "id": "g44",
+      "x": 4432,
+      "y": 460,
+      "axis": "x",
+      "items": [
+        {
+          "id": "li40",
+          "kind": "listItem",
+          "label": "电池优化",
+          "icon": "battery_saver",
+          "variant": "filled",
+          "supporting": "已加入白名单",
+          "iconFill": "secondaryContainer",
+          "note": "没加入白名单时高亮提示，点一下跳系统设置"
+        }
+      ]
+    },
+    {
+      "id": "g45",
+      "x": 4432,
+      "y": 540,
+      "axis": "x",
+      "items": [
+        {
+          "id": "sw41",
+          "kind": "switch",
+          "label": "启动时自动检查更新",
+          "icon": null,
+          "variant": "filled",
+          "checked": true
+        }
+      ]
+    },
+    {
+      "id": "g46",
+      "x": 4432,
+      "y": 596,
+      "axis": "x",
+      "items": [
+        {
+          "id": "se42",
+          "kind": "select",
+          "label": "更新通道",
+          "icon": "alt_route",
+          "variant": "filled",
+          "supporting": "预览版",
+          "note": "稳定版 / 预览版"
+        }
+      ]
+    },
+    {
+      "id": "g48",
+      "x": 4432,
+      "y": 664,
+      "axis": "x",
+      "items": [
+        {
+          "id": "bu47",
+          "kind": "button",
+          "label": "关于与许可证",
+          "icon": "gavel",
+          "variant": "outlined",
+          "width": 380,
+          "note": "GPL-3.0 全文与第三方组件声明"
+        }
+      ]
+    }
+  ],
+  "frames": [
+    {
+      "id": "f1",
+      "name": "主页",
+      "x": 0,
+      "y": 64,
+      "bg": "surface",
+      "note": "打开应用后的落地屏：一眼看到「服务器现在是什么状态」，并且可以立刻启停",
+      "place": "top"
+    },
+    {
+      "id": "fh",
+      "name": "服务端",
+      "x": 552,
+      "y": 64,
+      "bg": "surface",
+      "note": "服务端实例的列表与管理：多开、筛选、启停、导入",
+      "place": "top"
+    },
+    {
+      "id": "f12",
+      "name": "控制台",
+      "x": 1104,
+      "y": 64,
+      "bg": "surface",
+      "note": "实时日志与命令输入：这是这个应用的主工作台",
+      "place": "top"
+    },
+    {
+      "id": "f1b",
+      "name": "实例详情",
+      "x": 1656,
+      "y": 64,
+      "bg": "surface",
+      "note": "一个服务端的全部控制项：运行、配置、世界、备份、日志、附加组件",
+      "place": "top"
+    },
+    {
+      "id": "f1u",
+      "name": "新建服务端",
+      "x": 2208,
+      "y": 64,
+      "bg": "surface",
+      "note": "三步向导：选核心 → 选版本与资源 → 确认安装",
+      "place": "top"
+    },
+    {
+      "id": "f2b",
+      "name": "插件与模组",
+      "x": 2760,
+      "y": 64,
+      "bg": "surface",
+      "note": "从 Modrinth 搜索并一键安装到当前实例",
+      "place": "top"
+    },
+    {
+      "id": "f2u",
+      "name": "启动日志",
+      "x": 3312,
+      "y": 64,
+      "bg": "surface",
+      "note": "每次启动的历史记录：退出码、耗时、失败原因",
+      "place": "top"
+    },
+    {
+      "id": "f3b",
+      "name": "外观设置",
+      "x": 3864,
+      "y": 64,
+      "bg": "surface",
+      "note": "主题、颜色与字体：应用长什么样",
+      "place": "top"
+    },
+    {
+      "id": "f3s",
+      "name": "运行与存储",
+      "x": 4416,
+      "y": 64,
+      "bg": "surface",
+      "note": "实例目录、电池优化、Java、更新通道与许可证",
+      "place": "top"
+    }
+  ],
+  "paletteKey": "purple",
+  "dynamicColor": true,
+  "frame": "phone",
+  "platform": "android",
+  "title": "KAZE SLauncher 界面重构",
+  "brief": "Android 上运行 Minecraft Java 服务端的启动器。核心链路：部署自包含 Linux 环境（proot + Ubuntu rootfs）→ 按 MC 版本自动安装 Java → 下载或导入服务端核心 → 首次启动自动处理 eula.txt → 实时控制台看日志并输入命令。数据模型是「多实例」：每个服务端实例有独立的目录、Java 版本、内存上限、控制台日志与运行状态。这是对既有应用的一次界面重构：后端、功能与常驻底栏全部保留，只重做其余界面层。",
+  "theme": {
+    "dark": false,
+    "bothModes": true,
+    "contrast": "standard",
+    "shape": "rounded",
+    "font": "robotoFlex",
+    "emphasized": true,
+    "motion": "expressive"
+  }
+}

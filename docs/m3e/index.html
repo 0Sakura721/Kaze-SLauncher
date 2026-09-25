@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KAZE SLauncher · 界面重构（M3 Expressive by m3e-canvas）</title>
+<style>
+  :root{
+    --bg:#f7f2fa; --surface:#fffbfe; --surface-2:#f3edf7; --surface-3:#ece6f0;
+    --on:#1d1b20; --on-var:#49454f; --outline:#cac4d0;
+    --primary:#6750a4; --on-primary:#fff; --primary-container:#eaddff; --on-primary-container:#21005d;
+    --tertiary-container:#ffd8e4; --on-tertiary-container:#31111d;
+    --radius-l:20px; --radius-xl:28px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#141317; --surface:#1c1b1f; --surface-2:#201f23; --surface-3:#2b292d;
+      --on:#e4e1e7; --on-var:#c9c4d1; --outline:#494550;
+      --primary:#d2bcfc; --on-primary:#32226f; --primary-container:#4c3889; --on-primary-container:#e9ddff;
+      --tertiary-container:#6c3644; --on-tertiary-container:#fddae1;
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--on);
+    font:16px/1.6 -apple-system,"Segoe UI",Roboto,"Noto Sans SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1240px;margin:0 auto;padding:40px 24px 96px}
+
+  header.hero{padding:8px 0 28px}
+  .kicker{color:var(--primary);font-weight:700;letter-spacing:.06em;font-size:13px;text-transform:uppercase}
+  h1{margin:10px 0 8px;font-size:clamp(28px,4.2vw,44px);line-height:1.15;font-weight:600;letter-spacing:-.01em}
+  .lede{color:var(--on-var);max-width:76ch;margin:0 0 22px}
+  .pills{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:26px}
+  .pill{
+    display:inline-flex;align-items:center;gap:7px;
+    padding:7px 14px;border-radius:999px;font-size:13px;font-weight:600;
+    background:var(--surface-3);color:var(--on-var);border:1px solid var(--outline);
+  }
+  .pill.acc{background:var(--primary-container);color:var(--on-primary-container);border-color:transparent}
+  .swatch{width:12px;height:12px;border-radius:50%;background:var(--primary)}
+
+  .tabs{display:flex;gap:4px;flex-wrap:wrap;margin:0 0 28px;border-bottom:1px solid var(--outline)}
+  .tab{
+    appearance:none;border:0;background:transparent;color:var(--on-var);cursor:pointer;
+    font:inherit;font-weight:600;padding:12px 18px;border-radius:14px 14px 0 0;position:relative;top:1px;
+  }
+  .tab[aria-selected="true"]{color:var(--primary);background:var(--surface);border:1px solid var(--outline);border-bottom-color:var(--surface)}
+  .tab:hover{color:var(--on)}
+  .panel[hidden]{display:none}
+
+  h2{margin:0 0 6px;font-size:23px;font-weight:600;letter-spacing:-.005em}
+  .sub{color:var(--on-var);margin:0 0 20px;font-size:15px}
+
+  /* 屏幕陈列 */
+  .screen{
+    background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius-xl);
+    padding:22px;margin-bottom:20px;
+  }
+  .screen-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+  .screen-head h3{margin:0;font-size:19px;font-weight:600}
+  .note{color:var(--on-var);font-size:14px;margin:0 0 18px;max-width:88ch}
+  .shots{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+  figure{margin:0;flex:0 0 auto}
+  figure img{
+    display:block;width:236px;height:auto;border-radius:var(--radius-l);
+    border:1px solid var(--outline);background:var(--surface-2);
+  }
+  figcaption{
+    margin-top:8px;font-size:12px;color:var(--on-var);font-weight:600;
+    display:flex;align-items:center;gap:6px;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--outline);display:inline-block}
+  .dot.light{background:#f3edf7;border:1px solid var(--outline)}
+  .dot.dark{background:#141317}
+  .mono{font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:12.5px}
+
+  .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px}
+  .grid2 figure img{width:100%}
+
+  /* 卡片 */
+  .card{background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius-xl);padding:26px;margin-bottom:20px}
+  .card h3{margin:0 0 10px;font-size:19px;font-weight:600}
+  .card p{color:var(--on-var);margin:0 0 14px;max-width:82ch}
+  a.btn{
+    display:inline-flex;align-items:center;gap:9px;text-decoration:none;
+    background:var(--primary);color:var(--on-primary);font-weight:700;
+    padding:13px 22px;border-radius:999px;border:0;
+  }
+  a.btn:hover{filter:brightness(1.06)}
+  a.btn.sec{background:var(--surface-3);color:var(--on);border:1px solid var(--outline)}
+  code{
+    background:var(--surface-3);border-radius:6px;padding:2px 6px;
+    font-family:ui-monospace,"Cascadia Code",Consolas,monospace;font-size:13px;
+  }
+
+  table{border-collapse:collapse;width:100%;font-size:14.5px;margin:6px 0 4px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--outline);vertical-align:top}
+  th{color:var(--on-var);font-weight:700;font-size:13px}
+  td:first-child{white-space:nowrap;font-weight:600}
+
+  ul{margin:0 0 14px;padding-left:20px;color:var(--on-var)}
+  li{margin:4px 0}
+  li strong{color:var(--on)}
+
+  /* 设计稿 */
+  details.doc{background:var(--surface);border:1px solid var(--outline);border-radius:var(--radius-l);margin-bottom:12px;overflow:hidden}
+  details.doc[open]{border-color:var(--primary)}
+  details.doc>summary{
+    cursor:pointer;padding:16px 20px;font-weight:600;list-style:none;
+    display:flex;align-items:center;gap:12px;
+  }
+  details.doc>summary::-webkit-details-marker{display:none}
+  details.doc>summary::before{content:"▸";color:var(--primary);font-size:14px;transition:transform .15s}
+  details.doc[open]>summary::before{transform:rotate(90deg)}
+  details.doc>summary .meta{margin-left:auto;color:var(--on-var);font-weight:500;font-size:13px}
+  .doc-body{border-top:1px solid var(--outline);padding:20px 24px 24px;background:var(--surface-2);max-height:70vh;overflow:auto}
+  .rendered h4{margin:20px 0 8px;font-size:15px;color:var(--primary);font-weight:700}
+  .rendered h4:first-child{margin-top:0}
+  .rendered ul{padding-left:22px;margin:0 0 12px}
+  .rendered li{color:var(--on)}
+  .rendered p{margin:0 0 12px;color:var(--on-var)}
+  .muted{color:var(--on-var);font-size:14px}
+  footer{margin-top:44px;padding-top:22px;border-top:1px solid var(--outline);color:var(--on-var);font-size:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">界面重构 · Material 3 Expressive</div>
+  <h1>KAZE SLauncher 新界面</h1>
+  <p class="lede">
+    全部 9 屏按 <strong>m3e-canvas</strong>（Material 3 Expressive 草图工具）导出的设计稿重做。
+    下面每一张都是实现之后从真实 Compose 渲染出来的图，不是设计稿。常驻底栏保留原设计，未作改动。
+  </p>
+  <div class="pills">
+    <span class="pill acc"><span class="swatch" style="background:#6750a4"></span>purple #6750A4 · 动态取色</span>
+    <span class="pill">形状 rounded（卡片 20dp / 对话框 28dp / 按钮全圆）</span>
+    <span class="pill">字体 Roboto Flex · emphasized 字阶</span>
+    <span class="pill">动效 MotionScheme.expressive()</span>
+    <span class="pill">浅色 + 深色</span>
+  </div>
+</header>
+
+<div class="tabs" role="tablist">
+  <button class="tab" role="tab" aria-selected="true"  data-tab="ui">重写后的界面</button>
+  <button class="tab" role="tab" aria-selected="false" data-tab="canvas">设计画布</button>
+  <button class="tab" role="tab" aria-selected="false" data-tab="docs">设计稿（prompt）</button>
+</div>
+
+<!-- ══════════ 界面 ══════════ -->
+<section class="panel" id="panel-ui" role="tabpanel">
+
+  <h2>屏幕</h2>
+  <p class="sub">深色版与浅色版都做了（设计稿明确要求两套）。点图可放大。</p>
+
+  <div class="screen">
+    <div class="screen-head"><h3>主页</h3><span class="pill">落地屏</span></div>
+    <p class="note">状态指示 + 状态胶囊 → 当前实例卡（卡片本身就是选择器）→ 启动/停止相连按钮组 → 运行时长卡 → 环境状态行 → 一排次要动作。左上角的形状指示器就是官方那个会变形的加载指示器，同时兼作服务端"生命体征"。</p>
+    <div class="shots">
+      <figure><a href="screenshots/screen_home_with_instance.png" target="_blank"><img src="screenshots/screen_home_with_instance.png" alt="主页（有实例）"></a><figcaption><span class="dot light"></span>有实例 · 浅色</figcaption></figure>
+      <figure><a href="screenshots/screen_home.png" target="_blank"><img src="screenshots/screen_home.png" alt="主页（空态）"></a><figcaption><span class="dot light"></span>空态 · 浅色</figcaption></figure>
+      <figure><a href="screenshots/screen_home_dark.png" target="_blank"><img src="screenshots/screen_home_dark.png" alt="主页（深色）"></a><figcaption><span class="dot dark"></span>空态 · 深色</figcaption></figure>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-head"><h3>服务端</h3><span class="pill">实例列表</span></div>
+    <p class="note">标题 + 新建/导入相连按钮组 → 分类分段筛选（带计数）→ 相连列表（首尾 28dp、内侧 8dp 圆角），按核心分类着色，当前实例用主色细环标出 → 启动全部/停止全部。</p>
+    <div class="shots">
+      <figure><a href="screenshots/screen_server_with_instances.png" target="_blank"><img src="screenshots/screen_server_with_instances.png" alt="服务端（有实例）"></a><figcaption><span class="dot light"></span>有实例 · 浅色</figcaption></figure>
+      <figure><a href="screenshots/screen_server.png" target="_blank"><img src="screenshots/screen_server.png" alt="服务端（空态）"></a><figcaption><span class="dot light"></span>空态 · 浅色</figcaption></figure>
+      <figure><a href="screenshots/screen_server_dark.png" target="_blank"><img src="screenshots/screen_server_dark.png" alt="服务端（深色）"></a><figcaption><span class="dot dark"></span>空态 · 深色</figcaption></figure>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-head"><h3>控制台</h3><span class="pill">主工作台</span></div>
+    <p class="note">终端画布<b>刻意保留</b>（深色底 + 等宽 + 按级别着色），只换了周围的壳：屏幕头 + 状态胶囊、四个圆形动作、以及和发送按钮融合在一起的命令输入。</p>
+    <div class="shots">
+      <figure><a href="screenshots/screen_console.png" target="_blank"><img src="screenshots/screen_console.png" alt="控制台（浅色）"></a><figcaption><span class="dot light"></span>浅色</figcaption></figure>
+      <figure><a href="screenshots/screen_console_dark.png" target="_blank"><img src="screenshots/screen_console_dark.png" alt="控制台（深色）"></a><figcaption><span class="dot dark"></span>深色</figcaption></figure>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-head"><h3>新建服务端</h3><span class="pill">三步向导</span></div>
+    <p class="note">逐步进度用官方波浪进度条；核心选择卡选中态是主色容器色 + 对勾。</p>
+    <div class="shots">
+      <figure><a href="screenshots/screen_new_server_step1.png" target="_blank"><img src="screenshots/screen_new_server_step1.png" alt="新建向导（浅色）"></a><figcaption><span class="dot light"></span>第 1 步 · 浅色</figcaption></figure>
+      <figure><a href="screenshots/screen_new_server_step1_dark.png" target="_blank"><img src="screenshots/screen_new_server_step1_dark.png" alt="新建向导（深色）"></a><figcaption><span class="dot dark"></span>第 1 步 · 深色</figcaption></figure>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-head"><h3>设置</h3><span class="pill">分组卡 + 设置行</span></div>
+    <p class="note">一张浮起卡作为一个分组的头，下面是这一组的设置行。顺带修好一处死 UI：原来「液态玻璃」整组被一个永远为假的条件挡住，此前根本点不到，现在正常显示。</p>
+    <div class="shots">
+      <figure><a href="screenshots/screen_settings.png" target="_blank"><img src="screenshots/screen_settings.png" alt="设置（浅色）"></a><figcaption><span class="dot light"></span>浅色</figcaption></figure>
+      <figure><a href="screenshots/screen_settings_dark.png" target="_blank"><img src="screenshots/screen_settings_dark.png" alt="设置（深色）"></a><figcaption><span class="dot dark"></span>深色</figcaption></figure>
+    </div>
+  </div>
+
+  <h2 style="margin-top:36px">组件层与签名元素</h2>
+  <p class="sub">所有屏幕共用的 Expressive 组件，以及官方那 7 个加载形状。</p>
+
+  <div class="screen">
+    <div class="screen-head"><h3>加载指示器的 7 个形状</h3><span class="pill">签名元素</span></div>
+    <p class="note">来自 Google 的 Material Design 形状资产，按官方顺序每 650ms 变一次，形状之间逐点插值（所以是连续变形，不是淡入淡出）。</p>
+    <div class="shots">
+      <figure><a href="screenshots/m3e_loading_shapes.png" target="_blank"><img src="screenshots/m3e_loading_shapes.png" alt="7 个加载形状"></a><figcaption>7 形逐一渲染</figcaption></figure>
+      <figure><a href="screenshots/m3e_loading_variants.png" target="_blank"><img src="screenshots/m3e_loading_variants.png" alt="指示器三种用法"></a><figcaption>指示器 / 细环 / 静止造型</figcaption></figure>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-head"><h3>组件层</h3><span class="pill">浅色 + 深色</span></div>
+    <p class="note">卡片三变体、状态胶囊、指标块、相连列表、分段选择、波浪进度条（确定态 / 不定态 / 经典直线）。</p>
+    <div class="grid2">
+      <figure><a href="screenshots/m3e_components_light.png" target="_blank"><img src="screenshots/m3e_components_light.png" alt="组件层（浅色）"></a><figcaption><span class="dot light"></span>浅色</figcaption></figure>
+      <figure><a href="screenshots/m3e_components_dark.png" target="_blank"><img src="screenshots/m3e_components_dark.png" alt="组件层（深色）"></a><figcaption><span class="dot dark"></span>深色</figcaption></figure>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-head"><h3>常驻底栏（未改动）</h3><span class="pill">刻意保留</span></div>
+    <p class="note">液态玻璃浮动胶囊底栏本次一个字都没改 —— <code>AppRoot.kt</code> 与改动前无差异。上面每张屏幕图底部那条就是它。</p>
+  </div>
+</section>
+
+<!-- ══════════ 画布 ══════════ -->
+<section class="panel" id="panel-canvas" role="tabpanel" hidden>
+  <h2>m3e-canvas 设计画布</h2>
+  <p class="sub">这是设计的来源，不是截图 —— 一份可交互、可继续编辑的真实画布。</p>
+
+  <div class="card">
+    <h3>在浏览器里打开这份设计</h3>
+    <p>
+      链接里带着整份画布文档（<code>#docz=</code>，deflate-raw + base64url）。打开后能看到
+      <strong>9 个并排的手机画布</strong>、68 个组件组 / 77 个组件、真实的 Material 3 Expressive 组件库、
+      屏幕之间的跳转箭头。按 <code>P</code> 进入预览模式，可以点着把这个应用的流程走一遍。
+    </p>
+    <p class="muted">
+      画布数据只存在你自己的浏览器里（localStorage），不会上传。链接比较长（约 9.5KB），完整内容见
+      <code>docs/m3e/kaze-redesign.share.txt</code>；右边按钮直接从本地文件读取，所以打开的一定是这份设计。
+    </p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap">
+      <a class="btn" id="open-canvas" href="https://lnkiai.github.io/m3e-canvas/#docz=7V1bbxtHln7Pr6glMMBuJmuLF8my3pKMM8hMnAkyyMxiJwOjRbasTig2p9m07AwGoK4kJV5kW3fSlihLNn0RJcuxRJGUBOxPGXVVN5_0F3ariqSaVF_YZGvWQGQEAdlsdXXVV3XqXL5z6u8fAeC4K_DhYMgxAP7yEQAA_J38HwAH53MMAMfdu45P6lfuOwZAT-PbA8cA6L_R1_jO3OfwUxz3z_-AE9mR8yern65qYZAfavwFufwjF6j9IIr8yNfMveaf_cwg68e_N1_mvHzAMQACYb-_6fo9RuCYgIj_YIjz-1lf85-FuJ9YxwDwOF3Nl1k_6xVZn7rH5AeRGWzuUWuv1C_jGOZH2Kb2mnsgFcvV3HtH0-__-KS9R_sCIYMno2wSzuTk1zudPVxkhREuwPiNWki9gLF9mN7trIUQK4pc4K5RH5TCsXxUaHm86ttfm4AJ8CIG0gGLxerLMiwtoPX0WWX144-VkxWpGIGbk9LJE3lhRU7tomxcKRwrhdxZJYGyb9CbXDWaRE8npWISzuRhYeLjj08j4zC2BLN5JRmHmeNqNAHTr6RiSSpNy7mCUtiEhQk5U4Q7h3B6ChYO5dVJ6SgpHxWkYqr6ehmWnp9GxptnGuMVOT6AJ0_zoOApNdBz4TL-gSez1nlxjESBCYQ4_DxyB-NjDVEgTTgNmhi2pwmXUS9c9rThNmjDPdhBGx9pfa5_-utHqvdoFY2eZtHo7GuSjc4eT9ey0c-7tGWjn2d8XODulwEf52VEXvhXiMgezfVWkzQz-ygyhhJRebN0VllVTuaUXEIqbsuVx2hqAy3NKkdvzioJOLcDZ_JScRvOrFcja_jKWBZtb6Cl_eqTFfwhNicVI1LxFcyUYGG1GlmHT2cd1mDpbYalz2M7LN5htzYs3mEuqANFY0hAj2vA6Rlw39AExzHI-0WHHjwi3yqUHd5h1vsj2ahEIcxqQkTBUSb2YWbmrLJa-xrfg9lpefwQ_BrAgz36ehiHhROL433DeBn09XQ_3kyfzngzgk9nvOX5Nbi9jLJJ7WFu3T7Vo8z62XuM2LoMAvyXI8xdVmugQ-FgkBfwfob__BsmyArAec3lvOYB_3MAfsfcY4DLiT96em72gduf4Y_y6x2YfgZcvb19vfg7zObl0gnoAVKpRL5PT8HtZeC81g-uA8-1HvDbzy4uSyxwnS2qS2MjPHoM40lYeCodz8JkDgM_fkgW1yx8uwArkdpPsSUll4exKEpu4PWYzMnxKMq-UUqv4e5btLxTjcTR7Eu4kj-rxGB6USo_g6k19GQLb3nFWTQbV9JZmFw4q8RPI-No-xlajFbHnym5BCw-l4ozp5EE7ZpUKqGFXXC93rPrtSE4jSTxPhyPSOWt2l79No234ukkTC7Is2_Q_DG-WFmvzdHn43D6PUzmLE5TxnCauvq7n6aD4X4dTTYsinxAZ6JSmXiusGlO16CfeXCHEQR-VHfWaonu-lyQimUMyEz-rLJKJS4VAhjA5R0MUfNLEEwy9KJyEpXzs1hmp5dRbA7fnF5E-zH6K0UPTuXl_CxM78jjh2eVhDyfR7EDmM1L5bJ0tFBd3keF99WJI2XiSCpuo-0NLc1IQzHS0Rxa9nT2fpAJ-NS7umof_8QYsJudAEYGUBunkMgHrUjvxmJNv8LKZn2PQLHF862SjKrFye41nOxuT78NMnnQskxu7DMme-AIH-BEXsDyVG8s-bDo5wIdy-iatHVblrb9_Zr4qbdPeT4PN1_A9IG8HYeFI7SwC7eXzioJqRiRsxWY3lF2ymeVDF1scCWP9nLKwUO0tI-Wj-XN0mkkgbKv6APp6pKKSeX5GP0V9PQMkP8sTgjWcEJ4PDboqpxPe0L4uZD4pciO6EyKr7hA-D6QUztwYwIe7MHdt3L5lfa8ILrOHS8neP2sJTnYDH5Q4HkR_Bp8NxgOiGHg8lzrIRs1br0QV55N0S3beQNcBy7nxVf5gvP76XO4EUZ48DkfEBkuwAraS5v2rKZ05RJnlVWUfVWdyMtHe2hpH4vl3WMYLcmp3dNIgl4_jSRRIl59VDirZOgVqbhN90Z8P5HD6N0Gev9KOcnA0nP0JIe1OLLho-2t6qtNtBhFuZjFOeJ0Nk-S3l5X0yyxx9vj7Pmg3T3OK3ePZgtX7p4rd09LE78wd8-PLdKxr79JOtrhWBgMcx0opGhxF5ZL2lsm4_NZ2ikbbp34Y1iJ0CfDuYdwp2JNZw8b6-whP-djvwvqKO3toOFvRqOvz3UJaPzQiXmwU4FTW-AHRtBGZIjzs3f4IBvQxcXATpDn8_K7slxeQ4tRqbzfsM1R4mHNb3awh7JxeXUShFjhHitc-4ERAH0li9rA30yme58NNsTwiPYAG_jR4FS-OpEHbsvqQGe-MxibRoX38namGsGjWo3EpeJ2Nae2xwxNTO9wwHoXC8to8RBoaJ4mXdQzimhX_sQEOL-fAdcB8VC13wPecg9Q5IUycWR7D74JC8GwAK6DPwa5u7zYfg-C1nuQz8nlSdt78AUzKHBecB18wQt3WXAdfM3y5KPFxRk2Xpyunu4Xp58TtEfNxJ7rwvFqbrq151tt-FG6td2oi5RabfL4YcNpquw8RxNT2EV28Fw6foGWd2iT1MqDx0doPXpWyVDjDi3vYGfOWJbadFIxBf45WwDUbWptV21VeLR21S721Hsms6rfjlkV6mhWwVimGlm_7FnVo5pVzhv4o6vH01-bVdg9oOP6q8-qEOvlA76meWUNgVFjBNw2bLp-TuwIASoRdRFg74tsIMS1qkWWcKhJR7K8nS3Lu8_p8dSAuPXdV58ClH2FUlswvaSPhsgKIme-yJsfJ69O1gIjJ1PVXBnbhLkEnJ6SMz-j1BYWAtESerJVc8tNHClLaeUkQwVCk3XfFt4_GePtUXlgOtdi72vj3UZUgipblxKSqDVAfFZUvcJOsNVJ2iSFoN0NfjD8oGM_vlEXO_bmq558HgqvTyyrXrnWwJXatLHRLacXCvkw3HLNP1y55a7cclduuSu3HJGPrTQsp6uZpGoP48fZBeXnX-SraOb5YP5FC9XH6s7TZzayNoQNvYyzV2dk9QPJf3G6Bno8A24n-PLrL_7w1wHwjcAGGRwwBn72HusH3ztGecHv-97xfaB-r_vivaEgMxoAjMAyA8DT96vze3vr9_6GD7Dg3z3X-p2u0H_8G7bawTDrD34CxAdBFnzvwF--t2cPHKpprVzgHiuE2D-GhSHGy17cJ_Hy7u1pJePpxr3bmTflmPx6p_pkAz05wYYuCVvD7SXp6DGWzYk4WtqCJ0ty6QWMvZafRJT43lklhkcIyPN5LGh3DtHOPHo_pcT3TiNjf_7026-BPLclpyOnkbFb3377h2-BXNo4jYzBh0dSeRNmnqLlY-XxE8oZUk5WKAmFvoc8X4bFidNIUolgFRst76CVQjWySplJZ5VEdWUTZqeVF4_g5iINjcOZdeXZVHVrFzOQFnfp68LYrnJ8jEOs0VeY21JehbFdWFo4q2QoPwXFZwnDYgaVH2Kq0-o4HMsqB2vV1TRePYf7jagszDylf1udyDdis1YXU7_JYuqzQdcXWecN7cUksvfFLzjWr7eilOPHcGqL4vPPyHOb3F6jnE8cxnbrOd-gaebR9mjbJDBe05cwJaLOqJCfj8nzeUJNW5eOkmgxCreXUHKDcpEaf0Lvh3MpTLBQdeY0krSKlNiCVF9vM1vCJoVbxxHygSjcV3Fw7RauFO4rhbuliV-awu1rlY837I-9iqzTq7-TdRR6MFS4Lzy0JiFdzQKyvqGpNm9yfZD3G4cRqUtxDtP5zmnY6R2pvFWNJuHDIzhneZsaMoPBDoWCcbI6MOAd4fJ3KHd_80DblJhnJH-JItGZeDd4bHUqeVGsd_9YqbgoL1zC265Mwpl1y5sQneXTU9jXmclgOkJsGibOM4KoPQqu18kJQYEPYic9GwLXAe2KVEzBzahUPgLXAUo_ksr7UjFFYw9WF8iwyQKxI0rqZZx3tReIgfmqHgxtz3MbDOgus1QucrFVWShGvOjW5BVtC1UvK6UWISX5KDR4SrnSagI11vXT7_BPpHWYXCcGQIZ-VfanlJMo6O_5FcCcaWIIAFYQ_s80V-J7VufIDyZzxO2yI-Lm1KF1YZOJEb4R-LsCG9ITp-pRsEW03mP8YaL99zbvbcy9B4Z7WBMaiRYCMg53q5DpEpaAGSw2ZJX5OeePerAYRkKpQ4FKKe3lO8yFRF54oLt2zUOhaCcN3D0Axqarj9bwkkPZiHLyEEjlGbj5EmA_VQ9ZoFNvgQdovohtQWknb4KGx2MLGv6O0EBrW3J2tpbARDw_2pgIrJflguIdP28gVNsCBr3J0eZISC-BFn7GDodoCRtBkQj2Gq1riHUDODQMJl0OiKsdZmUXHBBn0ATsXpctYOsw_8zAJhoBVg2oRqCJtB1UBKmcArd5n8AFxGGA5rLyzxvYI0jSQy4P20vm9zgFE2z7bGHNOv-mjW0b0XiTNEjDgLwWqA0HZL929ro6MfI8-46mRDa_UC3Rsc4B0kubtChaXS3BfZdaJ7XP1-j6sIP7V75G7RaufI1XvsaWJn5pvsbRVvnosr-ch8g672nLRwNfI02NMd6vbPU4eix6HEnSDlqPVjeWrer7D8wG3QbPop9z6vAS2zKK5TdvgBOg7S1SfeAtcOPPtlrHbrc165iMNzWHzyqrUjGOtrew-yv2muoKOFdnvQhPcGibfpXjMZR9IxVTyvtJVJqj1-uyDyuaHegTbjPo-m2hbPykDZ2Bz6uefUKTW2BqTY7HtJU8Hxv08w9Y3x0v77OW5t228-s2_wMTuFt7F2pGV2DhEEVeoGwEbh1dXJhY7t7UDmLTnCB5dZLCS8AvY85N4RCu5PGH0gJOz06_k4ozmLawcwhnjwmBOE7-NmIVZI8JyHYQ9b2MSydR2wBkSqSn2T9SZRkmFrUhNixy1GVpB2oiyvNruCAVQZO4T8g7oczPsFLSQ9ciCr0mKLhvdi8lvUxrAYJ2ymyQdD_spSqsSodxg1RE3u9jBeNkxG4LbRzsyeU0ysZV-YhnlTXKpq_lJdoDR58JHJ6b3VtSXsalU5DNCI40rqFUzR3iAkpEZUBL-3D3LUanOEtyCeLa-IjhgL4A7BKY1vpTeKlsvpBTL2FhH7iIbxFtP5PjseqrhLIzBmAlQq4ViyiWRvkcrKQBjbdaEpbUVMCJJMs7dGCU59NyZpEMzyo2Hl6WcAmQ-Xy1vIw3wkgFh0yzY_B4CaciFxJwOol3WVUeFpq3ymx09ZtMFnscIS4dMpahI0QqzkrFiJ424yAZF3eGeGH0woxrM_NCfvOGNkAzXOj2RbOH6Q6G4jixxTpf1NVCnHLd6LuMcrGuK-KU6t-VM-PKmVH_4cqZcbGND8iZ4fK1yscb9peMFVmXdeIU1Zkv3Ydx05oLgzovMC-4OepzVkkoB2vyk1oydsPykt-W4dNZmLbq73ANmeFig78jxLp0mFQhlhG8w5-1Kunn4JDoUyMapRMZIQ-xNTZC20W5aUzVyDxVjp7D9EPl_QG9jmUh-dCoDIlZ-EdHtAYwXMlbBeEHExBcThv092GXHltHP42nGhmHc7Fa0QHra6SjVB6UiKvrt-J6Lrc_B9RhpJxEUXmz_eIXrmHLXe7crWlc_gKmX9Eyho0GcHXLeRxIr-YO5UzBQq90KDUGvZKKs3iCYkNn1eaOodQjWEpjx1YlbXXiB8wmfm_3E9_PuTrjunwV9v74DSuMhLTFzo9sVySXJxPVlTm5kJPnprFx6XT13wYUJf0Ye3uVO6hsksuP0dOsun4HnWaN-h3nFTqIw7VedTFBvzZEG3XrWgWWNwHW7bYF2M5oM7dCITYgcow_9F_a0A4zAd-DEaYbEgVcK8m5CEpEpfJmNUMgvtlnjnDXhCVX0GTkPTbsJX7O1RmH5c84M_GWr7UMR8M3KoRD1jby1tK2u_BoQ64sKscPSQUTZ4_5kF8slWFxxAWTEVdlLHY84ux9lw6zhDB-fKzvi9aixKqaWmR9xyPViI6zzcePBvCxCrpDb1DwAcUPq9E0beOskqGjTZgkZLNTMSVpZqFUnKfkf1pK2-Jgu1tII2638zIKtbqvSCOqf1d-lis_S_2HKz_LxTY-JD_LaKt8dNlfqlVkXdZJI6YsZVsZI85O3C1WN_6fzMbaBt-Jd9ilwxUxLRT6L7LXaQUr7CihrZ4PopkZq1O5yqhjm2-Vn61zXUwt8waLnjaAbfLxZzC6jt5YPWrF7TabFDaExv2cW4egYKJ_q1IoSLU_4rpa01YKbTpxoHaSSmQJLe0Dz7X-EG63kSsAelS17ro1fHFor56fQM8LwCpn5hitR-GjRHUjq8T3aPRdyeVxgQzSe3wsD0G9cdyEUnhJy2TI44dYdU2VUTwpr21Vxx5Tq9rqnPCYzAnXDVvmhA5dor050XMT15TBfCD9NeYgSU1dTIbvArXvrO9zPxMK_YkVcLLCLZIrhedFNqI8H6vPB4we8QSC1tIeHZQ6pN2CqTWYWa9RMKZXYDaPHi4rz8eq0YRVUHtNQHXbwhR0652CZ5IsspzHoLqcA07X_8dC773mtGehWwSl3wQUjw1-p8GwW-dMNtPi6NGSUc1FUzPcrGp9Yoo2gq0CQmoA4n0RoNgi-IkLtrsxD4ZbzyZqrxJ_cUp-WVIKu_BoQad7rJ8V2TuhUZY1KC15QdNrdJA0AFPTML2HJQNhcEilBHqTo_aP1bnS4rdx9_ddRnFJt15G0IfhSmhm-l65Eq5cCVeuhCtXApGPd1vlY_8lFJdk3DqUDSNW6eai8mJce5MJMn5WFPX1mC5LR2CZtrFc44Bi_YYYFejJFirNkeoQqbL8aAJWSjhmdkEUG55ZGpuWy5O0OgQ98xMmc_QYUrqXU4FBb2ucVgqnp3AF_tkteLhHb2gq4NIe0MMmQKsZol1osp2dkacecb2oEXd3WAywodCdPl3czfVXWv6QHjFjKUCnCaf6aZi9QwpE4g8Hb0kNyQSNyeLwKzlmhR5nYxU5zgQ5tx0HcXNuHfaOCXLqtaFjefB-XsAqShdWx7MxuVTEnsXIGEwv4nobXWN38ZngOmjkFNAMl7NK7BxBcg85JjhuFcEfzBC0IWnJz7mHOkKQTla0fqC79nyM8OOdEavJSi1UCFLjtFp-2D1yjUeB6-DT23_46tZvgFzawY-2CEvABBaPHUdAMW4dYorR3kdq0-JKUTN5tKCTRsYEuBFGNKoC0W0FpUpJ2Z2A20vVaJL4jMjLoMVDfPKm5rbX328RAd4Egd6-7hdGaNStwyAJjXJiK6fwfFmQaAGuzbUelbePpSNy7q1qSGyx3dpwvd92g1v3gzhVlLvHAsyUY0eCwwwecx-gM6W2eC0OftBk8PtsKIQSGnXrkEgMB1_J5eXULpzJwMqhvPvCYBlcwoDDqXcoFYexFezXyjzFjuXoNC6Fk4hUI2uYnVi0GjDwtDAaPB7nZZTc9XzYjIYrN4R2C1duiCs3REsTvzQ3xGirfHTbX3LXy7h1TgYzVMWW4biOK5-mF1-a-kWZ8ZkCPFog6hcpTCi_LFWXftZTv4ydDlYVhPsmoLhs4Dz6OXdYGxSzA_NUw2MEj3H2t7nhQtN0qUiqnZInz-eB65oH_Paz7o0Zal82jr2l_Tk_9ja5QVvG8jW5AQsJWpsRS9nFXRR_jdJpeiKuxjbVHsgPzEDutwVkHS6RGcgHe5R0itVeHFfUczEMDbHdWKeqAxFNo5fWkK3RYJML8uybGkc3tgiTRZyosTaHo3ekQZr5YlWrdJtg57bBfPIybuvFUMgxFbvYeMr8jBZ3tVEzzP7vUnjK8-_R23VaooOExsl7YLfB2GNygio9M-VZBK3p1Gewast6PCZgeGwp6erpjBOkHg8dBysjiqzw4E6IuWewp7XhqzvYgzPrcGpLXsFF3y8cAduRx2cv1_JMXEj59bJUKqD0nLxZUledVw7eUVnaqvW2B2OvCYy9NtSCDY16dGg8hlZxnV25r569BiusO9vY4rj1mY2bDeVJQqxHhylDrUw9V45q8ev40vziHYEPG4SU2lAUNiaVF7ELVZ8a20H-HSysyvEYuA7Ob7U4yP0mg9xng8AfDHs6oYbAqXdSKYWLfRWK-IiiHZ3K73eZe6xfd5hNjlnSyeT97Tdf_af7Wg-AU3m0GJWKKVICJI4WD-XypFTeh8920XJKd7A_qlnAjiGBGWHPB6hl-FXmoyPAjNTrq2K_QxMqLV60c0QGyTwJtRx81kTuqURgaR47GudS8uqkMneEs53epmm4UM5WMIc1tts4FwquED9ZNo8DiOWIdBij9edrxVxViTjy61kYK9Nzus-bDvrxmxBWcI06pD3zVGZto-sXc2jpEb-9rk7738iZrecEw9iSkstjPEkKJaYfb67CCj51jRKS8ZFrpEv4Q3Oxpfb7prKnzzvX8Mk0de7C2bTt9w4WnuJy_oQajz37zSeD0TPiiIPlFZ0B2A9SLMODLeko2_Qe7fdr8GK_1GWFWrrWegpY-12r1dapw9c45JgOIq18RIsPn0bG6Dkhp5ExehwGBo4Umj-NjNHBwfeQ0zno2u2k42ENQHXKWWpXJbbSd1IHkRRHPKusNooggn9OPwIXayCSy-oSiB10z6WBa-tJIs3da61TZKF7mmXCpWKkOl-gHcAHB6oy-TvpjwZcmokk2smAFgRMS2l7wjKkZEYCXY3FehoZowRXMjfPCcUddM2ttQQJsaWmnDZ3rZWcaGUaYgIFXjokHo8FTO18y1UqTqoLJ3SDQOsHnXQkdLEj9XriqRYfmXaEw5KkbHh2sKRXmS6nkTFsLmNZodLpNJUOrb41Nvoagej3LH4zRzAsBGusaIfvQYAZ4byfY9KCysykqgG5eZivma24BXGIF0aIBhnwCTxH9RaHyIl-cvPvP_3vW-CPXzHhgHeYFYC8kKg-2aAucnrnoMCxQ_jOT-nfA1xCkx5bc5sLsF6BGRKph6BJvNI0lpU8Pg-UiJvq42PlYAfP4om8fLSHDYTEFJx7Db7iAuH7QE7twI2Js0osKPC8CH4NvhsMB8QwwN-GQmeVOBZLKBFXFeGgZ4CQJU5fAN9SqzARW6Sb7fl5liqZ93yxscjqB4lM4voHbNjPXMNUZXxXbTes77JydrZ2qOnhfvPhluNoYRclC5ga9HS2VpR-c5VOEaLlrKKdtHr3oT-hbFyefSO_xlpEYyapPC14aZPjXqTiTHVlDk-o-rs0tmj1KUaNY1zxUbBLGygbV-3SOCFFDS1edHMpUi9_DM6s4VqhxZQ6mkK3RxpFIYcBvcKHpI2twql96WiFPgq-Ha8HPhziMEsmH12VhI_hGABDjD9U84HgCN_wbd5HlNdz14jDywdEgQkR1TokMtjWrqvWjtAwEySTVODDOLe8fn2Ip6q4wA_yIv-Fn60bEI7zuHNzKyN8PSjANgLVeMX946N__C8" target="_blank" rel="noreferrer">打开设计画布 ↗</a>
+      <a class="btn sec" href="kaze-redesign.m3e.json" target="_blank">查看画布 JSON</a>
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>这份画布是怎么来的</h3>
+    <p>
+      m3e-canvas 是纯前端工具，正常用法是在浏览器里拖拽。拖拽的结果没法版本化、也没法复核，
+      所以这里改成<strong>直接驱动它的引擎</strong>：把仓库 clone 下来，用脚本构造它的画布文档，调用它自己的
+      <code>lib/prompt.ts</code> 导出设计稿，再用它 <code>lib/share.ts</code> 的格式生成分享链接。
+    </p>
+    <p>生成脚本还带几何自检（不越界、不重叠）—— m3e-canvas 会把「两组重叠」读作「叠放」，普通堆叠必须不重叠。这个检查一开始抓出了 39 处版面错误。</p>
+    <p style="display:flex;gap:10px;flex-wrap:wrap">
+      <a class="btn sec" href="tools/gen.mts" target="_blank">查看生成脚本 tools/gen.mts</a>
+      <a class="btn sec" href="README.md" target="_blank">查看 docs/m3e/README.md</a>
+    </p>
+  </div>
+
+  <div class="card">
+    <h3>9 个屏幕</h3>
+    <table>
+      <tr><th>屏幕</th><th>这一屏要解决什么</th></tr>
+      <tr><td>主页</td><td>一眼看到服务端现在是什么状态，并且可以立刻启停</td></tr>
+      <tr><td>服务端</td><td>实例的列表与管理：多开、筛选、启停、导入</td></tr>
+      <tr><td>控制台</td><td>实时日志与命令输入 —— 这个应用的主工作台</td></tr>
+      <tr><td>实例详情</td><td>一个服务端的全部控制项：运行 / 配置 / 世界 / 附加</td></tr>
+      <tr><td>新建服务端</td><td>三步向导：选核心 → 选版本与资源 → 确认安装</td></tr>
+      <tr><td>插件与模组</td><td>从 Modrinth 搜索并安装到当前实例</td></tr>
+      <tr><td>启动日志</td><td>崩溃报告与完整日志，失败原因直接写在摘要里</td></tr>
+      <tr><td>外观设置</td><td>主题、颜色、字体与动效</td></tr>
+      <tr><td>运行与存储</td><td>实例目录、电池优化、Java、更新通道与许可证</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════ 设计稿 ══════════ -->
+<section class="panel" id="panel-docs" role="tabpanel" hidden>
+  <h2>设计稿（m3e-canvas 生成的 prompt）</h2>
+  <p class="sub">
+    下面这些文字<strong>全部由 m3e-canvas 自己的 prompt 引擎生成</strong>，没有一句是手写的。
+    整包稿一次覆盖 9 屏；逐屏稿是 m3e-canvas 的「只导出这一屏」，实现时按屏喂给编码 agent 更准。
+  </p>
+  <div id="docs-list"><p class="muted">正在加载设计稿…</p></div>
+</section>
+
+<footer>
+  渲染图由 <code>./gradlew :app:recordRoborazziArm64Debug</code> 生成（Roborazzi，纯 JVM，不需要模拟器）。
+  当前 <strong>64 个测试全部通过</strong>。
+</footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ── 标签切换 ── */
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  function show(name) {
+    tabs.forEach(function (t) { t.setAttribute("aria-selected", String(t.dataset.tab === name)); });
+    ["ui", "canvas", "docs"].forEach(function (n) {
+      document.getElementById("panel-" + n).hidden = (n !== name);
+    });
+    if (name === "docs") loadDocs();
+  }
+  tabs.forEach(function (t) { t.addEventListener("click", function () { show(t.dataset.tab); }); });
+
+  /* 画布链接已直接写进按钮的 href：file:// 下 fetch() 会被浏览器拦掉，
+     所以链接不能运行时再从 kaze-redesign.share.txt 读。 */
+
+  /* ── 设计稿：按需加载并做极简 Markdown 渲染 ── */
+  var DOCS = [
+    { file: "kaze-redesign.prompt.md", title: "整包设计稿", meta: "9 屏 · 配色 · 形状字体动效 · 行为 · 组件样式 · 整体原则", open: true },
+    { file: "prompt-主页.md", title: "主页", meta: "逐屏" },
+    { file: "prompt-服务端.md", title: "服务端", meta: "逐屏" },
+    { file: "prompt-控制台.md", title: "控制台", meta: "逐屏" },
+    { file: "prompt-实例详情.md", title: "实例详情", meta: "逐屏" },
+    { file: "prompt-新建服务端.md", title: "新建服务端", meta: "逐屏" },
+    { file: "prompt-插件与模组.md", title: "插件与模组", meta: "逐屏" },
+    { file: "prompt-启动日志.md", title: "启动日志", meta: "逐屏" },
+    { file: "prompt-外观设置.md", title: "外观设置", meta: "逐屏" },
+    { file: "prompt-运行与存储.md", title: "运行与存储", meta: "逐屏" }
+  ];
+
+  function esc(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  /* 极简渲染：## 与 ### 变标题，- 变列表，正文变段落。够读就行。 */
+  function render(md) {
+    var out = [], list = null;
+    function flush() { if (list) { out.push("<ul>" + list.join("") + "</ul>"); list = null; } }
+    md.split(/\r?\n/).forEach(function (raw) {
+      var line = raw.replace(/\s+$/, "");
+      if (/^###\s+/.test(line)) { flush(); out.push("<h4>" + esc(line.replace(/^###\s+/, "")) + "</h4>"); return; }
+      if (/^##\s+/.test(line)) { flush(); out.push("<h4>" + esc(line.replace(/^##\s+/, "")) + "</h4>"); return; }
+      if (/^#\s+/.test(line)) { flush(); out.push("<h4>" + esc(line.replace(/^#\s+/, "")) + "</h4>"); return; }
+      if (/^\s*-\s+/.test(line)) { (list = list || []).push("<li>" + esc(line.replace(/^\s*-\s+/, "")) + "</li>"); return; }
+      if (!line) { flush(); return; }
+      flush();
+      out.push("<p>" + esc(line) + "</p>");
+    });
+    flush();
+    return out.join("");
+  }
+
+  var docsLoaded = false;
+  function loadDocs() {
+    if (docsLoaded) return;
+    docsLoaded = true;
+    var host = document.getElementById("docs-list");
+    host.innerHTML = "";
+
+    /* file:// 下浏览器会拦掉 fetch（同源策略），所以双击打开本页时改成给原始文件链接，
+       而不是显示一堆加载失败。用本地服务器打开（python -m http.server）则正常内联展开。 */
+    var offline = location.protocol === "file:";
+
+    DOCS.forEach(function (d) {
+      var det = document.createElement("details");
+      det.className = "doc";
+      if (d.open) det.open = true;
+
+      var sum = document.createElement("summary");
+      sum.innerHTML = "<span>" + esc(d.title) + "</span><span class=\"meta\">" + esc(d.meta || "") + "</span>";
+      det.appendChild(sum);
+
+      var body = document.createElement("div");
+      body.className = "doc-body";
+      det.appendChild(body);
+      host.appendChild(det);
+
+      var rawLink = "<p><a class=\"btn sec\" href=\"" + d.file + "\" target=\"_blank\">打开 " + esc(d.file) + "</a></p>";
+
+      if (offline) {
+        body.innerHTML =
+          "<p class=\"muted\">直接双击打开的页面读不到同目录的 Markdown（浏览器的 file:// 同源限制）。" +
+          "点下面的按钮看原文；或者在本目录执行 <code>python -m http.server</code> 后用 " +
+          "<code>http://localhost:8000/</code> 打开，内容就会直接展开在这里。</p>" + rawLink;
+        return;
+      }
+
+      body.textContent = "加载中…";
+      fetch(d.file)
+        .then(function (r) { return r.ok ? r.text() : Promise.reject(new Error(r.status)); })
+        .then(function (txt) {
+          var box = document.createElement("div");
+          box.className = "rendered";
+          box.innerHTML = render(txt);
+          body.textContent = "";
+          body.appendChild(box);
+          var link = document.createElement("p");
+          link.style.marginTop = "18px";
+          link.innerHTML = "<a class=\"btn sec\" href=\"" + d.file + "\" target=\"_blank\">查看原始 Markdown</a>";
+          body.appendChild(link);
+        })
+        .catch(function (e) {
+          body.innerHTML = "<p class=\"muted\">无法加载 " + esc(d.file) + "（" + esc(e.message) + "）。</p>" + rawLink;
+        });
+    });
+  }
+})();
+</script>
+</body>
+</html>

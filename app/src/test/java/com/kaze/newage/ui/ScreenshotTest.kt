@@ -13,8 +13,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.kaze.newage.ui.components.CheckChip
-import com.kaze.newage.ui.components.StatusOrb
-import com.kaze.newage.ui.components.StatusTone
+import com.kaze.newage.ui.components.ExpressiveLoadingGlyph
+import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.NewAgeTheme
 import com.kaze.newage.ui.theme.ThemeBackdrop
@@ -63,7 +63,12 @@ class ScreenshotTest {
                 Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
             ) {
-                StatusTone.entries.forEach { StatusOrb(tone = it) }
+                // 状态指示已换成 M3 Expressive 的形状变化指示器：
+                // 空闲=定格造型、运行中=常速变形、启动中=加速变形
+                ExpressiveLoadingGlyph(size = 56.dp, shapeIndex = 0)
+                ExpressiveLoadingGlyph(size = 56.dp, shapeIndex = 4)
+                ExpressiveLoadingIndicator(size = 56.dp)
+                ExpressiveLoadingIndicator(size = 56.dp, speed = 1.8f)
             }
         }
     }
@@ -75,7 +80,7 @@ class ScreenshotTest {
                 Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                StatusOrb(tone = StatusTone.Running, size = 72.dp)
+                ExpressiveLoadingIndicator(size = 72.dp)
                 CheckChip(selected = true, label = "已选中", onClick = {})
                 CheckChip(selected = false, label = "未选中", onClick = {})
                 Text("Kaze Launcher UI")

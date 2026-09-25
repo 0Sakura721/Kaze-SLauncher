@@ -11,6 +11,97 @@ _（暂无未发布内容；下次发版时把本节内容并入对应版本号�
 
 ---
 
+## [0.3.0] — 2026-09-25
+
+> 这一版把界面整体重做到 Material 3 Expressive，并修掉一批「真机根本跑不起来」的问题。
+> 在这之前，应用在**任何 arm64 真机**上都部署不了环境——四个缺陷叠在一起，而模拟器是
+> x86_64 + houdini，跑 proot 直接段错误，所以这些问题在开发环境里从未暴露。
+
+### Added
+- **设置页顶部分类条**：7 个分区（外观 / 玻璃 / 背景图 / 存储 / Java / 后台 / 关于）横向排列、
+  固定在顶部；点击平滑滚到对应分区，滚动时自动高亮当前分区并把它滚进可视范围。
+  分区偏移用 `onGloballyPositioned` 实测而非写死下标（条目高度随文案换行变化，
+  Java 分区条目数还取决于已安装版本数）。
+- **Java 安装情况自动检测**：扫描 rootfs 的 `usr/lib/jvm`，优先读 `release` 文件里的
+  `JAVA_VERSION`（权威），读不到再从目录名解析，因此 apt 装的、Adoptium 解压的、
+  以及标准列表之外的版本都能认出来；进设置页时自动重新检测，行内显示确切版本
+  （如「已安装 · 17.0.20.1」）。
+
+### Changed
+- **界面重构为 Material 3 Expressive**。设计不是手写的：用 [M3E Canvas](https://github.com/lnkiai/m3e-canvas)
+  在代码里构造画布文档、跑它自己的 prompt 引擎导出 9 屏设计稿，再据此重做界面。
+  设计源（整包 prompt、逐屏 prompt、画布 JSON、可直接在浏览器打开的分享链接、生成脚本）
+  全部入库于 [docs/m3e](docs/m3e/)。
+  - 新增 `ui/theme/Expressive.kt`：官方形状 / 动效 / 排版令牌。本项目锁在 Compose BOM 2024.12.01
+    （material3 1.3.1，**没有** Expressive API），所以按 androidx token 落常量 —— 6 组 spring、
+    缓动曲线与时长、Expressive 圆角阶（卡片 20dp / 对话框 28dp / 全圆按钮）、
+    强调字阶（15 个字阶的 size 与 lineHeight 不变，只提字重与字距）。
+  - 新增 `ui/components/M3EComponents.kt`：Expressive 版式组件层（卡片三变体、72dp 列表项、
+    相连列表 28/8dp 圆角、屏幕头、状态胶囊、指标块、分段选择）。可点组件统一带涟漪与轻微缩小反馈。
+  - 新增 `ui/components/LoadingIndicator.kt` + `LoadingShapes.kt`：官方「会变形的」加载指示器。
+    7 个形状取自 Material Design 形状资产，每 650ms 变一次（一个循环 4.5s），变形按官方的
+    0.6/200 弹簧回落（峰值过冲约 9%，用解析式而不是 Animatable —— 形状序号是跳变目标，
+    有限动画追不准，也会让 Compose 测试等不到空闲），旋转按 50°+90°/形 的模型并补掉循环余量，
+    使跨形不跳。它同时接管了原来的「状态球」：运行中常速、启动中加速、停止时定格成单个形状。
+  - 新增 `ui/components/WavyProgress.kt`：官方波浪形线性进度条（容器 10dp、波幅 3dp、波长 40/20dp，
+    二次贝塞尔而非正弦），部署与安装进度改用它。
+  - 删除旧设计层：`BackgroundCard.kt`（整页大卡框架，重构后已无任何调用）、
+    `StatusOrb` 的自绘圆环/玻璃球（其职责由形状变化指示器接管，`StatusTone` 保留在
+    `StatusTone.kt`），以及 `Theme.kt` 里只服务于它们的 `cardColor/cardShape/cardTitleColor/
+    itemColor/serverItemBorderColor` 等助手。主页的实例选择从下拉菜单改为「点卡片展开」，
+    「运行概况」并入实例卡正文。
+  - 新增 `LoadingShapesTest`（7 形的点数一致 / 归一化居中 / 等弧长重采样 / 插值不外溢与不塌缩）
+    与 `ExpressiveComponentsTest`（组件层截图）；屏幕截图补上有实例时的版式与深色版。
+  - **常驻底栏（液态玻璃浮动胶囊）本次刻意不改**，仅确认它与新内容的相对位置。
+
+### Fixed
+- **真机上一部署环境就失败（四个叠加缺陷）**：
+  1. `targetSdk` 35 → **28**。Android 按 targetSdk 选 SELinux 域，≥30 落到 `untrusted_app`，
+     AOSP 用 `neverallow` 禁止 execve 应用私有目录中的文件（W^X），而 proot 必须执行 rootfs
+     里的 guest 二进制 → `execve("/usr/bin/sh"): Permission denied`。Termux / PojavLauncher
+     同样停在 28。
+  2. **usrmerge 兜底绑定根本不存在**：`repairRootfsLinks` 的注释声称"建不出符号链接时由
+     `buildProotCommand` 的 `-b` 绑定负责映射"，但绑定列表里从来没有 `/bin` `/lib` `/sbin`
+     → `'/bin/sh' not found`。现在真的补上绑定，并改用 `/usr/bin/sh`（真文件）而非 `/bin/sh`。
+  3. **`ensureMultiarchLinks` 在 arm64 上从不生效**：守卫检查的是硬编码的
+     `usr/lib/arm-linux-gnueabihf`，而 arm64 rootfs 里只有 `aarch64-linux-gnu` → 函数第一行
+     就 return，`usr/lib/ld-linux-aarch64.so.1` 等顶层 soname 软链**从未创建**，
+     dash 的 PT_INTERP 解析不到，proot 一步都跑不动。
+  4. **解压不还原 tar 权限**：只按路径给 `bin/` 与 `libexec/` 加 x，而 Java 创建的文件默认
+     0600 → `usr/lib` 下的共享库（含动态链接器）全都没有执行位，execve 返回 ENOENT。
+     现在解析 tar 头的 mode 字段并用 chmod 应用。
+  配套：`repairExecPermissions` 对**已经解压过**的 rootfs 幂等补齐执行位（老用户不必删掉重来）；
+  `dumpDiagnostics` 把 rootfs 关键文件的存在性 / 权限 / SELinux 上下文与两项 exec 实测写到
+  外部目录，真机没有 root 时也能直接取到（应用每次启动写一份）。
+- **启动瞬间整屏位移**：window insets 异步下发，首帧组合时 `WindowInsets.statusBars` 仍为 0，
+  内容先按"没有状态栏"布局（标题与状态栏图标重叠），insets 到达后整屏下移一个状态栏高度
+  （720p 实测 76px、持续约 0.45s）。现在 insets 就绪前只画背景不画前景。
+- **部署失败被静默吞掉**：阶段 3 的 `apt-get update` 结果无人查看，离线或源不可达时照样报
+  「环境已就绪」，之后所有 `apt-get install`（装 Java）都失败且重试无用。现在失败即明确报错，
+  重试会补做这一步（已解压的环境不会重复下载）。
+- **Java 明明装了却显示「未安装」**：判定用 `bin/java` 体积 > 1MB，而 OpenJDK 的 `bin/java`
+  只是约 100KB 的启动器（真正的大头是 `lib/server/libjvm.so`）→ 任何正常安装都被判成未安装。
+  服务端能跑是因为启动流程自己拼路径、没走这个检测，问题才被掩盖。
+- **实例摘要被断词截断**（`Java 21 · 4096 M…`）：`M3EListItem` 固定 72dp 高，而正文允许两行，
+  第二行被压掉。改为最小高度，长内容让行高自然增长。
+- **每种核心给独立图标与配色**：此前 7 种核心只有 3 种图标，Purpur / Spigot / Fabric /
+  Forge / NeoForge 全是同一个灰块，新建向导里连着 5 个一模一样的灰方块。
+- 控制台空状态用一个定格的灰椭圆表示"待命"，在空荡荡的日志区里读起来像渲染残渣，换成终端图标。
+- 「EULA 未接受」占掉约 55dp 把标题挤到不足 90dp，改为紧凑的警示图标（语义保留给读屏）；
+  玻璃设置页的长说明句被省略号截断，已精简。
+- 设置页「AMOLED 纯黑」在浅色模式下无效且无提示；AMOLED 覆盖漏了 `surfaceBright`
+  （M3 卡片底色用的就是它）。
+- CI：`android-actions/setup-android` 内部会安装 Google 已下架的旧 `tools` 包，必定失败；
+  去掉该 action 后 `sdkmanager` 不在 PATH，改为显式定位 runner 预装的 cmdline-tools。
+
+### Removed
+- **不再发布 `universal` 包**。安装包只出 arm64-v8a 与 armeabi-v7a 两个；
+  更新器的选包逻辑同步改造（精确后缀 → 名字含本机架构 → 旧命名 → universal → 单个安全包），
+  **任何情况下都不会把别的架构的包发给用户**，并补了 8 个针对性测试。
+- v7a（armeabi-v7a）包标记为 **experimental**：在真机上验证得少，请优先用 arm64 包。
+
+---
+
 ## [0.2.0] — 2026-09-11 · 替换构建 2026-09-12
 
 > 本版本为**替换构建**（2026-09-12）：0.2.0 已发布的安装包替换为含完整审计修复的构建，

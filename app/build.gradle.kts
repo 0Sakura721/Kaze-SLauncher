@@ -42,8 +42,8 @@ android {
         // `execve("/usr/bin/sh"): Permission denied`、环境永远起不来（vivo Android 16 真机实锤）。
         // targetSdk 28 → untrusted_app_27 域，允许执行；Termux / PojavLauncher 同样停在 28。
         targetSdk = 28
-        versionCode = 4
-        versionName = "0.2.0"
+        versionCode = 5
+        versionName = "0.3.0"
     }
 
     // ABI flavor：每包只带本架构的 native 库与 rootfs 资产；universal 全量（分发用）

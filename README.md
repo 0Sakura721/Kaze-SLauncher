@@ -9,7 +9,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-27-orange)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
-当前版本 **v0.2.0**（[预发布](https://github.com/0Sakura721/Kaze-SLauncher/releases)） · 变更见 [CHANGELOG](CHANGELOG.md)
+当前版本 **v0.3.0**（[下载](https://github.com/0Sakura721/Kaze-SLauncher/releases)） · 变更见 [CHANGELOG](CHANGELOG.md)
 
 ---
 
@@ -33,9 +33,13 @@
 - 🛡️ **前台保活**：服务端运行期间常驻通知保活，全部停止后自动退出；首次启动自动申请忽略电池优化
 
 ### 界面
-- 🎨 **两套主题**：简洁面板（默认）/ 液态玻璃（玻璃卡片 + 镜面高光 + 柔光斑），跟随系统深浅色，
+- 🎨 **Material 3 Expressive 界面**：版式由 [M3E Canvas](https://github.com/lnkiai/m3e-canvas) 设计并生成提示词
+  （设计稿与画布分享链接见 [docs/m3e](docs/m3e/)）；卡片 20dp 圆角、相连按钮组、波浪形进度条、
+  可点组件带涟漪与轻微缩小反馈，动效走官方 spatial/effects 两组弹簧
+- 🔵 **形状变化加载指示器**：签名元素，就是官方那个会变形的加载指示器 —— 7 个形状每 650ms 变一次，
+  同时承担服务状态：运行中常速变形、启动中加速、停止时定格成单个形状
+- 🌗 **两套外观**：简洁面板（默认）/ 液态玻璃（玻璃卡片 + 镜面高光 + 柔光斑），跟随系统深浅色，
   支持 AMOLED 纯黑、自定义种子色与取色风格
-- 🔵 **状态球**：签名元素，实时呈现服务状态（运行 / 忙碌 / 空闲 / 错误）
 - 🖥️ **实时控制台**：逐行着色、自动跟随、`\r` 进度行原地刷新、命令输入（stop / op / say…）、
   一键复制与导出日志
 - 👥 **玩家管理**：解析 `list` 响应与 join/leave 事件，提供 OP / 白名单 / 踢出快捷命令
@@ -48,14 +52,15 @@
 3. 「服务端」→「新建」→ 选核心类型 → 选版本 → 配置 → 下载并创建
 4. 点「启动」→ 首次会自动接受 EULA 并重启 → 「控制台」实时查看日志
 
-**选哪个安装包**：64 位手机用 `arm64-v8a`；32 位老设备用 `armeabi-v7a`；不确定用 `universal`。
+**选哪个安装包**：64 位手机用 `arm64-v8a`；32 位老设备用 `armeabi-v7a`（标记 experimental，真机验证较少）。
+不再发布 `universal` 包。
 
 ## 🛠️ 构建
 
 ```bash
 # 需要 JDK 17+ 与 Android SDK（compileSdk 35）
 ./gradlew assembleArm64Debug        # 产物 app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
-./gradlew assembleArmhfRelease      # arm64 / armhf / universal 三种 flavor，debug / release 各一套
+./gradlew assembleArmhfRelease      # arm64 / armhf / universal 三种 flavor，debug / release 各一套（发布只出前两个）
 ```
 
 发布包需要签名凭据，从 `local.properties`（本地）或环境变量（CI）读取，**取不到时产出未签名包，

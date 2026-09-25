@@ -107,8 +107,16 @@ object UpdateChecker {
     }
 
     /**
-     * 按架构挑下载资产：当前架构 → 旧命名兼容（-arm64）→ universal → 任意 apk。
-     * 不匹配时永远有 universal 兜底，不会拿到装不上的架构包（如 v7a 设备拿到 arm64 包）。
+     * 按架构挑下载资产。
+     *
+     * 命名自 v0.3.0 起变了：v7a 包带 `-experimental` 后缀（例：
+     * `Kaze-SLauncher-v0.3.0-armeabi-v7a-experimental.apk`），且**不再发布 universal**。
+     * 旧逻辑是「精确后缀 → -arm64 → -universal → 任意 .apk」，两个后果：
+     *  - 带 -experimental 的包精确后缀匹配不上；
+     *  - universal 没了之后会掉到「任意 .apk」，可能把 arm64 包发给 v7a 设备，
+     *    装上去直接 INSTALL_FAILED_NO_MATCHING_ABIS。
+     * 改为：精确 → 名字里含本机架构 → 旧命名兼容 → universal（老版本还有）→
+     * 只剩一个且**不是别的架构**时才用。任何时候都不会拿到装不上的架构包。
      *
      * 返回整个 asset 对象（而不只是 URL）：这样 URL 与它的 `digest` 一定成对取到，
      * 不会出现「URL 取 A、哈希取 B」的错配。
@@ -117,19 +125,48 @@ object UpdateChecker {
         val items = (0 until assets.length())
             .mapNotNull { assets.optJSONObject(it) }
             .filter { it.optString("browser_download_url").isNotBlank() }
-        val arch = archSuffix()
-        val candidates = buildList {
-            add("-$arch.apk")
-            if (arch == "arm64-v8a") add("-arm64.apk") // 旧发布命名兼容
-            add("-universal.apk")
-            add(".apk")
+        val picked = pickAssetName(
+            items.map { item ->
+                item.optString("name").ifBlank {
+                    item.optString("browser_download_url").substringAfterLast('/')
+                }
+            },
+            archSuffix(),
+        ) ?: return null
+        return items.firstOrNull { item ->
+            val n = item.optString("name").ifBlank {
+                item.optString("browser_download_url").substringAfterLast('/')
+            }
+            n == picked
         }
-        for (suffix in candidates) {
-            items.firstOrNull {
-                it.optString("browser_download_url").endsWith(suffix, ignoreCase = true)
-            }?.let { return it }
+    }
+
+    /**
+     * 选包规则本体（纯函数，单独测）：
+     *  1. 精确后缀 `-<arch>.apk`
+     *  2. 名字里含本机架构（覆盖 `-arm64-v8a-experimental` 这类修饰后缀）
+     *  3. 旧命名 `-arm64.apk`（仅 arm64）
+     *  4. `-universal.apk`（0.2.0 及更早还有）
+     *  5. 只剩一个且不是别的架构时才用
+     *
+     * 底线：**永远不返回属于别的架构的包**——装上去只会 INSTALL_FAILED_NO_MATCHING_ABIS。
+     */
+    internal fun pickAssetName(names: List<String>, arch: String): String? {
+        val apks = names.filter { it.endsWith(".apk", ignoreCase = true) }
+        if (apks.isEmpty()) return null
+        val foreignArch = when (arch) {
+            "arm64-v8a" -> listOf("armeabi", "armhf", "v7a")
+            "armeabi-v7a" -> listOf("arm64", "aarch64")
+            else -> emptyList()
         }
-        return null
+        apks.firstOrNull { it.endsWith("-$arch.apk", ignoreCase = true) }?.let { return it }
+        apks.firstOrNull { it.contains(arch, ignoreCase = true) }?.let { return it }
+        if (arch == "arm64-v8a") {
+            apks.firstOrNull { it.endsWith("-arm64.apk", ignoreCase = true) }?.let { return it }
+        }
+        apks.firstOrNull { it.endsWith("-universal.apk", ignoreCase = true) }?.let { return it }
+        return apks.filter { name -> foreignArch.none { name.contains(it, ignoreCase = true) } }
+            .singleOrNull()
     }
 
     /** GitHub 原链 + 全部镜像（下载时由 Downloader 测速择优） */

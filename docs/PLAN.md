@@ -45,7 +45,26 @@ app/src/main/java/com/kaze/newage/
 - **后端 100% 继承 v3**（已验证：proot 部署、tar 解压、Java apt 安装、eula 三段式、stdin 直连注入命令、日志双通道）。
 - **前端全新**：双主题设计系统 + 状态球签名元素 + eula 三步可视化。
 
-## 3. 设计系统（签名元素：状态球 StatusOrb）
+## 2.5 界面重构（2026-09，Material 3 Expressive）
+
+> 签名元素与设计体系在本次重构中**换代**：状态球 StatusOrb 由 M3 Expressive 的
+> 形状变化加载指示器取代。设计不是手写的 —— 用 [M3E Canvas](https://github.com/lnkiai/m3e-canvas)
+> 在代码里构造画布文档、跑它自己的 prompt 引擎导出 9 屏设计稿，再据此重做界面。
+> 设计源与画布分享链接见 [docs/m3e](m3e/)。
+
+| 项 | 取值 |
+|---|---|
+| 设计语言 | Material 3 Expressive（官方 baseline seed `#6750A4` + 动态取色，浅色与深色都做） |
+| 形状 | 卡片 20dp（corner-large-increased）、对话框 28dp、按钮全圆；相连列表首尾 28dp / 内侧 8dp |
+| 动效 | 官方 `MotionScheme.expressive()` 的 6 组 spring；可点组件带涟漪 + 轻微缩小反馈 |
+| 排版 | 强调字阶：15 个字阶的 size/lineHeight 不变，titleMedium 及以下提到 Bold |
+| 签名元素 | 形状变化加载指示器：7 形每 650ms 一变，兼作服务状态（运行中常速 / 启动中加速 / 停止定格） |
+| 进度 | 官方波浪形线性进度条（容器 10dp、波幅 3dp、波长 40/20dp） |
+
+## 3. 设计系统（旧版：签名元素 状态球 StatusOrb）
+
+> ⚠️ 本节描述的是 v1 的两主题设计系统，**已被 2.5 节的 M3 Expressive 体系取代**，
+> 保留在此仅供追溯。CLEAR / AURORA 两主题的**背景层与液态玻璃底栏仍然有效**。
 
 | 主题 | 背景 | 卡片 | 状态球 |
 |---|---|---|---|

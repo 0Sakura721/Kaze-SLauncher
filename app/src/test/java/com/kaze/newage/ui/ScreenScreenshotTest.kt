@@ -9,6 +9,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.kaze.newage.NewAgeApp
+import com.kaze.newage.data.model.CoreType
+import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.screens.ConsoleScreen
 import com.kaze.newage.ui.screens.HomeScreen
 import com.kaze.newage.ui.screens.NewServerScreen
@@ -31,13 +33,13 @@ import org.robolectric.annotation.GraphicsMode
  *   ./gradlew :app:recordRoborazziArm64Debug
  *   输出：app/build/screenshots/screen_*.png
  *
- * 与 `ScreenshotTest`（组件级）的分工：
- *  - `ScreenshotTest`：纯组件、无依赖，渲染快，用来盯单个控件的样式
+ * 与 `ScreenshotTest` / `ExpressiveComponentsTest`（组件级）的分工：
+ *  - 组件级：纯组件、无依赖，渲染快，用来盯单个控件的样式
  *  - 本类：整屏、走真实 ViewModel，用来检查布局/间距/空状态/文案
  *
  * 说明：这里的实例列表是空的（Robolectric 的存储是干净的），
- * 因此截到的是各页面的**空状态**。要看"有实例/运行中"的样子，
- * 需要往 `instanceStore` 里塞测试数据——见 [screen_server_with_instance]。
+ * 因此截到的是各页面的**空状态**——新设计的空状态同样是设计的一部分（要有引导，不能是白屏）。
+ * 要看「有实例 / 运行中」的样子，需要往 `instanceStore` 里塞测试数据。
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -78,15 +80,46 @@ class ScreenScreenshotTest {
         HomeScreen(vm(), onNavigate = {}, onNewServer = {})
     }
 
+    // ── 有实例时的首页：主行动按钮组 / 运行时长卡 / 次要动作行只有这一屏才看得到 ──
+    @Test
+    fun screen_home_with_instance() {
+        val viewModel = vm()
+        seedInstance(viewModel)
+        captureScreen("screen_home_with_instance") {
+            HomeScreen(viewModel, onNavigate = {}, onNewServer = {})
+        }
+    }
+
     // ── 服务端列表（空态）──
     @Test
     fun screen_server() = captureScreen("screen_server") {
         ServerScreen(vm(), onOpenInstance = {}, onNewServer = {})
     }
 
+    @Test
+    fun screen_server_dark() = captureScreen("screen_server_dark", dark = true) {
+        ServerScreen(vm(), onOpenInstance = {}, onNewServer = {})
+    }
+
+    // ── 服务端列表（两个实例）：相连列表、分类着色、选中环只有这一屏才看得到 ──
+    @Test
+    fun screen_server_with_instances() {
+        val viewModel = vm()
+        seedInstance(viewModel, name = "生存服", core = CoreType.PAPER, mc = "1.21.4", java = 21, memory = 4096)
+        seedInstance(viewModel, name = "模组服", core = CoreType.FABRIC, mc = "1.21.1", java = 21, memory = 6144)
+        captureScreen("screen_server_with_instances") {
+            ServerScreen(viewModel, onOpenInstance = {}, onNewServer = {})
+        }
+    }
+
     // ── 控制台 ──
     @Test
     fun screen_console() = captureScreen("screen_console") {
+        ConsoleScreen(vm())
+    }
+
+    @Test
+    fun screen_console_dark() = captureScreen("screen_console_dark", dark = true) {
         ConsoleScreen(vm())
     }
 
@@ -96,10 +129,47 @@ class ScreenScreenshotTest {
         SettingsScreen(vm())
     }
 
+    @Test
+    fun screen_settings_dark() = captureScreen("screen_settings_dark", dark = true) {
+        SettingsScreen(vm())
+    }
+
     // ── 新建服务端向导：第 1 步（选择核心类型）──
     // 不进第 2 步：那一步会在 LaunchedEffect 里拉版本清单（需要网络）
     @Test
     fun screen_new_server_step1() = captureScreen("screen_new_server_step1") {
         NewServerScreen(viewModel = vm(), onBack = {})
+    }
+
+    @Test
+    fun screen_new_server_step1_dark() = captureScreen("screen_new_server_step1_dark", dark = true) {
+        NewServerScreen(viewModel = vm(), onBack = {})
+    }
+
+    /**
+     * 往真实的 InstanceStore 里塞一个实例，并把它设为当前实例。
+     *
+     * 只建目录与登记条目，不写 jar：截图要看的是「有实例」时的版式
+     * （主行动按钮组、运行时长卡、相连列表、选中环），不是启动流程。
+     */
+    private fun seedInstance(
+        viewModel: AppViewModel,
+        name: String = "生存服",
+        core: CoreType = CoreType.PAPER,
+        mc: String = "1.21.4",
+        java: Int = 21,
+        memory: Int = 4096,
+    ) {
+        val dir = viewModel.instanceStore.createInstanceDir(name)
+        val instance = ServerInstance(
+            name = name,
+            coreType = core,
+            mcVersion = mc,
+            javaMajor = java,
+            memoryMb = memory,
+            dir = dir,
+        )
+        viewModel.instanceStore.add(instance)
+        viewModel.selectInstance(instance)
     }
 }

@@ -4,92 +4,87 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.CoreCategory
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.AppViewModel
-import com.kaze.newage.ui.components.InstanceIcon
+import com.kaze.newage.ui.components.M3EConnectedList
+import com.kaze.newage.ui.components.M3EListItem
+import com.kaze.newage.ui.components.M3EScreenHeader
+import com.kaze.newage.ui.components.M3ESegmentedRow
 import com.kaze.newage.ui.isBusy
-import com.kaze.newage.ui.theme.cardBorderColor
-import com.kaze.newage.ui.theme.itemColor
-import com.kaze.newage.ui.theme.serverItemBorderColor
-import com.kaze.newage.ui.theme.statusPalette
+import com.kaze.newage.ui.theme.M3Shape
+import com.kaze.newage.ui.theme.M3Spacing
 import com.kaze.newage.ui.toLabel
 
 /**
- * 服务端管理：整页大卡 + 顶部分类条带 + 单选列表。
- * 版式 1:1 移植 ZalithLauncher2 VersionsManageScreen（GPL-3.0）：
- * - 全页 BackgroundCard 作为唯一画布；
- * - CardTitleLayout 位 = 横向滚动工具条（新建/导入 + 分类 chip 带数量）；
- * - 列表项 VersionItemLayout：RadioButton 单选当前实例 + 图标 + 名称/摘要跑马灯 +
- *   FlowRow 信息行(alpha 0.7) + 启停按钮 + ⋮ 菜单 + 入场缩放。
+ * 服务端 —— 多实例的列表与管理（多开 / 筛选 / 启停 / 导入）。
+ *
+ * 版式来自 m3e-canvas 生成的 `docs/m3e/prompt-服务端.md`：
+ *   标题 → 一排动作按钮（新建 / 导入 jar）→ 分段筛选（全部 / 官方 / 性能 / 模组，带数量）
+ *   → 实例列表（相连列表项：类型图标 + 名称 + 一行摘要 + 启停 / ⋮）→ 批量启停相连按钮组
+ *
+ * 与旧版的差别（行为一条没少，只是换皮）：
+ *  - 不再有整页大卡框架，内容直接铺在屏幕上，分组交给 M3EListItem / M3ECard
+ *  - 筛选 chip 从「横向滚动 + 右侧箭头」换成分段选择：四档一屏放得下，
+ *    不再需要那个"还有更多"的指示按钮（窄屏上它本身就是个容易被忽略的补丁）
+ *  - 实例行换成官方 72dp 列表项（相连列表：首尾 28dp、内部 8dp、间隔 3dp），
+ *    信息压成一行摘要；EULA 未接受直接写在行内，不再藏进详情页
+ *  - 启停按钮从 FilledIconButton 换成 40dp 圆形动作按钮：整行本身可点开详情，
+ *    按钮必须明显小于整行，才不会和"点行"抢触控
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ServerScreen(
     viewModel: AppViewModel,
@@ -99,10 +94,11 @@ fun ServerScreen(
     val instances by viewModel.instances.collectAsStateWithLifecycle()
     val states by viewModel.serverStates.collectAsStateWithLifecycle()
     val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()
-    val appContext = LocalContext.current.applicationContext
+    val runningCount by viewModel.runningCount.collectAsStateWithLifecycle()
 
-    // 分类筛选（Zalith VersionCategory：全部/官方/性能优化/模组加载）
-    var category by remember { mutableStateOf<CoreCategory?>(null) }
+    // 分类筛选（Zalith VersionCategory）：全部 = 不过滤
+    var filter by remember { mutableStateOf(InstanceFilter.ALL) }
+    val category: CoreCategory? = filter.category
     val filtered = remember(instances, category) {
         if (category == null) instances
         else instances.filter { it.coreType.category == category }
@@ -125,97 +121,99 @@ fun ServerScreen(
         }
     }
 
-    // 内容直接铺在背景上（无整页大卡框架）；列表项/工具条为小型玻璃元素
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 12.dp)
-            // 底部空白承载常驻栏：实例列表滚动中透过底栏玻璃，滚到底最后一项不被遮挡
-            .padding(bottom = 96.dp)
-    ) {
-        // ── 顶部工具条（横向滚动）──
-        // 窄屏上 chip 会排不下（340dp 时最后一个会被直接裁掉，用户看不出还能滑）。
-        // 右侧加一个可点的"更多"指示：比渐隐更稳——页面背景是图片，渐隐色对不上。
-        val chipsScroll = rememberScrollState()
-        val scope = rememberCoroutineScope()
-        val canScrollRight by remember {
-            derivedStateOf { chipsScroll.value < chipsScroll.maxValue }
-        }
-        Box(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(chipsScroll)
-                    // 右侧留出指示按钮的位置，滑动到底时最后一个 chip 不会被按钮压住
-                    .padding(vertical = 10.dp, horizontal = 0.dp)
-                    .padding(end = if (canScrollRight) 34.dp else 0.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ToolChip(Icons.Filled.Add, "新建", onClick = onNewServer)
-                ToolChip(Icons.Filled.FileOpen, "导入 jar", onClick = {
-                    importLauncher.launch(arrayOf("application/java-archive", "application/octet-stream", "*/*"))
-                })
-                CategoryChip("全部", countOf(null), selected = category == null) { category = null }
-                CategoryChip("官方", countOf(CoreCategory.OFFICIAL), selected = category == CoreCategory.OFFICIAL) {
-                    category = CoreCategory.OFFICIAL
-                }
-                CategoryChip("性能", countOf(CoreCategory.OPTIMIZED), selected = category == CoreCategory.OPTIMIZED) {
-                    category = CoreCategory.OPTIMIZED
-                }
-                CategoryChip("模组", countOf(CoreCategory.MODDED), selected = category == CoreCategory.MODDED) {
-                    category = CoreCategory.MODDED
-                }
-            }
-            if (canScrollRight) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .size(28.dp),
-                    onClick = { scope.launch { chipsScroll.animateScrollTo(chipsScroll.maxValue) } },
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.Filled.KeyboardArrowRight,
-                            contentDescription = "还有更多筛选项",
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                }
-            }
+    // 批量启停的可用性：启动只针对「既没跑也不在启动中」的实例，
+    // 停止只针对运行中的实例（stop() 对停止中的实例是空操作，不必打扰）
+    val startableCount = filtered.count { inst ->
+        val state = states[inst.id] ?: ServerState.Idle
+        state != ServerState.Running && !state.isBusy()
+    }
+    val stoppableCount = filtered.count { (states[it.id] ?: ServerState.Idle) == ServerState.Running }
+
+    Column(Modifier.fillMaxSize()) {
+        M3EScreenHeader(
+            title = "服务端",
+            subtitle = if (instances.isEmpty()) {
+                "还没有服务端实例"
+            } else {
+                "共 ${instances.size} 个实例 · $runningCount 个运行中"
+            },
+        )
+
+        // ── 一排动作：新建（填充）+ 导入 jar（色调），横向相连的按钮组 ──
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin)
+                .padding(bottom = M3Spacing.betweenGroups),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            GroupButton(
+                label = "新建",
+                icon = Icons.Filled.Add,
+                shape = M3Shape.groupFirst(56f),
+                container = MaterialTheme.colorScheme.primary,
+                content = MaterialTheme.colorScheme.onPrimary,
+                enabled = true,
+                onClick = onNewServer,
+            )
+            GroupButton(
+                label = "导入 jar",
+                icon = Icons.Filled.FileOpen,
+                shape = M3Shape.groupLast(56f),
+                container = MaterialTheme.colorScheme.secondaryContainer,
+                content = MaterialTheme.colorScheme.onSecondaryContainer,
+                enabled = true,
+                // 用系统文件选择器挑一个已有的 server.jar 导入
+                onClick = {
+                    importLauncher.launch(
+                        arrayOf("application/java-archive", "application/octet-stream", "*/*")
+                    )
+                },
+            )
         }
 
+        // ── 分类筛选（每一档都带数量，选中的一档用容器色填充）──
+        M3ESegmentedRow(
+            options = InstanceFilter.entries,
+            selected = filter,
+            label = { f -> "${f.label} ${countOf(f.category)}" },
+            onSelect = { filter = it },
+            modifier = Modifier.padding(horizontal = M3Spacing.screenMargin),
+            height = 40.dp,
+        )
+
+        // ── 实例列表（空态另说）──
         if (filtered.isEmpty()) {
-            // 空态：居中文字
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text("没有服务端", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "点上方「新建」下载 Vanilla / Paper 服务端，\n或「导入 jar」添加已有的 server.jar",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                }
-            }
+            EmptyState(
+                hasInstances = instances.isNotEmpty(),
+                filterLabel = filter.label,
+                onNewServer = onNewServer,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+            )
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = M3Spacing.screenMargin),
+                contentPadding = PaddingValues(
+                    top = M3Spacing.betweenGroups,
+                    bottom = M3Spacing.betweenGroups,
+                ),
             ) {
-                items(filtered, key = { it.id }) { instance ->
-                    val state = states[instance.id] ?: ServerState.Idle
-                        InstanceCard(
+                item { SectionLabel("实例（${filtered.size}）") }
+                item {
+                    M3EConnectedList(count = filtered.size) { index, shape ->
+                        val instance = filtered[index]
+                        InstanceRow(
                             instance = instance,
+                            shape = shape,
                             selected = instance.id == currentInstanceId,
-                            state = state,
+                            state = states[instance.id] ?: ServerState.Idle,
+                            // 点行 = 选为当前实例 + 打开实例详情（与旧版一致）
                             onSelect = {
                                 viewModel.selectInstance(instance)
                                 onOpenInstance(instance)
@@ -228,63 +226,225 @@ fun ServerScreen(
                 }
             }
         }
-}
 
-/** 工具条按钮（Zalith IconTextButton 简化版） */
-@Composable
-private fun ToolChip(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.clip(RoundedCornerShape(50)),
-        shape = RoundedCornerShape(50),
-        color = itemColor(),
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        border = androidx.compose.foundation.BorderStroke(1.dp, cardBorderColor()),
-        onClick = onClick,
-    ) {
+        // ── 批量启停：只作用于当前筛选出来的实例 ──
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin)
+                .padding(top = M3Spacing.betweenGroups),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            Icon(icon, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-            Text(label, style = MaterialTheme.typography.labelMedium)
+            GroupButton(
+                label = "启动全部",
+                icon = Icons.Filled.PlayArrow,
+                shape = M3Shape.groupFirst(56f),
+                container = MaterialTheme.colorScheme.primary,
+                content = MaterialTheme.colorScheme.onPrimary,
+                enabled = startableCount > 0,
+                onClick = {
+                    // start() 自身按生命周期状态防重入（重复触发只记一条警告日志），
+                    // 但这里仍然只对停止态的实例发起，免得白白改写 currentInstanceId
+                    filtered.forEach { inst ->
+                        val state = states[inst.id] ?: ServerState.Idle
+                        if (state != ServerState.Running && !state.isBusy()) {
+                            viewModel.startInstance(inst)
+                        }
+                    }
+                },
+            )
+            GroupButton(
+                label = "停止全部",
+                icon = Icons.Filled.Stop,
+                shape = M3Shape.groupLast(56f),
+                container = MaterialTheme.colorScheme.secondaryContainer,
+                content = MaterialTheme.colorScheme.onSecondaryContainer,
+                enabled = stoppableCount > 0,
+                onClick = {
+                    filtered.forEach { inst ->
+                        if ((states[inst.id] ?: ServerState.Idle) == ServerState.Running) {
+                            viewModel.stopInstance(inst)
+                        }
+                    }
+                },
+            )
         }
+
+        // 常驻底栏占位：列表最后一项能滚到底栏之上，不被永久遮住
+        Spacer(Modifier.height(M3Spacing.bottomBarSpace))
     }
 }
 
-/** 分类 chip 带数量（Zalith VersionCategoryItem：TextRailItem 风格「标签 (N)」） */
+// ───────────────────────────────────────────────
+// 页面局部：筛选 / 空态 / 动作按钮
+// ───────────────────────────────────────────────
+
+/** 顶部分段筛选的档位（「全部」没有对应的 CoreCategory，所以不能直接用那个枚举） */
+private enum class InstanceFilter(val label: String, val category: CoreCategory?) {
+    ALL("全部", null),
+    OFFICIAL("官方", CoreCategory.OFFICIAL),
+    OPTIMIZED("性能", CoreCategory.OPTIMIZED),
+    MODDED("模组", CoreCategory.MODDED),
+}
+
+/**
+ * 相连按钮组里的一个按钮（必须写在 RowScope 里：它靠 weight 平分宽度）。
+ *
+ * 不可用时自己画成"禁用"的样子（surfaceContainerHighest + 38% 前景色），
+ * 而不是把 onClick 置空——调用方仍然拿到点击事件，由它决定要不要真的执行。
+ */
 @Composable
-private fun CategoryChip(
+private fun RowScope.GroupButton(
     label: String,
-    count: Int,
-    selected: Boolean,
+    icon: ImageVector,
+    shape: Shape,
+    container: Color,
+    content: Color,
+    enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val shape = RoundedCornerShape(50)
     Surface(
-        modifier = Modifier.clip(shape),
+        modifier = Modifier
+            .weight(1f)
+            .height(56.dp)
+            .clip(shape),
         shape = shape,
-        color = if (selected) MaterialTheme.colorScheme.primary else itemColor(),
-        contentColor = if (selected) MaterialTheme.colorScheme.onPrimary
-        else MaterialTheme.colorScheme.onSurfaceVariant,
-        border = if (selected) null else androidx.compose.foundation.BorderStroke(1.dp, cardBorderColor()),
+        color = if (enabled) container else MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = if (enabled) content else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
         onClick = onClick,
     ) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(label, style = MaterialTheme.typography.labelMedium)
-            Text("($count)", style = MaterialTheme.typography.labelMedium)
+            Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }
 }
 
-/** 实例列表项（Zalith VersionItemLayout 移植：单选 + 图标 + 信息 + 动作） */
+/** 分组小标题：列表上方的一行说明文字 */
 @Composable
-private fun InstanceCard(
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = M3Spacing.betweenParts),
+    )
+}
+
+/** 空态：一个实例都没有，或当前筛选档下一个都没有 —— 两种文案不一样 */
+@Composable
+private fun EmptyState(
+    hasInstances: Boolean,
+    filterLabel: String,
+    onNewServer: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.padding(horizontal = M3Spacing.screenMargin),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenParts),
+        ) {
+            Icon(
+                if (hasInstances) Icons.Filled.Dns else Icons.Filled.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(40.dp),
+            )
+            Text(
+                if (hasInstances) "「$filterLabel」下没有服务端" else "还没有服务端",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                if (hasInstances) {
+                    "换一个筛选档，或者新建一个"
+                } else {
+                    "点上方「新建」下载 Vanilla / Paper 服务端，\n或「导入 jar」添加已有的 server.jar"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            if (!hasInstances) {
+                TextButton(onClick = onNewServer) { Text("新建服务端") }
+            }
+        }
+    }
+}
+
+// ───────────────────────────────────────────────
+// 实例行
+// ───────────────────────────────────────────────
+
+/**
+ * 分类 → 图标圆底的容器色。
+ *
+ * 三档分类用同一个 primaryContainer 就分不出类型了（草图的「生存服」「创造服」用不同
+ * 容器色区分），所以这里把 M3EListItem 的 iconContainer 按分类换成三个容器色角色；
+ * 图标本身由组件固定用 onPrimaryContainer —— 三个容器色在浅色/深色下都与它保持对比。
+ */
+@Composable
+private fun coreTypeContainer(category: CoreCategory): Color {
+    val scheme = MaterialTheme.colorScheme
+    return when (category) {
+        CoreCategory.OFFICIAL -> scheme.primaryContainer
+        CoreCategory.OPTIMIZED -> scheme.secondaryContainer
+        CoreCategory.MODDED -> scheme.tertiaryContainer
+        CoreCategory.IMPORT -> scheme.surfaceContainerHighest
+    }
+}
+
+/** 分类 → 图标：官方/性能是"服务器"，模组加载是"扩展"，导入的 jar 是"文件" */
+private fun coreTypeIcon(category: CoreCategory): ImageVector = when (category) {
+    CoreCategory.MODDED -> Icons.Filled.Extension
+    CoreCategory.IMPORT -> Icons.Filled.FileOpen
+    else -> Icons.Filled.Dns
+}
+
+/** 实例状态文案（运行中 / 启动中 / 已停止 / 启动失败）——全应用统一词汇见 ServerStateUi */
+private fun instanceStatusText(state: ServerState): String = when {
+    state == ServerState.Running -> "运行中"
+    state.isBusy() -> state.toLabel()
+    state == ServerState.Error -> "启动失败"
+    else -> "已停止"
+}
+
+/**
+ * 实例行的一行摘要：核心 + MC 版本 + Java + 内存 + 状态。
+ * 状态必须进摘要（不能只靠行尾按钮的图标）：EULA 之外，「启动中 / 启动失败」
+ * 也要一眼看到，而不是点进详情才知道。
+ */
+private fun instanceSummary(instance: ServerInstance, state: ServerState): String = buildString {
+    append(instance.coreType.displayName)
+    // 不写 "MC "：版本号本身就是 MC 版本，这几个字符在这个摘要行里很值钱
+    append(" · ")
+    append(instance.mcVersion.ifBlank { "自定义" })
+    append(" · Java ")
+    append(instance.javaMajor)
+    append(" · ")
+    append(instance.memoryMb)
+    append(" MB · ")
+    append(instanceStatusText(state))
+}
+
+/**
+ * 实例行：左侧类型图标 → 名称 / 摘要 / 状态胶囊 → 行尾启停按钮 + ⋮ 菜单。
+ *
+ * 无障碍：整个列表项是一个 `selectable(Role.RadioButton)` —— 它代表"当前实例"这一个
+ * 单选状态。M3EListItem 自带的 clickable 必须去掉（onClick = null），否则同一个动作
+ * 会多出一个可点区域与一套"按钮"语义，TalkBack 也读不出"已选中"。
+ */
+@Composable
+private fun InstanceRow(
     instance: ServerInstance,
+    shape: Shape,
     selected: Boolean,
     state: ServerState,
     onSelect: () -> Unit,
@@ -292,241 +452,180 @@ private fun InstanceCard(
     onStop: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    // 入场缩放动画（Zalith VersionItemLayout 模式）
-    val scale = remember { Animatable(0.95f) }
-    LaunchedEffect(Unit) {
-        scale.animateTo(1f, animationSpec = tween(220))
-    }
-
     val running = state == ServerState.Running
-    val busy = state.isBusy()
-    val palette = statusPalette()
-    val dotColor = when {
-        running -> palette.running
-        busy -> palette.busy
-        state == ServerState.Error -> palette.error
-        else -> palette.idle
-    }
-    val statusText = when {
-        running -> "运行中"
-        busy -> state.toLabel()
-        state == ServerState.Error -> "启动失败"
-        else -> "已停止"
-    }
+    // running **或** busy 都显示「停止」：启动流程里包含部署、装 Java、下载核心、
+    // Forge --installServer，可能要几分钟。此前 busy 时给的是一个禁用的「启动」，
+    // 用户在整个启动过程中没有任何中止手段，只能删掉实例。
+    // stop() 已能处理"进程还没创建"的启动期（置取消标志让 start() 自己收尾）。
+    val showStop = running || state.isBusy()
+    val iconContainer = coreTypeContainer(instance.coreType.category)
+    // EULA 未接受：需要用户动作的关键信息，必须直接在行内点出来（不能藏进详情页）。
+    // 用 error 色正文而不是再加一个彩色胶囊——同一行里两个胶囊会互相抢注意力。
+    val eulaMissing = !instance.eulaFile.exists() && !running
 
     val context = LocalContext.current
     var menuExpanded by remember { mutableStateOf(false) }
     // 删除实例必须二次确认：会连目录内全部世界数据一起删掉，一次误触即丢档不可恢复
     var confirmDelete by remember { mutableStateOf(false) }
 
-    Surface(
-        modifier = Modifier
+    Box(
+        Modifier
             .fillMaxWidth()
-            .graphicsLayer {
-                scaleX = scale.value
-                scaleY = scale.value
-            }
-            // 无障碍：整卡是一个单选项目。此前只有 Surface(onClick)（读作"按钮"），
-            // TalkBack 读不出"已选中"，也说不清这是单选列表。
-            .selectable(
-                selected = selected,
-                role = Role.RadioButton,
-                onClick = onSelect,
-            ),
-        shape = MaterialTheme.shapes.large,
-        color = itemColor(),
-        contentColor = MaterialTheme.colorScheme.onSurface,
-        // 每个服务器项带主题对应的可见边框（选中=主色粗框）
-        border = androidx.compose.foundation.BorderStroke(
-            if (selected) 2.dp else 1.dp,
-            serverItemBorderColor(selected),
-        ),
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 当前实例单选（Zalith：RadioButton）。
-            // onClick = null：整卡的 selectable 已是唯一触控目标，圆圈只作指示，
-            // 否则同一个动作会有两个可点区域与两套语义。
-            RadioButton(selected = selected, onClick = null)
-
-            InstanceIcon(instance.coreType, Modifier.size(34.dp))
-            Spacer(Modifier.width(8.dp))
-
-            Column(
-                Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Text(
-                    text = instance.name,
-                    style = MaterialTheme.typography.labelLarge,
-                    maxLines = 1,
-                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
-                )
-                Text(
-                    text = "MC ${instance.mcVersion.ifBlank { "自定义" }} · ${instance.coreType.displayName}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE),
-                )
-                // Zalith 信息行 + 状态胶囊：FlowRow 自动换行——
-                // 元素多时（Java/内存/状态/EULA）宁可整体换行，不能把文字压成竖排。
-                // 注意：状态与 EULA 不再跟随整行降透明度——它们是需要一眼看到的信息
-                // （旧实现把状态点/状态字放在 alpha 0.7 的行里，真机上几乎看不清）。
-                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                androidx.compose.foundation.layout.FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+        M3EListItem(
+            headline = instance.name,
+            supporting = instanceSummary(instance, state),
+            leadingIcon = coreTypeIcon(instance.coreType.category),
+            iconContainer = iconContainer,
+            shape = shape,
+            highlighted = selected,
+            // 实例名是用户自己起的，可能很长：跑马灯而不是截断
+            marqueeHeadline = true,
+            // onClick = null：整行的 selectable 已是唯一触控目标（见上面的无障碍说明）
+            onClick = null,
+            trailing = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    val metaColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    Text(
-                        "Java ${instance.javaMajor}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = metaColor,
-                    )
-                    Text(
-                        "${instance.memoryMb} MB",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = metaColor,
-                    )
-                    StatusBadge(statusText, dotColor)
-                    if (!instance.eulaFile.exists() && !running) EulaWarningChip()
-                }
-            }
-
-            // 右侧动作：启动/停止 + ⋮ 菜单（Zalith 动作列）
-            // 不再写死 size(36/32)：那会把 M3 的 48dp 触控区一起缩小，容易误触
-            //
-            // running **或** busy 都显示「停止」：启动流程里包含部署、装 Java、下载核心、
-            // Forge --installServer，可能要几分钟。此前 busy 时给的是一个禁用的「启动」，
-            // 用户在整个启动过程中没有任何中止手段，只能删掉实例。
-            // stop() 已能处理"进程还没创建"的启动期（置取消标志让 start() 自己收尾）。
-            if (running || busy) {
-                FilledIconButton(
-                    onClick = onStop,
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                ) {
-                    Icon(Icons.Filled.Stop, contentDescription = "停止", modifier = Modifier.size(18.dp))
-                }
-            } else {
-                FilledIconButton(onClick = onStart) {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = "启动", modifier = Modifier.size(18.dp))
-                }
-            }
-            IconButton(onClick = { menuExpanded = true }) {
-                Icon(
-                    Icons.Filled.MoreVert,
-                    contentDescription = "更多",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false },
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                DropdownMenuItem(
-                    text = { Text("打开实例目录") },
-                    leadingIcon = { Icon(Icons.Filled.FolderOpen, null, Modifier.size(20.dp)) },
-                    onClick = {
-                        menuExpanded = false
-                        try {
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(Uri.fromFile(instance.dir), "resource/folder")
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            context.startActivity(intent)
-                        } catch (_: Exception) { }
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("删除", color = MaterialTheme.colorScheme.error) },
-                    leadingIcon = {
+                    if (eulaMissing) {
+                        // 用警示图标而不是「EULA 未接受」四个字：那段文字要占 ~55dp，
+                        // 把标题/摘要挤到只剩不到 90dp，摘要被折成两行后又被 72dp 行高压掉
+                        // （真机截图里是「Java 21 · 4096 M…」）。图标同样醒目、仍然行内可见，
+                        // 语义靠 contentDescription 保留给读屏。
                         Icon(
-                            Icons.Filled.Delete,
-                            null,
-                            Modifier.size(20.dp),
+                            Icons.Filled.Warning,
+                            contentDescription = "EULA 未接受",
                             tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(18.dp),
                         )
-                    },
-                    onClick = {
-                        menuExpanded = false
-                        confirmDelete = true
-                    },
-                )
-            }
-        }
+                    }
+                    RoundActionButton(
+                        icon = if (showStop) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                        description = if (showStop) "停止" else "启动",
+                        container = if (showStop) {
+                            MaterialTheme.colorScheme.errorContainer
+                        } else {
+                            MaterialTheme.colorScheme.primaryContainer
+                        },
+                        content = if (showStop) {
+                            MaterialTheme.colorScheme.onErrorContainer
+                        } else {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        },
+                        onClick = { if (showStop) onStop() else onStart() },
+                    )
+                    RoundActionButton(
+                        icon = Icons.Filled.MoreVert,
+                        description = "更多",
+                        container = Color.Transparent,
+                        content = MaterialTheme.colorScheme.onSurfaceVariant,
+                        onClick = { menuExpanded = true },
+                    )
+                }
 
-        // 删除确认弹窗
-        if (confirmDelete) {
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { confirmDelete = false },
-                title = { Text("删除「${instance.name}」？") },
-                text = {
-                    Text("将永久删除实例目录及其全部备份（世界存档、配置、插件/模组）。此操作不可恢复。")
-                },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(
+                // 实例菜单：打开实例目录 / 删除（删除进二次确认）
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                    shape = M3Shape.medium,
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("打开实例目录") },
+                        leadingIcon = { Icon(Icons.Filled.FolderOpen, null, Modifier.size(20.dp)) },
                         onClick = {
-                            confirmDelete = false
-                            onDelete()
-                        }
-                    ) {
-                        Text("删除", color = MaterialTheme.colorScheme.error)
-                    }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) {
-                        Text("取消")
-                    }
-                },
+                            menuExpanded = false
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(Uri.fromFile(instance.dir), "resource/folder")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(intent)
+                            } catch (_: Exception) { }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Filled.Delete,
+                                null,
+                                Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            confirmDelete = true
+                        },
+                    )
+                }
+
+                // 删除确认弹窗：删掉的是实例目录里的全部世界数据与备份
+                if (confirmDelete) {
+                    AlertDialog(
+                        onDismissRequest = { confirmDelete = false },
+                        title = { Text("删除「${instance.name}」？") },
+                        text = {
+                            Text("将永久删除实例目录及其全部备份（世界存档、配置、插件/模组）。此操作不可恢复。")
+                        },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    confirmDelete = false
+                                    onDelete()
+                                }
+                            ) {
+                                Text("删除", color = MaterialTheme.colorScheme.error)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirmDelete = false }) {
+                                Text("取消")
+                            }
+                        },
+                    )
+                }
+            },
+        )
+
+        // 选中态描边：画在列表项之上、不参与它的内部布局（描边跟随相连列表的圆角）
+        if (selected) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .border(2.dp, MaterialTheme.colorScheme.primary, shape)
             )
         }
     }
 }
 
 /**
- * 状态胶囊：带底色的圆角标签（点 + 文案同色）。
- * 旧实现只是混在降透明度信息行里的一个小圆点，实际观感是"看不清的状态"。
+ * 实例行末尾的圆形动作按钮（启停 / 更多）。
+ *
+ * 刻意做成 40dp：它比整行（72dp、整行可点开详情）小一圈，
+ * 用 FilledIconButton 的 48dp 触控区会和"点行"抢触控。
  */
 @Composable
-private fun StatusBadge(text: String, color: Color) {
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(50))
-            .background(color.copy(alpha = 0.16f))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
+private fun RoundActionButton(
+    icon: ImageVector,
+    description: String,
+    container: Color,
+    content: Color,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape),
+        shape = CircleShape,
+        color = container,
+        contentColor = content,
+        onClick = onClick,
     ) {
-        Box(Modifier.size(6.dp).clip(CircleShape).background(color))
-        Text(text, style = MaterialTheme.typography.labelSmall, color = color)
-    }
-}
-
-/** EULA 未接受：这是一项需要用户动作的关键信息，用警示色 + 图标点出来，而不是普通灰字 */
-@Composable
-private fun EulaWarningChip() {
-    val amber = Color(0xFFE0A02B)
-    Row(
-        Modifier
-            .clip(RoundedCornerShape(50))
-            .background(amber.copy(alpha = 0.18f))
-            .padding(horizontal = 8.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(
-            Icons.Filled.ErrorOutline,
-            contentDescription = null,
-            tint = amber,
-            modifier = Modifier.size(12.dp),
-        )
-        Text("EULA 未接受", style = MaterialTheme.typography.labelSmall, color = amber)
+        Box(contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = description, modifier = Modifier.size(20.dp))
+        }
     }
 }

@@ -334,12 +334,25 @@ fun NewAgeTheme(
         // 未显式指定颜色的 Text 在深色下会整段渲染成纯黑——这里按 scheme 显式补上
         LocalContentColor provides fgAdjusted.onBackground,
     ) {
-        MaterialTheme(colorScheme = fgAdjusted, content = content)
+        // 排版走 M3 Expressive 的强调字阶：字号/行高与 M3 基线完全一致，
+        // 只有字重与字距变（titleMedium 及以下加粗到 Bold）。
+        // 这是「四轴」里的 typography 一轴，材料见 m3e-canvas 生成的 prompt。
+        MaterialTheme(
+            colorScheme = fgAdjusted,
+            typography = expressiveTypography(),
+            content = content,
+        )
     }
 }
 
 // ───────────────────────────────────────────────
 // 色板函数（改编自 ZalithLauncher2 ui/theme/Palette.kt，GPL-3.0）
+//
+// 说明：原来这一组还包含 cardColor / cardShape / cardTitleColor / itemColor /
+// serverItemBorderColor 等「卡片体系」助手，它们服务于已删除的
+// BackgroundCard/CardTitleLayout（旧设计的大卡框架）。界面重构后所有屏幕都改用
+// ui/components/M3EComponents.kt 的 Expressive 组件，颜色一律从
+// MaterialTheme.colorScheme 的角色取，助手层只剩背景色与状态色。
 // ───────────────────────────────────────────────
 
 /** 应用整体背景色 */
@@ -350,72 +363,6 @@ fun backgroundColor(): Color = MaterialTheme.colorScheme.surfaceContainer
 @Composable
 @ReadOnlyComposable
 fun onBackgroundColor(): Color = MaterialTheme.colorScheme.onSurfaceVariant
-
-/**
- * 卡片背景：M3=surfaceBright / GLASS=玻璃表面
- * （照搬 BiliPai：surfaceAlpha 随玻璃模式 progress 线性映射 0.12→0.42）
- */
-@Composable
-@ReadOnlyComposable
-fun cardColor(): Color = when (LocalAppTheme.current) {
-    AppThemeMode.M3 -> MaterialTheme.colorScheme.surfaceBright
-    AppThemeMode.GLASS -> Color.White.copy(alpha = glassParams(LocalGlassMode.current).surfaceAlpha)
-}
-
-@Composable
-@ReadOnlyComposable
-fun onCardColor(): Color = MaterialTheme.colorScheme.onSurface
-
-/** 卡片描边：M3=发丝灰 / GLASS=高光白边 */
-@Composable
-@ReadOnlyComposable
-fun cardBorderColor(): Color = when (LocalAppTheme.current) {
-    AppThemeMode.M3 -> MaterialTheme.colorScheme.outlineVariant
-    AppThemeMode.GLASS -> if (LocalDarkTheme.current) Color.White.copy(alpha = 0.20f)
-    else Color.White.copy(alpha = 0.85f)
-}
-
-/** 服务器实例项边框：主题对应且**可见**（M3=outline 灰框；玻璃深色=白框；玻璃浅色=深蓝灰框；选中=主色） */
-@Composable
-@ReadOnlyComposable
-fun serverItemBorderColor(selected: Boolean = false): Color = when (LocalAppTheme.current) {
-    AppThemeMode.M3 ->
-        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
-    AppThemeMode.GLASS -> when {
-        selected -> MaterialTheme.colorScheme.primary
-        LocalDarkTheme.current -> Color.White.copy(alpha = 0.35f)
-        else -> Color(0xFF233049).copy(alpha = 0.30f)
-    }
-}
-
-/** 卡片圆角：M3=14 / GLASS=24 */
-@Composable
-@ReadOnlyComposable
-fun cardShape(): RoundedCornerShape = when (LocalAppTheme.current) {
-    AppThemeMode.M3 -> RoundedCornerShape(14.dp)
-    AppThemeMode.GLASS -> RoundedCornerShape(24.dp)
-}
-
-/** 卡片顶部标题栏背景 */
-@Composable
-@ReadOnlyComposable
-fun cardTitleColor(): Color = when (LocalAppTheme.current) {
-    AppThemeMode.M3 -> MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.85f)
-    AppThemeMode.GLASS -> Color.White.copy(alpha = 0.10f)
-}
-
-/** 卡片内条目背景 */
-@Composable
-@ReadOnlyComposable
-fun itemColor(): Color = when (LocalAppTheme.current) {
-    AppThemeMode.M3 -> if (LocalDarkTheme.current) MaterialTheme.colorScheme.surfaceVariant
-    else MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
-    AppThemeMode.GLASS -> Color.White.copy(alpha = 0.12f)
-}
-
-@Composable
-@ReadOnlyComposable
-fun onItemColor(): Color = MaterialTheme.colorScheme.onSurface
 
 /**
  * 玻璃表面的 Haze 样式（BiliPai LiquidGlassTuning 参数基础上强化：
