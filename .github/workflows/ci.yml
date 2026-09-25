@@ -28,13 +28,15 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 安装 SDK 组件
+      # 不用 android-actions/setup-android：它内部会安装已被 Google 下架的旧 `tools` 包，
+      # 现在必定失败（Failed to find package 'tools' → sdkmanager 退出码 1）。
+      # GitHub 的 ubuntu runner 本来就预装 Android SDK 并设好了 ANDROID_SDK_ROOT，
+      # 只装本项目需要的组件即可。
+      - name: 安装 Android SDK 组件
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
 
       # 处理 Gradle 缓存与并发；首次运行会下载 Gradle 发行版
       - name: 配置 Gradle
