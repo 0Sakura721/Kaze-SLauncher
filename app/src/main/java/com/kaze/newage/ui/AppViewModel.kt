@@ -152,6 +152,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val addonInstall: StateFlow<DownloadState> = _addonInstall.asStateFlow()
 
     init {
+        // 每次启动写一份环境自检报告到外部目录（files/diagnostics.txt）：
+        // 真机上"部署失败/启动失败"往往只有一句笼统提示，用户可以直接把这个文件发出来。
+        container.appScope.launch { runCatching { container.env.dumpDiagnostics() } }
+
         // 跟随当前实例切换控制台（每实例独立日志流），并跟踪在线玩家
         viewModelScope.launch(Dispatchers.IO) {
             _currentInstanceId.collectLatest { id ->

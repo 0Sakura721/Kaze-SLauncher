@@ -208,9 +208,18 @@ class ProotEnvironment(
      *  "已解压完成"（实锤：toybox tar 丢 usr/share 整目录 → apt "Error reading the CPU table"）。
      *  apt-helper 在 tar 后段，确保流式解压真正走完；usr/share/apt/cpu-table 由
      *  ensureAptCpuTable 生成（tar 无此目录，不能作为健康项） */
+    /**
+     * 动态链接器在 guest 内的路径（顶层 soname 软链）。
+     * dash/apt 的 PT_INTERP 指向它；缺失时 execve 返回 ENOENT，
+     * 而"文件都存在"的健康检查会误判为正常（真机实锤踩过）。
+     */
+    private val interpLink: File
+        get() = File(rootfsDir, if (isAarch64) "usr/lib/ld-linux-aarch64.so.1" else "usr/lib/ld-linux-armhf.so.3")
+
     private fun rootfsHealthy(): Boolean =
         readable("usr/bin/dash") && readable("usr/bin/sh") && readable("usr/bin/apt-get") &&
-            readable("usr/lib/apt/apt-helper")
+            readable("usr/lib/apt/apt-helper") &&
+            runCatching { interpLink.exists() }.getOrDefault(false)
 
     /**
      * toybox tar 丢链兜底（幂等）：Ubuntu multiarch 顶层 soname 软链
@@ -221,9 +230,13 @@ class ProotEnvironment(
     private fun ensureMultiarchLinks() {
         try {
             val topLib = File(rootfsDir, "usr/lib")
-            val multiarch = File(topLib, "arm-linux-gnueabihf")
-            if (!multiarch.isDirectory) return
             val base = if (isAarch64) "aarch64-linux-gnu" else "arm-linux-gnueabihf"
+            // 必须按 base 取目录：此前这里硬编码 arm-linux-gnueabihf，而 arm64 的 rootfs 里
+            // 只有 aarch64-linux-gnu —— 函数第一行就 return，于是 usr/lib/ld-linux-aarch64.so.1
+            // 等顶层 soname 软链在 arm64 上**从未创建**，dash 的 PT_INTERP 解析不到，
+            // proot 执行任何 guest 程序都失败（vivo Android 16 真机实锤：execve ENOENT）。
+            val multiarch = File(topLib, base)
+            if (!multiarch.isDirectory) return
             multiarch.listFiles()?.forEach { f ->
                 if (f.isFile && Regex("""\.so(\.\d+){1,3}$""").containsMatchIn(f.name)) {
                     val link = File(topLib, f.name)
@@ -254,11 +267,48 @@ class ProotEnvironment(
         }
     }
 
+    /**
+     * 补齐 rootfs 里缺失的执行位（幂等，成功一次后写标记文件）。
+     *
+     * 老版本解压时只给 bin/ 与 libexec/ 设了 +x，而 Java 创建文件默认 0600 ——
+     * usr/lib 下的共享库（包括 ld-linux-aarch64.so.1 这个 ELF 解释器）都没有执行位，
+     * execve 直接 ENOENT，proot 一步都跑不动。这里对**已经解压过**的 rootfs 做补偿，
+     * 用户不必删掉重新部署几十万个文件。
+     */
+    private fun repairExecPermissions() {
+        val marker = File(linuxDir, ".perm-ok")
+        if (marker.exists()) return
+        var fixed = 0
+        try {
+            val roots = listOf("usr/lib", "usr/bin", "usr/sbin", "usr/libexec")
+                .map { File(rootfsDir, it) }
+                .filter { it.isDirectory }
+            roots.forEach { root ->
+                root.walkTopDown().take(200_000).forEach { f ->
+                    if (!f.isFile) return@forEach
+                    // 共享库（含动态链接器）与可执行目录下的文件都需要 x 位
+                    val isLib = f.name.endsWith(".so") || f.name.contains(".so.")
+                    if (!isLib && root.name != "bin" && root.name != "libexec") return@forEach
+                    if (f.canExecute()) return@forEach
+                    if (runCatching { android.system.Os.chmod(f.absolutePath, 0b111_101_101) }.isSuccess) fixed++
+                }
+            }
+            runCatching { marker.writeText("ok") }
+        } catch (e: Exception) {
+            Log.w("KazeEnv", "repairExecPermissions 失败", e)
+        }
+        if (fixed > 0) {
+            _log.value = _log.value + "  ✓ 补齐 $fixed 个文件的执行位（老版本解压缺 x）"
+            Log.w("KazeSLauncher", "repairExecPermissions: fixed=$fixed")
+        }
+    }
     override val isReady: Boolean
         get() {
             // 自愈：解压丢链的老安装（先尝试修复再看状态）
             ensureMultiarchLinks()
             ensureAptCpuTable()
+            // 权限自愈（有标记文件，首次之后零开销）
+            repairExecPermissions()
             val checks = listOf(
                 "prootBinary" to prootBinary.exists(),
                 "prootLoader" to prootLoader.exists(),
@@ -297,6 +347,9 @@ class ProotEnvironment(
      * Java 安装由 JavaManager 按需调用（apt-get install openjdk-N-jdk-headless）。
      */
     override suspend fun setup(onProgress: (Float, String) -> Unit): Unit = withContext(Dispatchers.IO) {
+        // 每次部署都先落一份环境自检报告（外部目录，adb 可读）：
+        // 真机上"部署失败/启动失败"只有一句笼统提示时，靠它定位到底卡在哪一步。
+        runCatching { dumpDiagnostics() }
         // CAS 抢锁（原 get+set 非原子：窗口内两入口可双双进入压榨 rootfs）。
         // 没抢到：等待对方完成——成功直接收工；失败则自己整体重试，不再误报"正在进行"。
         if (!isSetupRunning.compareAndSet(false, true)) {
@@ -536,10 +589,70 @@ class ProotEnvironment(
 
     /** 在环境内执行命令并收集完整输出（apt 等一次性命令用）。
      *  注意：先 waitFor(timeout) 再取输出——避免子进程不退时 readText 永久阻塞导致超时失效。 */
+    /**
+     * 环境自检：把 rootfs 关键文件的状态与"能否被 execve"的实测结果写到**外部**目录
+     * （/sdcard/Android/data/<pkg>/files/diagnostics.txt），这样在没有 root / run-as 的
+     * release 真机上也能直接用 adb 读到，不必靠猜。
+     *
+     * 实测两项：
+     *  1. 直接 execve rootfs 里的 dash —— 区分"策略禁止执行"与"proot 自身问题"
+     *  2. 经 proot 跑一条命令 —— 区分"rootfs 不可用"与"调用方式问题"
+     */
+    suspend fun dumpDiagnostics(): File = withContext(Dispatchers.IO) {
+        val sb = StringBuilder()
+        fun line(s: String) = sb.appendLine(s)
+        val info = context.applicationInfo
+        line("Kaze SLauncher 环境自检  ${java.util.Date()}")
+        line("SDK=${android.os.Build.VERSION.SDK_INT}  targetSdk=${info.targetSdkVersion}  abi=${android.os.Build.SUPPORTED_ABIS.firstOrNull()}")
+        line("filesDir=${context.filesDir}")
+        line("rootfs=$rootfsDir  exists=${rootfsDir.exists()}")
+        line("proot=$prootBinary  exists=${prootBinary.exists()} len=${prootBinary.length()} x=${prootBinary.canExecute()}")
+        line("loader=$prootLoader  exists=${prootLoader.exists()} len=${prootLoader.length()} x=${prootLoader.canExecute()}")
+        line("cacheDir=${context.cacheDir} exists=${context.cacheDir.exists()}")
+        line("")
+        for (rel in listOf("usr/bin/sh", "usr/bin/dash", "usr/bin/apt-get", "usr/bin/java", "bin", "usr/bin", "lib", "usr/lib", "usr/lib/ld-linux-aarch64.so.1", "usr/lib/aarch64-linux-gnu", "usr/lib/aarch64-linux-gnu/libc.so.6")) {
+            val f = File(rootfsDir, rel)
+            val mode = runCatching { android.system.Os.lstat(f.absolutePath).st_mode }.getOrDefault(-1)
+            // android.os.SELinux 是 @hide API：反射取，取不到就是 null（不影响自检其余部分）
+            val ctx = runCatching {
+                val c = Class.forName("android.os.SELinux")
+                c.getMethod("getFileContext", String::class.java).invoke(null, f.absolutePath) as? String
+            }.getOrNull()
+            val xok = runCatching { android.system.Os.access(f.absolutePath, android.system.OsConstants.X_OK); true }.getOrDefault(false)
+            line(
+                "$rel exists=${f.exists()} link=${isSymlink(f)} file=${f.isFile} dir=${f.isDirectory} " +
+                    "mode=${if (mode >= 0) Integer.toOctalString(mode) else "?"} X_OK=$xok ctx=$ctx"
+            )
+        }
+        line("")
+        val dash = File(rootfsDir, "usr/bin/dash")
+        line("实测1 直接 execve dash：")
+        line(
+            runCatching {
+                val p = ProcessBuilder(dash.absolutePath, "-c", "echo DIRECT_OK")
+                    .redirectErrorStream(true).start()
+                val o = p.inputStream.bufferedReader().use { it.readText() }.trim()
+                val rc = p.waitFor()
+                "  rc=$rc  out=$o"
+            }.getOrElse { "  抛异常 ${it::class.java.simpleName}: ${it.message}" }
+        )
+        line("实测2 经 proot 执行 echo：")
+        line(
+            runCatching {
+                val r = runCommand("echo PROOT_OK", timeoutMs = 60_000)
+                "  isSuccess=${r.isSuccess} out=${r.getOrNull()?.trim()} err=${r.exceptionOrNull()?.message?.take(300)}"
+            }.getOrElse { "  抛异常 ${it::class.java.simpleName}: ${it.message}" }
+        )
+        val out = File(context.getExternalFilesDir(null) ?: context.filesDir, "diagnostics.txt")
+        out.parentFile?.mkdirs()
+        runCatching { out.writeText(sb.toString()) }
+        sb.toString().trimEnd().lines().forEach { _log.value = _log.value + "[自检] $it" }
+        out
+    }
     suspend fun runCommand(command: String, timeoutMs: Long = 900_000): Result<String> =
         withContext(Dispatchers.IO) {
             try {
-                val pb = buildProotCommand(listOf("/bin/sh", "-c", command), null)
+                val pb = buildProotCommand(listOf("/usr/bin/sh", "-c", command), null)
                 val proc = startProot(pb) ?: return@withContext Result.failure(RuntimeException("无法启动 proot"))
                 // 输出在独立协程读取（防止管道写满死锁子进程）
                 val readJob = async(Dispatchers.IO) {
@@ -636,9 +749,24 @@ class ProotEnvironment(
             // 深层 /storage/... 路径；外部 FUSE 上深层路径 sanitize 曾失败）
             args.add("-b"); args.add("${workDir.absolutePath}:/mnt")
         }
+        // usrmerge 兜底绑定（真机实锤过的问题）：
+        // Ubuntu 24.04 的 /bin /lib /sbin 是指向 usr/ 的**符号链接**，而符号链接在部分设备上
+        // 建不出来（TarExtractor 对目录型链接无能为力、Os.symlink 也可能失败）。
+        // repairRootfsLinks 的注释一直声称"由 buildProotCommand 的 -b 绑定负责映射"，
+        // 但绑定列表里从来没有这些条目 —— 于是 proot 直接报
+        // `'/bin/sh' not found (root = .../rootfs)`，每次调用都失败、环境永远不可用。
+        for ((name, relTarget) in USRMERGE_DIRS) {
+            val target = File(rootfsDir, relTarget)
+            if (target.isDirectory && !isSymlink(File(rootfsDir, name))) {
+                args.add("-b"); args.add("${target.absolutePath}:/$name")
+            }
+        }
         // 包装：cd 到工作目录（绑定在 /mnt）后执行
         val wrapped = buildList {
-            add("/bin/sh")
+            // 用 /usr/bin/sh（isReady/rootfsHealthy 保证它真实可读）而不是 /bin/sh：
+            // 后者依赖上面那个可能不存在的符号链接。上面补了绑定后两者都能用，
+            // 但用真文件路径不会因为绑定遗漏而再次踩坑。
+            add("/usr/bin/sh")
             add("-c")
             val cd = if (workDir != null && workDir.exists()) "cd '/mnt' && " else ""
             add(cd + command.joinToString(" ") { shellQuote(it) })
@@ -744,10 +872,42 @@ class ProotEnvironment(
                 sh.setExecutable(true)
                 _log.value = _log.value + "  ✓ 修复 usr/bin/sh → dash"
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            _log.value = _log.value + "  ! usr/bin/sh 修复失败：${e.message}"
+        }
 
-        // 2) usrmerge 顶层目录：真符号链接（失败则运行时 -b 绑定兜底）
-        val mergeDirs = listOf(
+        // 2) usrmerge 顶层目录：真符号链接（失败则 runtime 由 -b 绑定兜底，见 buildProotCommand）
+        for ((name, relTarget) in USRMERGE_DIRS) {
+            val link = File(rootfsDir, name)
+            val targetDir = File(rootfsDir, relTarget)
+            if (!targetDir.isDirectory) continue
+            if (isSymlink(link)) continue
+            // 注意：这里必须覆盖"存在但不是目录也不是符号链接"的情况（解压可能留下同名普通文件）。
+            // 原条件 (link.isDirectory || !link.exists()) 对普通文件为 false → 什么都不做，
+            // 而当时又没有 -b 兜底，结果就是 proot 报 '/bin/sh' not found（真机实锤）。
+            if (link.exists() && !link.isDirectory && !link.isFile) continue
+            try {
+                if (link.exists()) link.deleteRecursively()
+                android.system.Os.symlink(relTarget, link.absolutePath)
+                _log.value = _log.value + "  ✓ 符号链接 $name → $relTarget"
+            } catch (e: Exception) {
+                // 建不出链接不是致命错误：buildProotCommand 会把 usr/ 目标绑定到 /<name>
+                _log.value = _log.value + "  · $name 无法建符号链接（${e.message}），改用绑定映射"
+            }
+        }
+
+        // 3) multiarch 顶层 soname 软链（ld-linux-aarch64.so.1 / libc.so.6 等）
+        //    必须在部署阶段就建：dash、apt 的 PT_INTERP 指向它，缺了 proot 一执行就 ENOENT
+        ensureMultiarchLinks()
+    }
+
+    /** 判断是否真符号链接：File.exists() 对断链返回 false，必须用 NIO 判断 */
+    private fun isSymlink(f: File): Boolean =
+        runCatching { java.nio.file.Files.isSymbolicLink(f.toPath()) }.getOrDefault(false)
+
+    companion object {
+        /** usrmerge：Ubuntu 24.04 里这些顶层目录是指向 usr/ 的符号链接 */
+        private val USRMERGE_DIRS = listOf(
             "bin" to "usr/bin",
             "sbin" to "usr/sbin",
             "lib" to "usr/lib",
@@ -755,19 +915,6 @@ class ProotEnvironment(
             "lib64" to "usr/lib64",
             "libx32" to "usr/libx32",
         )
-        for ((name, relTarget) in mergeDirs) {
-            val link = File(rootfsDir, name)
-            val targetDir = File(rootfsDir, relTarget)
-            if (targetDir.isDirectory && (link.isDirectory || !link.exists())) {
-                try {
-                    if (link.exists()) link.deleteRecursively()
-                    android.system.Os.symlink(relTarget, link.absolutePath)
-                    _log.value = _log.value + "  ✓ 符号链接 $name → $relTarget"
-                } catch (_: Exception) {
-                    // 沙箱禁止建链接：保留空目录，buildProotCommand 的 -b 绑定负责映射
-                }
-            }
-        }
     }
 
     /** apt 阶段（写源 + apt-get update）是否已完成；老安装没有该标记，视为未完成（重跑一次很便宜） */

@@ -96,6 +96,11 @@ object TarExtractor {
             var pendingLongName: String? = null
             while (readHeader()) {
                 val size = octal(header.copyOfRange(124, 136))
+                // tar 头的权限位（偏移 100，8 字节八进制）。必须解析并应用：
+                // 解压出的文件由 Java 创建，默认 0600 —— 旧实现只按路径给 bin/ 与 libexec/ 加 x，
+                // 于是 usr/lib/**/*.so 全是 0600。其中 ld-linux-aarch64.so.1 是 dash 的 ELF
+                // 解释器，缺执行位时 execve 直接 ENOENT，proot 一步都跑不动（真机实锤）。
+                val tarMode = octal(header.copyOfRange(100, 108))
                 val type = header[156].toInt().toChar()
                 val pathName = pendingLongName ?: name()
                 pendingLongName = null
@@ -120,7 +125,9 @@ object TarExtractor {
                     // 目录条目：tar 目录标记、以 / 结尾、或根路径
                     type == '5' || pathName.endsWith("/") || pathName.isBlank() || pathName == "." || pathName == "./" -> {
                         if (pathName.isNotBlank() && pathName != "." && pathName != "./") {
-                            resolvedTarget(pathName).mkdirs()
+                            val d = resolvedTarget(pathName)
+                            d.mkdirs()
+                            applyTarMode(d, tarMode)
                         }
                     }
                     // 符号链接：兼容两种 tar 变体——
@@ -177,7 +184,11 @@ object TarExtractor {
                             // 极慢且可能触发回刷缺陷；改用提取完成后的全局 sync()。
                         }
                         // 可执行位
-                        if (pathName.contains("bin/") || pathName.contains("libexec/")) target.setExecutable(true)
+                        // 权限：优先用 tar 里记录的真实模式（这是唯一能正确处理"lib 下的 .so 也需要
+                        // 可执行位"的来源），chmod 不可用时退回路径启发式
+                        if (!applyTarMode(target, tarMode)) {
+                            if (pathName.contains("bin/") || pathName.contains("libexec/")) target.setExecutable(true)
+                        }
                     }
                     else -> {
                         // 其他类型（'x' 扩展头等）：跳过数据
@@ -239,4 +250,13 @@ object TarExtractor {
             fileStream.close()
         }
     }
-}
+
+    /**
+     * 应用 tar 头里的权限位（只取 rwx，忽略 setuid/setgid/sticky）。
+     * 返回 false 表示没有可用模式或 chmod 失败，调用方回退到路径启发式。
+     */
+    private fun applyTarMode(target: File, tarMode: Long): Boolean {
+        val perm = (tarMode and 0x1FFL).toInt()
+        if (perm == 0) return false
+        return runCatching { android.system.Os.chmod(target.absolutePath, perm) }.isSuccess
+    }}
