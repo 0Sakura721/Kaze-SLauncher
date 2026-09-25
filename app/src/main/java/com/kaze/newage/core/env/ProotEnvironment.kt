@@ -709,6 +709,22 @@ class ProotEnvironment(
             )
         }
         line("")
+        line("── 容器内 DNS（/etc/resolv.conf，每次起 proot 时绑定）──")
+        line(
+            runCatching {
+                val rf = ensureResolvConf()
+                val body = rf.readLines().filter { it.isNotBlank() && !it.startsWith("#") }.joinToString(" | ")
+                "  ${rf.absolutePath}  ${rf.length()} 字节  →  $body"
+            }.getOrElse { "  读取失败：${it.message}" }
+        )
+        line(
+            "  系统 DNS: " + runCatching {
+                val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+                val lp = cm?.activeNetwork?.let { cm.getLinkProperties(it) }
+                lp?.dnsServers?.joinToString().takeUnless { it.isNullOrBlank() } ?: "无活动网络"
+            }.getOrElse { "读取失败：${it.message}" }
+        )
+        line("")
         val dash = File(rootfsDir, "usr/bin/dash")
         line("实测1 直接 execve dash：")
         line(
@@ -820,6 +836,9 @@ class ProotEnvironment(
             "-b", "${File(rootfsDir, "sys/.empty").absolutePath}:/sys/fs/selinux",
             "-b", "${context.cacheDir.absolutePath}:/tmp",
             "-b", "${File(rootfsDir, "tmp").absolutePath}:/dev/shm",
+            // 容器内 DNS：宿主没有可用的 /etc/resolv.conf 可绑，自己写一份带进去。
+            // 没有它，容器内联网的程序（apt、Forge 安装器的 JVM）全部 UnknownHostException。
+            "-b", "${ensureResolvConf().absolutePath}:/etc/resolv.conf",
         )
         // Android 的 /proc/cpuinfo 非标准 Linux 格式（缺 implementer/Features 字段）——
         // Ubuntu 24.04 的 apt 解析失败报 "Error reading the CPU table"（v7a 真机实锤）。
@@ -980,11 +999,76 @@ class ProotEnvironment(
             }
         }
 
+        // 2.5) 容器内联网的基础配置
+        ensureGuestNetConfig()
+
         // 3) multiarch 顶层 soname 软链（ld-linux-aarch64.so.1 / libc.so.6 等）
         //    必须在部署阶段就建：dash、apt 的 PT_INTERP 指向它，缺了 proot 一执行就 ENOENT
         ensureMultiarchLinks()
     }
 
+    /**
+     * 容器用的 /etc/resolv.conf。
+     *
+     * proot 容器里**没有任何 DNS 配置**：ubuntu-base 的 /etc/resolv.conf 通常是指向
+     * systemd-resolved 的断链，于是"在容器内联网"的程序一律解析失败 ——
+     * apt 静默失败（旧代码忽略退出码，所以一直没被发现），Forge 安装器的 JVM 直接
+     * `UnknownHostException` 中止安装（真机实锤：所有 Host 都是 [Unknown]）。
+     *
+     * 这里用系统当前的 DNS 服务器写一份，并在每次起 proot 时绑定到容器内，
+     * 换网络（Wi-Fi ↔ 移动数据）后自动是最新的。
+     */
+    private fun ensureResolvConf(): File {
+        val f = File(linuxDir, "resolv.conf")
+        val systemServers = runCatching {
+            val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+            val lp = cm?.activeNetwork?.let { cm.getLinkProperties(it) }
+            lp?.dnsServers?.mapNotNull { it.hostAddress?.substringBefore('%') } ?: emptyList()
+        }.getOrDefault(emptyList())
+        // IPv4 优先：容器里不一定有可用的 IPv6 路由，放到后面免得解析卡在 IPv6 上
+        val servers = (
+            systemServers.filter { !it.contains(':') } + systemServers.filter { it.contains(':') }
+            )
+            .ifEmpty { listOf("223.5.5.5", "119.29.29.29", "1.1.1.1", "8.8.8.8") }
+            .distinct()
+        val text = buildString {
+            appendLine("# 由 Kaze SLauncher 写入：proot 容器内的 DNS")
+            appendLine("# 宿主的 /etc/resolv.conf 在容器里不可用，必须自带一份")
+            servers.forEach { appendLine("nameserver $it") }
+            appendLine("options timeout:2 attempts:2")
+        }
+        runCatching {
+            f.parentFile?.mkdirs()
+            if (!f.isFile || f.readText() != text) f.writeText(text)
+        }
+        return f
+    }
+
+    /**
+     * 容器内联网的基础配置：nsswitch.conf（缺了 glibc 不一定查 DNS）与 hosts。
+     * 只补缺失的，不覆盖 rootfs 自带的（避免破坏其它解析规则）。
+     */
+    private fun ensureGuestNetConfig() {
+        runCatching {
+            val etc = File(rootfsDir, "etc").apply { mkdirs() }
+            // /etc/resolv.conf 在 ubuntu-base 里常是指向 systemd-resolved 的**断链**：
+            // proot 往断链目标上做 -b 绑定会失败，先换成真实文件占位
+            //（内容每次启动容器时由 -b 覆盖，见 buildProotCommand）
+            val resolv = File(etc, "resolv.conf")
+            if (isSymlink(resolv) || !resolv.exists()) {
+                runCatching { resolv.delete() }
+                resolv.writeText("# 由 Kaze SLauncher 管理：启动容器时绑定覆盖\n")
+            }
+            val nsswitch = File(etc, "nsswitch.conf")
+            if (!nsswitch.isFile) {
+                nsswitch.writeText("passwd: files\ngroup: files\nshadow: files\nhosts: files dns\n")
+            }
+            val hosts = File(etc, "hosts")
+            if (!hosts.isFile) {
+                hosts.writeText("127.0.0.1\tlocalhost\n::1\t\tlocalhost ip6-localhost\n")
+            }
+        }
+    }
     /** 判断是否真符号链接：File.exists() 对断链返回 false，必须用 NIO 判断 */
     private fun isSymlink(f: File): Boolean =
         runCatching { java.nio.file.Files.isSymbolicLink(f.toPath()) }.getOrDefault(false)
