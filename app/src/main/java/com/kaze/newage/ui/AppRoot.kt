@@ -52,12 +52,14 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -164,6 +166,20 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     }
 
     AppBackground(prefs = uiPrefs) {
+        // ── 首帧守卫：window insets 是异步下发的 ──
+        // 首帧组合时 WindowInsets.statusBars 仍为 0，内容会先按"没有状态栏"布局
+        // （标题与状态栏图标重叠），等 insets 到达后整屏下移一个状态栏高度。
+        // 真机录屏实测：720p 下位移 76px，持续约 0.45s —— 观感就是"启动瞬间跳一下"。
+        // 处理：insets 就绪前只画背景、不画前景（通常只差 1–2 帧，肉眼不可见）。
+        // 兜底：真正没有状态栏的设备（全屏/车机）永远拿不到 inset，超时后照常渲染。
+        val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        var insetsTimedOut by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            delay(300)
+            insetsTimedOut = true
+        }
+        val contentVisible = statusBarTop > 0.dp || insetsTimedOut
+
         // 覆盖式布局（不用 Scaffold 的 bottomBar 预留位）：
         // 内容全屏滚动，可以"穿过"常驻底栏——滚动中的文字/卡片经 hazeSource 进入模糊源，
         // 被底栏的液态玻璃实时映射（模糊的字）
@@ -188,6 +204,8 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     startDestination = Dest.Home.route,
                     modifier = Modifier
                         .fillMaxSize()
+                        // insets 就绪前不画（布局照常，只是不可见）——见上方首帧守卫
+                        .graphicsLayer { alpha = if (contentVisible) 1f else 0f }
                         .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()),
                     // 无底部留白：内容（含各页自带底部空白）可滚过常驻栏，滚动中充分透出
                 ) {
@@ -264,6 +282,8 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
+                        // 同上：底栏也依赖 navigationBars inset，首帧会跳，一起门控
+                        .graphicsLayer { alpha = if (contentVisible) 1f else 0f }
                         // 底栏上方加一层向上渐隐：滚过来的内容"淡出"，
                         // 而不是被浮起的胶囊硬切一半（设置页的 chips 就出现过这种观感）。
                         // 用 drawBehind 绘制，不参与布局，底栏尺寸不变。
