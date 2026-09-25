@@ -108,6 +108,22 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val uiPrefs = viewModel.uiPrefs
     val showBottomBar = Dest.entries.any { it.route == currentRoute }
 
+    /**
+     * 所有"切换主页面"都走这一条。
+     *
+     * 底栏一直用的是「popUpTo(起始页){saveState} + launchSingleTop + restoreState」，
+     * 但首页那个控制台快捷入口原本是**裸 `navigate(route)`** —— 它推进去的条目和起始页
+     * 之间没有 saveState 关系，之后底栏再切回主页就不生效了（实测：首页点控制台图标后
+     * 切不回主页，语义树里内容仍是控制台）。混用两种跳转是根因，所以统一到这里。
+     */
+    val navigateTab: (String) -> Unit = { route ->
+        navController.navigate(route) {
+            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+            launchSingleTop = true
+            restoreState = true
+        }
+    }
+
     // ── 启动自动检查更新（默认开；通道默认预览版，设置页可改）──
     val appContext = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
@@ -212,7 +228,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Dest.Home.route) {
                     HomeScreen(
                         viewModel,
-                        onNavigate = { navController.navigate(it) },
+                        onNavigate = navigateTab,
                         // 首页大按钮在"没有实例"时显示的是「新建服务端」，
                         // 就必须真的进新建向导——此前跳到服务端列表页，用户还得再点一次「新建」
                         onNewServer = { navController.navigate("server/new") },
@@ -304,15 +320,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     LiquidGlassNavBar(
                         currentRoute = currentRoute,
                         contentLayer = contentLayer,
-                        onNavigate = { dest ->
-                            navController.navigate(dest.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
-                            }
-                        },
+                        onNavigate = { dest -> navigateTab(dest.route) },
                     )
                 }
             }
