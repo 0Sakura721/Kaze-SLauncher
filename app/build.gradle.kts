@@ -118,6 +118,12 @@ android {
         buildConfig = true
     }
     testOptions {
+        // 把 -Dkaze.patch.dir 透传给测试 JVM：Gradle 的 -D 只作用于守护进程，
+        // 不传的话 ApkPatchApplierTest 里那条"真实补丁互通"用例会**静默跳过** ——
+        // 看起来是绿的，实际什么都没验。
+        unitTests.all {
+            it.systemProperty("kaze.patch.dir", System.getProperty("kaze.patch.dir") ?: "")
+        }
         // 单测只覆盖纯逻辑（版本比较 / server.properties 读写 / 控制台解析），不触碰 Android API
         unitTests.isReturnDefaultValues = true
         // Roborazzi 截图测试（Robolectric）需要真实 Android 资源
