@@ -792,7 +792,13 @@ class DefaultServerManager(
             "实例目录里没有找到 ${instance.coreType.displayName} 安装器（*-installer.jar）"
         )
         slot.log(
-            "> 首次启动：正在安装 ${instance.coreType.displayName}（需联网下载依赖，可能数分钟）",
+            // 有 unix_args.txt 却没有成功标记 = 上次安装中断过（断网/DNS 不通/取消）。
+            // installer 幂等，重跑会把缺的依赖库补齐——这也是这类实例唯一的自救路径。
+            if (instance.forgeInstallIncomplete()) {
+                "> 检测到上次 ${instance.coreType.displayName} 安装未完成（依赖库不全），正在补齐…"
+            } else {
+                "> 首次启动：正在安装 ${instance.coreType.displayName}（需联网下载依赖，可能数分钟）"
+            },
             LineType.System,
         )
         val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
@@ -805,12 +811,15 @@ class DefaultServerManager(
         if (code != 0) {
             throw RuntimeException("${instance.coreType.displayName} 安装失败（退出码 $code），请看上方日志")
         }
-        if (!instance.forgeInstalled()) {
+        // 入口文件必须真的生成了
+        if (instance.forgeArgsFile() == null && instance.legacyForgeJar() == null) {
             throw RuntimeException(
                 "${instance.coreType.displayName} 安装器已退出，但没有生成启动入口" +
                     "（unix_args.txt / forge-*.jar），请查看上方安装日志"
             )
         }
+        // 成功标记必须**在这里**写：forgeInstalled() 认的就是它。
+        // 若在安装成功前就写，会在失败时留下"已安装"的假象，之后永远跳过安装、再也修不回来。
         runCatching { instance.forgeMarker.writeText(javaVersion.toString()) }
         slot.log("> ${instance.coreType.displayName} 安装完成", LineType.System)
     }

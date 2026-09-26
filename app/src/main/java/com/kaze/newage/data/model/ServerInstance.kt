@@ -74,7 +74,7 @@ data class ServerInstance(
                 it.name.contains("installer", ignoreCase = true)
         }
 
-    /** 安装完成标记（installer 跑过一次就写，避免每次启动重装） */
+    /** 安装成功标记（只有 installer 退出码为 0 时才写） */
     val forgeMarker: File get() = File(dir, ".forge-installed")
 
     /**
@@ -96,8 +96,24 @@ data class ServerInstance(
                 !it.name.contains("installer", ignoreCase = true)
         }
 
-    /** Forge/NeoForge 是否已安装完成（有启动入口即算） */
-    fun forgeInstalled(): Boolean = forgeArgsFile() != null || legacyForgeJar() != null
+    /**
+     * Forge/NeoForge 是否**安装完成**。
+     *
+     * 不能只看"有没有 unix_args.txt"：安装器是**先**解压主 jar、写出 `unix_args.txt`
+     * 与启动入口，**后**才下载那 60 多个依赖库的。中途失败（断网、DNS 不通、用户取消）
+     * 会留下一个"看着装好了、库却不全"的目录；此时启动会看到 Forge bootstrap 列出一长串
+     * `Missing required library`，然后 `IllegalStateException: Missing required libraries!`（exit=1）。
+     * 更糟的是它会被判定成"已安装"，之后每次启动都跳过安装，**永远修不回来**（真机实锤）。
+     *
+     * 所以以**安装成功标记**为准（只有 installer 退出码为 0 时才写）。
+     * installer 本身是幂等的：已有的文件复用、缺的补下，重跑不会重复下载几十 MB。
+     */
+    fun forgeInstalled(): Boolean =
+        forgeMarker.isFile && (forgeArgsFile() != null || legacyForgeJar() != null)
+
+    /** 有启动入口、但没有安装成功标记 = 上次安装中断过 */
+    fun forgeInstallIncomplete(): Boolean =
+        !forgeInstalled() && (forgeArgsFile() != null || legacyForgeJar() != null)
 }
 
 /**
