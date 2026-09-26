@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+_（暂无未发布内容）_
+
+---
+
+## [0.3.1-fix] — 2026-09-26
+
 ### Added
 - **APK 增量补丁（补丁合成更新）—— 核心已实现并验证**：新版本只下"变化的那部分"，
   由客户端把**本机已安装 APK** 里没变的条目拼进来，合成与官方包**逐字节相同**的新包。
@@ -27,26 +33,6 @@
   - 过程中被测试抓出两个真 bug：中央目录解析用了**大端**读（zip 是小端，导致目录解析成空表）；
     本地记录长度照**中央目录**的 extra 算（应与**本地头**一致，两者可不同），
     以及未处理 **data descriptor**（flag bit 3）。
-
-### Removed（构建内）
-- **液态玻璃从软件构建中彻底移除**（**代码完整保留**，随时可接回）：
-  - 设置页删掉整个「液态玻璃」分区（玻璃模式 / 原生模糊 / 玻璃强度）与两个对话框，
-    顶部分类条从 7 个分区变回 6 个（外观 / 背景图 / 存储 / Java / 后台 / 关于）；
-  - 「主题样式」里不再出现 GLASS 选项（连那条"已封锁"提示一起删掉），
-    外观分区副标题里残留的「玻璃强度」也清了；
-  - `AppRoot` 底栏的玻璃链改为**编译期常量** `isGlass = false`。这一点是关键：
-    原来写的是 `LocalAppTheme.current == GLASS`，R8 无法证明它恒假，于是整条玻璃链
-    （`glassBackdropBlur` / `liquidGlassLensSafe`、`theme/blur/` 与 `theme/shader/` 两个包、
-    `LiquidGlassEffect.kt` 里的 shader）都因"运行时可能可达"而被打进 APK；
-    写成常量后编译器直接常量折叠，全部剥离。
-  - 仓库里保留未引用的：`ui/theme/LiquidGlassEffect.kt`、`theme/blur/`、`theme/shader/`、
-    `GlassMode`/`glassParams`/`LocalGlassMode` 等令牌、`SettingsPrefs` 的玻璃项、
-    `AppThemeMode.GLASS` 枚举与玻璃配色分支，以及各处说明性注释。
-  - **实测验证**：对 release dex 搜玻璃相关的**字符串字面量**（R8 会重命名类/方法，
-    类名不可靠）——`cornerRadii` 3→0、`refractionHeight` 4→0、`refractionAmount` 3→0、
-    `depthEffect` 3→0、`KazeGlass` 2→0、`uniform`（shader 源码）6→0，全部归零。
-
-### Added
 - **应用内「诊断日志」**（设置 → 关于与许可证 → 诊断日志）：应用自身的 logcat 落盘 +
   环境自检合在一页，可刷新 / 分享 / 清空。
   - 为什么需要：Android 的 logcat 只在**内存环形缓冲**里（main/system/crash 各 256KiB），
@@ -70,40 +56,6 @@
   没授权时退回 app 外部私有目录，不会出现"实例建到一半才发现写不进去"。
   旧默认目录里已有的实例会尝试 rename 搬过去（同分区内是瞬时的）；跨挂载点搬不动时
   留在原处照常可用（实例记录存的是绝对路径），设置页文案同步更新。
-### Security / 健壮性（一次全仓排查后的修复）
-
-- **实例库可能被一次半截写入清空**（数据丢失）：`load()` 解析失败静默返回空列表，
-  紧接着 `rescan()` 把空列表写回文件，用户的全部实例永久消失。现在解析失败先把坏文件
-  留档为 `instances.json.corrupt-<时间戳>`、再退回上一次的 `.bak`；写入改为
-  "临时文件 + fsync + rename"原子落盘，每次成功写入前保留上一份为 `.bak`。
-- **实例库移到内部存储**：原位置 `getExternalFilesDir` 在外部存储未挂载时返回 null，
-  `File(null, "instances.json")` 会退化成相对进程 CWD 的路径（写不进去却没人知道）；
-  Android 7–10 上其它应用也能改写它。旧文件一次性自动迁移。
-- **保存失败不再静默**：读取告警与保存失败分别通过 `loadWarning` / `saveError` 暴露。
-- **自更新 APK 增加签名校验**：哈希只在 GitHub 提供 `digest` 时才存在，而 APK 字节来自
-  多个第三方加速镜像 —— 镜像被控制就能返回"魔数合法、体积足够"的包。现在额外比对 APK
-  与本应用的签名证书，不一致或取不到签名信息一律判为不可用。
-- **`runCommand` 的超时分支原本永远返回不了**：`readJob` 是 `withContext` 的子协程，
-  proot 被杀后 guest 可能仍持有 stdout，阻塞读不会 EOF → 结构化并发一直等它，
-  "有界超时"变成**永久挂起**（Java 安装 / apt 卡住时只能杀应用）。现在超时分支按
-  SIGTERM → 关管道 → 强杀的顺序收尾。
-- **JDK 判定要求虚拟机本体**：`bin/java` 只是约 100KB 的启动器，真正的 `libjvm.so`
-  最后才落盘 —— 半截安装会被认成"已就绪"，服务端起不来又永远不会重装。现在必须有
-  `libjvm.so`（server 或 client）才算装好。
-- **实例状态表改为原子更新**：并发读改写会丢更新，表现为"已停止的实例仍显示运行中"，
-  进而停不掉也删不掉。
-- **控制台列表不再按下标回读实时 State**：后台协程整体替换 `lines`（切实例/清空）时
-  可能越界崩溃，改为直接持有元素。
-- **首页「重启」此前点了没反应**：它直接调 `startInstance`，运行中会被
-  `guardActiveStates` 挡掉。现在走真正的"停止 → 等状态离开 Running/Stopping → 启动"。
-- **端口允许空串**：清空端口再保存会写下 `server-port=`，端口占用统计随之漏掉该实例，
-  新建实例会撞端口。空串现在被拒绝。
-- **幻影实例**：备份/恢复用的 `restore_tmp_*` / `restore_old_*` 目录里有 jar，会被目录
-  扫描当成实例并写进 JSON；现在扫描跳过隐藏目录与 `restore_` 前缀。
-- **路由参数做 URL 编码**：实例 id 在目录扫描恢复路径下等于目录名，含 `#` 时会被当成
-  fragment 截断，实例详情页一闪即退。
-- **Lint**：去掉 `liquidGlassLensSafe` 上与实现（内部已自守卫）矛盾的 `@RequiresApi`，
-  它在调用点被误报成 NewApi error。
 
 ### Changed
 - **「选择服务端核心」页改用各项目的官方图标**（此前是几何形状的 Material 图标 + 配色，
@@ -141,6 +93,60 @@
   流动；同时 `loadVersions/loadBuilds` 在任务被取消或抛异常时不复位 `loading`，
   进度条会永久停留。步骤条改为静态，加载状态用 `try/finally` + 请求序号复位，
   并加了 45s 的界面可见超时与「重试」按钮。
+
+---
+
+### Security / 健壮性（一次全仓排查后的修复）
+- **实例库可能被一次半截写入清空**（数据丢失）：`load()` 解析失败静默返回空列表，
+  紧接着 `rescan()` 把空列表写回文件，用户的全部实例永久消失。现在解析失败先把坏文件
+  留档为 `instances.json.corrupt-<时间戳>`、再退回上一次的 `.bak`；写入改为
+  "临时文件 + fsync + rename"原子落盘，每次成功写入前保留上一份为 `.bak`。
+- **实例库移到内部存储**：原位置 `getExternalFilesDir` 在外部存储未挂载时返回 null，
+  `File(null, "instances.json")` 会退化成相对进程 CWD 的路径（写不进去却没人知道）；
+  Android 7–10 上其它应用也能改写它。旧文件一次性自动迁移。
+- **保存失败不再静默**：读取告警与保存失败分别通过 `loadWarning` / `saveError` 暴露。
+- **自更新 APK 增加签名校验**：哈希只在 GitHub 提供 `digest` 时才存在，而 APK 字节来自
+  多个第三方加速镜像 —— 镜像被控制就能返回"魔数合法、体积足够"的包。现在额外比对 APK
+  与本应用的签名证书，不一致或取不到签名信息一律判为不可用。
+- **`runCommand` 的超时分支原本永远返回不了**：`readJob` 是 `withContext` 的子协程，
+  proot 被杀后 guest 可能仍持有 stdout，阻塞读不会 EOF → 结构化并发一直等它，
+  "有界超时"变成**永久挂起**（Java 安装 / apt 卡住时只能杀应用）。现在超时分支按
+  SIGTERM → 关管道 → 强杀的顺序收尾。
+- **JDK 判定要求虚拟机本体**：`bin/java` 只是约 100KB 的启动器，真正的 `libjvm.so`
+  最后才落盘 —— 半截安装会被认成"已就绪"，服务端起不来又永远不会重装。现在必须有
+  `libjvm.so`（server 或 client）才算装好。
+- **实例状态表改为原子更新**：并发读改写会丢更新，表现为"已停止的实例仍显示运行中"，
+  进而停不掉也删不掉。
+- **控制台列表不再按下标回读实时 State**：后台协程整体替换 `lines`（切实例/清空）时
+  可能越界崩溃，改为直接持有元素。
+- **首页「重启」此前点了没反应**：它直接调 `startInstance`，运行中会被
+  `guardActiveStates` 挡掉。现在走真正的"停止 → 等状态离开 Running/Stopping → 启动"。
+- **端口允许空串**：清空端口再保存会写下 `server-port=`，端口占用统计随之漏掉该实例，
+  新建实例会撞端口。空串现在被拒绝。
+- **幻影实例**：备份/恢复用的 `restore_tmp_*` / `restore_old_*` 目录里有 jar，会被目录
+  扫描当成实例并写进 JSON；现在扫描跳过隐藏目录与 `restore_` 前缀。
+- **路由参数做 URL 编码**：实例 id 在目录扫描恢复路径下等于目录名，含 `#` 时会被当成
+  fragment 截断，实例详情页一闪即退。
+- **Lint**：去掉 `liquidGlassLensSafe` 上与实现（内部已自守卫）矛盾的 `@RequiresApi`，
+  它在调用点被误报成 NewApi error。
+
+### Removed（构建内）
+- **液态玻璃从软件构建中彻底移除**（**代码完整保留**，随时可接回）：
+  - 设置页删掉整个「液态玻璃」分区（玻璃模式 / 原生模糊 / 玻璃强度）与两个对话框，
+    顶部分类条从 7 个分区变回 6 个（外观 / 背景图 / 存储 / Java / 后台 / 关于）；
+  - 「主题样式」里不再出现 GLASS 选项（连那条"已封锁"提示一起删掉），
+    外观分区副标题里残留的「玻璃强度」也清了；
+  - `AppRoot` 底栏的玻璃链改为**编译期常量** `isGlass = false`。这一点是关键：
+    原来写的是 `LocalAppTheme.current == GLASS`，R8 无法证明它恒假，于是整条玻璃链
+    （`glassBackdropBlur` / `liquidGlassLensSafe`、`theme/blur/` 与 `theme/shader/` 两个包、
+    `LiquidGlassEffect.kt` 里的 shader）都因"运行时可能可达"而被打进 APK；
+    写成常量后编译器直接常量折叠，全部剥离。
+  - 仓库里保留未引用的：`ui/theme/LiquidGlassEffect.kt`、`theme/blur/`、`theme/shader/`、
+    `GlassMode`/`glassParams`/`LocalGlassMode` 等令牌、`SettingsPrefs` 的玻璃项、
+    `AppThemeMode.GLASS` 枚举与玻璃配色分支，以及各处说明性注释。
+  - **实测验证**：对 release dex 搜玻璃相关的**字符串字面量**（R8 会重命名类/方法，
+    类名不可靠）——`cornerRadii` 3→0、`refractionHeight` 4→0、`refractionAmount` 3→0、
+    `depthEffect` 3→0、`KazeGlass` 2→0、`uniform`（shader 源码）6→0，全部归零。
 
 ---
 
