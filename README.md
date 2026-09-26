@@ -11,6 +11,9 @@
 
 当前版本 **v0.3.2**（[下载](https://github.com/0Sakura721/Kaze-SLauncher/releases)） · 变更见 [CHANGELOG](CHANGELOG.md)
 > 液态玻璃已从构建中移除（代码保留）；想要**可用的液态玻璃版本**请用分支 [`liquidglassver`](https://github.com/0Sakura721/Kaze-SLauncher/tree/liquidglassver)（说明见 [LIQUIDGLASS_BRANCH.md](LIQUIDGLASS_BRANCH.md)）。
+>
+> 动手改之前建议先看 [维护笔记](docs/MAINTENANCE.md) —— 记的是那些"只有真跑一次才会
+> 暴露、而且往往以'静默成功'的样子出现"的坑（CI 流水线 / 测试基建 / 增量补丁格式 / 本机工具链）。
 
 ---
 
