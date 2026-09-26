@@ -80,13 +80,22 @@ jobs:
 
       - name: 整理产物名
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p out patches
           TAG="${{ steps.t.outputs.tag }}"
-          cp app/build/outputs/apk/arm64/release/app-arm64-release.apk \
-             "out/Kaze-SLauncher-$TAG-arm64-v8a.apk"
-          cp app/build/outputs/apk/armhf/release/app-armhf-release.apk \
-             "out/Kaze-SLauncher-$TAG-armeabi-v7a-experimental.apk"
+          # 不写死 AGP 的输出路径：第一次真跑时硬编码的 app/build/outputs/apk/arm64/release/…
+          # 在 runner 上找不到（构建任务明明执行了），日志里也没有线索。
+          # 这里先把实际产物打出来，再按 flavor 关键字定位。
+          echo "构建目录里的 APK："
+          find app/build/outputs -name '*.apk' -printf '  %p  %s 字节\n' 2>/dev/null || true
+          A64=$(find app/build/outputs/apk -path '*arm64*' -path '*release*' -name '*.apk' | head -1)
+          AHF=$(find app/build/outputs/apk -path '*armhf*' -path '*release*' -name '*.apk' | head -1)
+          if [ -z "$A64" ] || [ -z "$AHF" ]; then
+            echo "::error::没找到 release APK（arm64='$A64' armhf='$AHF'）"
+            exit 1
+          fi
+          cp "$A64" "out/Kaze-SLauncher-$TAG-arm64-v8a.apk"
+          cp "$AHF" "out/Kaze-SLauncher-$TAG-armeabi-v7a-experimental.apk"
           ls -la out/
 
       - name: 对上一个 release 生成增量补丁
