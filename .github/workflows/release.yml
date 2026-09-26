@@ -111,17 +111,24 @@ jobs:
           fi
           echo "上一个 release：$PREV"
 
+          # 取上一个 release 的资产 URL 列表。
+          # 踩过的坑：gh release view --json assets --jq '.assets[].browser_download_url'
+          # 在本 runner 上拿不到东西（gh 的报错走 stderr，管道里只看到空输出，
+          # 于是"没有同 ABI 的 APK"被当成正常情况静默跳过）。改用 curl + python，
+          # 这条写法已在本地对着真实 release 验证过。
+          ASSETS=$(curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$PREV" \
+            | python3 -c "import json,sys;print('\n'.join(a['browser_download_url'] for a in json.load(sys.stdin).get('assets',[])))")
+          echo "上一个 release 的资产："
+          echo "$ASSETS" | sed 's|.*/|  |'
+
           gen () {
             ABI="$1"; APK="$2"
-            # 上一个 release 里的同 ABI 资产。
-            # 踩过的坑：①不能用 jq 的 test("armeabi-v7a\\.apk$") —— v7a 资产名是
-            #   `...-armeabi-v7a-experimental.apk`，后缀根本不是 .apk；而且 `$"` 会被
-            #   bash 当特殊展开吃掉。②用 grep 匹配 ABI 关键字最稳（两个 token 互不包含）。
-            OLD_URL=$(gh release view "$PREV" --json assets \
-                      --jq '.assets[].browser_download_url' \
-                      | grep -- '.apk$' | grep -- "$ABI" | head -1)
+            # ABI 关键字匹配：arm64-v8a 与 armeabi-v7a 互不包含，v7a 那份带
+            # -experimental 后缀所以不能用"以 <abi>.apk 结尾"来匹配
+            OLD_URL=$(printf '%s\n' "$ASSETS" | grep -F -- '.apk' | grep -F -- "$ABI" | head -1)
             if [ -z "$OLD_URL" ]; then
-              echo "  [$ABI] 上一个 release 没有同 ABI 的 APK，跳过"
+              echo "::warning::[$ABI] 上一个 release($PREV) 没有同 ABI 的 APK，本次不出补丁"
               return 0
             fi
             rm -f patches/patch_*.zip patches/patch_*.json "patches/base-$ABI.apk"
