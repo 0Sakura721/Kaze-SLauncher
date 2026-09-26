@@ -80,6 +80,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.kaze.newage.core.console.CONSOLE_MAX_LINES
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import com.kaze.newage.core.console.CountFormat
 
 /**
  * 控制台：实时日志（主题化深色终端）+ 命令输入 —— 本应用的主工作台。
@@ -326,14 +331,48 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             }
             ConsoleAction(Icons.Filled.Delete, "清空日志") { viewModel.clearConsole() }
             Spacer(Modifier.weight(1f))
+            // 行数按「万 / 百万 / 千万 / 亿」缩写（一位小数），点一下看精确数字与日志体积。
+            // 内存里不可能真的无限（120 万行 ≈ 150 MB），真正的全量在磁盘上的 console-output.log，
+            // 所以这里必须能告诉用户"完整日志多大、在哪"。
+            var showCountDetail by remember { mutableStateOf(false) }
             Text(
-                // 到上限时明确标出**去哪找更早的**：日志仍在继续写盘（console-output.log），
-                // 只是控制台不再往上堆。服务器开久了必然会到这里，别让用户以为日志丢了。
-                if (lines.size >= CONSOLE_MAX_LINES) "${lines.size} 行（上限，更早的见 console-output.log）"
-                else "${lines.size} 行",
+                "${CountFormat.short(lines.size.toLong())} 行",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clickable { showCountDetail = true }
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
             )
+            if (showCountDetail) {
+                val dropped = viewModel.consoleDroppedCount()
+                val logFile = viewModel.consoleLogFile()
+                val logSize = logFile?.takeIf { it.isFile }?.length() ?: 0L
+                AlertDialog(
+                    onDismissRequest = { showCountDetail = false },
+                    title = { Text("控制台统计") },
+                    text = {
+                        Column {
+                            Text("内存中保留：${lines.size} 行（${CountFormat.short(lines.size.toLong())}）")
+                            if (dropped > 0) {
+                                Text("已滚出内存：$dropped 行（${CountFormat.short(dropped.toLong())}）")
+                            }
+                            Text(
+                                "完整日志：${if (logFile?.isFile == true) CountFormat.bytes(logSize) else "（暂无文件）"}",
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "完整日志一直在写盘，控制台只是滑动窗口：\n" +
+                                    (logFile?.absolutePath ?: "（未选择实例）"),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showCountDetail = false }) { Text("知道了") }
+                    },
+                )
+            }
         }
 
         // ── 终端画布（深色底 + 等宽 + 按级别着色，随主题微调）──

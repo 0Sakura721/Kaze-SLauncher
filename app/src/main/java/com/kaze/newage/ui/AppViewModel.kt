@@ -414,6 +414,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _consoleLines.value = emptyList()
     }
 
+    /**
+     * 当前实例的运行日志文件 —— 控制台详情里要回答两个问题：
+     * "精确多少行"（内存窗口）+ "完整日志多大 / 在哪"（磁盘上的 append-only 文件）。
+     */
+    fun consoleLogFile(): java.io.File? =
+        _currentInstanceId.value
+            ?.let { id -> instanceStore.get(id) }
+            ?.let { inst -> java.io.File(inst.dir, "console-output.log") }
+
+    /** 控制台因超限被丢掉的行数（详情对话框里的精确数字） */
+    fun consoleDroppedCount(): Int =
+        _currentInstanceId.value?.let { id -> serverManager.consoleFor(id).droppedCount } ?: 0
+
     /** 导出当前实例控制台显示内容到用户选择的目录（SAF 一次性保存，与复制一致 = 控制台所见） */
     fun saveConsoleLog(uri: android.net.Uri) {
         val text = _consoleLines.value.joinToString("\n") { it.text }
