@@ -381,16 +381,15 @@ fun HomeScreen(
             ) {
                 HomeSecondaryAction(Icons.Filled.Terminal, "控制台") { onNavigate(Dest.Console.route) }
                 HomeSecondaryAction(Icons.Filled.FolderOpen, "实例目录") {
-                    // 与「服务端」页的操作保持一致：交给系统文件管理器打开实例目录
-                    runCatching {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                            setDataAndType(
-                                android.net.Uri.fromFile(current.dir),
-                                "resource/folder",
-                            )
-                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        context.startActivity(intent)
+                    // 必须走 FileProvider 的 content://：targetSdk≥24 传 file:// 会抛
+                    // FileUriExposedException，异常一吞按钮就"点了没反应"（此处原样）。
+                    // 自定义实例目录在 FileProvider 的根之外，打不开就提示真实路径。
+                    if (!com.kaze.newage.util.StorageDirUtil.openInFileManager(context, current.dir)) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "无法调起文件管理器，目录：${current.dir.absolutePath}",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
                     }
                 }
                 // 走真正的重启：以前直接 startInstance，运行中会被 guard 挡掉、点了没反应

@@ -2,4 +2,8 @@
 <paths>
     <!-- 更新 APK 下载目录 -->
     <cache-path name="updates" path="updates/" />
+    <!-- 实例目录：默认在 app 外部私有目录的 instances/ 下。
+         「打开实例目录」必须交给别的应用一个 content:// —— targetSdk≥24 传 file://
+         会抛 FileUriExposedException，异常被吞掉后按钮就是"点了没反应"。 -->
+    <external-files-path name="instances" path="instances/" />
 </paths>

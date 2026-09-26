@@ -83,4 +83,31 @@ object StorageDirUtil {
     /** Android 11 以下需要单独申请传统存储权限（11+ 用「所有文件访问」开关） */
     fun needsLegacyStoragePermission(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.R
+
+    /**
+     * 在系统文件管理器里打开目录，成功返回 true。
+     *
+     * **必须**用 FileProvider 的 `content://`：targetSdk ≥ 24 时把 `file://` 交给别的应用
+     * 会抛 `FileUriExposedException`（Android 7.0 行为变更）。此前两处「打开实例目录」都用
+     * `Uri.fromFile` 且把异常吞了，于是按钮在任何现代设备上都是"点了没反应"。
+     *
+     * 实例目录被用户改成自定义位置时（SAF 选的目录不在 FileProvider 允许的根之内）无法
+     * 生成 URI，返回 false，由调用方提示实际路径。
+     */
+    fun openInFileManager(context: Context, dir: File): Boolean = runCatching {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            dir,
+        )
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "resource/folder")
+            addFlags(
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK,
+            )
+        }
+        context.startActivity(intent)
+        true
+    }.getOrDefault(false)
 }

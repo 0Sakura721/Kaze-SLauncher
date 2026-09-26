@@ -536,13 +536,15 @@ private fun InstanceRow(
                         leadingIcon = { Icon(Icons.Filled.FolderOpen, null, Modifier.size(20.dp)) },
                         onClick = {
                             menuExpanded = false
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(Uri.fromFile(instance.dir), "resource/folder")
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(intent)
-                            } catch (_: Exception) { }
+                            // content:// 而不是 file://：targetSdk≥24 传 file:// 会抛
+                            // FileUriExposedException，被 catch 吞掉后按钮毫无反应（此处原样）
+                            if (!com.kaze.newage.util.StorageDirUtil.openInFileManager(context, instance.dir)) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "无法调起文件管理器，目录：${instance.dir.absolutePath}",
+                                    android.widget.Toast.LENGTH_LONG,
+                                ).show()
+                            }
                         },
                     )
                     DropdownMenuItem(

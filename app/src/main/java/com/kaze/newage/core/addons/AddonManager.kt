@@ -76,12 +76,29 @@ object AddonManager {
         val version = versions.firstOrNull() ?: throw RuntimeException("没有适配 $loader 的版本")
         val file = version.files.firstOrNull { it.primary } ?: version.files.firstOrNull()
             ?: throw RuntimeException("版本无下载文件")
-        val dest = File(addonDir(instance, kind), file.filename.ifBlank { "$projectId.jar" })
+        // 文件名来自 Modrinth 返回的 JSON —— **不可信远端数据**。直接拼进路径时，
+        // 形如 "../../x" 的名字会被系统解析到 plugins/ 之外，而下面还有 dest.delete()
+        // 与覆盖写；配合 MANAGE_EXTERNAL_STORAGE 足以删除/覆盖任意共享存储文件。
+        // 只取纯文件名（File(...).name 会剥掉所有目录部分），再断言结果确实落在插件目录内。
+        val rawName = file.filename.ifBlank { "$projectId.jar" }
+        val safeName = File(rawName).name
+        if (safeName.isBlank() || safeName == "." || safeName == ".." ||
+            safeName.any { it == '/' || it == '\\' || it == '\u0000' }
+        ) {
+            throw RuntimeException("插件文件名不合法：$rawName")
+        }
+        val dir = addonDir(instance, kind)
+        val dest = File(dir, safeName)
+        val canonicalDir = runCatching { dir.canonicalFile }.getOrElse { dir.absoluteFile }
+        val canonicalDest = runCatching { dest.canonicalFile }.getOrElse { dest.absoluteFile }
+        if (canonicalDest.parentFile?.path != canonicalDir.path) {
+            throw RuntimeException("插件文件名越界：$rawName")
+        }
         onProgress(0f, "下载 ${file.filename}（${version.version_number}）…")
         // 先下到临时名再原子换入：直写最终路径时，续传会把旧文件字节当前缀拼出损坏 jar，
         // 且服务器不认 Range 时会先截掉旧文件——失败后用户原有的可用插件就没了。
         // validate 用 ZIP 魔数（jar 均以 PK\x03\x04 开头），拦镜像 HTML 错误页。
-        val part = File(addonDir(instance, kind), dest.name + ".part")
+        val part = File(dir, dest.name + ".part")
         Downloader.download(
             file.url,
             part,
