@@ -30,6 +30,54 @@
 
 ## 二、GitHub Actions / 发版流水线
 
+### ⚠️ 最严重的一次：CI 打出了**未签名**的 release APK（v0.3.2）
+
+**症状**：用户从 0.3.0 更新到 0.3.2，安装时提示**「缺少开发者证书」**。
+
+**真相**：`app/build.gradle.kts` 里是
+
+```kotlin
+signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else null
+```
+
+这个设计本身有正当理由（本地没有密钥时也能构建 debug），但在 CI 上它意味着：
+**没有密钥 → `signingConfig = null` → AGP 照常打出一个未签名的 release APK**，
+构建全程没有一句警告，一路绿到发布。
+
+**影响范围**（都验过签名）：`v0.3.0` ✅ 已签名、`v0.3.1-fix` ✅ 已签名
+（这两个都是本地构建的）、**`v0.3.2` ❌ 未签名**（第一个由 CI 构建的版本）。
+
+**修复**：
+
+1. `release.yml` 里加了「还原签名密钥」步骤（从 secrets 还原 `kaze-release.jks` 并导出
+   `KAZE_*` 环境变量），以及一道**决定性的闸**——「校验 APK 已签名」，
+   未签名**直接失败**，绝不把包发出去。
+2. 需要配置的仓库 secrets（Settings → Secrets and variables → Actions）：
+
+   | Secret | 内容 | 怎么生成 |
+   |---|---|---|
+   | `KAZE_KEYSTORE_B64` | release 密钥库的 base64 | `base64 -w0 kaze-release.jks` |
+   | `KAZE_STORE_PASS` | 密钥库口令 | 与本地 `local.properties` 的 `kaze.storePassword` 相同 |
+   | `KAZE_KEY_ALIAS` | 别名 | 本地是 `kaze` |
+   | `KAZE_KEY_PASS` | 别名口令 | 与 `kaze.keyPassword` 相同 |
+
+3. 事故包已替换：v0.3.2 的 APK 换成**本地用发布密钥签名**的版本，
+   补丁也按新包重新生成（补丁的 `targetSha256` 必须对上**实际发布的那份**）。
+
+**教训（比 bug 本身重要）**：
+
+- **"构建成功"不等于"产物可用"。** 发布流程里必须有一步**验证产物本身**
+  （签名 / sha256 / 能否解析），而不是只看 Gradle 退出码。
+- **我当时的验证方式有漏洞**：我查了 `aapt2 dump badging` 的 `debuggable: 否`，
+  但**没查签名**；而那个"决定性校验"是拿补丁拼包对 sha256 —— 它对签名**完全不敏感**
+  （签名块在"尾部"里，拼得对不对与签没签无关），所以也漏过去了。
+  现在验签是发版流程的强制步骤。
+- **下载回来的文件要核对大小**：中途有一次只下了 29.50 MB（完整 30.80 MB），
+  拿截断的文件验签会得出"未签名"的**假结论**。现在下载都对着 release API 的
+  `size` 字段核对。
+
+### 其它真跑时修掉的问题
+
 `release.yml` 在 4 次真跑里修掉的问题（run #1 → #2 → #4 → #5 全绿）：
 
 1. **不要写死 AGP 的产物路径。**

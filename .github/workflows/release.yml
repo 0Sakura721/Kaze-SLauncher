@@ -63,6 +63,38 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # ⚠️ v0.3.2 真出过这个事故：CI 没有发布密钥 → app/build.gradle.kts 里
+      # `signingConfig = if (hasReleaseKey) … else null` 静默生效 → 打出**未签名**的
+      # release APK → 用户安装时报「缺少开发者证书」。构建全程绿，没人发现。
+      #
+      # 所以：先把密钥还原好；万一没配 secret，下面的「校验已签名」那步会直接失败。
+      #
+      # 需要的仓库 secrets（Settings → Secrets and variables → Actions）：
+      #   KAZE_KEYSTORE_B64  release 密钥库的 base64（生成：base64 -w0 kaze-release.jks）
+      #   KAZE_STORE_PASS    密钥库口令
+      #   KAZE_KEY_ALIAS     别名（本地用的是 kaze）
+      #   KAZE_KEY_PASS      别名口令
+      - name: 还原签名密钥
+        env:
+          KAZE_KEYSTORE_B64: ${{ secrets.KAZE_KEYSTORE_B64 }}
+          KAZE_STORE_PASS: ${{ secrets.KAZE_STORE_PASS }}
+          KAZE_KEY_ALIAS: ${{ secrets.KAZE_KEY_ALIAS }}
+          KAZE_KEY_PASS: ${{ secrets.KAZE_KEY_PASS }}
+        run: |
+          if [ -z "${KAZE_KEYSTORE_B64:-}" ]; then
+            echo "::warning::仓库没有配置 KAZE_KEYSTORE_B64，本次构建的 release APK 会是未签名的"
+            exit 0
+          fi
+          echo "$KAZE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/kaze-release.jks"
+          chmod 600 "$RUNNER_TEMP/kaze-release.jks"
+          {
+            echo "KAZE_KEYSTORE=$RUNNER_TEMP/kaze-release.jks"
+            echo "KAZE_STORE_PASS=$KAZE_STORE_PASS"
+            echo "KAZE_KEY_ALIAS=$KAZE_KEY_ALIAS"
+            echo "KAZE_KEY_PASS=$KAZE_KEY_PASS"
+          } >> "$GITHUB_ENV"
+          echo "密钥已还原到 $RUNNER_TEMP/kaze-release.jks"
+
       - name: 校验 tag 与 versionName 一致
         run: |
           V=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
@@ -77,6 +109,31 @@ jobs:
 
       - name: 构建 arm64 + armhf
         run: ./gradlew :app:assembleArm64Release :app:assembleArmhfRelease --console=plain --stacktrace
+
+      # 决定性的一道闸：v0.3.2 就是在这里失守的 —— CI 没有密钥，AGP 的
+      # `signingConfig = … else null` 静默生效，打出未签名的 release APK，
+      # 一路绿到发布，用户装上才报「缺少开发者证书」。
+      # 现在没签名就**直接失败**，绝不把未签名的包发出去。
+      - name: 校验 APK 已签名
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          APKSIGNER=$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f | sort | tail -1)
+          echo "apksigner: $APKSIGNER"
+          FAIL=0
+          for f in app/build/outputs/apk/*/release/*.apk; do
+            if "$APKSIGNER" verify --print-certs "$f" > /tmp/sig.txt 2>&1; then
+              echo "✅ $(basename "$f")  $(grep -m1 'Signer #1 certificate DN' /tmp/sig.txt)"
+            else
+              echo "::error file=$f::$(basename "$f") **没有签名**，装到手机上会报「缺少开发者证书」"
+              grep -E 'ERROR|DOES NOT VERIFY' /tmp/sig.txt || true
+              FAIL=1
+            fi
+          done
+          if [ "$FAIL" = "1" ]; then
+            echo "::error::release APK 未签名。请在仓库 Secrets 里配置 KAZE_KEYSTORE_B64 / KAZE_STORE_PASS / KAZE_KEY_ALIAS / KAZE_KEY_PASS（见 .github/workflows/release.yml 顶部注释与 docs/MAINTENANCE.md）。"
+            exit 1
+          fi
 
       - name: 整理产物名
         run: |
