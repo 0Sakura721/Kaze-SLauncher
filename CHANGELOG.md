@@ -7,6 +7,41 @@
 
 ## [Unreleased]
 
+### Security / 健壮性（一次全仓排查后的修复）
+
+- **实例库可能被一次半截写入清空**（数据丢失）：`load()` 解析失败静默返回空列表，
+  紧接着 `rescan()` 把空列表写回文件，用户的全部实例永久消失。现在解析失败先把坏文件
+  留档为 `instances.json.corrupt-<时间戳>`、再退回上一次的 `.bak`；写入改为
+  "临时文件 + fsync + rename"原子落盘，每次成功写入前保留上一份为 `.bak`。
+- **实例库移到内部存储**：原位置 `getExternalFilesDir` 在外部存储未挂载时返回 null，
+  `File(null, "instances.json")` 会退化成相对进程 CWD 的路径（写不进去却没人知道）；
+  Android 7–10 上其它应用也能改写它。旧文件一次性自动迁移。
+- **保存失败不再静默**：读取告警与保存失败分别通过 `loadWarning` / `saveError` 暴露。
+- **自更新 APK 增加签名校验**：哈希只在 GitHub 提供 `digest` 时才存在，而 APK 字节来自
+  多个第三方加速镜像 —— 镜像被控制就能返回"魔数合法、体积足够"的包。现在额外比对 APK
+  与本应用的签名证书，不一致或取不到签名信息一律判为不可用。
+- **`runCommand` 的超时分支原本永远返回不了**：`readJob` 是 `withContext` 的子协程，
+  proot 被杀后 guest 可能仍持有 stdout，阻塞读不会 EOF → 结构化并发一直等它，
+  "有界超时"变成**永久挂起**（Java 安装 / apt 卡住时只能杀应用）。现在超时分支按
+  SIGTERM → 关管道 → 强杀的顺序收尾。
+- **JDK 判定要求虚拟机本体**：`bin/java` 只是约 100KB 的启动器，真正的 `libjvm.so`
+  最后才落盘 —— 半截安装会被认成"已就绪"，服务端起不来又永远不会重装。现在必须有
+  `libjvm.so`（server 或 client）才算装好。
+- **实例状态表改为原子更新**：并发读改写会丢更新，表现为"已停止的实例仍显示运行中"，
+  进而停不掉也删不掉。
+- **控制台列表不再按下标回读实时 State**：后台协程整体替换 `lines`（切实例/清空）时
+  可能越界崩溃，改为直接持有元素。
+- **首页「重启」此前点了没反应**：它直接调 `startInstance`，运行中会被
+  `guardActiveStates` 挡掉。现在走真正的"停止 → 等状态离开 Running/Stopping → 启动"。
+- **端口允许空串**：清空端口再保存会写下 `server-port=`，端口占用统计随之漏掉该实例，
+  新建实例会撞端口。空串现在被拒绝。
+- **幻影实例**：备份/恢复用的 `restore_tmp_*` / `restore_old_*` 目录里有 jar，会被目录
+  扫描当成实例并写进 JSON；现在扫描跳过隐藏目录与 `restore_` 前缀。
+- **路由参数做 URL 编码**：实例 id 在目录扫描恢复路径下等于目录名，含 `#` 时会被当成
+  fragment 截断，实例详情页一闪即退。
+- **Lint**：去掉 `liquidGlassLensSafe` 上与实现（内部已自守卫）矛盾的 `@RequiresApi`，
+  它在调用点被误报成 NewApi error。
+
 ### Changed
 - **「选择服务端核心」页改用各项目的官方图标**（此前是几何形状的 Material 图标 + 配色，
   Purpur / Spigot / Fabric / Forge / NeoForge 之间只能靠颜色区分）。现在 Vanilla 是草方块、
