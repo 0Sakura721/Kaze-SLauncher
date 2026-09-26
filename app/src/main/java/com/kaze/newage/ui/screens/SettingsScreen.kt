@@ -101,7 +101,6 @@ import com.kaze.newage.ui.components.M3EStatusChip
 import com.kaze.newage.ui.components.WavyLinearProgress
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.FgColorMode
-import com.kaze.newage.ui.theme.GlassMode
 import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.M3Spacing
 import com.kaze.newage.ui.theme.parseSeedColor
@@ -410,7 +409,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             GroupHeader(
                 title = "外观",
                 icon = Icons.Filled.Palette,
-                supporting = "主题模式 · 颜色来源 · 深色样式 · 玻璃强度",
+                supporting = "主题模式 · 颜色来源 · 深色样式",
                 section = SettingsSection.Appearance,
                 sectionOffsets = sectionOffsets,
             )
@@ -472,58 +471,6 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             if (!darkNow) {
                 SettingNote("「AMOLED 纯黑」只在深色模式下生效，当前是浅色")
             }
-
-            // ═══ 液态玻璃 ═══
-            // 旧实现把整组玻璃参数藏在 `themeMode == "glass"` 分支里，而「液态玻璃」主题已在
-            // SettingsPrefs 初始化时强制回退 m3（入口只弹提示），那个条件恒为假 —— 也就是
-            // 这些设置在任何情况下都不可达。这里改为常显并注明「解锁后生效」，不让设置被永久隐藏。
-            GroupHeader(
-                modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                title = "液态玻璃",
-                icon = Icons.Filled.BlurOn,
-                supporting = "玻璃模式 · 强度 · 原生模糊",
-                section = SettingsSection.Glass,
-                sectionOffsets = sectionOffsets,
-            )
-            M3EConnectedList(count = 3) { index, shape ->
-                when (index) {
-                    0 -> M3EListItem(
-                        headline = "玻璃模式",
-                        supporting = GlassMode.fromId(uiPrefs.glassMode.value).label,
-                        leadingIcon = Icons.Filled.BlurCircular,
-                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = shape,
-                        onClick = { openDialog = SettingsDialog.GlassMode },
-                        trailing = { RowChevron() },
-                    )
-                    1 -> M3EListItem(
-                        headline = "原生模糊",
-                        // 控制在两行以内：原文「液态玻璃的真实背景模糊（Android 12+）；个别设备渲染
-                        // 异常时可关闭，回退为半透明玻璃」会被省略号截断（截图实锤：…可关，回退为半透明…）
-                        supporting = "真实背景模糊（Android 12+）；异常设备可关",
-                        leadingIcon = Icons.Filled.BlurLinear,
-                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = shape,
-                        onClick = { uiPrefs.setGlassBlur(!uiPrefs.glassBlur.value) },
-                        trailing = {
-                            Switch(
-                                checked = uiPrefs.glassBlur.value,
-                                onCheckedChange = { uiPrefs.setGlassBlur(it) },
-                            )
-                        },
-                    )
-                    else -> M3EListItem(
-                        headline = "玻璃强度",
-                        supporting = "当前 ${glassStrengthPercent(uiPrefs.glassIntensity.floatValue)}%",
-                        leadingIcon = Icons.Filled.Tune,
-                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = shape,
-                        onClick = { openDialog = SettingsDialog.GlassStrength },
-                        trailing = { RowChevron() },
-                    )
-                }
-            }
-            SettingNote("「液态玻璃」主题当前已封锁（在「主题样式」里点它会提示），以上参数先在此设定，主题解锁后立即生效。")
 
             // ═══ 背景图 ═══
             val hasBg = uiPrefs.hasBackgroundImage
@@ -878,18 +825,13 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
 
             SettingsDialog.ThemeStyle -> ChoiceDialog(
                 title = "主题样式",
-                options = AppThemeMode.entries,
+                // 液态玻璃已从构建中移除：主题列表里不再出现该选项
+                //（相关代码保留在 ui/theme/LiquidGlassEffect.kt 与 blur/shader 目录，未接入）
+                options = AppThemeMode.entries.filter { it != AppThemeMode.GLASS },
                 selected = AppThemeMode.fromId(uiPrefs.themeMode.value),
                 label = { it.label },
                 note = AppThemeMode.fromId(uiPrefs.themeMode.value).desc,
-                onSelect = { mode ->
-                    if (mode == AppThemeMode.GLASS) {
-                        // 液态玻璃功能封锁：点击仅提示（3 秒），不切换主题
-                        Toast.makeText(appContext, "液态玻璃功能已封锁，敬请期待", Toast.LENGTH_LONG).show()
-                    } else {
-                        uiPrefs.setThemeMode(mode.id)
-                    }
-                },
+                onSelect = { mode -> uiPrefs.setThemeMode(mode.id) },
                 onDismiss = { openDialog = null },
             )
 
@@ -969,24 +911,6 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 onDismiss = { openDialog = null },
             )
 
-            SettingsDialog.GlassMode -> ChoiceDialog(
-                title = "玻璃模式",
-                options = GlassMode.entries,
-                selected = GlassMode.fromId(uiPrefs.glassMode.value),
-                label = { it.label },
-                onSelect = { uiPrefs.setGlassMode(it.id) },
-                onDismiss = { openDialog = null },
-            )
-
-            SettingsDialog.GlassStrength -> SliderDialog(
-                title = "玻璃强度",
-                value = uiPrefs.glassIntensity.floatValue,
-                valueText = "玻璃强度：${glassStrengthPercent(uiPrefs.glassIntensity.floatValue)}%",
-                range = 0.5f..1.5f,
-                note = "饱和度增强与透镜折射幅度按此缩放（0.5 更通透低调，1.5 更强玻璃感）",
-                onValueChange = { uiPrefs.setGlassIntensity(it) },
-                onDismiss = { openDialog = null },
-            )
 
             SettingsDialog.BgBlur -> SliderDialog(
                 title = "模糊强度",
@@ -1296,8 +1220,6 @@ private enum class SettingsDialog {
     ColorSource,
     DarkStyle,
     FgColor,
-    GlassMode,
-    GlassStrength,
     BgBlur,
     BgMask,
     UpdateChannel,
@@ -1317,9 +1239,6 @@ private fun darkStyleLabel(value: Int): String = if (value == 1) "AMOLED 纯黑"
 
 private fun updateChannelLabel(value: String): String =
     if (value == "stable") "仅正式版" else "预览版（含测试版）"
-
-/** 玻璃强度读数：0.5..1.5 线性映射到 0..100%（与旧版显示一致） */
-private fun glassStrengthPercent(value: Float): Int = ((value - 0.5f) / 1f * 100).toInt()
 
 /** 自研 HSV 取色器（自研实现，无第三方依赖；无第三方依赖）：
  * 色相条 + 饱和度/明度面板 + 实时预览，确定后回调 ARGB */
@@ -1514,7 +1433,6 @@ private const val SECTION_STICKY_SLOP = 48
  */
 private enum class SettingsSection(val label: String) {
     Appearance("外观"),
-    Glass("玻璃"),
     Background("背景图"),
     Storage("存储"),
     JavaRuntime("Java"),

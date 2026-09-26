@@ -401,8 +401,15 @@ private fun LiquidGlassNavBar(
     contentLayer: androidx.compose.ui.graphics.layer.GraphicsLayer,
     onNavigate: (Dest) -> Unit,
 ) {
-    val isGlass = LocalAppTheme.current == AppThemeMode.GLASS
-    val blurEnabled = LocalGlassBlurEnabled.current
+    // ⚠️ 液态玻璃已从**构建**中移除（代码保留，随时可接回）。
+    //
+    // 这里刻意写成编译期常量 false，而不是 `LocalAppTheme.current == GLASS`：
+    // 后者 R8 无法证明恒假，整条玻璃链（glassBackdropBlur / liquidGlassLensSafe /
+    // theme/blur/ + theme/shader/ 两个包 + LiquidGlassEffect.kt）就会因为"运行时可能可达"
+    // 而被打进 APK。写成常量后编译器直接常量折叠，那些类与它依赖的 shader 全部被剥离。
+    // 要恢复液态玻璃：把下面两行改回原来的读取，并把设置页的主题选项与玻璃分区加回来。
+    val isGlass = false
+    val blurEnabled = false
     val density = LocalDensity.current
     val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val pillShape = CircleShape
