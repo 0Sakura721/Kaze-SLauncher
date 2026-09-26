@@ -113,9 +113,13 @@ jobs:
 
           gen () {
             ABI="$1"; APK="$2"
-            # 上一个 release 里的同 ABI 资产：按后缀匹配（v7a 带 -experimental，写全名很容易漏）
+            # 上一个 release 里的同 ABI 资产。
+            # 踩过的坑：①不能用 jq 的 test("armeabi-v7a\\.apk$") —— v7a 资产名是
+            #   `...-armeabi-v7a-experimental.apk`，后缀根本不是 .apk；而且 `$"` 会被
+            #   bash 当特殊展开吃掉。②用 grep 匹配 ABI 关键字最稳（两个 token 互不包含）。
             OLD_URL=$(gh release view "$PREV" --json assets \
-                      --jq ".assets[].browser_download_url | select(test(\"${ABI}\\\\.apk$\"))" | head -1)
+                      --jq '.assets[].browser_download_url' \
+                      | grep -- '.apk$' | grep -- "$ABI" | head -1)
             if [ -z "$OLD_URL" ]; then
               echo "  [$ABI] 上一个 release 没有同 ABI 的 APK，跳过"
               return 0
@@ -140,13 +144,22 @@ jobs:
 
       - name: 创建 / 更新 release 并上传资产
         run: |
+          set -euo pipefail
           TAG="${{ steps.t.outputs.tag }}"
           if gh release view "$TAG" > /dev/null 2>&1; then
             gh release edit "$TAG" --notes-file out/RELEASE_NOTES.md
           else
             gh release create "$TAG" --title "Kaze SLauncher $TAG" --notes-file out/RELEASE_NOTES.md
           fi
-          gh release upload "$TAG" out/*.apk out/*.zip out/*.json --clobber
+          # 只上传真实存在的文件：补丁被跳过时 out/*.zip 不匹配任何文件，
+          # 直接把 glob 传给 gh 会报 "no such file"（第一次真跑就是这么挂的）。
+          FILES=$(ls out/*.apk out/*.zip out/*.json 2>/dev/null || true)
+          if [ -z "$FILES" ]; then
+            echo "::warning::out/ 里没有可上传的资产"
+          else
+            echo "上传："; echo "$FILES" | sed 's/^/  /'
+            gh release upload "$TAG" $FILES --clobber
+          fi
 
       - name: 汇总
         run: |
