@@ -118,11 +118,13 @@ android {
         buildConfig = true
     }
     testOptions {
-        // 把 -Dkaze.patch.dir 透传给测试 JVM：Gradle 的 -D 只作用于守护进程，
-        // 不传的话 ApkPatchApplierTest 里那条"真实补丁互通"用例会**静默跳过** ——
-        // 看起来是绿的，实际什么都没验。
+        // 把 -Dkaze.* 透传给测试 JVM：Gradle 的 -D 只作用于守护进程，不传的话
+        // 那几条"吃真实产物"的用例（ApkPatchApplierTest 的真实补丁互通、
+        // ReleaseNotesTest 的真实发布正文）会**静默跳过** —— 看起来是绿的，实际什么都没验。
         unitTests.all {
-            it.systemProperty("kaze.patch.dir", System.getProperty("kaze.patch.dir") ?: "")
+            listOf("kaze.patch.dir", "kaze.notes.file").forEach { key ->
+                it.systemProperty(key, System.getProperty(key) ?: "")
+            }
         }
         // 单测只覆盖纯逻辑（版本比较 / server.properties 读写 / 控制台解析），不触碰 Android API
         unitTests.isReturnDefaultValues = true

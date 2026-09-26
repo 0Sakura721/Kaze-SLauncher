@@ -88,6 +88,9 @@ import com.kaze.newage.ui.theme.LocalGlassIntensity
 import com.kaze.newage.ui.theme.LocalGlassMode
 import com.kaze.newage.ui.theme.glassBackdropBlur
 import com.kaze.newage.ui.theme.liquidGlassLensSafe
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 
 enum class Dest(
     val route: String,
@@ -346,10 +349,20 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 text = {
                     Column {
                         if (info.body.isNotBlank()) {
+                            // 原来直接把 info.body 丢进 Text：用户看到的是**原始 Markdown**
+                            // （## / > / ** / 表格竖线），而且 take(400) 把正文截断，后半截看不到。
+                            // 现在转成可读纯文本，并给固定高度 + 可滚动 —— 全文都能翻。
                             Text(
-                                info.body.take(400),
+                                remember(info.tag, info.body) {
+                                    com.kaze.newage.core.update.ReleaseNotes
+                                        .toPlainText(info.body, dropTitle = info.tag)
+                                        .ifBlank { info.body }
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .heightIn(max = 340.dp)
+                                    .verticalScroll(rememberScrollState()),
                             )
                         }
                         updateProgress?.let {
