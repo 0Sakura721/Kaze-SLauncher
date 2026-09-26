@@ -151,17 +151,39 @@ signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else null
 
 ## 五、本机（Windows / PowerShell）操作
 
+0. **别直连 github.com 下载 release 资产 —— 用加速镜像。** 同一台机器、同一个 30 MB 的包：
+
+   | 来源 | 实测速度 |
+   |---|---|
+   | 直连 github.com | **~40 KB/s**（一个包十几分钟） |
+   | `https://github.boki.moe/` | **5~6 MB/s**（快约 100 倍，6 个文件 40 秒下完） |
+   | moeyy / gitmirror / gh.llkk.cc / mirror.ghproxy | 当时全部失败或超时 |
+
+   应用自身的更新器本来就带这套镜像（`UpdateChecker.MIRRORS`），本地脚本却一直直连 ——
+   白等了很久，还因此中途放弃过几次验证。`D:\dsh\tools\get.ps1` 是镜像优先、直连兜底、
+   并按 `Content-Length` 校验大小的下载脚本（截断的文件不算成功）。
+
+   ⚠️ 连带一个坑：**写 .ps1 时不要放中文**。PowerShell 会把无 BOM 的 UTF-8 当 ANSI 读，
+   中文变乱码 → 报"缺少 }"之类的语法错误，而真正原因是编码。本地工具脚本一律 ASCII。
+
 1. **`String.Replace(old, new, 1)` 在 PowerShell 里不存在**（那是 .NET Core 3+ 的
    三参重载，PowerShell 上直接报"找不到重载"）→ 用 `edit` 工具或 Python 改文件。
    因为这个，我有三次"CHANGELOG 明明改了却没写进去"。
+   ⚠️ 更坑的是：写在外层 `if` 里的 `.Replace` 抛异常后，脚本**继续往下走**，
+   后面照样打印"✅ 已加" —— 得到一次**假成功**。改完必须回读确认。
 2. **`git commit -m` 的消息里有 `\$` 会被 git 当路径解释** →
    `fatal: '\$' is outside repository`，而且可能只提交了一半。
    消息一律写进文件再 `git commit -F`。
 3. **`[System.IO.File]::WriteAllLines` 会把文件改成 CRLF**，而本仓库约定是 **LF**
-   —— 会造成整文件级别的伪 diff。改文件一律用 `edit`/`write` 工具，
-   或用 `WriteAllText(..., UTF8Encoding(false))` 并保持 `\n`。
+   —— 会造成整文件级别的伪 diff（SettingsScreen.kt 曾被这样刷出 3000 行"改动"）。
+   改文件一律用 `edit`/`write` 工具，或用 `WriteAllText(..., UTF8Encoding(false))`
+   并保持 `\n`。
 4. **中文参数经 `adb shell` 传过去会被控制台编码搞坏**（grep 中文永远不匹配）。
    排查真机上的中文文本时用 ASCII 模式匹配，或把文件拉回来再搜。
+5. **验签前记得设 `JAVA_HOME`**：`apksigner.bat` 没它跑不起来，而失败看起来就像
+   "这个包没签名" —— 我因此对**四个明明已签名的包**得出过 `NOT SIGNED` 的假结论。
+   凡是"断言某东西不存在"的检查，先确认检查本身真的跑起来了。
+
 
 ---
 
