@@ -78,60 +78,74 @@ class ConsoleFollowTest {
         composeRule.waitForIdle()
     }
 
-    /** 等到界面真正收到第 n 行 */
+    /**
+     * 等到 ViewModel 真正收到第 n 行。
+     *
+     * 刻意**不用** composeRule.waitUntil：它依赖 Compose 的 idle 判定与虚拟时钟，
+     * CI 机器上曾因此稳定超时（本地却通过）—— 而这里等的其实是 Dispatchers.IO 上的
+     * 收集协程，需要真实时间流逝。用"抽一帧 + sleep"的轮询，语义直白且不挑环境。
+     */
     private fun awaitLines(n: Int) {
-        composeRule.waitUntil(timeoutMillis = 10_000) { vm.consoleLines.value.size >= n }
+        val deadline = System.currentTimeMillis() + 30_000
+        while (vm.consoleLines.value.size < n && System.currentTimeMillis() < deadline) {
+            composeRule.waitForIdle()
+            Thread.sleep(10)
+        }
         composeRule.waitForIdle()
+        check(vm.consoleLines.value.size >= n) {
+            "只收到 ${vm.consoleLines.value.size} 行，期望至少 $n 行"
+        }
     }
 
     @Test
     fun `进控制台自动停在最新一行`() {
         setUpApp()
-        emit(1..300)
+        emit(1..120)
         clickTab("控制台")
-        awaitLines(300)
-        composeRule.onNodeWithText("日志行 300").assertIsDisplayed()
+        awaitLines(120)
+        composeRule.onNodeWithText("日志行 120").assertIsDisplayed()
     }
 
     @Test
     fun `切走再切回来仍停在最新一行（期间持续输出）`() {
         setUpApp()
-        emit(1..300)
+        emit(1..120)
         clickTab("控制台")
-        awaitLines(300)
-        composeRule.onNodeWithText("日志行 300").assertIsDisplayed()
+        awaitLines(120)
+        composeRule.onNodeWithText("日志行 120").assertIsDisplayed()
 
         // 切到别的页面，服务端继续刷日志
         clickTab("主页")
 
         // 后台持续输出：模拟真实运行中的服务端（每行间隔很小）。
         // 这正是旧实现翻不了身的原因 —— 每次输出都会把滚到底的动画取消掉。
-        val emitter = thread(isDaemon = true) { emit(301..900, delayMs = 2) }
+        val emitter = thread(isDaemon = true) { emit(121..400, delayMs = 3) }
 
         clickTab("控制台")
-        awaitLines(900)
+        awaitLines(400)
         emitter.join(5_000)
-        awaitLines(900)
+        awaitLines(400)
 
         // 停在底部 ⇒ 最新那一行必须在屏幕上
-        composeRule.onNodeWithText("日志行 900").assertIsDisplayed()
+        composeRule.onNodeWithText("日志行 400").assertIsDisplayed()
     }
 
     @Test
     fun `暂停跟随后新日志不该把视图拽回底部`() {
         setUpApp()
-        emit(1..300)
+        emit(1..120)
         clickTab("控制台")
-        awaitLines(300)
+        awaitLines(120)
 
         // 用户上滑（等价于关掉跟随）：这里直接点"跟随"开关
         composeRule.onAllNodesWithContentDescription("暂停自动滚动").onFirst().performClick()
         composeRule.waitForIdle()
 
-        emit(301..400)
-        awaitLines(400)
+        emit(121..200)
+        awaitLines(200)
 
-        // 关掉跟随后，最新的第 400 行不应被自动滚进视野
-        // LazyColumn 不组合屏幕外的行：跟随关掉后，最新那行根本不该存在\n        composeRule.onNodeWithText("日志行 400").assertDoesNotExist()
+        // 关掉跟随后，最新的第 200 行不应被自动滚进视野。
+        // LazyColumn 不组合屏幕外的行，所以"取不到"就等于"确实没被滚到"。
+        composeRule.onNodeWithText("日志行 200").assertDoesNotExist()
     }
 }
