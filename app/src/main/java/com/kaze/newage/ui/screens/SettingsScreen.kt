@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.FormatColorText
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Opacity
@@ -156,7 +157,7 @@ private const val ABOUT_LICENSE_TEXT =
  * （#A87C27）随旧版式删除，颜色一律走 MaterialTheme.colorScheme 角色。
  */
 @Composable
-fun SettingsScreen(viewModel: AppViewModel) {
+fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) {
     val javaVersions by viewModel.envJavaVersions.collectAsStateWithLifecycle()
     // 检测到的确切版本号（release 文件里的 JAVA_VERSION），用于行内显示"已安装 · 17.0.20.1"
     val javaVersionDetails by viewModel.envJavaVersionDetails.collectAsStateWithLifecycle()
@@ -611,7 +612,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
                 title = "存储",
                 icon = Icons.Filled.Storage,
-                supporting = "实例目录 · 自定义到其他分区或 SD 卡",
+                supporting = "实例目录 · 默认在手机根目录 KazeS/，可自定义到其他分区或 SD 卡",
                 section = SettingsSection.Storage,
                 sectionOffsets = sectionOffsets,
             )
@@ -620,7 +621,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     M3EListItem(
                         headline = "实例目录",
                         supporting = when {
-                            customDir.isBlank() -> "默认位置 · 应用外部目录 instances/"
+                            customDir.isBlank() -> "默认位置 · 手机根目录 KazeS/"
                             // 目录失效时要说明：InstanceStore 会静默回落到默认目录（新实例建在
                             // 用户找不到的地方），而这里若只显示旧路径 → 两边说法不一致
                             File(customDir).isDirectory -> "自定义目录 · 可用"
@@ -637,7 +638,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 } else {
                     M3EListItem(
                         headline = "恢复默认目录",
-                        supporting = "回到应用外部目录 instances/",
+                        supporting = "回到手机根目录 KazeS/",
                         leadingIcon = Icons.Filled.RestartAlt,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -846,16 +847,28 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 section = SettingsSection.About,
                 sectionOffsets = sectionOffsets,
             )
-            M3EConnectedList(count = 1) { _, shape ->
-                M3EListItem(
-                    headline = "许可证与第三方组件",
-                    supporting = "GPL-3.0 · 第三方组件清单 · Minecraft EULA 声明",
-                    leadingIcon = Icons.Filled.Gavel,
-                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = shape,
-                    onClick = { openDialog = SettingsDialog.About },
-                    trailing = { RowChevron() },
-                )
+            M3EConnectedList(count = 2) { index, shape ->
+                if (index == 0) {
+                    M3EListItem(
+                        headline = "诊断日志",
+                        supporting = "应用日志 · 环境自检 · 出问题可直接分享",
+                        leadingIcon = Icons.Filled.BugReport,
+                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = shape,
+                        onClick = onOpenDiagnostics,
+                        trailing = { RowChevron() },
+                    )
+                } else {
+                    M3EListItem(
+                        headline = "许可证与第三方组件",
+                        supporting = "GPL-3.0 · 第三方组件清单 · Minecraft EULA 声明",
+                        leadingIcon = Icons.Filled.Gavel,
+                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = shape,
+                        onClick = { openDialog = SettingsDialog.About },
+                        trailing = { RowChevron() },
+                    )
+                }
             }
         }
 

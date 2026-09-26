@@ -2,8 +2,10 @@
 <paths>
     <!-- 更新 APK 下载目录 -->
     <cache-path name="updates" path="updates/" />
-    <!-- 实例目录：默认在 app 外部私有目录的 instances/ 下。
-         「打开实例目录」必须交给别的应用一个 content:// —— targetSdk≥24 传 file://
-         会抛 FileUriExposedException，异常被吞掉后按钮就是"点了没反应"。 -->
+    <!-- 实例目录：默认在手机根目录 KazeS/，这里是兜底位置（Android/data/.../instances）。
+         「打开实例目录」必须交给别的应用 content:// —— targetSdk≥24 传 file:// 会抛
+         FileUriExposedException，异常被吞掉后按钮就是"点了没反应"。 -->
     <external-files-path name="instances" path="instances/" />
+    <!-- 应用日志（诊断日志页的「分享」） -->
+    <files-path name="logs" path="logs/" />
 </paths>

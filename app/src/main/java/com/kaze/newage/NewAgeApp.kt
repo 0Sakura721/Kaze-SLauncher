@@ -5,6 +5,7 @@ import android.content.Context
 import com.kaze.newage.core.console.ConsoleStream
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.java.RootfsJavaManager
+import com.kaze.newage.core.log.AppLogStore
 import com.kaze.newage.core.server.DefaultServerManager
 import com.kaze.newage.data.InstanceStore
 import com.kaze.newage.data.prefs.SettingsPrefs
@@ -57,6 +58,14 @@ class AppContainer(context: Context) {
     val serverManager: DefaultServerManager = DefaultServerManager(env, javaManager, console, appContext)
 
     val instanceStore: InstanceStore = InstanceStore(appContext, uiPrefs)
+
+    /**
+     * 应用自身的日志采集（「设置 → 诊断日志」查看）。
+     *
+     * 在这里 start 而不是在界面里：日志的价值恰恰在于**崩溃前那一段**，
+     * 挂在界面上会因为切页/退出而中断，事后就查不到了。
+     */
+    val appLog: AppLogStore = AppLogStore(appContext).also { it.start(appScope) }
 }
 
 /** 便捷获取容器 */

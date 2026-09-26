@@ -75,6 +75,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ── core 组件 ──
     val env: ProotEnvironment = container.env
     val serverManager = container.serverManager
+
+    /** 应用日志（设置 → 诊断日志）；container 是私有的，这里给界面一个出口 */
+    val appLog get() = container.appLog
+
+    /** proot 环境（诊断页要读它写的自检文件） */
+    val prootEnv get() = container.env
     val instanceStore = container.instanceStore
     val uiPrefs = container.uiPrefs
 

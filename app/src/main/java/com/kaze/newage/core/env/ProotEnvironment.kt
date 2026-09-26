@@ -695,6 +695,10 @@ class ProotEnvironment(
      *  1. 直接 execve rootfs 里的 dash —— 区分"策略禁止执行"与"proot 自身问题"
      *  2. 经 proot 跑一条命令 —— 区分"rootfs 不可用"与"调用方式问题"
      */
+    /** 自检文件位置（外部目录优先，没有 root 也能用 adb 直接读） */
+    fun diagnosticsFile(): File =
+        File(context.getExternalFilesDir(null) ?: context.filesDir, "diagnostics.txt")
+
     suspend fun dumpDiagnostics(): File = withContext(Dispatchers.IO) {
         val sb = StringBuilder()
         fun line(s: String) = sb.appendLine(s)

@@ -73,6 +73,7 @@ import com.kaze.newage.ui.components.AppBackground
 import com.kaze.newage.ui.components.BackdropLayer
 import com.kaze.newage.ui.screens.AddonsScreen
 import com.kaze.newage.ui.screens.ConsoleScreen
+import com.kaze.newage.ui.screens.DiagnosticsScreen
 import com.kaze.newage.ui.screens.HomeScreen
 import com.kaze.newage.ui.screens.InstanceDetailScreen
 import com.kaze.newage.ui.screens.LogsScreen
@@ -256,7 +257,15 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 composable(Dest.Console.route) { ConsoleScreen(viewModel) }
-                composable(Dest.Settings.route) { SettingsScreen(viewModel) }
+                composable(Dest.Settings.route) {
+                    SettingsScreen(
+                        viewModel = viewModel,
+                        onOpenDiagnostics = { navController.navigate("diagnostics") },
+                    )
+                }
+                composable("diagnostics") {
+                    DiagnosticsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+                }
                 composable("instance/{instanceId}") { entry ->
                     val id = entry.arguments?.getString("instanceId") ?: ""
                     InstanceDetailScreen(

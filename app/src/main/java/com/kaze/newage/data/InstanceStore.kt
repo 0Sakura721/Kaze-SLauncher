@@ -115,18 +115,88 @@ class InstanceStore(
     @Synchronized
     fun rescan() {
         _instances.value = load()
+        // 迁移必须放在 load() 之后：要按已加载的实例列表同步它们记录的目录
+        migrateInstancesToSharedRoot()
         save() // 目录扫描恢复出的实例回存 JSON
     }
 
     /**
-     * 实例根目录：优先自定义目录（设置→环境→实例存储位置）；
-     * 未设置时用 app 外部目录（用户可见）。目录不存在时自动创建。
+     * 共享存储里的默认实例根：`<手机根目录>/KazeS`，例如 `/sdcard/KazeS`。
+     *
+     * 放这里是让**存档、服务端 jar、运行日志、备份**都在用户能直接看到的地方 ——
+     * 传存档、手动备份、用文件管理器翻世界文件夹，都不需要 root，也不用记
+     * `Android/data/...` 这种路径。
+     */
+    fun sharedRoot(): File? = runCatching {
+        @Suppress("DEPRECATION")
+        val base = android.os.Environment.getExternalStorageDirectory() ?: return null
+        File(base, "KazeS")
+    }.getOrNull()
+
+    /**
+     * 目录是否**真的可写**。
+     *
+     * 只看 `isDirectory` 不够：没有共享存储权限（Android 11+ 的「所有文件访问」或
+     * 11 以下的 WRITE_EXTERNAL_STORAGE）时目录可能建得出来却写不进去，那样实例会
+     * 建到一半才失败。这里实地写一个探针文件。
+     */
+    private fun ensureWritable(dir: File): Boolean = runCatching {
+        if (!dir.isDirectory && !dir.mkdirs()) return false
+        val probe = File(dir, ".kaze-write-probe")
+        probe.writeText("ok")
+        probe.delete()
+        true
+    }.getOrDefault(false)
+
+    /**
+     * 把旧默认根（app 外部私有目录 `Android/data/<pkg>/files/instances`）里已有的实例
+     * 搬到共享根。同一分区内是 rename，几 GB 也是瞬间完成；搬不动就跳过（实例记录里的
+     * 路径是绝对的，留在原处照常能用，只是不在 KazeS 里）。
+     *
+     * 搬完必须同步实例记录里的 dirPath，否则重启后指向已经不存在的旧目录。
+     */
+    private fun migrateInstancesToSharedRoot() {
+        if (prefs.instanceDirPath.value.isNotBlank()) return // 用户自己指定了目录，不动
+        val target = sharedRoot() ?: return
+        if (!ensureWritable(target)) return
+        runCatching {
+            val old = File(context.getExternalFilesDir(null), "instances")
+            if (!old.isDirectory) return
+            val oldCanon = runCatching { old.canonicalPath }.getOrElse { old.absolutePath }
+            val newCanon = runCatching { target.canonicalPath }.getOrElse { target.absolutePath }
+            if (oldCanon == newCanon || newCanon.startsWith(oldCanon)) return
+            val dirs = old.listFiles()?.filter { it.isDirectory } ?: return
+            val moved = mutableMapOf<String, String>()
+            dirs.forEach { src ->
+                val dst = File(target, src.name)
+                if (dst.exists()) return@forEach
+                if (src.renameTo(dst)) moved[src.absolutePath] = dst.absolutePath
+            }
+            if (moved.isNotEmpty()) {
+                _instances.value = _instances.value.map { inst ->
+                    moved[inst.dir.absolutePath]?.let { inst.copy(dir = File(it)) } ?: inst
+                }
+            }
+        }
+    }
+
+    /**
+     * 实例根目录，按优先级：
+     *  1. 用户在「设置 → 存储」里指定的目录；
+     *  2. **共享存储的 `KazeS/`**（`/sdcard/KazeS`）—— 默认值，用户能直接用文件管理器看到；
+     *  3. app 外部私有目录 `Android/data/<pkg>/files/instances` —— 没拿到共享存储权限时的兜底。
+     *
+     * 第 2 步必须**实地探测可写**才能采用：Android 11+ 需要「所有文件访问」、
+     * 11 以下需要 WRITE_EXTERNAL_STORAGE，没授权时目录可能建得出来却写不进去。
      */
     fun instancesRoot(): File {
         val custom = prefs.instanceDirPath.value.takeIf { it.isNotBlank() }
             ?.let { File(it) }
             ?.takeIf { it.isDirectory }
-        return (custom ?: File(context.getExternalFilesDir(null), "instances")).apply { mkdirs() }
+        if (custom != null) return custom.apply { mkdirs() }
+
+        sharedRoot()?.let { if (ensureWritable(it)) return it }
+        return File(context.getExternalFilesDir(null), "instances").apply { mkdirs() }
     }
 
     /**
