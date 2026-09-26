@@ -825,7 +825,9 @@ private fun PropertiesEditor(
             ) {
                 OutlinedTextField(
                     value = port,
-                    onValueChange = { v -> if (v.all { it.isDigit() }) set("server-port", v) },
+                    // 必须拒绝空串：`"".all { isDigit }` 为 true，清空输入框再保存会写下 server-port=，
+                    // 之后 toIntOrNull() 得到 null，端口占用统计就漏掉这个实例，新建实例会撞端口
+                    onValueChange = { v -> if (v.isNotEmpty() && v.all { it.isDigit() }) set("server-port", v) },
                     label = { Text("端口") },
                     singleLine = true,
                     shape = M3Shape.large,

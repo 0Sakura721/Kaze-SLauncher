@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -391,10 +392,14 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                         }
                     }
                 }
-                items(lines.size, key = { lines[it].seq }) { i ->
+                // 直接用 items(list) 而不是 items(count) 按下标回读：
+                // count 是组合时定下的，而 key/content 里读的 lines 是**实时** State
+                // （后台协程在 IO 线程整体替换它，切实例/清空时会变短），
+                // 若替换正好落在组合与测量之间，lines[i] 就越界崩溃。
+                items(lines, key = { it.seq }) { line ->
                     Text(
-                        lines[i].text,
-                        color = consoleLineColor(lines[i].type),
+                        line.text,
+                        color = consoleLineColor(line.type),
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                     )

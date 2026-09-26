@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -352,6 +353,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             container.appContext.startActivity(intent)
         } catch (_: Exception) { }
+    }
+
+    /**
+     * 重启实例：停止 → 等它真的停下 → 启动。
+     *
+     * 首页那个「重启」按钮原来直接调 [startInstance]，而服务端正在跑时 `start()` 会被
+     * guardActiveStates 挡掉（只往日志写一行"已处于启动/运行中，忽略重复启动"），
+     * 用户点了**没有任何反应** —— 按钮实际只在停止状态下可用，与「启动服务端」重复。
+     * 停止是异步的，必须等状态离开 Running/Stopping 再启动，否则同样会被挡。
+     */
+    fun restartInstance(instance: ServerInstance) {
+        _currentInstanceId.value = instance.id
+        container.appScope.launch {
+            val cur = serverManager.states.value[instance.id] ?: ServerState.Idle
+            if (cur.isBusy()) return@launch
+            serverManager.stop(instance)
+            // 有上限地等：卡住时也不能让按钮看起来永远没反应
+            withTimeoutOrNull(60_000) {
+                serverManager.states.first { m ->
+                    val s = m[instance.id] ?: ServerState.Idle
+                    s != ServerState.Running && !s.isBusy()
+                }
+            }
+            serverManager.start(instance)
+        }
     }
 
     fun stopInstance(instance: ServerInstance) {

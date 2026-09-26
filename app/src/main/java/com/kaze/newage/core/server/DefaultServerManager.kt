@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.flow.update
 
 /**
  * 服务端管理器实现：完整生命周期编排，支持**多开**。
@@ -53,6 +54,18 @@ class DefaultServerManager(
     private val consoles = ConcurrentHashMap<String, ConsoleStream>()
 
     private val _states = MutableStateFlow<Map<String, ServerState>>(emptyMap())
+
+    /**
+     * 原子地更新某个实例的状态。
+     *
+     * 原来写的是 `_states.value = _states.value + (id to s)`：多个实例的协程都在
+     * Dispatchers.IO 上跑，读-改-写交错就会丢更新 —— 表现为"已经停了的实例仍显示运行中"
+     * （槽位已移除但状态留着），而 [states] 是界面判断运行状态的唯一依据，
+     * 于是一段时间内既停不掉、也删不掉。CAS 更新不会丢。
+     */
+    private fun putState(id: String, s: ServerState) {
+        _states.update { it + (id to s) }
+    }
     override val states: StateFlow<Map<String, ServerState>> = _states.asStateFlow()
 
     /** 环境/Java 初始化互斥（多实例同时启动时只部署一次） */
@@ -109,7 +122,7 @@ class DefaultServerManager(
 
         fun setState(s: ServerState) {
             state.value = s
-            _states.value = _states.value + (instance.id to s)
+            putState(instance.id, s)
         }
 
         /** 系统消息（部署/Java/启动/报错，带 "> " 前缀）也持久化：
@@ -550,7 +563,7 @@ class DefaultServerManager(
     // ── 停止 ──
     override suspend fun stop(instance: ServerInstance) {
         val slot = slots[instance.id] ?: run {
-            _states.value = _states.value + (instance.id to ServerState.Stopped)
+            putState(instance.id, ServerState.Stopped)
             return
         }
         val proc = slot.process

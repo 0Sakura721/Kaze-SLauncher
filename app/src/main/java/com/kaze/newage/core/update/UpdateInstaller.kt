@@ -28,12 +28,14 @@ object UpdateInstaller {
         shouldCancel: () -> Boolean = { false },
     ): File? = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        val file = File(dir, "kaze-slauncher-${info.tag}.apk")
+        // tag 来自远端（tag_name），参与拼文件名前先净化
+        val safeTag = info.tag.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val file = File(dir, "kaze-slauncher-$safeTag.apk")
         // 完成哨兵：仅当一次下载走完才写。半成品 APK 往往已 >1MB 且以 PK 开头——
         // 若只看这两个条件复用，取消一次后每次重试都被短路当作完整包，
         // 装出"解析包失败"，且断点续传永远没有机会补完剩余字节
-        val doneMarker = File(dir, "kaze-slauncher-${info.tag}.apk.done")
-        if (file.exists() && doneMarker.exists() && isUsableApk(file, info)) {
+        val doneMarker = File(dir, "kaze-slauncher-$safeTag.apk.done")
+        if (file.exists() && doneMarker.exists() && isUsableApk(context, file, info)) {
             return@withContext file
         }
         val used = Downloader.downloadFromSources(
@@ -43,7 +45,7 @@ object UpdateInstaller {
                 onProgress(done / 1024 / 1024, total / 1024 / 1024, if (total > 0) done.toFloat() / total else 0f)
             },
             shouldCancel = shouldCancel,
-            validate = { f -> isUsableApk(f, info) },
+            validate = { f -> isUsableApk(context, f, info) },
         )
         if (used == null) null
         else {
@@ -52,9 +54,64 @@ object UpdateInstaller {
         }
     }
 
-    /** 体积 + 魔数 + 哈希，三者都过才算可用 */
-    private fun isUsableApk(f: File, info: UpdateChecker.ReleaseInfo): Boolean =
-        f.length() > 1_000_000 && isApk(f) && matchesDigest(f, info)
+    /** 体积 + 魔数 + 哈希 + **签名**，四者都过才算可用 */
+    private fun isUsableApk(context: Context, f: File, info: UpdateChecker.ReleaseInfo): Boolean =
+        f.length() > 1_000_000 && isApk(f) && matchesDigest(f, info) && isSignedBySameKey(context, f)
+
+    /**
+     * APK 的签名证书是否与**已安装的本应用**一致。
+     *
+     * 这比"发布方给出的 SHA-256"更根本：哈希只在 GitHub 返回了 `digest` 字段时才存在，
+     * 而 APK 的字节是从多个**第三方加速镜像**下载的（[UpdateChecker.sources]）——
+     * 镜像被控制就能返回一个"魔数合法、体积足够"的包，而应用会引导用户安装它。
+     * 签名比对不依赖任何远端字段：没有私钥就伪造不出同签名的包。
+     *
+     * 拿不到签名信息时一律判为**不可用**（宁可让用户自己去 GitHub 下载，
+     * 也不要装来路不明的包）。
+     */
+    fun isSignedBySameKey(context: Context, apk: File): Boolean = try {
+        val pm = context.packageManager
+        val candidate = archivePackageInfo(pm, apk)
+        val installed = pm.getPackageInfo(context.packageName, signingFlags())
+        val a = signersOf(candidate)
+        val b = signersOf(installed)
+        a.isNotEmpty() && a == b
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun signingFlags(): Int =
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            android.content.pm.PackageManager.GET_SIGNATURES
+        }
+
+    private fun archivePackageInfo(
+        pm: android.content.pm.PackageManager,
+        apk: File,
+    ): android.content.pm.PackageInfo? =
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            pm.getPackageArchiveInfo(
+                apk.absolutePath,
+                android.content.pm.PackageManager.PackageInfoFlags.of(signingFlags().toLong()),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageArchiveInfo(apk.absolutePath, signingFlags())
+        }
+
+    private fun signersOf(pi: android.content.pm.PackageInfo?): Set<String> {
+        if (pi == null) return emptySet()
+        val sigs = if (android.os.Build.VERSION.SDK_INT >= 28) {
+            pi.signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            pi.signatures
+        }
+        return sigs?.map { it.toCharsString() }?.toSet().orEmpty()
+    }
 
     /**
      * 校验发布方给出的 SHA-256。

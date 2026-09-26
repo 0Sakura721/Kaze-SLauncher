@@ -124,8 +124,11 @@ fun Modifier.glassBackdropBlur(
  * @param refractionHeight 折射条带宽度（px）；BiliPai 底栏用 24dp
  * @param refractionAmount 最大位移量（px）；BiliPai 底栏用 24dp
  * @param depthEffect 附加向心梯度（景深感）
+ *
+ * **不需要 `@RequiresApi(TIRAMISU)`**：本函数第一行就自守卫，低版本直接返回 `this`，
+ * 调用方无需（也无法）自己判断。此前标着 `@RequiresApi` 与实现矛盾，导致调用点
+ * 被 Lint 判成 NewApi error（AppRoot 的玻璃底栏），而实际上并不会崩。
  */
-@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 fun Modifier.liquidGlassLensSafe(
     refractionHeight: Float,
     refractionAmount: Float,
@@ -158,8 +161,9 @@ fun Modifier.liquidGlassLensSafe(
 /**
  * 边缘折射（照搬 BiliPai 旧 LiquidGlassShader，GPL-3.0）：SDF 圆角矩形边缘采样偏移。
  * 保留备用（曾用于底栏，现已被 Kyant0 透镜取代）。
+ *
+ * 同 [liquidGlassLensSafe]：内部自守卫，无需调用方判断 API 等级，故不标 `@RequiresApi`。
  */
-@RequiresApi(Build.VERSION_CODES.TIRAMISU)
 fun Modifier.liquidGlassEdgeRefractionSafe(
     refractIntensity: Float = 0.32f,
     thickness: Float = 12f,

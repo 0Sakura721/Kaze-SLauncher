@@ -394,11 +394,16 @@ private fun VersionConfigPhase(
     }
     // 实际生效内存：自动 = 系统建议（不可手动改）；手动 = 滑块值
     val effectiveMb = if (autoMemory) suggestMb else memoryMb
-    // 端口自动分配起点
-    val freePort = remember { ServerProperties.findFreePort(viewModel.instanceStore.instances.value) }
-    // 已被其它实例占用的端口：手填端口时给冲突提示（自动分配会避让，手填此前没有任何校验）
-    val usedPorts = remember(viewModel.instanceStore.instances.value) {
-        viewModel.instanceStore.instances.value.mapNotNull { inst ->
+    // 端口自动分配起点 / 已被其它实例占用的端口。
+    //
+    // 实例列表必须**订阅**（collectAsStateWithLifecycle），不能像原来那样读
+    // `instances.value`：StateFlow.value 在组合里读不会触发重组，于是"再建一个服务端"时
+    // 端口建议与占用集合仍是上一个实例时的旧值（freePort 更是连 remember key 都没有，
+    // 算一次就定死），用户可能选到已被别的实例占用的端口。
+    val allInstances by viewModel.instances.collectAsStateWithLifecycle()
+    val freePort = remember(allInstances) { ServerProperties.findFreePort(allInstances) }
+    val usedPorts = remember(allInstances) {
+        allInstances.mapNotNull { inst ->
             ServerProperties.load(inst.dir)["server-port"]?.toIntOrNull()
         }.toSet()
     }

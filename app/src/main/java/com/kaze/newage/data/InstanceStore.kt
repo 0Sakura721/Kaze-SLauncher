@@ -62,14 +62,52 @@ class InstanceStore(
     private val context: Context = context.applicationContext
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
-    /** 存储文件放外部存储（真机内部 /data/user/0 的 FUSE 批量写会静默丢失） */
-    private val storeFile: File = File(context.getExternalFilesDir(null), "instances.json")
+    /**
+     * 实例库落在**内部** `filesDir`。
+     *
+     * 原来用 `getExternalFilesDir(null)`：
+     *  1. 它可能返回 **null**（外部存储未挂载），`File(null, "instances.json")` 会退化成
+     *     相对进程 CWD 的路径 —— 写不进去，而 [save] 又把异常吞了，用户看到实例"建好了"、
+     *     重启后全没了；
+     *  2. Android 7–10 上外部目录任何持有 WRITE_EXTERNAL_STORAGE 的应用都能改写，
+     *     实例库被改等于数据丢失/被指向别的 jar。
+     * 旧位置的文件会在 [migrateLegacyStore] 里一次性迁过来。
+     */
+    private val storeFile: File = File(context.filesDir, "instances.json")
+    private val backupFile: File = File(context.filesDir, "instances.json.bak")
+
+    /** 旧版把实例库放在这里（外部私有目录），仅用于一次性迁移 */
+    private val legacyStoreFile: File? =
+        runCatching { context.getExternalFilesDir(null)?.let { File(it, "instances.json") } }.getOrNull()
+
+    /**
+     * 实例库最近一次读写出的问题。这类失败必须让用户看见：否则实例"建好了"却会在重启后消失。
+     *
+     * 读取告警与保存错误**分开**两个流：合成一条的话，损坏提示会在紧随其后的那次
+     * `save()` 成功时被抹掉，而那次 save 写的恰恰是"恢复出来的子集"，用户就看不到
+     * 自己丢了东西。
+     */
+    private val _loadWarning = MutableStateFlow<String?>(null)
+    val loadWarning: StateFlow<String?> = _loadWarning.asStateFlow()
+
+    private val _saveError = MutableStateFlow<String?>(null)
+    val saveError: StateFlow<String?> = _saveError.asStateFlow()
 
     private val _instances = MutableStateFlow<List<ServerInstance>>(emptyList())
     val instances: StateFlow<List<ServerInstance>> = _instances.asStateFlow()
 
     init {
+        migrateLegacyStore()
         rescan()
+    }
+
+    /** 把旧版放在外部私有目录的实例库迁到内部（只做一次，且不覆盖已有的内部文件） */
+    private fun migrateLegacyStore() {
+        runCatching {
+            val legacy = legacyStoreFile ?: return
+            if (storeFile.isFile || !legacy.isFile) return
+            legacy.copyTo(storeFile, overwrite = false)
+        }
     }
 
     /** 重新加载：读 JSON + 扫描实例根目录（切换自定义目录后调用，可直接识别新目录里的既有服务端）。
@@ -153,11 +191,32 @@ class InstanceStore(
     fun get(id: String): ServerInstance? = _instances.value.firstOrNull { it.id == id }
 
     private fun load(): List<ServerInstance> {
-        // 1) 正常读 JSON
-        val fromJson = try {
-            if (!storeFile.exists()) emptyList()
-            else json.decodeFromString<List<StoredInstance>>(storeFile.readText()).map { it.toInstance() }
-        } catch (_: Exception) { emptyList() }
+        // 1) 正常读 JSON。解析失败**绝不能**当成"没有实例"：
+        //    旧实现直接 emptyList()，紧接着 rescan() 把空列表写回去 —— 一旦文件半截
+        //    （writeText 先截断再写，进程被杀/掉电/FUSE 短写都会留下半截），用户的
+        //    全部实例就永久消失了。现在先把坏文件留档，再退回上一次的备份。
+        val text = runCatching { storeFile.takeIf { it.isFile }?.readText() }.getOrNull()
+        _loadWarning.value = null
+        val fromJson = if (text == null) {
+            emptyList()
+        } else {
+            runCatching { json.decodeFromString<List<StoredInstance>>(text).map { it.toInstance() } }
+                .getOrElse { e ->
+                    val archived = runCatching {
+                        val dst = File(storeFile.parentFile, storeFile.name + ".corrupt-" + System.currentTimeMillis())
+                        storeFile.renameTo(dst)
+                    }.getOrDefault(false)
+                    _loadWarning.value = buildString {
+                        append("实例列表读取失败：").append(e.message ?: e.javaClass.simpleName)
+                        if (archived) append("（原文件已留档为 instances.json.corrupt-…）")
+                    }
+                    runCatching {
+                        backupFile.takeIf { it.isFile }?.readText()?.let { b ->
+                            json.decodeFromString<List<StoredInstance>>(b).map { it.toInstance() }
+                        }
+                    }.getOrNull() ?: emptyList()
+                }
+        }
 
         // 2) 目录扫描恢复：JSON 丢失（内部存储不可靠）但实例目录还在时重建记录
         val recovered = recoverFromDirs()
@@ -179,7 +238,12 @@ class InstanceStore(
     private fun recoverFromDirs(): List<ServerInstance> {
         val root = instancesRoot()
         return try {
-            val dirs = root.listFiles()?.filter { it.isDirectory } ?: emptyList()
+            // 跳过隐藏目录与备份/恢复临时目录：BackupManager 的 restore_tmp_*/restore_old_*
+            // 里也有 .jar，被扫到就会在实例列表里冒出指向临时目录的"幻影实例"，
+            // 而且 rescan() 会把它写进 JSON 长期留存。
+            val dirs = root.listFiles()
+                ?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("restore_") }
+                ?: emptyList()
             dirs.mapNotNull { dir ->
                 val jar = dir.listFiles()?.firstOrNull { it.isFile && it.name.endsWith(".jar") && !it.name.contains("installer", true) }
                     ?: return@mapNotNull null
@@ -207,16 +271,39 @@ class InstanceStore(
         } catch (_: Exception) { emptyList() }
     }
 
-    private fun save() {
-        try {
-            storeFile.parentFile?.mkdirs()
-            storeFile.writeText(
-                Json.encodeToString(
-                    kotlinx.serialization.builtins.ListSerializer(StoredInstance.serializer()),
-                    _instances.value.map { StoredInstance.from(it) },
-                )
-            )
-        } catch (_: Exception) { }
+    /**
+     * 原子写实例库：先写 `instances.json.tmp` 并 `fd.sync()`，再 rename 覆盖正式文件，
+     * 写成功前把上一份留成 `instances.json.bak`。
+     *
+     * 原来的 `writeText` 是"先截断再写"：进程被杀 / 掉电 / FUSE 短写都会留下半截 JSON，
+     * 而 [load] 解析失败会静默返回空列表、紧接着 [rescan] 又写回去 —— 实例全没了。
+     * rename 在同一文件系统上是原子的，所以正式文件要么是旧的完整内容、要么是新的完整内容。
+     *
+     * 失败不再静默：[saveError] 会带上原因，界面据此提示。
+     */
+    private fun save(): Boolean = try {
+        storeFile.parentFile?.mkdirs()
+        val text = Json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(StoredInstance.serializer()),
+            _instances.value.map { StoredInstance.from(it) },
+        )
+        val tmp = File(storeFile.parentFile, storeFile.name + ".tmp")
+        java.io.FileOutputStream(tmp).use { out ->
+            out.write(text.toByteArray(Charsets.UTF_8))
+            out.flush()
+            out.fd.sync()
+        }
+        if (storeFile.isFile) runCatching { storeFile.copyTo(backupFile, overwrite = true) }
+        if (!tmp.renameTo(storeFile)) {
+            // 少数文件系统上 rename 可能失败，退回覆盖写（至少 tmp 已落盘）
+            runCatching { tmp.copyTo(storeFile, overwrite = true) }
+            tmp.delete()
+        }
+        _saveError.value = null
+        true
+    } catch (e: Exception) {
+        _saveError.value = "实例列表保存失败：${e.message ?: e.javaClass.simpleName}"
+        false
     }
 
     /**

@@ -345,12 +345,25 @@ class ProotEnvironment(
                 val javaBin = File(dir, "bin/java")
                 // 只要不是空壳就认（0 字节/几 KB 的是半成品；不用 canExecute，FUSE 上不可靠）
                 if (!javaBin.isFile || javaBin.length() < 10_000L) return@forEach
+                // 但**光有 bin/java 不算装好**：它是个约 100KB 的启动器，而真正的虚拟机
+                // libjvm.so（20MB+）在解压/安装的**最后**才落盘。中途被杀/空间不足时
+                // （toybox tar 会静默丢条目的那个坑），只查 bin/java 会把半截 JDK 认成
+                // "已就绪"——服务端启动 30 秒就退，用户只看到一句笼统的早退错误，
+                // 而且因为判定为已安装，永远不会重装。
+                if (!hasJvmLibrary(dir)) return@forEach
                 val major = readJavaMajor(dir) ?: parseMajorFromName(dir.name) ?: return@forEach
                 // 同一主版本有多个目录时保留第一个（通常是先前装的那个）
                 found.putIfAbsent(major, dir.name)
             }
         }
         return found
+    }
+
+    /** JDK 是否真的完整：必须存在虚拟机本体 libjvm.so（server 或 client VM） */
+    private fun hasJvmLibrary(jdkDir: File): Boolean {
+        val minSize = 1_000_000L
+        return listOf("lib/server/libjvm.so", "lib/client/libjvm.so", "jre/lib/server/libjvm.so")
+            .any { rel -> File(jdkDir, rel).let { it.isFile && it.length() > minSize } }
     }
 
     /**
@@ -760,6 +773,19 @@ class ProotEnvironment(
                 }
                 val exited = proc.waitFor(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                 if (!exited) {
+                    // 超时分支必须**真的返回**。
+                    //
+                    // readJob 是 withContext 的子协程，结构化并发要求它结束才能返回；
+                    // 而 proot 被 kill 后 guest（apt-get / java）可能还活着，并且继承了
+                    // proot 的 stdout —— 只 destroyForcibly() 不会让 readText 看到 EOF，
+                    // 于是 withContext 一直等 readJob，"有界超时"变成**永久挂起**：
+                    // 调用方（Java 安装 / apt）卡死，UI 停在"安装中"，只能杀应用。
+                    // 先 SIGTERM 让 --kill-on-exit 有机会回收 guest，再关掉管道让阻塞读
+                    // 立刻拿到 EOF，才轮到真正强杀。
+                    proc.destroy()
+                    runCatching { proc.inputStream.close() }
+                    runCatching { proc.errorStream?.close() }
+                    readJob.cancel()
                     proc.destroyForcibly()
                     Result.failure(RuntimeException("命令超时（${timeoutMs / 1000}s）：$command"))
                 } else {

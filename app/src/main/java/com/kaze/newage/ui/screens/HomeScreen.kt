@@ -393,8 +393,9 @@ fun HomeScreen(
                         context.startActivity(intent)
                     }
                 }
+                // 走真正的重启：以前直接 startInstance，运行中会被 guard 挡掉、点了没反应
                 HomeSecondaryAction(Icons.Filled.RestartAlt, "重启") {
-                    if (!busy) viewModel.startInstance(current)
+                    if (!busy) viewModel.restartInstance(current)
                 }
                 HomeSecondaryAction(Icons.Filled.MoreVert, "更多") { onNavigate(Dest.Server.route) }
             }

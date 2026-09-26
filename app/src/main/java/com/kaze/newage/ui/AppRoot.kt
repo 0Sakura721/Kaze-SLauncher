@@ -237,7 +237,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Dest.Server.route) {
                     ServerScreen(
                         viewModel,
-                        onOpenInstance = { inst -> navController.navigate("instance/${inst.id}") },
+                        onOpenInstance = { inst -> navController.navigate("instance/${android.net.Uri.encode(inst.id)}") },
                         onNewServer = { navController.navigate("server/new") },
                     )
                 }
@@ -264,9 +264,9 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         instanceId = id,
                         onBack = { navController.popBackStack() },
                         onOpenAddons = { kind ->
-                            navController.navigate("instance/$id/addons/${kind.name.lowercase()}")
+                            navController.navigate("instance/${android.net.Uri.encode(id)}/addons/${kind.name.lowercase()}")
                         },
-                        onOpenLogs = { navController.navigate("instance/$id/logs") },
+                        onOpenLogs = { navController.navigate("instance/${android.net.Uri.encode(id)}/logs") },
                     )
                 }
                 composable("instance/{instanceId}/logs") { entry ->
