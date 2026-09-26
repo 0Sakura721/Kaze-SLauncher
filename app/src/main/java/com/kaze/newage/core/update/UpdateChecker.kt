@@ -20,12 +20,16 @@ object UpdateChecker {
     private const val API_LIST = "https://api.github.com/repos/$REPO/releases"
 
     /** GitHub 下载加速镜像（社区常用线路，前缀直拼 GitHub 原链） */
+    // 按**实测吞吐**排序（同一台机器、同一个 30 MB 的包，各取前 2 MB）：
+    //   github.ednovas.xyz      890 KB/s  ✓
+    //   github.boki.moe         706 KB/s  ✓
+    //   其余 11 个                全部 0（超时/失败）
+    //  直连 github.com          40 KB/s   ← 最慢，已挪到候选列表**最后**
+    // 旧顺序把两个"实测不通"的放在最前面，每次更新先白等 40 秒才轮到能用的镜像。
     private val MIRRORS = listOf(
-        "https://github.moeyy.xyz/",
-        "https://mirror.ghproxy.com/",
-        "https://hub.gitmirror.com/",
-        "https://github.boki.moe/",
         "https://github.ednovas.xyz/",
+        "https://github.boki.moe/",
+        "https://hub.gitmirror.com/",
         "https://github.limoruirui.com/",
         "https://github.abskoop.workers.dev/",
         "https://github.tbedu.top/",
@@ -215,7 +219,9 @@ object UpdateChecker {
 
     /** GitHub 原链 + 全部镜像（下载时由 Downloader 测速择优） */
     fun sources(apkUrl: String): List<String> =
-        listOf(apkUrl) + MIRRORS.map { it + apkUrl }
+        // ⚠️ 直连 github.com 放**最后**，只当兜底：实测它只有 ~40 KB/s（镜像 700~900 KB/s），
+        // 放最前面时"能下但极慢"，用户感受就是更新卡住了。
+        MIRRORS.map { it + apkUrl } + apkUrl
 
     /**
      * 版本号比较：latest 比 current 新 → true。

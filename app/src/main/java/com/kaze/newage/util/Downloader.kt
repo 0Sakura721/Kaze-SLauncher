@@ -203,15 +203,28 @@ object Downloader {
     }
 
     /**
-     * 并发探测候选源：对每个 URL 发起 1KB Range 请求，测「连接+首字节」耗时，
-     * 返回最快的 URL；全部失败返回 null。
+     * 并发探测候选源，返回**吞吐最好**的那个；全部失败返回 null。
+     *
+     * ## 为什么按"下载量/耗时"排而不是按"首字节耗时"排
+     * 旧实现只发 1KB Range 请求、按「连接+首字节」耗时排序。问题在于
+     * **直连 github.com 的首字节很快、但吞吐只有 ~40 KB/s**（同一台机器实测：
+     * 直连 40 KB/s，`github.ednovas.xyz` 890 KB/s、`github.boki.moe` 706 KB/s）——
+     * 于是每次探测都是直连胜出，30 MB 的包要下十几分钟，用户感受就是"更新特别慢"。
+     *
+     * 现在读最多 [PROBE_BYTES]（256 KB）并记录**实际读到的字节数 / 耗时**，
+     * 按吞吐排序。对不支持 Range 的源会返回 200 + 完整内容 —— 那也没关系，
+     * 我们只读到 256 KB 就断开，测的仍然是真实吞吐。
      * 额外嗅探响应内容：部分镜像对不存在的大文件返回 200+HTML 错误页
      *（HTTP 码正常但内容无效），以 "<html"/"<?xml" 开头视为错误页排除。
      */
-    fun probeFastest(urls: List<String>, probeTimeoutMs: Int = 4000): String? {
+    /** 探测时最多读多少字节来评估吞吐（256 KB：足够区分 40 KB/s 与 900 KB/s） */
+    private const val PROBE_READ_BYTES = 256 * 1024
+
+    fun probeFastest(urls: List<String>, probeTimeoutMs: Int = 8000): String? {
         val candidates = urls.filter { it.isNotBlank() }.distinct()
         if (candidates.isEmpty()) return null
-        val results = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        // key = url, value = 吞吐（字节/毫秒，越大越好）
+        val results = java.util.concurrent.ConcurrentHashMap<String, Double>()
         val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(candidates.size, 4))
         try {
             val futures = candidates.map { u ->
@@ -223,28 +236,31 @@ object Downloader {
                         conn.connectTimeout = probeTimeoutMs
                         conn.readTimeout = probeTimeoutMs
                         conn.setRequestProperty("User-Agent", USER_AGENT)
-                        conn.setRequestProperty("Range", "bytes=0-1023")
+                        conn.setRequestProperty("Range", "bytes=0-$PROBE_READ_BYTES")
                         val code = conn.responseCode
                         if (code !in 200..299) {
                             conn.disconnect()
                             return@submit
                         }
-                        val head = conn.inputStream.use { ins ->
-                            val buf = ByteArray(1024)
-                            var read = 0
-                            while (read < buf.size) {
-                                val n = ins.read(buf, read, buf.size - read)
-                                if (n == -1) break
+                        var read = 0
+                        val buf = ByteArray(16 * 1024)
+                        var head = ""
+                        conn.inputStream.use { ins ->
+                            while (read < PROBE_READ_BYTES) {
+                                val n = ins.read(buf, 0, minOf(buf.size, PROBE_READ_BYTES - read))
+                                if (n <= 0) break
+                                if (read == 0) head = String(buf, 0, minOf(n, 64), Charsets.ISO_8859_1).trimStart()
                                 read += n
                             }
-                            String(buf, 0, read, Charsets.ISO_8859_1).trimStart()
                         }
                         conn.disconnect()
                         // 内容嗅探：HTML/XML 错误页视为不可用（镜像"假 200"）
                         if (head.startsWith("<html", ignoreCase = true) || head.startsWith("<?xml", ignoreCase = true)) {
                             return@submit
                         }
-                        results[u] = System.currentTimeMillis() - start
+                        val ms = (System.currentTimeMillis() - start).coerceAtLeast(1)
+                        // 至少读到 8KB 才算这个源可用，避免"连上了但没数据"被当成最快
+                        if (read >= 8 * 1024) results[u] = read.toDouble() / ms
                     } catch (_: Exception) {
                         // 该源不可达，跳过
                     }
@@ -254,7 +270,10 @@ object Downloader {
         } finally {
             pool.shutdownNow()
         }
-        return results.entries.minByOrNull { it.value }?.key
+        // 注意是 maxByOrNull：value 现在是**吞吐**（字节/毫秒），越大越好。
+        // 旧实现按"首字节耗时"排，那里确实该取 min —— 语义变了，这里必须跟着改，
+        // 否则会挑中最慢的源（而它恰好是直连 GitHub）。
+        return results.entries.maxByOrNull { it.value }?.key
     }
 
     /**
