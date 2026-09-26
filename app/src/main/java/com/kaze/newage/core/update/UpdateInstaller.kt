@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.core.content.FileProvider
 import com.kaze.newage.util.Downloader
 import java.io.File
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -38,6 +39,9 @@ object UpdateInstaller {
         if (file.exists() && doneMarker.exists() && isUsableApk(context, file, info)) {
             return@withContext file
         }
+        // 先试增量补丁：能省 90%+ 流量。任何一步不成立就静默回退整包 ——
+        // 补丁是"加速手段"而不是"必经路径"，它失败绝不能让用户更新不了。
+        tryPatchUpdate(context, info, onProgress, shouldCancel)?.let { return@withContext it }
         val used = Downloader.downloadFromSources(
             urls = UpdateChecker.sources(info.apkUrl),
             dest = file,
@@ -53,6 +57,67 @@ object UpdateInstaller {
             file
         }
     }
+
+    /**
+     * 尝试走**增量补丁**；任何一步不成立就返回 null（调用方回退整包）。
+     *
+     * 判定"哪一份补丁对我有效"靠的是 `baseSha256 == 本机已装 APK 的 sha256`，
+     * 而不是文件名里的架构 —— 用户装的若是别处来的同签名包、或版本对不上，
+     * 这里自然匹配不到，安全回退整包。
+     *
+     * 为什么用 [android.content.pm.ApplicationInfo.sourceDir]：那是**本机已安装的 APK**，
+     * 补丁就是拿它当基线拼的；不需要额外下载旧包。
+     */
+    private suspend fun tryPatchUpdate(
+        context: Context,
+        info: UpdateChecker.ReleaseInfo,
+        onProgress: (Long, Long, Float) -> Unit,
+        shouldCancel: () -> Boolean,
+    ): File? {
+        if (info.patchAssets.isEmpty()) return null
+        val installedApk = runCatching { File(context.applicationInfo.sourceDir) }.getOrNull() ?: return null
+        if (!installedApk.isFile) return null
+        val baseSha = runCatching { ApkPatchApplier.sha256Of(installedApk) }.getOrNull() ?: return null
+        val dir = File(context.cacheDir, "updates").apply { mkdirs() }
+
+        for (asset in info.patchAssets) {
+            if (shouldCancel()) return null
+            // ① 元数据只有 ~10KB：先拿它判断"这份补丁的基线是不是本机这个包"
+            val metaText = runCatching {
+                Downloader.downloadText(asset.jsonUrl, timeoutMs = 20_000)
+            }.getOrNull() ?: continue
+            val meta = runCatching { JSONObject(metaText) }.getOrNull() ?: continue
+            val base = meta.optString("baseSha256", "").trim().lowercase()
+            if (base.length != 64 || !base.equals(baseSha, ignoreCase = true)) continue
+
+            // ② 下补丁（走与整包同一条多镜像 + 断点续传链路）
+            val patchZip = File(dir, asset.name.removeSuffix(".json") + ".zip")
+            // downloadFromSources 返回的是"最终用了哪个源"（字符串），文件在 dest 上
+            val usedSource = Downloader.downloadFromSources(
+                urls = UpdateChecker.sources(asset.zipUrl),
+                dest = patchZip,
+                onProgress = { done, total ->
+                    onProgress(done, total, if (total > 0) done.toFloat() / total else 0f)
+                },
+                shouldCancel = shouldCancel,
+                validate = { f -> f.length() > 1024 },
+            ) ?: continue
+            if (usedSource.isBlank() || !patchZip.isFile) continue
+
+            // ③ 拼装：apply 内部会比对 targetSha256（补丁被篡改/传输损坏都在这拦下）
+            val out = File(dir, "patched-${safeTagOf(info)}.apk")
+            val got = runCatching { ApkPatchApplier.apply(installedApk, patchZip, out) }.getOrNull() ?: continue
+
+            // ④ 与发布方给出的整包 sha256 对齐（有的话），再比对签名
+            if (info.apkSha256 != null && !got.equals(info.apkSha256, ignoreCase = true)) continue
+            if (!isSignedBySameKey(context, out)) continue
+            return out
+        }
+        return null
+    }
+
+    private fun safeTagOf(info: UpdateChecker.ReleaseInfo): String =
+        info.tag.replace(Regex("[^A-Za-z0-9._-]"), "_")
 
     /** 体积 + 魔数 + 哈希 + **签名**，四者都过才算可用 */
     private fun isUsableApk(context: Context, f: File, info: UpdateChecker.ReleaseInfo): Boolean =

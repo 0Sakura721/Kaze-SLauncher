@@ -1,0 +1,145 @@
+name: Release
+
+# 打 tag 时自动发版：构建两个 ABI 的 APK，**并对上一个 release 生成增量补丁**一并上传。
+#
+# 为什么要放 CI：补丁必须由"上一个版本的 APK"与"本次的 APK"逐条目对比得出，
+# 手工发版很容易忘（v0.3.1-fix 那次就是手工跑的脚本）。
+#
+# 依赖：仓库 Settings → Actions → General → Workflow permissions 需要
+# "Read and write permissions"（下方 permissions: contents: write 也会申请）。
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag（需已存在）'
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: 构建 + 生成补丁 + 发版
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 解析 tag
+        id: t
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "发布：$TAG"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Android SDK 组件
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          CMDLINE=$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -name sdkmanager -type f 2>/dev/null | head -1)
+          echo "sdkmanager: $CMDLINE"
+          yes | "$CMDLINE" --licenses > /dev/null 2>&1 || true
+          "$CMDLINE" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 校验 tag 与 versionName 一致
+        run: |
+          V=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          echo "versionName=$V   tag=${{ steps.t.outputs.version }}"
+          if [ "$V" != "${{ steps.t.outputs.version }}" ]; then
+            echo "::error::versionName($V) 与 tag(${{ steps.t.outputs.version }}) 不一致；先改 build.gradle.kts 再打 tag"
+            exit 1
+          fi
+
+      - name: 跑单元测试
+        run: ./gradlew :app:testArm64DebugUnitTest --console=plain
+
+      - name: 构建 arm64 + armhf
+        run: ./gradlew :app:assembleArm64Release :app:assembleArmhfRelease --console=plain --stacktrace
+
+      - name: 整理产物名
+        run: |
+          set -e
+          mkdir -p out patches
+          TAG="${{ steps.t.outputs.tag }}"
+          cp app/build/outputs/apk/arm64/release/app-arm64-release.apk \
+             "out/Kaze-SLauncher-$TAG-arm64-v8a.apk"
+          cp app/build/outputs/apk/armhf/release/app-armhf-release.apk \
+             "out/Kaze-SLauncher-$TAG-armeabi-v7a-experimental.apk"
+          ls -la out/
+
+      - name: 对上一个 release 生成增量补丁
+        run: |
+          set -e
+          TAG="${{ steps.t.outputs.tag }}"
+          VER="${{ steps.t.outputs.version }}"
+          PREV=$(gh release list --limit 30 --json tagName \
+                 --jq "[.[] | select(.tagName != \"$TAG\")][0].tagName" 2>/dev/null || true)
+          if [ -z "$PREV" ] || [ "$PREV" = "null" ]; then
+            echo "没有上一个 release，跳过补丁生成"
+            exit 0
+          fi
+          echo "上一个 release：$PREV"
+
+          gen () {
+            ABI="$1"; APK="$2"
+            # 上一个 release 里的同 ABI 资产：按后缀匹配（v7a 带 -experimental，写全名很容易漏）
+            OLD_URL=$(gh release view "$PREV" --json assets \
+                      --jq ".assets[].browser_download_url | select(test(\"${ABI}\\\\.apk$\"))" | head -1)
+            if [ -z "$OLD_URL" ]; then
+              echo "  [$ABI] 上一个 release 没有同 ABI 的 APK，跳过"
+              return 0
+            fi
+            rm -f patches/patch_*.zip patches/patch_*.json "patches/base-$ABI.apk"
+            echo "  [$ABI] 基线 $OLD_URL"
+            curl -sSL -o "patches/base-$ABI.apk" "$OLD_URL"
+            python3 tools/make_apk_patch.py "patches/base-$ABI.apk" "$APK" patches \
+              --version="$VER" --base-version="${PREV#v}"
+            ZIP=$(ls patches/patch_*.zip | head -1)
+            JSON=$(ls patches/patch_*.json | head -1)
+            cp "$ZIP"  "out/patch-${PREV}-to-${TAG}-${ABI}.zip"
+            cp "$JSON" "out/patch-${PREV}-to-${TAG}-${ABI}.json"
+          }
+
+          gen "arm64-v8a"   "out/Kaze-SLauncher-$TAG-arm64-v8a.apk"
+          gen "armeabi-v7a" "out/Kaze-SLauncher-$TAG-armeabi-v7a-experimental.apk"
+          ls -la out/
+
+      - name: 生成发布说明（取自 CHANGELOG）
+        run: python3 tools/extract_release_notes.py "${{ steps.t.outputs.version }}" out/RELEASE_NOTES.md
+
+      - name: 创建 / 更新 release 并上传资产
+        run: |
+          TAG="${{ steps.t.outputs.tag }}"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file out/RELEASE_NOTES.md
+          else
+            gh release create "$TAG" --title "Kaze SLauncher $TAG" --notes-file out/RELEASE_NOTES.md
+          fi
+          gh release upload "$TAG" out/*.apk out/*.zip out/*.json --clobber
+
+      - name: 汇总
+        run: |
+          gh release view "${{ steps.t.outputs.tag }}" --json assets \
+            --jq '.assets[] | "  \(.name)  \(.size / 1048576 * 100 | round / 100) MB"'

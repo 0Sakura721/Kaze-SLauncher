@@ -51,6 +51,21 @@ object UpdateChecker {
          * 取不到时为 null（见 [matchesDigest] 的处理）。
          */
         val apkSha256: String? = null,
+        /**
+         * 该 Release 附带的**增量补丁**资产（可能为空）。
+         *
+         * 命名约定：`patch-<from>-to-<to>-<abi>.zip` + 同名 `.json`（元数据，含 `baseSha256`）。
+         * 这里只收集 URL（不额外发请求）—— 是否可用要等真正下载时才判断：
+         * 得先拿到 `.json` 里的 `baseSha256` 与本机已装 APK 的 sha256 比对。
+         */
+        val patchAssets: List<PatchAsset> = emptyList(),
+    )
+
+    /** 一对补丁资产：`.json` 元数据 + 对应的 `.zip` */
+    data class PatchAsset(
+        val name: String,
+        val jsonUrl: String,
+        val zipUrl: String,
     )
 
     /**
@@ -83,7 +98,36 @@ object UpdateChecker {
             body = json.optString("body", "").trim(),
             apkUrl = asset.optString("browser_download_url"),
             apkSha256 = parseSha256(asset.optString("digest", "")),
+            patchAssets = pickPatchAssets(assets),
         )
+    }
+
+    /**
+     * 从 release 资产里挑出增量补丁（`patch-*.json`，且配对的 `patch-*.zip` 必须也在）。
+     *
+     * 纯函数、单独测：命名对不上时宁可不返回，也不要让 `UpdateInstaller` 去请求一个
+     * 不存在的 URL —— 那会白白拖慢更新，失败原因还看不出来。
+     *
+     * 这里**不**按 ABI 过滤：一个 release 里两个 ABI 的补丁都可能存在，而"该用哪一份"
+     * 取决于本机已装 APK 的 sha256（`UpdateInstaller` 比对 `baseSha256` 才准），
+     * 名字里带不带 arch 只是辅助信息。
+     */
+    internal fun pickPatchAssets(assets: JSONArray): List<PatchAsset> {
+        val urls = HashMap<String, String>()
+        for (i in 0 until assets.length()) {
+            val a = assets.optJSONObject(i) ?: continue
+            val name = a.optString("name")
+            val url = a.optString("browser_download_url")
+            if (name.isNotBlank() && url.isNotBlank()) urls[name] = url
+        }
+        return urls.keys
+            .filter { it.startsWith("patch-") && it.endsWith(".json") }
+            .sorted()
+            .mapNotNull { jsonName ->
+                val zipName = jsonName.removeSuffix(".json") + ".zip"
+                val zipUrl = urls[zipName] ?: return@mapNotNull null
+                PatchAsset(jsonName, urls.getValue(jsonName), zipUrl)
+            }
     }
 
     /**

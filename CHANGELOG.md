@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+### Added
+- **增量补丁接入更新流程**：`UpdateInstaller.download()` 现在**先试补丁**——
+  用本机已安装 APK（`applicationInfo.sourceDir`）的 sha256 去比对补丁元数据里的
+  `baseSha256`，匹配就下补丁（1.6 MB 级）并拼装；任何一步不成立（没有补丁资产、
+  基线不匹配、下载失败、拼装校验不过、签名不符）都**静默回退整包**。
+  补丁是加速手段而不是必经路径，它失败绝不能让用户更新不了。
+  拼装结果先比 `targetSha256`（`ApkPatchApplier` 内部）再比**签名证书**——
+  两道都与整包路径一致，安全性没有放松。
+- **CI 自动出补丁**：新增 `.github/workflows/release.yml`，打 `v*` tag 时自动
+  跑测试 → 构建两个 ABI → **对上一个 release 的同 ABI APK 生成增量补丁** →
+  创建/更新 release 并上传 APK + 补丁（命名 `patch-<from>-to-<to>-<abi>.{zip,json}`）。
+  发布说明从 CHANGELOG 同版本段落抽（新增 `tools/extract_release_notes.py`，
+  版本段落缺失时写占位说明而不是留空）。工作流会先校验 tag 与 `versionName` 一致。
+- `UpdateChecker.pickPatchAssets()`：从 release 资产里挑出 `patch-*.json` 且配对的
+  `.zip` 必须存在（纯函数，5 例单测）；不按 ABI 过滤 —— 该用哪份由 `baseSha256`
+  决定，名字里的 arch 只是辅助。
+
 ### Fixed
 - **更新弹窗把原始 Markdown 直接显示、而且被截断**（真机截图实锤）：原来
   `Text(info.body.take(400))` —— 用户看到的是 `## v0.3.1-fix`、`>`、`**修复向**`、
