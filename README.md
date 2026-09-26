@@ -9,7 +9,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-27-orange)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
-当前版本 **v0.3.2**（[下载](https://github.com/0Sakura721/Kaze-SLauncher/releases)） · 变更见 [CHANGELOG](CHANGELOG.md)
+当前版本 **v0.3.3**（[下载](https://github.com/0Sakura721/Kaze-SLauncher/releases)） · 变更见 [CHANGELOG](CHANGELOG.md)
 > 液态玻璃已从构建中移除（代码保留）；想要**可用的液态玻璃版本**请用分支 [`liquidglassver`](https://github.com/0Sakura721/Kaze-SLauncher/tree/liquidglassver)（说明见 [LIQUIDGLASS_BRANCH.md](LIQUIDGLASS_BRANCH.md)）。
 >
 > 动手改之前建议先看 [维护笔记](docs/MAINTENANCE.md) —— 记的是那些"只有真跑一次才会
