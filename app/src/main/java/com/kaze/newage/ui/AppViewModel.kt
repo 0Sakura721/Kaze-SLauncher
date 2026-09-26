@@ -9,6 +9,7 @@ import com.kaze.newage.core.addons.AddonManager
 import com.kaze.newage.core.addons.ModrinthApi
 import com.kaze.newage.core.addons.ModrinthSearchHit
 import com.kaze.newage.core.console.ConsoleLine
+import com.kaze.newage.core.console.CONSOLE_MAX_LINES
 import com.kaze.newage.core.console.ConsoleParser
 import com.kaze.newage.core.download.CoreBuild
 import com.kaze.newage.core.download.CoreSources
@@ -176,15 +177,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 // 先用环形缓冲回填历史：ConsoleStream 的实时流是 replay=0，
                 // 不预填的话切到一个**已经在运行**的实例会看到空控制台
                 // （snapshot() 之前定义了却没有任何调用点）
-                _consoleLines.value = stream.snapshot().takeLast(2000)
+                _consoleLines.value = stream.snapshot().takeLast(CONSOLE_MAX_LINES)
                 stream.lines.collect { line ->
                     // 覆盖行（服务端 \r 原地进度）要替换上一行而不是追加：
                         // 只让环形缓冲去替换的话，实时视图仍会把每个百分比都追加成一行
                         val cur = _consoleLines.value
                         _consoleLines.value = if (line.replaceLast && cur.isNotEmpty()) {
-                            (cur.dropLast(1) + line).takeLast(2000)
+                            (cur.dropLast(1) + line).takeLast(CONSOLE_MAX_LINES)
                         } else {
-                            (cur + line).takeLast(2000)
+                            (cur + line).takeLast(CONSOLE_MAX_LINES)
                         }
                     ConsoleParser.parseOnlinePlayers(line.text)?.let { _onlinePlayers.value = it }
                     ConsoleParser.parseJoin(line.text)?.let { name ->

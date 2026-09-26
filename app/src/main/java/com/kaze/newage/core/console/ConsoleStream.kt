@@ -34,8 +34,17 @@ data class ConsoleLine(
  *  - 环形缓冲保留最近 [maxLines] 行，供 [snapshot] 回填（切换实例 / 重建界面时用）
  *  - 实时流不带 replay，缓冲满时丢**最旧**的行，保证最新输出一定到得了界面
  */
+/**
+ * 控制台保留的最大行数（UI 与环形缓冲共用同一个上限，避免"缓冲 2000 / 界面又是另一个数"
+ * 这种对不上的情况）。超出的**最旧**行会被丢掉，但完整日志始终落盘在实例目录的
+ * `console-output.log`，控制台的「保存日志」与实例日志页都能拿到全量。
+ *
+ * 内存量级：每行约 100~150 字节，5000 行 ≈ 1 MB 以内。
+ */
+const val CONSOLE_MAX_LINES = 5000
+
 class ConsoleStream(
-    private val maxLines: Int = 2000,
+    private val maxLines: Int = CONSOLE_MAX_LINES,
 ) {
     private val _lines = MutableSharedFlow<ConsoleLine>(
         replay = 0,

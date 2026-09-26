@@ -78,6 +78,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.kaze.newage.core.console.CONSOLE_MAX_LINES
 
 /**
  * 控制台：实时日志（主题化深色终端）+ 命令输入 —— 本应用的主工作台。
@@ -90,6 +91,12 @@ import java.util.Locale
  *    按日志级别着色（consoleLineColor），除 M3E 的 20dp 圆角外不加描边/标题/底色。
  *  - 命令输入是描边输入框 fused 上主色填充发送键（相连按钮组：外角全圆、内角 8dp）。
  */
+/**
+ * 自动跟随滚动的"平滑/直接跳"分界：目标与当前可见行相差在这个范围内才走动画。
+ * 差得多（切页回来、暂停跟随后恢复）直接跳到底，动画要走几百行会让人以为没反应。
+ */
+private const val SCROLL_ANIMATE_MAX_ITEMS = 30
+
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ConsoleScreen(viewModel: AppViewModel) {
@@ -155,9 +162,22 @@ fun ConsoleScreen(viewModel: AppViewModel) {
         }
     }
 
-    // 新日志自动滚到底部（可暂停跟随）
-    LaunchedEffect(lines.size) {
-        if (follow && lines.isNotEmpty()) scrollToNewest(animated = true)
+    // 新日志自动滚到底部（可暂停跟随）。
+    //
+    // 这里**不能**用 LaunchedEffect(lines.size)：服务端在跑时 lines.size 几毫秒就变一次，
+    // 每次变化都会取消上一个 effect —— 而 animateScrollToItem 是持续多帧的动画，
+    // 被取消就停在半路。平时"人已经在底部、只差 1 行"看不出来；从别的页面切回来时
+    // 差了几百行，动画永远走不完，日志就停在原地，用户得自己往下翻（实报）。
+    //
+    // 改成单个 snapshotFlow 收集器：块内顺序执行，进行中的滚动不会被新行打断。
+    // 另外按距离区分：差得少就平滑滚（连续输出的观感），差得多就直接跳
+    // （切页回来 / 暂停后恢复），不让人干等一次长动画。
+    LaunchedEffect(listState, follow) {
+        snapshotFlow { lines.size }.collect { size ->
+            if (!follow || size == 0) return@collect
+            val distance = (size - 1) - listState.firstVisibleItemIndex
+            scrollToNewest(animated = distance in 1..SCROLL_ANIMATE_MAX_ITEMS)
+        }
     }
 
     // 用户手势把列表从底部拖走（下方还有内容）就暂停跟随，终端右下角浮出「回到底部」。
@@ -306,7 +326,9 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             ConsoleAction(Icons.Filled.Delete, "清空日志") { viewModel.clearConsole() }
             Spacer(Modifier.weight(1f))
             Text(
-                "${lines.size} 行",
+                // 到上限时明确标出来：日志仍在继续写盘，只是控制台不再往上堆
+                if (lines.size >= CONSOLE_MAX_LINES) "${lines.size} 行（上限）"
+                else "${lines.size} 行",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
