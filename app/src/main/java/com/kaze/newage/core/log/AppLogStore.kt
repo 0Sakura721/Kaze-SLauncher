@@ -34,6 +34,23 @@ class AppLogStore(private val context: Context) {
         private val STAMP = SimpleDateFormat("yyyyMMdd", Locale.US)
     }
 
+    /**
+     * 崩溃文本的格式化（抽成独立函数便于单测）。
+     * 必须自带完整堆栈与 cause 链 —— 这份内容就是"闪退现场"的全部。
+     */
+    internal fun formatCrash(threadName: String, throwable: Throwable): String {
+        val sw = java.io.StringWriter()
+        throwable.printStackTrace(java.io.PrintWriter(sw))
+        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
+        return buildString {
+            appendLine("════════ 崩溃 ════════")
+            appendLine("时间: $stamp")
+            appendLine("线程: $threadName")
+            appendLine(sw.toString().trimEnd())
+            appendLine("═════════════════════")
+        }
+    }
+
     val logDir: File get() = File(context.filesDir, "logs")
 
     private var job: Job? = null
@@ -72,6 +89,11 @@ class AppLogStore(private val context: Context) {
     /**
      * 开始采集。重复调用无副作用；采集失败（例如受限设备上 logcat 不可执行）时静默放弃 ——
      * 这是诊断增强，不该影响应用可用性。
+     *
+     * **顺序很重要**：先把上一次会话的尾巴捞回来，再开始实时采集 ——
+     * 采集器跑在应用进程里，进程一闪退它就跟着死，系统最后打的那段
+     * `FATAL EXCEPTION` 根本来不及写进文件；而 logcat 的环形缓冲在进程死后**仍然在**，
+     * 所以下次启动时捞一次就能补上（这正是"闪退也要有日志"的关键一步）。
      */
     fun start(scope: CoroutineScope) {
         if (job?.isActive == true) return
@@ -79,6 +101,7 @@ class AppLogStore(private val context: Context) {
             runCatching {
                 logDir.mkdirs()
                 rotateIfNeeded()
+                salvagePreviousSession()
                 // 只取本应用进程的条目：以自身 UID 跑 logcat 本来也只能看到自己的，
                 // 但显式 --pid 更干净，也避免系统广播刷屏
                 val pid = android.os.Process.myPid()
@@ -95,11 +118,64 @@ class AppLogStore(private val context: Context) {
         }
     }
 
+    /**
+     * 把**上一次运行**遗留的日志尾巴补进今天的文件。
+     *
+     * 为什么要这么做：采集器活在应用进程里，闪退时它一起没了，崩溃现场（系统打的
+     * FATAL EXCEPTION 堆栈、native 崩溃前后的几行）永远写不进文件。但 logcat 的环形缓冲
+     * 在进程死后仍在内存里，所以启动时用 `--uid`（上一次的 pid 已经不可知）dump 一次，
+     * 就能把上一段的末尾捞回来（800 行：崩溃到下次启动之间系统还会打不少字，窗口太小会把现场挤出缓冲）。
+    已经采过的行会重复一次，可接受 —— 诊断文件里重复远好过缺失。
+     */
+    private fun salvagePreviousSession() {
+        val out = runCatching {
+            val p = ProcessBuilder("logcat", "-d", "-v", "threadtime", "--uid=${android.os.Process.myUid()}", "-t", "800")
+                .redirectErrorStream(true)
+                .start()
+            val text = p.inputStream.bufferedReader().use { it.readText() }
+            p.waitFor()
+            text
+        }.getOrNull().orEmpty().trim()
+        if (out.isEmpty()) return
+        appendRaw(
+            buildString {
+                appendLine("──────── 上一次运行的日志尾巴（闪退现场，启动时补捞）────────")
+                appendLine(out)
+                appendLine("──────── 本次运行 ────────")
+            },
+        )
+    }
+
+    /**
+     * 安装崩溃处理器：未捕获异常时**同步**把堆栈写进日志文件再让系统接管。
+     *
+     * 采集器是异步的，进程被杀时它可能还没读到那一行；这里在同一个线程上直接落盘，
+     * 保证"闪退"也一定留下现场。写文件本身也包在 runCatching 里 ——
+     * 崩溃路径上再抛异常会把原始崩溃信息覆盖掉，那才是最糟的结果。
+     */
+    fun installCrashHandler() {
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            runCatching { appendRaw(formatCrash(thread.name, throwable)) }
+            previous?.uncaughtException(thread, throwable)
+        }
+    }
+
     fun stop() {
         runCatching { process?.destroy() }
         process = null
         job?.cancel()
         job = null
+    }
+
+    /** 直接追加一段原文（崩溃堆栈 / 补捞结果），不做行前缀处理 */
+    @Synchronized
+    fun appendRaw(text: String) {
+        runCatching {
+            logDir.mkdirs()
+            currentFile().appendText(text + "\n")
+            trimOld()
+        }
     }
 
     @Synchronized

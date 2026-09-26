@@ -16,7 +16,15 @@
     条目，包括系统为我们打的 `AndroidRuntime: FATAL EXCEPTION` 堆栈。接进文件即可，
     不用插电脑、不用 root 就能事后追溯（`files/logs/app-<日期>.log`，留最近 3 天、
     单文件 2MB 上限，服务端刷屏也写不满存储）。
-- **实例/存档目录默认改为手机根目录的 `KazeS/`**（如 `/sdcard/KazeS`）：存档、服务端 jar、
+- **闪退也一定留下现场**：日志采集器跑在应用进程里，进程一闪退它就跟着死，系统最后打的
+  `FATAL EXCEPTION` / native 崩溃根本来不及落盘。两条补法：
+  - **崩溃处理器**：`Thread.setDefaultUncaughtExceptionHandler` 在崩溃线程上**同步**写出
+    完整堆栈（含 cause 链）再交给系统，保证 Java 崩溃有记录；
+  - **启动时补捞**：logcat 的环形缓冲在进程死后**仍在内存里**，所以下次启动用
+    `logcat -d --uid=<自己> -t 800` 把上一段的尾巴捞回日志文件并标注「闪退现场」——
+    实测（MuMu 上 `kill -11` 制造真闪退）成功捞到
+    `F DEBUG : signal 11 (SIGSEGV) ... SI_USER` 与周边的 crash_dump 行。
+  - 新增 `AppLogStoreCrashTest` 3 例（堆栈完整性 / cause 链不丢 / 目录位置）。- **实例/存档目录默认改为手机根目录的 `KazeS/`**（如 `/sdcard/KazeS`）：存档、服务端 jar、
   运行日志、备份都在用户能用文件管理器直接看到、直接拷贝的地方，不用记
   `Android/data/...` 这种路径。写共享存储需要「所有文件访问」（Android 11+）或
   WRITE_EXTERNAL_STORAGE（11 以下），所以采用前会**实地探测可写**（写一个探针文件），

@@ -65,7 +65,12 @@ class AppContainer(context: Context) {
      * 在这里 start 而不是在界面里：日志的价值恰恰在于**崩溃前那一段**，
      * 挂在界面上会因为切页/退出而中断，事后就查不到了。
      */
-    val appLog: AppLogStore = AppLogStore(appContext).also { it.start(appScope) }
+    val appLog: AppLogStore = AppLogStore(appContext).also {
+        // 先装崩溃处理器再开采集：闪退时采集器会随进程一起死，
+        // 只有同线程同步落盘的处理器才能保证现场留下
+        it.installCrashHandler()
+        it.start(appScope)
+    }
 }
 
 /** 便捷获取容器 */
