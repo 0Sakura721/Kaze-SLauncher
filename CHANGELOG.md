@@ -7,7 +7,31 @@
 
 ## [Unreleased]
 
-_（暂无未发布内容；下次发版时把本节内容并入对应版本号）_
+### Changed
+- **「选择服务端核心」页改用各项目的官方图标**（此前是几何形状的 Material 图标 + 配色，
+  Purpur / Spigot / Fabric / Forge / NeoForge 之间只能靠颜色区分）。现在 Vanilla 是草方块、
+  Paper 是纸飞机、Purpur 是紫色立方、Spigot 是水龙头、Fabric 是线轴、Forge 是铁砧。
+  图标统一归一化为 192×192（透明的裁掉留白后垫浅灰底，否则 Spigot 的深灰 logo 在深色卡片上看不见），
+  首页实例下拉里的同一组件（28dp）一并生效。来源与授权见 `THIRD_PARTY_NOTICES.md`；
+  原版那张草方块是**本项目自绘的像素图**，不含 Mojang 贴图素材。
+
+### Fixed
+- **Forge/NeoForge「装了一半」导致永远起不来**：安装完成的判据原来是"有 `unix_args.txt`
+  就算装好"，而安装器是**先**写入口文件、**后**下那 60 多个依赖库的 —— 中途失败（断网、
+  DNS 不通、取消）会留下一个"看着装好了、库却不全"的目录，之后每次启动都跳过安装，
+  启动时报一长串 `Missing required library` 并退出，用户除了删实例重建没有出路。
+  改为以安装成功标记（`.forge-installed`，仅在 installer 退出码为 0 时写）为准；
+  有入口文件而无标记时日志会明确提示"上次安装未完成，正在补齐"，installer 幂等、重跑即可自愈。
+- **容器内 DNS**：proot 里从来没有配过 `/etc/resolv.conf`，容器内联网的程序一律解析失败
+  （apt 静默失败、Forge 安装器直接 `UnknownHostException`）。现在按系统当前 DNS 写一份并
+  在每次启动容器时绑定进去，换网络自动更新。
+- **首页「启动服务端」旁的控制台快捷入口切不回主页**：该入口用的是裸 `navigate()`，
+  绕过了底栏的 `popUpTo/saveState/restoreState` 语义，两种跳转混用后返回栈不可用。
+  已统一为同一个 `navigateTab`。
+- **版本页那个"常驻"的进度条**：波浪进度条的相位在定量态也一直流动，步骤指示条因此无休止
+  流动；同时 `loadVersions/loadBuilds` 在任务被取消或抛异常时不复位 `loading`，
+  进度条会永久停留。步骤条改为静态，加载状态用 `try/finally` + 请求序号复位，
+  并加了 45s 的界面可见超时与「重试」按钮。
 
 ---
 

@@ -31,6 +31,24 @@ Kaze SLauncher（GPL-3.0）参考/复用了以下开源项目的体系与代码�
 | Minecraft 服务端 jar（Paper/Purpur/Spigot） | 各自官方 API（运行时下载） | MIT（Paper 补丁）+ LGPL-3.0（CraftBukkit 底子）等 |
 | 插件 / 模组 | Modrinth v2 API + CDN（运行时下载） | 各项目自身许可证 |
 
+## 核心图标（`app/src/main/res/drawable-nodpi/ic_core_*.png`）
+
+「新建服务端 → 选择核心」页用的是各项目的**官方标识**，仅用于指代对应软件
+（nominative use），不代表项目方对本应用的认可或背书：
+
+| 图标 | 来源 | 说明 |
+|---|---|---|
+| Paper | github.com/PaperMC（项目 GitHub 组织头像） | PaperMC 项目标识 |
+| Purpur | github.com/PurpurMC（项目 GitHub 组织头像） | PurpurMC 项目标识 |
+| Spigot | github.com/SpigotMC（项目 GitHub 组织头像） | SpigotMC 项目标识 |
+| Fabric | github.com/FabricMC（项目 GitHub 组织头像） | FabricMC 项目标识 |
+| Forge | files.minecraftforge.net/static/images/apple-touch-icon.png | MinecraftForge 官方站点图标 |
+| NeoForge | github.com/neoforged（项目 GitHub 组织头像） | NeoForged 项目标识 |
+| 原版 Vanilla | **本项目自绘**（16×16 像素草方块，脚本见 `docs/m3e/` 同级工具说明） | 刻意不含 Mojang 的贴图素材 |
+
+这些标识的著作权与商标归各自项目所有；若任一项目方要求移除，请提 issue。
+图标在入库前统一归一化为 192×192（透明底的裁掉留白后垫浅灰底，否则深色 logo 在深色卡片上不可见）。
+
 ## 依赖库（AndroidX / Kotlin 生态）
 
 Jetpack Compose / AndroidX（Apache-2.0）、Kotlin & kotlinx（Apache-2.0）、Material Design Icons（Apache-2.0）、Navigation Compose（Apache-2.0）、**Haze**（github.com/chrisbanes/haze，Apache-2.0，安卓原生背景模糊）、**materialkolor**（github.com/jordond/materialkolor，Apache-2.0，动态取色/自定义种子色/取色风格）。
