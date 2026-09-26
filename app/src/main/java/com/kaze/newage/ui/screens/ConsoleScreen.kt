@@ -85,6 +85,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import com.kaze.newage.core.console.CountFormat
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
 
 /**
  * 控制台：实时日志（主题化深色终端）+ 命令输入 —— 本应用的主工作台。
@@ -111,6 +113,10 @@ fun ConsoleScreen(viewModel: AppViewModel) {
     var input by remember { mutableStateOf("") }
     var follow by remember { mutableStateOf(true) }
     val listState = rememberLazyListState()
+    // 回读更早日志：列表顶部会多一个条目，跟随滚动的索引要跟着偏移
+    val hasMoreOlder by viewModel.hasMoreOlder.collectAsStateWithLifecycle()
+    val loadingOlder by viewModel.loadingOlder.collectAsStateWithLifecycle()
+    val headerCount = if (hasMoreOlder) 1 else 0
     val scope = rememberCoroutineScope()
     val tone = serverState.toTone()
 
@@ -159,9 +165,9 @@ fun ConsoleScreen(viewModel: AppViewModel) {
         autoScrolling = true
         try {
             if (animated) {
-                listState.animateScrollToItem(lines.size - 1)
+                listState.animateScrollToItem(lines.size - 1 + headerCount)
             } else {
-                listState.scrollToItem(lines.size - 1)
+                listState.scrollToItem(lines.size - 1 + headerCount)
             }
         } finally {
             autoScrolling = false
@@ -389,6 +395,29 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                 modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
+                if (hasMoreOlder) {
+                    item(key = "load-older") {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !loadingOlder) { viewModel.loadOlderConsole() }
+                                .padding(vertical = 10.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (loadingOlder) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(
+                                if (loadingOlder) "正在读取更早的日志…"
+                                else "加载更早的日志（内存只留最近 5 万行）",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
                 if (lines.isEmpty()) {
                     item {
                         // 空态：形状变化的加载指示器（不是转圈）——启动中会转，停止/出错时定格成形状

@@ -37,6 +37,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import kotlinx.coroutines.withTimeoutOrNull
+import com.kaze.newage.core.console.ConsoleArchive
+import com.kaze.newage.core.console.LineType
+import com.kaze.newage.core.console.CONSOLE_DISPLAY_MAX
 
 /** 服务端下载状态 */
 data class DownloadState(
@@ -184,15 +187,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 // 先用环形缓冲回填历史：ConsoleStream 的实时流是 replay=0，
                 // 不预填的话切到一个**已经在运行**的实例会看到空控制台
                 // （snapshot() 之前定义了却没有任何调用点）
-                _consoleLines.value = stream.snapshot().takeLast(CONSOLE_MAX_LINES)
+                _consoleLines.value = stream.snapshot().takeLast(CONSOLE_DISPLAY_MAX)
+                // 切实例时重置"回读更早日志"的游标（每个实例一份日志文件）
+                instanceStore.get(id)?.dir?.let { d -> _olderCursor.value = ConsoleArchive.start(d) }
+                _hasMoreOlder.value = _olderCursor.value != null
                 stream.lines.collect { line ->
                     // 覆盖行（服务端 \r 原地进度）要替换上一行而不是追加：
                         // 只让环形缓冲去替换的话，实时视图仍会把每个百分比都追加成一行
                         val cur = _consoleLines.value
                         _consoleLines.value = if (line.replaceLast && cur.isNotEmpty()) {
-                            (cur.dropLast(1) + line).takeLast(CONSOLE_MAX_LINES)
+                            (cur.dropLast(1) + line).takeLast(CONSOLE_DISPLAY_MAX)
                         } else {
-                            (cur + line).takeLast(CONSOLE_MAX_LINES)
+                            (cur + line).takeLast(CONSOLE_DISPLAY_MAX)
                         }
                     ConsoleParser.parseOnlinePlayers(line.text)?.let { _onlinePlayers.value = it }
                     ConsoleParser.parseJoin(line.text)?.let { name ->
@@ -402,6 +408,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         sendCommand("list")
     }
 
+    // ── 回读更早的日志（内存窗口之外的历史，来自 console-output.log / .old.log）──
+    private val _olderCursor = MutableStateFlow<ConsoleArchive.Cursor?>(null)
+    private val _hasMoreOlder = MutableStateFlow(false)
+    val hasMoreOlder: StateFlow<Boolean> = _hasMoreOlder.asStateFlow()
+    private val _loadingOlder = MutableStateFlow(false)
+    val loadingOlder: StateFlow<Boolean> = _loadingOlder.asStateFlow()
+
+    /**
+     * 往前读一段更早的日志并**前插**到列表顶部。
+     *
+     * 界面用 LazyColumn 的 key（按 seq）保持滚动位置：前插后索引会整体后移，
+     * 没有 key 的话视图会跳到别处。
+     */
+    fun loadOlderConsole() {
+        val id = _currentInstanceId.value ?: return
+        if (_loadingOlder.value) return
+        val dir = instanceStore.get(id)?.dir ?: return
+        _loadingOlder.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val chunk = ConsoleArchive.readOlder(dir, _olderCursor.value)
+                if (chunk.lines.isNotEmpty()) {
+                    val older = chunk.lines.map { ConsoleLine(it, LineType.Info) }
+                    _consoleLines.value = (older + _consoleLines.value).takeLast(CONSOLE_DISPLAY_MAX)
+                }
+                _olderCursor.value = chunk.cursor
+                _hasMoreOlder.value = chunk.hasMore
+            } catch (e: Exception) {
+                android.util.Log.w("KazeSLauncher", "回读更早日志失败", e)
+                _hasMoreOlder.value = false
+            } finally {
+                _loadingOlder.value = false
+            }
+        }
+    }
+
     /**
      * 清空当前实例控制台显示。
      *
@@ -412,6 +454,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun clearConsole() {
         _currentInstanceId.value?.let { id -> serverManager.consoleFor(id).clear() }
         _consoleLines.value = emptyList()
+        _olderCursor.value = null
+        _hasMoreOlder.value = false
     }
 
     /**
