@@ -7,6 +7,24 @@
 
 ## [Unreleased]
 
+### Removed（构建内）
+- **液态玻璃从软件构建中彻底移除**（**代码完整保留**，随时可接回）：
+  - 设置页删掉整个「液态玻璃」分区（玻璃模式 / 原生模糊 / 玻璃强度）与两个对话框，
+    顶部分类条从 7 个分区变回 6 个（外观 / 背景图 / 存储 / Java / 后台 / 关于）；
+  - 「主题样式」里不再出现 GLASS 选项（连那条"已封锁"提示一起删掉），
+    外观分区副标题里残留的「玻璃强度」也清了；
+  - `AppRoot` 底栏的玻璃链改为**编译期常量** `isGlass = false`。这一点是关键：
+    原来写的是 `LocalAppTheme.current == GLASS`，R8 无法证明它恒假，于是整条玻璃链
+    （`glassBackdropBlur` / `liquidGlassLensSafe`、`theme/blur/` 与 `theme/shader/` 两个包、
+    `LiquidGlassEffect.kt` 里的 shader）都因"运行时可能可达"而被打进 APK；
+    写成常量后编译器直接常量折叠，全部剥离。
+  - 仓库里保留未引用的：`ui/theme/LiquidGlassEffect.kt`、`theme/blur/`、`theme/shader/`、
+    `GlassMode`/`glassParams`/`LocalGlassMode` 等令牌、`SettingsPrefs` 的玻璃项、
+    `AppThemeMode.GLASS` 枚举与玻璃配色分支，以及各处说明性注释。
+  - **实测验证**：对 release dex 搜玻璃相关的**字符串字面量**（R8 会重命名类/方法，
+    类名不可靠）——`cornerRadii` 3→0、`refractionHeight` 4→0、`refractionAmount` 3→0、
+    `depthEffect` 3→0、`KazeGlass` 2→0、`uniform`（shader 源码）6→0，全部归零。
+
 ### Added
 - **应用内「诊断日志」**（设置 → 关于与许可证 → 诊断日志）：应用自身的 logcat 落盘 +
   环境自检合在一页，可刷新 / 分享 / 清空。
