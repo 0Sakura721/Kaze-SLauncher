@@ -39,9 +39,36 @@ data class ConsoleLine(
  * 这种对不上的情况）。超出的**最旧**行会被丢掉，但完整日志始终落盘在实例目录的
  * `console-output.log`，控制台的「保存日志」与实例日志页都能拿到全量。
  *
- * 内存量级：每行约 100~150 字节，5000 行 ≈ 1 MB 以内。
+ * 内存量级：每行约 100~150 字节，20000 行 ≈ 3 MB 以内。
+ *
+ * 从 5000 提到 20000：服务器开久了（挂机几小时）日志会持续累积，5000 行很快见底。
+ * 提高上限只是延后，真正解决"看不到"的是丢掉的行数会被记下来并在界面上说明去哪找
+ * （见 [droppedCount] 与 ConsoleScreen 的标题）。
  */
-const val CONSOLE_MAX_LINES = 5000
+const val CONSOLE_MAX_LINES = 20_000
+
+/**
+ * 连续多少行"同类刷屏输出"之后在**控制台**折叠。
+ *
+ * 起因（真机反馈）：补全依赖 / 解压时每来一个文件就是一行，几千行直接把环形缓冲冲爆，
+ * 前面真正有用的输出全被挤掉，屏幕上只剩「N 行（上限）」。
+ *
+ * ⚠️ 折叠必须**保守**：只针对"文件操作 / 进度"这类天然会重复成千上万行的输出。
+ * 早期版本用「前 20 个字符相同」当判据，结果把正常的服务器日志
+ * （`【Server thread/INFO】: …` 这类共享前缀的行）也折叠了 —— 那是**信息**，不是噪声。
+ *
+ * 折叠只作用于控制台：`slot.log()` 已经同步把每一行写进实例目录的
+ * `console-output.log`，完整记录一条不少。
+ */
+const val CONSOLE_BURST_LIMIT = 8
+
+/** 会被折叠的"刷屏型"行的特征：文件操作动词，或进度形式 */
+private val FLOOD_VERBS = Regex(
+    "^(downloading|download|extracting|extract|unpacking|installing|copying|copy|fetching|" +
+        "deploying|verifying|checking|resolving|" +
+        "下载|解压|解压缩|安装|复制|展开|补齐|补全|校验|获取|正在)\\b",
+    RegexOption.IGNORE_CASE,
+)
 
 class ConsoleStream(
     private val maxLines: Int = CONSOLE_MAX_LINES,
@@ -59,12 +86,88 @@ class ConsoleStream(
     /** 供 UI 读取的已缓冲行（简单环形缓冲实现） */
     private val buffer = ArrayDeque<ConsoleLine>()
 
+    // ── 同类刷屏折叠的状态 ──
+    private var burstKey: String? = null
+    private var burstSeen = 0
+    private var burstStartType: LineType = LineType.Info
+    /** 缓冲里最后一行是不是"折叠汇总行"（要原地更新它，而不是再堆一行） */
+    private var lastIsSummary = false
+
+    /**
+     * 因为超过 [maxLines] 而被丢掉的行数。
+     *
+     * 服务器开久了必然会丢 —— 这不是 bug，但界面必须**说清楚**：
+     * 这些行还在实例目录的 `console-output.log` 里，而不是凭空消失。
+     */
+    @Volatile
+    var droppedCount: Int = 0
+        private set
+
     @Synchronized
     fun emit(text: String, type: LineType = LineType.Info, replaceLast: Boolean = false) {
+        val key = familyKey(text)
+
+        // 换了"家族"（或空行、或本来就要替换上一行）：重新计数
+        if (replaceLast || key.isEmpty() || key != burstKey) {
+            burstKey = key.ifEmpty { null }
+            burstSeen = if (key.isEmpty()) 0 else 1
+            burstStartType = type
+            append(text, type, replaceLast)
+            return
+        }
+
+        burstSeen++
+        if (burstSeen <= CONSOLE_BURST_LIMIT) {
+            append(text, type, false)
+            return
+        }
+
+        // 超出阈值：不再往缓冲里塞新行，改成**原地更新**一行汇总
+        val folded = burstSeen - CONSOLE_BURST_LIMIT
+        val summary = buildString {
+            append(text.take(140))
+            append("\n        ⋯ 同类输出已折叠 ").append(folded)
+            append(" 行（完整内容见实例目录的 console-output.log）")
+        }
+        if (lastIsSummary && buffer.isNotEmpty()) buffer.removeLast()   // 替换上一个汇总行
+        append(summary, burstStartType, replaceLast = true)
+    }
+
+    private fun append(text: String, type: LineType, replaceLast: Boolean) {
         val line = ConsoleLine(text, type, replaceLast = replaceLast)
+        lastIsSummary = text.contains("同类输出已折叠")
         buffer.addLast(line)
-        while (buffer.size > maxLines) buffer.removeFirst()
+        while (buffer.size > maxLines) {
+            buffer.removeFirst()
+            droppedCount++
+        }
         _lines.tryEmit(line)
+    }
+
+    /**
+     * 一行的"家族"：用于判断连续多行是不是同一类刷屏。
+     *
+     * **只有"刷屏型"行才有家族**（文件操作动词开头 / 进度形式），其余一律返回空串 ——
+     * 空串永远不折叠。这一点很关键：早期版本拿"前 20 字符相同"当判据，把正常的
+     * 服务器日志也折叠了，那是信息而不是噪声。
+     */
+    private fun familyKey(text: String): String {
+        val t = text.trim()
+        if (t.isEmpty()) return ""
+        if (!isFloodProne(t)) return ""
+        // 家族 = 归一化后的**动词**（去掉时间戳与数字）
+        val stripped = t.replace(Regex("^\\[?\\d{1,2}:\\d{2}:\\d{2}]?\\s*"), "")
+        val verb = FLOOD_VERBS.find(stripped)?.value?.lowercase() ?: return ""
+        return verb
+    }
+
+    /** 这一行像不像"成千上万行"的那种输出（文件操作 / 进度） */
+    private fun isFloodProne(t: String): Boolean {
+        // 进度形式：以 % 结尾，或 "3/128" 这种计数
+        if (t.endsWith("%")) return true
+        if (Regex("\\b\\d+\\s*/\\s*\\d+\\b").containsMatchIn(t)) return true
+        val stripped = t.replace(Regex("^\\[?\\d{1,2}:\\d{2}:\\d{2}]?\\s*"), "")
+        return FLOOD_VERBS.containsMatchIn(stripped)
     }
 
     /** 覆盖式输出（服务端用 \r 原地更新进度，如 "Preparing spawn area: 50%"）：
@@ -82,5 +185,9 @@ class ConsoleStream(
     @Synchronized
     fun clear() {
         buffer.clear()
+        burstKey = null
+        burstSeen = 0
+        lastIsSummary = false
+        droppedCount = 0
     }
 }

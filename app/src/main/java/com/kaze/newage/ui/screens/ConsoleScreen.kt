@@ -327,8 +327,9 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             ConsoleAction(Icons.Filled.Delete, "清空日志") { viewModel.clearConsole() }
             Spacer(Modifier.weight(1f))
             Text(
-                // 到上限时明确标出来：日志仍在继续写盘，只是控制台不再往上堆
-                if (lines.size >= CONSOLE_MAX_LINES) "${lines.size} 行（上限）"
+                // 到上限时明确标出**去哪找更早的**：日志仍在继续写盘（console-output.log），
+                // 只是控制台不再往上堆。服务器开久了必然会到这里，别让用户以为日志丢了。
+                if (lines.size >= CONSOLE_MAX_LINES) "${lines.size} 行（上限，更早的见 console-output.log）"
                 else "${lines.size} 行",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
