@@ -40,7 +40,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -55,7 +54,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -206,14 +204,10 @@ fun InstanceDetailScreen(
         )
     }
 
-    // ── 标签页 ──
-    var tab by rememberSaveable(instanceId) { mutableStateOf(DetailTab.Run) }
+    // 四个分区（运行 / 配置 / 世界 / 附加）同在一页，共用一个滚动位置。
+    // 原来这里有 tab 状态、切页回顶的 LaunchedEffect 和 per-tab 的 SaveableStateProvider；
+    // 没有标签栏之后都不需要了 —— 分区一直在组合里，页内的 rememberSaveable 自然保住。
     val scrollState = rememberScrollState()
-    // 四页高度差别很大，沿用上一页的滚动位置会落在空白处，切页一律回到顶部
-    LaunchedEffect(tab) { scrollState.scrollTo(0) }
-    // 标签页离开组合时保住页内的 rememberSaveable：server.properties 的未保存修改、
-    // 「已保存」标记、玩家名输入都靠它，否则切一次页就被静默回滚
-    val tabStateHolder = rememberSaveableStateHolder()
 
     Column(
         Modifier
@@ -262,26 +256,11 @@ fun InstanceDetailScreen(
             )
         }
 
-        // 主标签页（M3 标准主标签页：选中项 primary + 3dp 指示条 + outlineVariant 分割线）。
-        // 容器透明：本应用的背景由 AppBackground 绘制，用 surface 会盖出一条色带
-        PrimaryTabRow(
-            selectedTabIndex = tab.ordinal,
-            modifier = Modifier.fillMaxWidth(),
-            containerColor = Color.Transparent,
-        ) {
-            DetailTab.entries.forEach { entry ->
-                Tab(
-                    selected = tab == entry,
-                    onClick = { tab = entry },
-                    text = { Text(entry.label) },
-                )
-            }
-        }
-
-        // ── 分区内容：每页自己滚动，底部留出常驻底栏的高度 ──
+        // ── 分区内容：四块按顺序铺在同一页 ──
+        // 原来上面有一条 运行 / 配置 / 世界 / 附加 的主标签栏，真机反馈要求去掉。
+        // 仍然是一个 Column + verticalScroll，底部留出常驻底栏的高度。
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            tabStateHolder.SaveableStateProvider(tab.name) {
-                Column(
+            Column(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(scrollState)
@@ -289,25 +268,25 @@ fun InstanceDetailScreen(
                         .padding(top = M3Spacing.betweenGroups, bottom = M3Spacing.bottomBarSpace),
                     verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenGroups),
                 ) {
-                    when (tab) {
-                        DetailTab.Run -> RunTab(
+                    run {
+                        RunTab(
                             viewModel = viewModel,
                             instance = instance,
                             state = state,
                             stateColor = stateColor,
                             backups = backups,
                             onOpenLogs = onOpenLogs,
-                            onOpenWorld = { tab = DetailTab.World },
+                            onOpenWorld = {},
                         )
 
-                        DetailTab.Config -> PropertiesEditor(
+                        PropertiesEditor(
                             dir = instance.dir,
                             instanceName = instance.name,
                             isRunning = state == ServerState.Running,
                             onSave = { props -> ServerProperties.save(instance.dir, props) },
                         )
 
-                        DetailTab.World -> WorldTab(
+                        WorldTab(
                             backups = backups,
                             busy = backupBusy,
                             message = backupMsg,
@@ -371,14 +350,13 @@ fun InstanceDetailScreen(
                             },
                         )
 
-                        DetailTab.Addons -> AddonsTab(
+                        AddonsTab(
                             instance = instance,
                             onOpenAddons = onOpenAddons,
                             onOpenLogs = onOpenLogs,
                         )
                     }
                 }
-            }
         }
     }
 
@@ -413,13 +391,6 @@ fun InstanceDetailScreen(
     }
 }
 
-/** 实例详情的四个分区（草图：运行 / 配置 / 世界 / 附加） */
-private enum class DetailTab(val label: String) {
-    Run("运行"),
-    Config("配置"),
-    World("世界"),
-    Addons("附加"),
-}
 
 /**
  * 常驻状态条：状态胶囊 + 主行动按钮。
