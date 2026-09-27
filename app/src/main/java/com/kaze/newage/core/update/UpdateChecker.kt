@@ -19,25 +19,58 @@ object UpdateChecker {
     private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
     private const val API_LIST = "https://api.github.com/repos/$REPO/releases"
 
-    /** GitHub 下载加速镜像（社区常用线路，前缀直拼 GitHub 原链） */
-    // 按**实测吞吐**排序（同一台机器、同一个 30 MB 的包，各取前 2 MB）：
-    //   github.ednovas.xyz      890 KB/s  ✓
-    //   github.boki.moe         706 KB/s  ✓
-    //   其余 11 个                全部 0（超时/失败）
-    //  直连 github.com          40 KB/s   ← 最慢，已挪到候选列表**最后**
-    // 旧顺序把两个"实测不通"的放在最前面，每次更新先白等 40 秒才轮到能用的镜像。
+    /**
+     * GitHub 下载加速镜像（社区常用线路，前缀直拼 GitHub 原链）。
+     *
+     * ## 顺序按实测来，不是"看起来像"
+     * 同一台机器、同一个 30 MB 的包实测（取前 1 MB，10s 上限）：
+     * ```
+     *  gh.xxooo.cf            2.4s ✓     gh.nxnow.top            4.1s ✓
+     *  gitproxy.mrhjx.cn      2.1s ✓     gh.zwy.one              5.7s ✓
+     *  github.ednovas.xyz     2.4s ✓     cdn.gh-proxy.com        5.4s ✓
+     *  gh-proxy.com           2.7s ✓     ghproxy.net             6.2s ✓
+     *  ghproxy.monkeyray.net  3.2s ✓     github.boki.moe         4.3s ✓
+     *  ghfast.top             3.4s ✓
+     *  ── 以上可用 ──
+     *  gh.llkk.cc / ghproxy.cc / gh.6yit.com / gh.jasonzeng.dev /
+     *  ghproxy.cfd / github.moeyy.xyz / hub.gitmirror.com       ✗ 全部失败
+     *  直连 github.com                                          40 KB/s ← 最慢
+     * ```
+     *
+     * ⚠️ 镜像可用性**抖动很大**：同一批源用 2 MB 探测时只剩 2 个通过，
+     * 换个时间/换探测长度结果就不同。所以这里保留一批（而不是只留最快的两个），
+     * 由 [com.kaze.newage.util.Downloader.probeFastest] 每次下载前现测现选。
+     *
+     * ## 一个测出来的**否定结论**：不要做多线程分块下载
+     * 同一镜像同一时刻整包下载：
+     * ```
+     *  1 连接  7.2 MB/s   ← 最快
+     *  4 连接  3.5 MB/s
+     *  8 连接  2.0 MB/s
+     * ```
+     * 镜像按**连接数**限速，连接越多每条越慢、总速反而下降。
+     * 谁想加"6 线程 Range 下载"之前，请先复测这一条。
+     */
     private val MIRRORS = listOf(
+        "https://gitproxy.mrhjx.cn/",
+        "https://gh.xxooo.cf/",
         "https://github.ednovas.xyz/",
+        "https://gh-proxy.com/",
+        "https://ghproxy.monkeyray.net/",
+        "https://ghfast.top/",
+        "https://gh.nxnow.top/",
+        "https://gh.zwy.one/",
+        "https://cdn.gh-proxy.com/",
         "https://github.boki.moe/",
+        "https://ghproxy.net/",
+        // 以下为历史线路，当前实测不通，留作不同网络环境下的兜底
+        "https://gh.llkk.cc/",
         "https://hub.gitmirror.com/",
         "https://github.limoruirui.com/",
         "https://github.abskoop.workers.dev/",
         "https://github.tbedu.top/",
-        "https://gh.llkk.cc/",
-        "https://gh.nxnow.top/",
-        "https://ghproxy.monkeyray.net/",
-        "https://gitproxy.mrhjx.cn/",
-        "https://gh.zwy.one/",
+        "https://github.moeyy.xyz/",
+        "https://mirror.ghproxy.com/",
     )
 
     data class ReleaseInfo(
