@@ -151,6 +151,8 @@ fun InstanceDetailScreen(
     var backupMsg by remember { mutableStateOf<String?>(null) }
     var exportTarget by remember { mutableStateOf<File?>(null) }
     var restoreTarget by remember { mutableStateOf<File?>(null) }
+    // 删除备份：不可逆，且紧邻「恢复 / 导出」，必须二次确认（同页其它破坏性操作都有）
+    var deleteTarget by remember { mutableStateOf<File?>(null) }
     val backups = remember(instanceId, backupRefresh) { BackupManager.list(instance) }
     val backupScope = rememberCoroutineScope()
     val appContext = LocalContext.current.applicationContext
@@ -345,7 +347,7 @@ fun InstanceDetailScreen(
                                 exportLauncher.launch(f.name)
                             },
                             onDelete = { f ->
-                                BackupManager.delete(f)
+                                deleteTarget = f
                                 backupRefresh++
                             },
                         )
@@ -361,6 +363,29 @@ fun InstanceDetailScreen(
     }
 
     // 恢复确认弹窗：恢复会用备份整体替换当前实例目录（模态，不属于任何一页）
+    // 删除确认弹窗：不可逆，明确写清后果
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除「${target.name.removeSuffix(".zip")}」？") },
+            text = { Text("该备份文件将被永久删除，无法恢复。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val f = target
+                        deleteTarget = null
+                        BackupManager.delete(f)
+                        backupMsg = "已删除备份：${f.name.removeSuffix(".zip")}"
+                        backupRefresh++
+                    }
+                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            },
+        )
+    }
+
     restoreTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { restoreTarget = null },
