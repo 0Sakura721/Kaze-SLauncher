@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -815,10 +816,43 @@ class DefaultServerManager(
             LineType.System,
         )
         val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
-        val code = env.execute(
-            listOf(javaBin, "-jar", installer.name, "--installServer"),
-            instance.dir,
-        ) { line -> slot.log(line, classify(line)) }
+        // ── 安装期间的实时进度行 ──
+        // Forge 安装最后一步是 binarypatcher 对 ~50MB 的 srg.jar 做 LZMA 解压 + 二进制差分，
+        // **全程一行输出都没有**，手机上要跑好几分钟 —— 真机反馈的"卡在这"就是这个阶段。
+        // 这里每 0.5 秒刷新一行：已用时长 + **已经写出多少 MB**（输出 jar 在持续长大，
+        // 那就是解压/打补丁的真实进度）。
+        //
+        // 两个细节：
+        //  · 用 logReplace 原地替换一行，不会把控制台刷爆；
+        //  · 只在安装器**静默超过 2 秒**时才占那一行 —— replace 是替换上一行，
+        //    否则会把安装器正在输出的正常日志顶掉。
+        val startedAt = System.currentTimeMillis()
+        var lastLineAt = System.currentTimeMillis()
+        val code = coroutineScope {
+            val ticker = launch {
+                while (isActive) {
+                    delay(500)
+                    if (System.currentTimeMillis() - lastLineAt < 2000) continue
+                    val used = (System.currentTimeMillis() - startedAt) / 1000
+                    slot.logReplace(
+                        "> 安装中 ${used / 60} 分 ${used % 60} 秒 · ${forgePatchProgress(instance)}",
+                        LineType.System,
+                    )
+                }
+            }
+            try {
+                env.execute(
+                    listOf(javaBin, "-jar", installer.name, "--installServer"),
+                    instance.dir,
+                ) { line ->
+                    lastLineAt = System.currentTimeMillis()
+                    slot.log(line, classify(line))
+                }
+            } finally {
+                ticker.cancel()
+            }
+        }
+        val elapsedMin = (System.currentTimeMillis() - startedAt) / 60_000
         // 安装期间用户可能点了停止
         slot.checkCancelled()
         if (code != 0) {
@@ -834,7 +868,29 @@ class DefaultServerManager(
         // 成功标记必须**在这里**写：forgeInstalled() 认的就是它。
         // 若在安装成功前就写，会在失败时留下"已安装"的假象，之后永远跳过安装、再也修不回来。
         runCatching { instance.forgeMarker.writeText(javaVersion.toString()) }
-        slot.log("> ${instance.coreType.displayName} 安装完成", LineType.System)
+        slot.log("> ${instance.coreType.displayName} 安装完成（耗时 $elapsedMin 分钟）", LineType.System)
+    }
+
+    /**
+     * 打补丁阶段的"进度"：看输出 jar 长到多大了。
+     *
+     * 只扫 `libraries/net/minecraftforge/forge/` 这个小目录（几层、少量文件），
+     * 不做全目录遍历 —— 每 0.5 秒跑一次，在 FUSE 挂载的外部存储上全量 walk 会把主线程拖垮。
+     * 找不到就返回"解析补丁中…"，宁可不报也不猜。
+     */
+    private fun forgePatchProgress(instance: ServerInstance): String {
+        val dir = File(instance.dir, "libraries/net/minecraftforge/forge")
+        val jar = runCatching {
+            dir.walkTopDown().maxDepth(3)
+                .filter { it.isFile && it.name.endsWith("-server.jar") }
+                .maxByOrNull { it.length() }
+        }.getOrNull()
+        return if (jar != null && jar.length() > 0) {
+            val mb = jar.length() / 1024.0 / 1024.0
+            "已写出 " + String.format(java.util.Locale.US, "%.1f", mb) + " MB（打补丁中，无输出属正常）"
+        } else {
+            "解析补丁中…（无输出属正常，请勿退出）"
+        }
     }
 
     /** 玩家聊天行：`... [Server thread/INFO]: <Steve> 内容` */
