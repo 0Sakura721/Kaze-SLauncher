@@ -93,4 +93,40 @@ class ConsoleArchiveTest {
         val got = drain(dir)
         assertEquals(listOf("a", "b", "c"), got)
     }
+
+    /**
+     * 超过一个块（[ConsoleArchive] 内部 BLOCK = 256 KB）的文件。
+     *
+     * 这是旧实现的**盲区**：文件不到 256 KB 时块边界永远落不进文件内部，
+     * "块首半行交给下一次"那条分支根本走不到，而正是它在跨块时把边界行拼坏
+     * （块首半行与下一块的读取区间重叠 → 同一段读两遍、边界行被截断重复）。
+     * 真机上 console-output.log 轻易就有几 MB，所以这里必须真的超过一个块。
+     *
+     * 用中文压"按字节结算"这条路径：一行 3 字节起，按字符数算落点必然错位。
+     */
+    @Test
+    fun `超过一个块的文件分块回读不重不漏`() {
+        val lines = (1..40000).map { "第 $it 行：这是中文日志内容 content-$it" }
+        val dir = dirWith("console-output.log", lines.joinToString("\n") + "\n")
+        val size = File(dir, "console-output.log").length()
+        assertTrue("用例必须真的超过一个块（实际 $size 字节），否则又回到盲区", size > 256 * 1024)
+
+        assertEquals("跨块回读必须与原文逐行相同", lines, drain(dir, chunk = 1000))
+    }
+
+    /** 两份日志都超过一个块，且跨文件切换正好落在块边界附近 */
+    @Test
+    fun `超过一个块时轮转的两份日志都能完整读回`() {
+        val dir = createTempDirectory("kaze-arc").toFile()
+        val old = (1..20000).map { "旧日志第 $it 行：内容内容内容" }
+        val new = (1..20000).map { "新日志第 $it 行：内容内容内容" }
+        File(dir, "console-output.old.log").writeText(old.joinToString("\n") + "\n")
+        File(dir, "console-output.log").writeText(new.joinToString("\n") + "\n")
+        assertTrue(File(dir, "console-output.old.log").length() > 256 * 1024)
+        assertTrue(File(dir, "console-output.log").length() > 256 * 1024)
+
+        val got = drain(dir, chunk = 1000)
+        assertEquals(old.size + new.size, got.size)
+        assertEquals("两份日志的拼接顺序必须是先旧后新", old + new, got)
+    }
 }
