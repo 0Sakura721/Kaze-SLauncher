@@ -97,6 +97,34 @@ class DefaultServerManager(
     private class StartCancelled : Exception("用户已请求停止")
 
     // ── 每实例运行会话 ──
+    /**
+     * 状态自愈：进程已经没了，但状态还停在"运行中"。
+     *
+     * 退出检测原本**完全依赖** start() 里那条 `proc.waitFor()` 协程（见 slot.waitJob）：
+     * 只要它有任何一条路径没跑到 handleExit —— 被取消、卡死、proot 被系统回收后
+     * 父子进程关系错乱 —— 界面就会永远显示"运行中"。真机反馈的
+     * "服务端强制结束仍显示运行"就是这个。
+     *
+     * 这里每秒核对一次，判定条件刻意收得很紧：
+     *   state == Running **且** process 句柄存在 **且** 已死。
+     * process == null 的部署/装 Java/首启探测阶段不会被误伤（那时根本不可能是 Running）。
+     */
+    init {
+        scope.launch {
+            while (isActive) {
+                delay(1000)
+                // toList()：handleExit → finalizeStop 会改 slots，边遍历边改会抛并发异常
+                slots.values.toList().forEach { slot ->
+                    val p = slot.process
+                    if (slot.state.value == ServerState.Running && p != null && !p.isAlive) {
+                        slot.log("> 检测到服务端进程已结束，状态回落为已停止", LineType.Warn)
+                        handleExit(slot)
+                    }
+                }
+            }
+        }
+    }
+
     private inner class RuntimeSlot(val instance: ServerInstance) {
         val console: ConsoleStream = consoles.getOrPut(instance.id) { ConsoleStream() }
         val state = MutableStateFlow(ServerState.Idle)
