@@ -559,10 +559,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val chunk = ConsoleArchive.readOlder(dir, _olderCursor.value)
+                // 回读期间用户可能已经切到别的实例：这一批行属于**旧实例**，
+                // 直接丢弃。旧实现无条件前插，于是 A 的历史会出现在 B 的控制台顶部。
+                if (_currentInstanceId.value != id) return@launch
                 if (chunk.lines.isNotEmpty()) {
                     val older = chunk.lines.map { ConsoleLine(it, LineType.Info) }
-                    _consoleLines.value = (older + _consoleLines.value).takeLast(CONSOLE_DISPLAY_MAX)
+                    // 与批量发布的定时器共用同一把锁：两边都是"读当前列表 → 拼接 → 写回"，
+                    // 不锁就会互相覆盖 —— 表现为回读的历史或刚到的实时行凭空少一截。
+                    synchronized(consoleLock) {
+                        _consoleLines.value = (older + _consoleLines.value).takeLast(CONSOLE_DISPLAY_MAX)
+                    }
                 }
+                if (_currentInstanceId.value != id) return@launch
                 _olderCursor.value = chunk.cursor
                 _hasMoreOlder.value = chunk.hasMore
             } catch (e: Exception) {
@@ -855,7 +863,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ── 动作：插件/模组（Modrinth）──
-    fun searchAddons(query: String, kind: AddonKind) {
+    fun searchAddons(query: String, kind: AddonKind, loader: String? = null) {
         if (query.isBlank()) return
         val seq = addonSearchSeq.incrementAndGet()
         // 换了类型：旧结果立刻作废（连同 kind 标记一起换掉），页面不会再拿它渲染
@@ -865,7 +873,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _addonSearching.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val hits = ModrinthApi.search(query, kind)
+                // loader 用实例的实际核心类型（Purpur/Spigot 各不相同）：搜索 facet 写死 paper 时
+                // 专为其它核心写的插件搜不到
+                val hits = ModrinthApi.search(query, kind, loader = loader)
                 // 序号不是最新的说明用户又搜了一次：丢弃这次结果，别把新结果覆盖回旧的
                 if (seq != addonSearchSeq.get()) return@launch
                 _addonResults.value = hits

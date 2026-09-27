@@ -79,6 +79,15 @@ object ConsoleArchive {
 
         var fileIndex = files.indexOfFirst { it.absolutePath == cursor?.file?.absolutePath }
         if (fileIndex < 0) fileIndex = 0
+        // 日志轮转识别：console-output.log 超过 8MB 会被**改名**成 console-output.old.log，
+        // 而游标记的是"文件名 + 偏移"。文件变短（偏移超过它的长度）说明它被轮转过了 ——
+        // 直接 coerceIn 会把偏移钳到新文件的末尾，于是把刚读过的那批行又读一遍
+        //（表现为"加载更早的日志"点下去只是重复末尾内容）。
+        // rename 不改字节，所以换到更旧的那一份、偏移保持不变即可接着往回读。
+        // 若更旧的那份也不存在（连续轮转把它挤掉了），只能按旧行为钳位 —— 如实记在这里。
+        if (cursor != null && cursor.offset > files[fileIndex].length() && fileIndex + 1 < files.size) {
+            fileIndex++
+        }
         var end = (cursor?.offset ?: files[fileIndex].length())
             .coerceIn(0L, files[fileIndex].length())
 

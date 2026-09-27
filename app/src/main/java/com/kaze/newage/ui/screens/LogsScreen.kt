@@ -304,7 +304,11 @@ fun LogsScreen(
                     shape = M3Shape.groupFirst(56f),
                     enabled = exportable.isNotEmpty(),
                 ) {
-                    val name = "kaze-${instance.name}-logs-${
+                    // 导出文件名要净化：显示名是用户自由输入的，含 `/` 时系统会把它当路径分隔符，
+                    // CreateDocument 直接失败（或建到别的目录），而调用方把它包在 runCatching 里
+                    // 静默吞掉 —— 用户点了「导出全部」没有任何反应。
+                    val safeName = instance.name.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_").ifBlank { "server" }
+                    val name = "kaze-$safeName-logs-${
                         SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
                     }.txt"
                     exportLauncher.launch(name)
@@ -456,7 +460,16 @@ private fun readTail(file: File, maxBytes: Int = 300 * 1024): String {
     val len = file.length()
     val skip = if (len > maxBytes) len - maxBytes else 0L
     return file.inputStream().use { ins ->
-        ins.skip(skip)
+        // skip 必须**循环补跳**：InputStream.skip 允许少跳（返回值是实际跳过的字节数），
+        // 文件流上虽然通常一次到位，但在 FUSE/外部存储（本应用的实例目录正是外部存储）上
+        // 少跳是常态。旧实现丢掉返回值，于是"末尾 300KB"实际可能从中间某处开始，
+        // 甚至把整份日志当成末尾内容读出来。
+        var remaining = skip
+        while (remaining > 0) {
+            val n = ins.skip(remaining)
+            if (n <= 0) break
+            remaining -= n
+        }
         val bytes = ins.readBytes()
         val text = String(bytes, Charsets.UTF_8)
         if (skip > 0) "…（已截断，仅显示末尾）\n$text" else text

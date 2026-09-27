@@ -71,8 +71,14 @@ object AddonManager {
         onProgress: (Float, String) -> Unit,
     ): File {
         val loader = loaderFor(instance, kind)
-        val versions = ModrinthApi.versions(projectId, loader, gameVersion?.takeIf { it.isNotBlank() })
-            .ifEmpty { ModrinthApi.versions(projectId, loader) }
+        val gv = gameVersion?.takeIf { it.isNotBlank() }
+        val versions = ModrinthApi.versions(projectId, loader, gv)
+        // 指定了 MC 版本却一个都没有适配 → 直接报错。
+        // 旧实现在这里**退回到"不带版本过滤"再查一次**，于是给 1.20.1 的实例静默装上 1.21 的模组：
+        // 文件进了 mods/、界面提示"已安装"，服务端要等重启时才报版本不匹配（甚至直接崩）。
+        if (versions.isEmpty() && gv != null) {
+            throw RuntimeException("这个项目没有适配 MC $gv 的 $loader 版本")
+        }
         val version = versions.firstOrNull() ?: throw RuntimeException("没有适配 $loader 的版本")
         val file = version.files.firstOrNull { it.primary } ?: version.files.firstOrNull()
             ?: throw RuntimeException("版本无下载文件")
@@ -114,7 +120,14 @@ object AddonManager {
                 }
             }.getOrDefault(false) },
         )
-        if (dest.exists()) dest.delete()
+        // 同名文件不能直接删：用户可能自己往 plugins/ 里放过同名 jar（或手动改过版本），
+        // 旧实现 `if (dest.exists()) dest.delete()` 一句话就把它抹掉、还没有任何提示。
+        // 这里把旧的挪成 `<名字>.replaced-<时间戳>`（后缀不是 .jar，服务端不会加载它、
+        // 也不会出现在"已安装"列表里），要找回随时能找回。
+        if (dest.exists()) {
+            val keep = File(dir, dest.name + ".replaced-" + System.currentTimeMillis())
+            if (!dest.renameTo(keep)) dest.delete()
+        }
         if (!part.renameTo(dest)) {
             part.copyTo(dest, overwrite = true)
             part.delete()

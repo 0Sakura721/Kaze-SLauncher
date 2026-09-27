@@ -56,10 +56,24 @@ object ModrinthApi {
     private const val USER_AGENT = "KazeSLauncher/3.0 (com.kaze.newage; server launcher)"
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** 搜索项目 */
-    fun search(query: String, kind: AddonKind, limit: Int = 20): List<ModrinthSearchHit> {
+    /**
+     * 搜索项目。
+     *
+     * 插件的 categories facet 必须跟着**实例的实际加载器**走：旧实现写死 `categories:paper`，
+     * 于是 Purpur/Spigot 实例搜出来的全是 paper 分类条目（专为 purpur 写的插件反而搜不到），
+     * 自定义核心也被强行套上 paper 分类。[loader] 为空时只按项目类型过滤。
+     */
+    fun search(
+        query: String,
+        kind: AddonKind,
+        limit: Int = 20,
+        loader: String? = null,
+    ): List<ModrinthSearchHit> {
         val facets = when (kind) {
-            AddonKind.PLUGIN -> """[["project_type:plugin"],["categories:paper"]]"""
+            AddonKind.PLUGIN -> buildList {
+                add("""["project_type:plugin"]""")
+                loader?.takeIf { it.isNotBlank() }?.let { add("""["categories:$it"]""") }
+            }.joinToString(prefix = "[", postfix = "]", separator = ",")
             AddonKind.MOD -> """[["project_type:mod"]]"""
         }
         val url = "$BASE/search?query=${enc(query)}&limit=$limit&index=relevance&facets=${enc(facets)}"

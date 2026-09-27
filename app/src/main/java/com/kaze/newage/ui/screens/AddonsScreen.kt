@@ -95,6 +95,12 @@ fun AddonsScreen(
 
     val kindLabel = if (kind == AddonKind.PLUGIN) "插件" else "模组"
 
+    // 当前核心不支持这类附加组件时，搜索与安装必须**一起停用**：
+    // 旧实现只在上面挂一条警示横幅，搜索框、安装按钮照常可用 ——
+    // 用户搜到并"安装成功"的东西，服务端根本不会加载（插件进 plugins/ 但核心是 Fabric，
+    // 或者相反），而界面显示一切正常。横幅也已经写明当前核心类型。
+    val supported = AddonManager.supports(instance, kind)
+
     var query by remember { mutableStateOf("") }
     var searched by remember { mutableStateOf(false) }
     var refresh by remember { mutableIntStateOf(0) }
@@ -147,9 +153,10 @@ fun AddonsScreen(
 
     // 回车与右侧图标都走这里；状态在调用时现读，避免闭包捕获到过期的可点状态
     fun submitSearch() {
-        if (query.isBlank() || searching) return
+        if (query.isBlank() || searching || !supported) return
         searched = true
-        viewModel.searchAddons(query.trim(), kind)
+        // loader 跟着实例的实际核心类型走（search 的 facet 不能写死 paper）
+        viewModel.searchAddons(query.trim(), kind, AddonManager.loaderFor(instance, kind))
     }
 
     Column(
@@ -177,16 +184,16 @@ fun AddonsScreen(
             verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenParts),
         ) {
             // 核心不支持：常驻在搜索框上方，不能只藏在结果为空里
-            if (!AddonManager.supports(instance, kind)) {
+            if (!supported) {
                 M3ECard(
                     variant = M3ECardVariant.Filled,
                     title = "当前核心不支持$kindLabel",
                     titleIcon = Icons.Filled.WarningAmber,
-                    supporting = if (kind == AddonKind.PLUGIN) {
+                    supporting = (if (kind == AddonKind.PLUGIN) {
                         "插件适用于 Paper / Purpur / Spigot 类服务端（当前：${instance.coreType.displayName}）。"
                     } else {
                         "模组适用于 Fabric / Forge / NeoForge 类服务端（当前：${instance.coreType.displayName}）。"
-                    },
+                    }) + "搜索与安装已停用。",
                 )
             }
 
@@ -194,6 +201,7 @@ fun AddonsScreen(
             SearchField(
                 query = query,
                 searching = searching,
+                enabled = supported,
                 onQueryChange = { query = it },
                 onSubmit = { submitSearch() },
             )
@@ -299,7 +307,7 @@ fun AddonsScreen(
                                         viewModel.installAddon(instance, kind, hit)
                                         refresh++
                                     },
-                                    enabled = !installState.running,
+                                    enabled = !installState.running && supported,
                                 ) { Text("安装") }
                             }
                         },
@@ -423,6 +431,7 @@ fun AddonsScreen(
 private fun SearchField(
     query: String,
     searching: Boolean,
+    enabled: Boolean = true,
     onQueryChange: (String) -> Unit,
     onSubmit: () -> Unit,
 ) {
@@ -467,6 +476,7 @@ private fun SearchField(
                 BasicTextField(
                     value = query,
                     onValueChange = onQueryChange,
+                    enabled = enabled,
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = MaterialTheme.colorScheme.onSurface,
@@ -483,7 +493,7 @@ private fun SearchField(
                     ExpressiveLoadingRing(size = 22.dp, speed = 1.6f)
                 }
             } else {
-                IconButton(onClick = onSubmit, enabled = query.isNotBlank()) {
+                IconButton(onClick = onSubmit, enabled = query.isNotBlank() && enabled) {
                     Icon(Icons.Filled.Search, contentDescription = "搜索")
                 }
             }
