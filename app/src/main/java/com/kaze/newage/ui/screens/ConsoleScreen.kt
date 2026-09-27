@@ -87,6 +87,7 @@ import androidx.compose.material3.TextButton
 import com.kaze.newage.core.console.CountFormat
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
+import com.kaze.newage.core.monitor.ProcessStats
 
 /**
  * 控制台：实时日志（主题化深色终端）+ 命令输入 —— 本应用的主工作台。
@@ -341,6 +342,26 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             // 内存里不可能真的无限（120 万行 ≈ 150 MB），真正的全量在磁盘上的 console-output.log，
             // 所以这里必须能告诉用户"完整日志多大、在哪"。
             var showCountDetail by remember { mutableStateOf(false) }
+            // 服务端进程的 CPU / 内存占用（每 2 秒刷新；未启动时为空 → 不占位）
+            val stats by viewModel.procStats.collectAsStateWithLifecycle()
+            val ctxForMem = androidx.compose.ui.platform.LocalContext.current
+            stats?.let { s ->
+                val totalKb = remember { ProcessStats.totalMemKb(ctxForMem) }
+                val memPct = if (totalKb > 0) s.rssKb.toFloat() / totalKb * 100f else 0f
+                Text(
+                    buildString {
+                        append("CPU ").append(fmt("%.0f", s.cpuPercent)).append("%")
+                        // 单核占用率可以超过 100%，所以把"用了几个核"也说清楚 ——
+                        // 否则 8 核机器上的 12% 会让人以为很闲，其实是吃满了一个核
+                        if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append(" 核）")
+                        append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append(" GB")
+                        append("（").append(fmt("%.0f", memPct)).append("%）")
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                )
+            }
             Text(
                 "${CountFormat.short(lines.size.toLong())} 行",
                 style = MaterialTheme.typography.labelMedium,
@@ -612,3 +633,6 @@ private fun JumpToBottomPill(
         }
     }
 }
+
+/** 指标文本的小工具：统一用 US locale，避免某些系统区域把小数点写成逗号 */
+private fun fmt(pattern: String, v: Float): String = String.format(java.util.Locale.US, pattern, v)

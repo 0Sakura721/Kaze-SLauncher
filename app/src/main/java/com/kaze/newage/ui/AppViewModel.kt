@@ -45,6 +45,7 @@ import com.kaze.newage.core.console.CONSOLE_FLUSH_INTERVAL_MS
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import com.kaze.newage.core.console.CONSOLE_EAGER_LIMIT
+import com.kaze.newage.core.monitor.ProcessStats
 
 /** 服务端下载状态 */
 data class DownloadState(
@@ -434,6 +435,54 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 请求服务端刷新在线玩家列表（发送 list 命令，结果经日志解析回填） */
     fun refreshPlayers() {
         sendCommand("list")
+    }
+
+    // ── 服务端进程的 CPU / 内存占用 ──
+    private val _procStats = MutableStateFlow<ProcessStats.Reading?>(null)
+    val procStats: StateFlow<ProcessStats.Reading?> = _procStats.asStateFlow()
+
+    /**
+     * 每 2 秒采一次服务端进程的 CPU / 内存。
+     *
+     * 服务端是 proot 的孙进程（app → proot → java），拿不到 Process 句柄，只能按 pid 读
+     * `/proc`；pid 靠扫 `/proc` 里 cmdline 同时含 `java` 与实例目录名来认。
+     * 扫不到就置 null，界面据此隐藏指标（未启动 / 已退出）。
+     * CPU 必须两次采样求差，所以第一次只记基线、不出数。
+     */
+    fun startProcStatsPolling() {
+        viewModelScope.launch(Dispatchers.IO) {
+            var pid: Int? = null
+            var lastTicks = 0L
+            var lastAt = 0L
+            while (true) {
+                val dirName = _currentInstanceId.value?.let { instanceStore.get(it)?.dir?.name }
+                if (dirName == null) {
+                    _procStats.value = null
+                    pid = null
+                    delay(2000)
+                    continue
+                }
+                if (pid == null || ProcessStats.sample(pid) == null) {
+                    pid = ProcessStats.findServerPid(dirName)
+                    lastTicks = 0L
+                    lastAt = 0L
+                }
+                val got = pid?.let { ProcessStats.sample(it) }
+                if (got == null) {
+                    _procStats.value = null
+                    pid = null
+                } else {
+                    val now = System.currentTimeMillis()
+                    if (lastAt > 0L) {
+                        val (percent, cores) = ProcessStats.cpuFrom(lastTicks, got.first, now - lastAt, ProcessStats.cores)
+                        _procStats.value = ProcessStats.Reading(percent, cores, got.second)
+                    }
+                    lastTicks = got.first
+                    lastAt = now
+                }
+                delay(2000)
+            }
+        }
     }
 
     // ── 控制台行的批量发布 ──
