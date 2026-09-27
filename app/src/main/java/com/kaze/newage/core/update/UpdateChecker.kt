@@ -304,9 +304,40 @@ object UpdateChecker {
             if (x != y) return x > y
         }
         return when {
-            lp.isEmpty() && cp.isNotEmpty() -> true   // latest 正式 vs current 预发布 → 已转正
-            lp.isNotEmpty() && cp.isEmpty() -> false  // latest 预发布 vs current 正式 → 不是更新
+            // latest 无后缀 vs current 有后缀：只有 current 是**预发布**时才算"转正"。
+            // 若 current 是修订后缀（fix 等），说明用户装的是正式版之上的修订，
+            // 不该被"更新"回不带后缀的那个 —— 两个方向必须对称，否则会出现来回横跳。
+            lp.isEmpty() && cp.isNotEmpty() && isPrereleaseTag(cp) -> true
+            lp.isEmpty() && cp.isNotEmpty() -> false
+            lp.isNotEmpty() && cp.isEmpty() ->
+                // ⚠️ 这里**不能**一律当成"预发布 → 不算更新"。
+                //
+                // 真机反馈："更新机制查不到带原版本加后缀的" —— v0.3.3-fix 的 lp = ["fix"]，
+                // 旧写法直接返回 false，于是装着 0.3.3 的用户**永远查不到** 0.3.3-fix。
+                //
+                // 后缀有两种完全不同的语义，必须分开：
+                //  · alpha / beta / rc / preview / dev / snapshot … → 预发布，正式版用户不该被引导去装
+                //  · fix / hotfix / patch / rev … 以及**任何未知后缀** → 视为在正式版**之上**的修订
+                //    （本仓库的 v0.3.1-fix / v0.3.3-fix 就是这种；用户也说了"以后可能会有其他名字"，
+                //     所以未知后缀一律按"更新"处理，而不是按"预发布"忽略）
+                !isPrereleaseTag(lp)
             else -> comparePre(lp, cp) > 0
         }
     }
+
+    /**
+     * 判断版本后缀是不是"预发布"（而不是"正式版之上的修订"）。
+     *
+     * 只认公认的预发布词；其余（含 fix / hotfix / 以及将来任何新名字）都算修订 → 是更新。
+     */
+    internal fun isPrereleaseTag(parts: List<String>): Boolean {
+        if (parts.isEmpty()) return false
+        // 形如 beta.1 / rc2 时，只要**首段**是预发布词就算预发布
+        val head = parts.first().lowercase().trimEnd { it.isDigit() }
+        return head in PRERELEASE_WORDS
+    }
+
+    private val PRERELEASE_WORDS = setOf(
+        "alpha", "a", "beta", "b", "preview", "pre", "rc", "cr", "milestone", "snapshot", "dev", "nightly",
+    )
 }
