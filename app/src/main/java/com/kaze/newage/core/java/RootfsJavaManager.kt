@@ -6,6 +6,7 @@ import com.kaze.newage.util.TarExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.kaze.newage.core.update.UpdateChecker
 
 /**
  * rootfs 内 Java 运行时管理（主方案 = 直接下载 OpenJDK 官方包解压，绕过 apt）。
@@ -192,14 +193,28 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                 }.getOrNull()
             }
 
-            // 2. 候选源：官方 API 直链 + TUNA / 华为镜像
+            // 2. 候选源。实测（同一台机器、同一个 JDK17 aarch64 包，取前 4MB）：
+            //      mirrors.tuna.tsinghua.edu.cn   5120 KB/s  ✓ 最快
+            //      api.adoptium.net（官方直链）     999 KB/s  ✓ 稳定可用
+            //      mirrors.huaweicloud.com            0 KB/s  ✗ 只回一个 12KB 错误页
+            //      github.com 直连（Adoptium API 给的 githubLink）~40 KB/s ✗ 最慢
+            //
+            // 所以：清华排第一；githubLink **过一遍 GitHub 加速镜像**（复用手动更新那套，
+            // 它本身就是 github.com/releases/download 链接）；华为留最后当兜底。
+            // 注意 Downloader.downloadFromSources 会先并发探测**吞吐**再选源，
+            // 所以顺序只是提示，真正决定的是实测速度 —— 但把已知坏的放最后能少一次无效探测。
             val urls = buildList {
-                if (!githubLink.isNullOrBlank()) add(githubLink)
                 if (!fileName.isNullOrBlank()) {
                     add("https://mirrors.tuna.tsinghua.edu.cn/Adoptium/$majorVersion/jdk/aarch64/linux/$fileName")
+                }
+                // 官方 API 直链：不依赖文件名猜得对不对，最稳
+                add("https://api.adoptium.net/v3/binary/latest/$majorVersion/ga/linux/aarch64/jdk/hotspot/normal/eclipse")
+                if (!githubLink.isNullOrBlank()) {
+                    addAll(UpdateChecker.sources(githubLink))   // 镜像在前、直连兜底
+                }
+                if (!fileName.isNullOrBlank()) {
                     add("https://mirrors.huaweicloud.com/adoptium/$majorVersion/jdk/aarch64/linux/$fileName")
                 }
-                add("https://api.adoptium.net/v3/binary/latest/$majorVersion/ga/linux/aarch64/jdk/hotspot/normal/eclipse")
             }.distinct()
 
             val tarFile = File(targetDir.parentFile, "openjdk-$majorVersion.tar.gz")
@@ -207,7 +222,7 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                 // 已下载解压过：跳过
                 return@withContext JavaRuntime(majorVersion.toString(), targetDir, archSuffix())
             }
-            onProgress(0f, "探测最快下载源（${urls.size} 个候选）…")
+            onProgress(0f, "探测最快下载源（${urls.size} 个候选：清华 / Adoptium 官方 / GitHub 镜像）…")
             val used = Downloader.downloadFromSources(
                 urls,
                 tarFile,

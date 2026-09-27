@@ -7,7 +7,19 @@
 
 ## [Unreleased]
 
-_（暂无未发布内容）_
+### Changed
+- **Java（JDK）下载源也按实测重排**（真机反馈"java下载源也是，完善一下"）：
+  实测同一台机器、同一个 JDK17 aarch64 包（取前 4 MB）：
+  `mirrors.tuna.tsinghua.edu.cn` **5120 KB/s** ✓ / `api.adoptium.net` **999 KB/s** ✓ /
+  `mirrors.huaweicloud.com` **0 KB/s（只回 12 KB 错误页）** ✗ /
+  `github.com` 直连（Adoptium API 返回的 githubLink）**~40 KB/s** ✗ 最慢。
+  - 清华排第一；**githubLink 现在会过一遍 GitHub 加速镜像**（复用更新器那套 ——
+    它本身就是 `github.com/…/releases/download/…` 链接）；官方 API 直链保留
+    （不依赖文件名猜得准，最稳）；实测已坏的华为挪到最后当兜底。
+  - 进度文案也说清候选来自哪（清华 / Adoptium 官方 / GitHub 镜像）。
+  - 与"更新下载源"是同一套机制：`Downloader.downloadFromSources` 现在按**吞吐**探测，
+    顺序只是提示，真正决定选哪个的是实测速度。
+
 
 ---
 
