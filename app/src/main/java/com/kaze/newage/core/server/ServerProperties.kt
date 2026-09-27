@@ -85,6 +85,14 @@ object ServerProperties {
         // 空服自动暂停默认关闭：proot 环境下暂停后唤醒会卡死（Can't keep up 数万 ms →
         // Watchdog 判崩溃强杀 → 自动重启循环，用户日志实锤 7 次）。-1 = MC 官方语义禁用。
         "pause-when-empty-seconds" to "-1",
+        // 看门狗强杀同样关掉。MC 默认 max-tick-time=60000：单 tick 超过 60 秒就判定
+        // "Considering it to be crashed, server will forcibly shutdown" 并杀掉服务端。
+        // 手机上这个阈值根本不够 —— 真机日志：首次进世界时 spawn 区准备 205 秒、
+        // 之后 JVM 用了 3GB 堆而设备已吃掉 6GB 交换分区，一次 tick 花了 73.67 秒，
+        // 于是服务端被自己的看门狗处决（Done 之后才崩，世界本身是好的）。
+        // 这和上面 pause-when-empty-seconds 是同一类问题：手机上的"慢"不等于"死"。
+        // -1 = MC 官方语义禁用；真卡死了用户直接点停止即可。
+        "max-tick-time" to "-1",
     )
 
     /** 为新实例分配空闲端口（25565 起，跳过已占用的）。同步：两个实例并发创建时
@@ -111,8 +119,19 @@ object ServerProperties {
             return
         }
         val existing = load(instance.dir)
+        // 两个键的补写合并成一次 save：分开写会各触发一次文件重写与一次 FS 通知
+        var patched = false
         if (existing["pause-when-empty-seconds"] == null) {
             existing["pause-when-empty-seconds"] = "-1"
+            patched = true
+        }
+        // 旧实例（首次启动后 MC 自己生成的 server.properties）没有 max-tick-time，
+        // 会回落到默认 60000 → 手机上必然被看门狗处决，所以这里也要补。
+        if (existing["max-tick-time"] == null) {
+            existing["max-tick-time"] = "-1"
+            patched = true
+        }
+        if (patched) {
             save(instance.dir, existing)
         }
     }
