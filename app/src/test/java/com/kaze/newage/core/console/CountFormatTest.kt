@@ -76,4 +76,11 @@ class CountFormatTest {
         assertEquals("12.3 MB", CountFormat.bytes((12.3 * 1024 * 1024).toLong()))
         assertEquals("1.2 GB", CountFormat.bytes((1.2 * 1024 * 1024 * 1024).toLong()))
     }
+
+    @Test
+    fun `日志体积按舍入判定档位`() {
+        // 差 1 字节到 1 MB 时，按原始值比大小会算出 1023.999 → "1024.0 KB" 这种怪值
+        assertEquals("1.0 MB", CountFormat.bytes(1024L * 1024 - 1))
+        assertEquals("1.0 GB", CountFormat.bytes(1024L * 1024 * 1024 - 1))
+    }
 }

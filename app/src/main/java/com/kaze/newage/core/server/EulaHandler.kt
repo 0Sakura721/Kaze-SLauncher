@@ -16,10 +16,20 @@ data class EulaResult(
  */
 object EulaHandler {
 
+    /**
+     * 已接受的那一行。必须**按行锚定**。
+     *
+     * 旧实现是 `contains(Regex("(?i)eula\\s*=\\s*true"))` —— 任意位置的子串匹配，
+     * 于是 `# eula=true` 这种**注释行**（MC 生成的 eula.txt 里就有一整段说明性注释）
+     * 会被判成"用户已同意"：界面显示 eula 已接受、不再改写文件，服务端启动时读到的
+     * 却是 false 直接退出，只报一句"环境或配置问题"，用户完全看不出问题在 eula.txt。
+     */
+    private val ACCEPTED_LINE = Regex("(?im)^\\s*eula\\s*=\\s*true\\s*$")
+
     fun isAccepted(serverDir: File): Boolean {
         val f = File(serverDir, "eula.txt")
         if (!f.exists()) return false
-        return f.readText().contains(Regex("(?i)eula\\s*=\\s*true"))
+        return ACCEPTED_LINE.containsMatchIn(f.readText())
     }
 
     /** 主动写入 eula=true（覆盖/新建） */

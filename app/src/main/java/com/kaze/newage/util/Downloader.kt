@@ -79,7 +79,6 @@ object Downloader {
         validate: (File) -> Boolean,
     ) {
         dest.parentFile?.mkdirs()
-        var url: URL? = null
         var redirects = 0
         var current = urlStr
         var downloaded = 0L
@@ -100,13 +99,11 @@ object Downloader {
                     val loc = conn.getHeaderField("Location") ?: throw RuntimeException("重定向无 Location")
                     conn.disconnect()
                     if (++redirects > MAX_REDIRECTS) throw RuntimeException("重定向过多")
-                    current = if (loc.startsWith("http")) {
-                        loc
-                    } else {
-                        val base = url ?: URL(current)
-                        URL(base, loc).toString()
-                    }
-                    if (url == null) url = URL(current)
+                    // 相对 Location 必须基于**当前这一跳**的 URL 解析。
+                    // 旧实现只在第一次重定向时记下 base（`if (url == null) url = URL(current)`），
+                    // 第 3 跳起相对路径就对着过期的 base 解析 → 跳到错误地址（404 或下到别的东西）。
+                    // 绝对地址时 base 会被忽略，等价于直接用它。
+                    current = URL(URL(current), loc).toString()
                     continue
                 }
                 206 -> { /* 断点续传成功 */ }

@@ -23,8 +23,15 @@ object ConsoleParser {
      */
     private val CHAT_LINE = Regex(""":\s*<[^>]{1,32}>\s""")
 
-    /** 若该行是玩家列表响应，返回名单（可能为空列表）；否则返回 null */
+    /**
+     * 若该行是玩家列表响应，返回名单（可能为空列表）；否则返回 null。
+     *
+     * 与 [parseJoin]/[parseLeave] 一样必须排除聊天行：模板是 `find`（不锚定），
+     * 玩家在游戏里打一句 "There are 99 of a max of 20 players online: Steve"
+     * 就会被当成服务端的 list 响应，**整份在线名单被聊天内容覆盖**（人数与名字都变成假的）。
+     */
     fun parseOnlinePlayers(line: String): List<String>? {
+        if (CHAT_LINE.containsMatchIn(line)) return null
         val m = LIST_PATTERN.find(line) ?: return null
         val tail = m.groupValues[1].trim()
         if (tail.isEmpty()) return emptyList()

@@ -51,6 +51,16 @@ class ConsoleParserTest {
     }
 
     @Test
+    fun `聊天里的假名单不能覆盖在线名单`() {
+        // list 模板是不锚定的 find：玩家把这句话打进聊天，旧实现会整份在线名单改成他编的内容
+        assertNull(
+            ConsoleParser.parseOnlinePlayers(
+                "[12:00:00] [Server thread/INFO]: <Steve> There are 99 of a max of 20 players online: Fake1, Fake2"
+            )
+        )
+    }
+
+    @Test
     fun `与事件无关的行返回 null`() {
         assertNull(ConsoleParser.parseJoin("[12:00:00] [Server thread/INFO]: Preparing spawn area: 50%"))
         assertNull(ConsoleParser.parseLeave("[12:00:00] [Server thread/INFO]: Saving chunks"))

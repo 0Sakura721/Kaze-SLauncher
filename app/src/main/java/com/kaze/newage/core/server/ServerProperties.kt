@@ -29,8 +29,15 @@ object ServerProperties {
         return map
     }
 
-    /** 写入（追加未知键）。原子写：先写临时文件再 rename——写入中断不产生半截配置文件
-     *  （否则下次载入为空 → 按默认 25565 重新生成,端口可能与他人冲突） */
+    /**
+     * 写入（追加未知键）。原子写：先写临时文件再 rename——写入中断不产生半截配置文件
+     *  （否则下次载入为空 → 按默认 25565 重新生成,端口可能与他人冲突）
+     *
+     * **原文件的注释与空行逐行保留**：MC 自己生成的 server.properties 带着整段说明性注释
+     * （"#Minecraft server properties"、时间戳、各配置项的含义），而这份文件正是用户会拿
+     * 文本编辑器直接改的。旧实现每次保存都把它重写成"两行表头 + 键值"，
+     * 用户编辑一次端口，文件里的全部注释就没了。
+     */
     @Synchronized
     fun save(dir: File, props: Map<String, String>) {
         val file = File(dir, "server.properties")
@@ -39,17 +46,28 @@ object ServerProperties {
         sb.append("# Minecraft server properties\n")
         sb.append("# 由 Kaze SLauncher 管理（手动编辑同名文件会被覆盖）\n")
         val written = mutableSetOf<String>()
-        for ((k, v) in props) {
-            sb.append(k).append('=').append(v).append('\n')
-            written.add(k)
-        }
-        // 追加原文件中未管理的键，避免丢配置
-        val existing = load(dir)
-        for ((k, v) in existing) {
-            if (k !in written) {
-                sb.append(k).append('=').append(v).append('\n')
-                written.add(k)
+        val existingText = runCatching { file.takeIf { it.isFile }?.readText() }.getOrNull()
+        existingText?.lines()?.forEach { raw ->
+            val line = raw.trim()
+            val key = if (line.isEmpty() || line.startsWith("#") || line.startsWith("!") || !line.contains('=')) {
+                null
+            } else {
+                line.substringBefore('=').trim().takeIf { it.isNotEmpty() }
             }
+            when {
+                // 注释、空行、无法解析的行：原样写回
+                key == null -> sb.append(raw).append('\n')
+                // 本次要改写的键：就地换成新值（位置不变，注释上下文不散）
+                props.containsKey(key) -> {
+                    sb.append(key).append('=').append(props[key]).append('\n')
+                    written.add(key)
+                }
+                // 未管理的键：原样保留（旧实现是挪到文件末尾，注释与键的对应关系会错位）
+                else -> sb.append(raw).append('\n')
+            }
+        }
+        for ((k, v) in props) {
+            if (k !in written) sb.append(k).append('=').append(v).append('\n')
         }
         val tmp = File(dir, "server.properties.tmp")
         tmp.writeText(sb.toString())

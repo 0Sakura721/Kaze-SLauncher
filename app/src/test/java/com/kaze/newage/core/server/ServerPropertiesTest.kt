@@ -61,6 +61,22 @@ class ServerPropertiesTest {
     }
 
     @Test
+    fun `保存时保留原有注释与空行`() {
+        val dir = inst("a").dir
+        // MC 生成的 server.properties 就是这种"注释 + 空行 + 键值"混排
+        File(dir, "server.properties").writeText(
+            "#Minecraft server properties\n#Mon Sep 27 00:00:00 UTC 2026\n\n" +
+                "# 世界名\nlevel-name=world\nserver-port=25565\n"
+        )
+        ServerProperties.save(dir, linkedMapOf("server-port" to "25580"))
+        val text = File(dir, "server.properties").readText()
+        assertTrue("注释必须还在：$text", text.contains("#Minecraft server properties"))
+        assertTrue("逐项说明必须还在：$text", text.contains("# 世界名"))
+        assertTrue("未管理的键必须还在：$text", text.contains("level-name=world"))
+        assertEquals("25580", ServerProperties.load(dir)["server-port"])
+    }
+
+    @Test
     fun `值里含等号不会被截断`() {
         val dir = inst("a").dir
         ServerProperties.save(dir, linkedMapOf("motd" to "a=b=c"))

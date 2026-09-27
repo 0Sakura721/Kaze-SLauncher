@@ -292,8 +292,11 @@ object CoreSources {
             val html = httpGet("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
             // build 段放宽为任意位数：老版本如 1.12.2-14.23.5.2860 是四段，原三段正则会漏
+            // build 段还可能是**带连字符的老格式**（1.7.10-10.13.4.1614-1.7.10，build 后面
+            // 又跟了一遍 MC 版本），所以这里只认"第一个连字符之前"的 MC 版本，不再要求
+            // 后面全是数字与点 —— 旧正则会把这些老版本整条丢掉，Forge 列表里看不到 1.7.10。
             val mcVersions = versions.mapNotNull { v ->
-                Regex("^(\\d+\\.\\d+(?:\\.\\d+)?)-[\\d.]+$").find(v)?.groupValues?.get(1)
+                Regex("^(\\d+\\.\\d+(?:\\.\\d+)?)-.+$").find(v)?.groupValues?.get(1)
             }.distinct()
             Result.success(mcVersions.map { GameVersion(it) })
         } catch (e: Exception) { Result.failure(e) }
