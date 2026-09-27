@@ -197,14 +197,17 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             return@rememberLauncherForActivityResult
         }
         // 持久化 SAF 授权（防系统回收）+ 保存路径
+        val newUri = uri.toString()
         runCatching {
             appContext.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
         }
-        // 释放旧目录的持久授权
-        uiPrefs.instanceDirUri.value.takeIf { it.isNotBlank() }?.let { old ->
+        // 释放旧目录的持久授权 —— 但**选同一个目录时不能释放**：
+        // 旧实现无条件 release 旧 uri，而重复选择当前目录时旧 uri 就是刚 take 的那个，
+        // 等于把刚拿到的授权又还回去了，重启后目录不可写。
+        uiPrefs.instanceDirUri.value.takeIf { it.isNotBlank() && it != newUri }?.let { old ->
             runCatching {
                 appContext.contentResolver.releasePersistableUriPermission(
                     Uri.parse(old),
@@ -212,7 +215,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 )
             }
         }
-        uiPrefs.setInstanceDir(dir.absolutePath, uri.toString())
+        uiPrefs.setInstanceDir(dir.absolutePath, newUri)
         viewModel.rescanInstances()
         Toast.makeText(appContext, "实例目录已切换，正在扫描所选目录…", Toast.LENGTH_LONG).show()
     }
@@ -594,6 +597,18 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
                         onClick = {
+                            // 恢复默认目录时也要把自定义目录的持久授权还回去：
+                            // 旧实现只在"换成另一个自定义目录"时释放，点这里之后
+                            // 系统里那条 persistable 授权会一直挂着（应用持有的授权数是有上限的，
+                            // 攒满了下次 take 就会失败）。
+                            uiPrefs.instanceDirUri.value.takeIf { it.isNotBlank() }?.let { old ->
+                                runCatching {
+                                    appContext.contentResolver.releasePersistableUriPermission(
+                                        Uri.parse(old),
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                                    )
+                                }
+                            }
                             uiPrefs.setInstanceDir("")
                             viewModel.rescanInstances()
                             Toast.makeText(appContext, "已恢复默认实例目录", Toast.LENGTH_SHORT).show()

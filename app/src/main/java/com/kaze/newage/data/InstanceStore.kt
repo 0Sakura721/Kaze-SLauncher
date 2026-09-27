@@ -202,6 +202,10 @@ class InstanceStore(
     /**
      * 取一个可用的实例目录（不与已有非空目录冲突）。
      *
+     * **必须同步**：下面的"已存在且非空才让位"是典型的 check-then-act，用户连点两次
+     * 「导入 jar」（或下载完成回调被触发两次）时两个协程会选中同一个目录，
+     * 于是两条实例记录指向同一个 server.jar / 世界目录互相踩。
+     *
      * 两道防线：
      *  1. [sanitize] 去掉首尾点号，使 "." / ".." 不可能成为目录名；
      *  2. 这里再用 canonicalPath 断言结果确实落在实例根之内。
@@ -215,6 +219,7 @@ class InstanceStore(
      * 第二条实例的 core jar 覆盖第一条的、新建时的 propsOverride 还会改写第一条的
      * server.properties（端口/正版验证/游戏模式被换掉），而两条记录指向同一目录互相踩。
      */
+    @Synchronized
     fun createInstanceDir(name: String): File {
         val root = instancesRoot()
         val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { root.absoluteFile }

@@ -116,23 +116,45 @@ object ServerProperties {
     /** 为新实例分配空闲端口（25565 起，跳过已占用的）。同步：两个实例并发创建时
      *  ensureInitial 会竞态看到同一份列表 → 撞端口；加对象锁串行化 */
     @Synchronized
-    fun findFreePort(instances: List<ServerInstance>): Int {
+    fun findFreePort(instances: List<ServerInstance>, extraUsed: Set<Int> = emptySet()): Int {
         val used = instances.mapNotNull { inst ->
             load(inst.dir)["server-port"]?.toIntOrNull()
-        }.toSet()
+        }.toSet() + extraUsed
         var port = DEFAULT_PORT
         while (port in used) port++
         return port
     }
 
+    /**
+     * 实例目录的**兄弟目录**里已经写下的端口。
+     *
+     * 只信调用方传进来的实例列表不够：两个实例并发创建时，双方读到的列表都可能还没有对方
+     *（`instanceStore.add` 与 `ensureInitial` 不在同一把锁里），于是双双选中同一个端口 ——
+     * 两个服务端抢同一个端口，后启动的那个直接失败。端口最终是落在 server.properties 里的，
+     * 那就以磁盘为准：谁先写好，另一个就能看见。
+     */
+    private fun portsOnDisk(instance: ServerInstance): Set<Int> =
+        instance.dir.parentFile?.listFiles()
+            ?.filter { it.isDirectory && it != instance.dir }
+            ?.mapNotNull { load(it)["server-port"]?.toIntOrNull() }
+            ?.toSet()
+            ?: emptySet()
+
     /** 若实例目录无 server.properties，写入默认模板（端口自动分配，motd 用实例名）；
      *  已有文件若缺失 pause-when-empty-seconds 键则补写 -1（旧实例兼容：MC 26 无键默认 60s
      *  自动暂停，proot 下暂停唤醒会卡死 → Watchdog 崩溃循环，见记忆 2026-08-18）。
-     *  用户主动设置过（键存在且 >0）则保留不覆盖。 */
+     *  用户主动设置过（键存在且 >0）则保留不覆盖。
+     *
+     *  整个"分配端口 → 写盘"必须在同一把对象锁里：旧实现只把 findFreePort 上了锁，
+     *  分配与写入之间仍可插入另一个实例的同一步骤。 */
+    @Synchronized
     fun ensureInitial(instance: ServerInstance, allInstances: List<ServerInstance>) {
         val file = File(instance.dir, "server.properties")
         if (!file.exists()) {
-            val port = findFreePort(allInstances.filter { it.id != instance.id })
+            val port = findFreePort(
+                allInstances.filter { it.id != instance.id },
+                extraUsed = portsOnDisk(instance),
+            )
             save(instance.dir, defaults(port, instance.name))
             return
         }

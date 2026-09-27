@@ -921,6 +921,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * ——导入成功/失败两条路径都会走到 Toast，等于每次导入都崩。
      */
     fun importJar(uri: android.net.Uri, name: String, memoryMb: Int) {
+        // 互斥：连点两次（或按钮重复触发）会各建一个实例目录 —— createInstanceDir 的
+        // "非空才让位"判定在两次调用之间还没落盘，两条记录会指向同一个目录互相踩。
+        if (!importRunning.compareAndSet(false, true)) return
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = container.appContext
             var dir: File? = null
@@ -954,9 +957,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         ctx, "导入失败：${e.message ?: "未知错误"}", android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
+            } finally {
+                importRunning.set(false)
             }
         }
     }
+
+    /** 导入任务互斥（见 [importJar]） */
+    private val importRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /**
      * 从 jar 内的 class 文件推断所需 Java 主版本（导入自定义核心用）。
