@@ -40,6 +40,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import com.kaze.newage.core.console.ConsoleArchive
 import com.kaze.newage.core.console.LineType
 import com.kaze.newage.core.console.CONSOLE_DISPLAY_MAX
+import com.kaze.newage.core.console.CONSOLE_FLUSH_BATCH
+import com.kaze.newage.core.console.CONSOLE_FLUSH_INTERVAL_MS
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import com.kaze.newage.core.console.CONSOLE_EAGER_LIMIT
 
 /** 服务端下载状态 */
 data class DownloadState(
@@ -191,15 +196,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 // 切实例时重置"回读更早日志"的游标（每个实例一份日志文件）
                 instanceStore.get(id)?.dir?.let { d -> _olderCursor.value = ConsoleArchive.start(d) }
                 _hasMoreOlder.value = _olderCursor.value != null
+                // 批量发布的缓冲与定时器（见下面 collect 里的说明）。
+                // 定时器是 collectLatest 的子协程 → 切实例时自动取消。
+                synchronized(consoleLock) { consolePending.clear(); consolePendingReplace = false }
+                val consoleFlusher = launch {
+                    while (isActive) {
+                        delay(CONSOLE_FLUSH_INTERVAL_MS)
+                        synchronized(consoleLock) { publishConsoleLocked() }
+                    }
+                }
+                try {
                 stream.lines.collect { line ->
-                    // 覆盖行（服务端 \r 原地进度）要替换上一行而不是追加：
-                        // 只让环形缓冲去替换的话，实时视图仍会把每个百分比都追加成一行
-                        val cur = _consoleLines.value
-                        _consoleLines.value = if (line.replaceLast && cur.isNotEmpty()) {
-                            (cur.dropLast(1) + line).takeLast(CONSOLE_DISPLAY_MAX)
-                        } else {
-                            (cur + line).takeLast(CONSOLE_DISPLAY_MAX)
-                        }
+                    // ⚠️ 这里**不能**每行都做 `(cur + line).takeLast(N)`。
+                    //
+                    // 真机反馈："Forge 开机时日志到 1.4 万行左右卡住了"。那个写法是 O(N)/行 ——
+                    // Forge 启动每秒几百上千行、列表已有一万多条，等于每秒上千万次元素拷贝，
+                    // 还附带同样次数的 Compose 重组合，主线程直接被拖死。
+                    //
+                    // 现在：行只往缓冲里塞（O(1)），由定时器每 80ms 发布一次。
+                    // 用定时器而不是"等下一行来了再发"，是为了让**最后一批**也能出现 ——
+                    // 否则服务端安静下来时，最关键的 "Done (3.2s)! For help, type help" 反而没了。
+                    synchronized(consoleLock) {
+                        consolePending.add(line)
+                        if (line.replaceLast) consolePendingReplace = true
+                        // 小列表逐行即时发布（手感与改造前一致）；只有大列表才批量，
+                        // 省掉的正是 O(N)/行 在万行级别上的代价。
+                        if (consolePending.size >= CONSOLE_FLUSH_BATCH ||
+                            _consoleLines.value.size < CONSOLE_EAGER_LIMIT
+                        ) publishConsoleLocked()
+                    }
                     ConsoleParser.parseOnlinePlayers(line.text)?.let { _onlinePlayers.value = it }
                     ConsoleParser.parseJoin(line.text)?.let { name ->
                         if (name !in _onlinePlayers.value) _onlinePlayers.value = _onlinePlayers.value + name
@@ -208,8 +233,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         _onlinePlayers.value = _onlinePlayers.value - name
                     }
                 }
-            }
-        }
+                } finally {
+                    consoleFlusher.cancel()
+                    synchronized(consoleLock) { publishConsoleLocked() }
+                }
+            }        }
         refreshJava()
     }
 
@@ -406,6 +434,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 请求服务端刷新在线玩家列表（发送 list 命令，结果经日志解析回填） */
     fun refreshPlayers() {
         sendCommand("list")
+    }
+
+    // ── 控制台行的批量发布 ──
+    // 逐行 `(cur + line).takeLast(N)` 是 O(N)/行：Forge 启动时每秒几百上千行、列表上万条，
+    // 就是每秒上千万次元素拷贝 + 同样次数的重组合 → 主线程卡死（真机反馈的"1.4 万行卡住"）。
+    private val consoleLock = Any()
+    private val consolePending = ArrayList<ConsoleLine>(CONSOLE_FLUSH_BATCH)
+    private var consolePendingReplace = false
+
+    /** 调用方必须持有 [consoleLock] */
+    private fun publishConsoleLocked() {
+        if (consolePending.isEmpty()) return
+        val cur = _consoleLines.value
+        val base = if (consolePendingReplace && cur.isNotEmpty()) cur.dropLast(1) else cur
+        _consoleLines.value = (base + consolePending).takeLast(CONSOLE_DISPLAY_MAX)
+        consolePending.clear()
+        consolePendingReplace = false
     }
 
     // ── 回读更早的日志（内存窗口之外的历史，来自 console-output.log / .old.log）──

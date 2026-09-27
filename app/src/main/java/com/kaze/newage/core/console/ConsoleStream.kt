@@ -65,6 +65,27 @@ const val CONSOLE_MAX_LINES = 50_000
 const val CONSOLE_DISPLAY_MAX = 60_000
 
 /**
+ * 控制台行的**批量发布**参数。
+ *
+ * 起因（真机反馈："Forge 开机时日志到 1.4 万行左右卡住了"）：ViewModel 原来每来一行就
+ * `(cur + line).takeLast(N)` —— O(N)/行。Forge 启动每秒几百上千行、列表已有一万多条，
+ * 等于每秒上千万次元素拷贝，外加同样次数的 Compose 重组合，主线程直接卡死。
+ *
+ * 现在行只往缓冲里塞（O(1)），按"攒够 [CONSOLE_FLUSH_BATCH] 行"或"每
+ * [CONSOLE_FLUSH_INTERVAL_MS] 毫秒"发布一次。定时发布是必须的：只按行数触发的话，
+ * 服务端安静下来时最后一批就永远不显示 —— 而那往往正是
+ * "Done (3.2s)! For help, type help" 这种最关键的收尾行。
+ */
+const val CONSOLE_FLUSH_BATCH = 256
+/**
+ * 列表小于这个行数时**逐行即时发布**（保持"打字就能看到"的手感），
+ * 超过之后才走批量 —— 省掉的正是 O(N)/行 在大列表上的代价。
+ * 这样小控制台的行为与改造前完全一致，只有真会卡死的场景才变。
+ */
+const val CONSOLE_EAGER_LIMIT = 2000
+const val CONSOLE_FLUSH_INTERVAL_MS = 80L
+
+/**
  * 连续多少行"同类刷屏输出"之后在**控制台**折叠。
  *
  * 起因（真机反馈）：补全依赖 / 解压时每来一个文件就是一行，几千行直接把环形缓冲冲爆，
