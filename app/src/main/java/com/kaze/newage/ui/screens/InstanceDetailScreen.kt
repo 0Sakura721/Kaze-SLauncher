@@ -303,7 +303,7 @@ fun InstanceDetailScreen(
                                             if (wasRunning) {
                                                 viewModel.serverManager.sendCommand(instance, "save-off")
                                                 viewModel.serverManager.sendCommand(instance, "save-all flush")
-                                                delay(1500)
+                                                awaitWorldFlushed(viewModel, instance)
                                             }
                                             try {
                                                 val f = BackupManager.backup(instance)
@@ -1075,6 +1075,35 @@ private fun formatClock(totalSec: Long): String {
     val m = (totalSec % 3600) / 60
     val s = totalSec % 60
     return "${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
+}
+
+/** 服务端 `save-all flush` 完成后会打的一行（原版/Paper/Purpur 都是 "Saved the game" 这类） */
+private val WORLD_SAVED_LINE = Regex("Saved the (game|world)|世界已保存")
+
+/**
+ * 等"世界真的落盘"，而不是等一个固定的 1.5 秒。
+ *
+ * 备份是在服务端**运行中**做的，直接拷 region 文件会备出写了一半的世界。旧实现发完
+ * `save-all flush` 就 `delay(1500)`：小世界够用，几千个区块文件的大世界落盘要几十秒，
+ * 1.5 秒后拷贝出来的 zip 就是撕裂的存档 —— 而且只有真去恢复时才会发现。
+ *
+ * 这里改等**服务端自己的完成信号**：`save-all flush` 结束后它会输出
+ * "Saved the game"/"Saved the world"。判定按行号（[ConsoleLine.seq]）过滤，
+ * 只看命令发出**之后**产生的行，否则上一次自动保存留下的同名字样会让等待立刻返回。
+ *
+ * 已知限制（如实写在这里）：核心若关了日志或改了措辞就拿不到信号，
+ * 此时退回固定等待 1.5 秒 —— 与旧行为一致，不会比原来更差；
+ * 反过来，30 秒内一直没等到就继续，避免世界卡住时备份永远不开始。
+ */
+private suspend fun awaitWorldFlushed(viewModel: AppViewModel, instance: ServerInstance) {
+    val console = viewModel.serverManager.consoleFor(instance.id)
+    val since = console.snapshot().lastOrNull()?.seq ?: 0L
+    val deadline = System.currentTimeMillis() + 30_000
+    while (System.currentTimeMillis() < deadline) {
+        if (console.snapshot().any { it.seq > since && WORLD_SAVED_LINE.containsMatchIn(it.text) }) return
+        delay(300)
+    }
+    delay(1500)
 }
 
 /**

@@ -137,6 +137,24 @@ class DefaultServerManager(
         var waitJob: Job? = null
         var uptimeJob: Job? = null
 
+        /**
+         * 崩溃后**已排定**的自动重启（`delay(3000)` 之后拉起）。
+         *
+         * 必须持有引用：用户在重启窗口内点「停止」时，只有把它取消掉才拦得住 ——
+         * 旧实现把这段延时任务直接丢给 scope，stop() 只能收尾旧槽位，
+         * 3 秒后服务端照常被重新拉起（界面显示"已停止"）。
+         */
+        var restartJob: Job? = null
+
+        /**
+         * 本次进程退出是否已经处理过。
+         *
+         * 退出有**两个**观察者：`waitFor()` 的 waitJob 与 init 里的状态自愈轮询，
+         * 二者都可能先看到同一个退出。没有这个标记就会处理两次：restartCount 被扣两次、
+         * 日志重复两遍、重启任务排两个（两个 java 共写同一世界目录）。
+         */
+        val exitHandled = AtomicBoolean(false)
+
         /** 「优雅停止 → 10s 后强杀」的延时任务。重启前必须取消，否则它会杀掉新进程。
          *  见 stop() 的说明。 */
         var stopTimeoutJob: Job? = null
@@ -213,15 +231,26 @@ class DefaultServerManager(
 
     // ── 启动 ──
     override suspend fun start(instance: ServerInstance) {
-        val existing = slots[instance.id]
-        // 按生命周期状态防重入：Starting/FirstRun 等部署阶段 process 尚为 null，
-        // 只看 isAlive 会漏——重复触发会双进程共写同一世界目录
-        if (existing != null && existing.state.value in guardActiveStates) {
-            existing.log("> 已处于启动/运行中，忽略重复启动", LineType.Warn)
+        // 防重入必须是**原子**的：旧实现是"先 get 判断、再 put"的 check-then-act，
+        // 用户连点两次「启动」（或自动重启与手动启动撞在一起）时两个协程都能通过判断，
+        // 各自建一个 slot 并各自拉起一个 java 进程 —— 两个进程共写同一世界目录，
+        // 而且后写入 slots 的那个才受管理，另一个彻底脱离管控（停不掉、杀不死）。
+        // compute 把"判定 + 占位"放进同一个原子操作里。
+        var reentry = false
+        val slot = slots.compute(instance.id) { _, existing ->
+            if (existing != null && existing.state.value in guardActiveStates) {
+                reentry = true
+                existing
+            } else {
+                existing ?: RuntimeSlot(instance)
+            }
+        }!!
+        if (reentry) {
+            slot.log("> 已处于启动/运行中，忽略重复启动", LineType.Warn)
             return
         }
-        val slot = existing ?: RuntimeSlot(instance).also { slots[instance.id] = it }
         slot.manualStop = false
+        slot.exitHandled.set(false)
         slot.setState(ServerState.Starting)
         // 一启动就保活：环境部署/Java 安装可能耗时数分钟，期间应用退后台也不能被杀
         startGuard(instance)
@@ -539,6 +568,8 @@ class DefaultServerManager(
         val proc = env.launch(args, slot.instance.dir)
             ?: throw RuntimeException("无法启动 proot 进程（环境异常）")
         slot.process = proc
+        // 新进程 = 新的一次退出：复位退出标记，否则第二次退出会被幂等保护吞掉
+        slot.exitHandled.set(false)
         // 上一轮的「10s 强杀」若还挂着，必须取消：它捕获的是旧进程，留着只会误杀本次新进程
         slot.stopTimeoutJob?.cancel()
         slot.stopTimeoutJob = null
@@ -595,6 +626,11 @@ class DefaultServerManager(
             putState(instance.id, ServerState.Stopped)
             return
         }
+        // 崩溃后的自动重启是**排定**在 3 秒后的延时任务：用户在这 3 秒里点停止，
+        // 必须先把任务取消掉（并把 manualStop 立起来让任务即使已经在跑也不再拉起进程），
+        // 否则停止只收尾了旧槽位，3 秒后服务端照样被拉起来。
+        slot.restartJob?.cancel()
+        slot.restartJob = null
         val proc = slot.process
         if (proc == null || !proc.isAlive) {
             // 进程还没创建，但 start() 的协程仍在推进（部署 / 装 Java / 首启探测）：
@@ -658,6 +694,9 @@ class DefaultServerManager(
 
     // ── 退出处理 ──
     private fun handleExit(slot: RuntimeSlot) {
+        // 幂等：waitJob 与状态自愈轮询是两个独立观察者，可能先后看到同一次退出。
+        // 放过第二次的话 restartCount 会双扣；重启分支还会排两个重启任务。
+        if (!slot.exitHandled.compareAndSet(false, true)) return
         if (slot.manualStop) {
             finalizeStop(slot)
             return
@@ -670,8 +709,14 @@ class DefaultServerManager(
             // 而直接 return，于是自动重启永远不会真的发生，状态永久卡在 Starting——
             // 四个页面全是禁用态、没有任何停止入口，只能杀掉应用。
             slot.setState(ServerState.Stopped)
-            scope.launch {
+            slot.restartJob = scope.launch {
                 delay(3000)
+                // 重启窗口内用户可能点了停止：任务已被 cancel，但取消与这里的检查之间
+                // 仍有极窄的竞态窗口，所以再检查一次 manualStop。
+                if (slot.manualStop) {
+                    slot.log("> 用户已停止，取消自动重启", LineType.System)
+                    return@launch
+                }
                 // 重启窗口内用户可能已删除实例：目录没了就不再拉起（否则重建半成品实例）
                 if (!slot.instance.dir.exists()) {
                     slot.log("> 实例目录已删除，取消自动重启", LineType.System)
@@ -691,13 +736,17 @@ class DefaultServerManager(
     }
 
     private fun finalizeStop(slot: RuntimeSlot) {
+        // 只在自己**仍是当前槽位**时收尾：自动重启/重新启动会先移除旧槽位再建新的，
+        // 旧槽位迟到的回调（waitJob、10 秒强杀任务、状态自愈轮询）绝不能把新槽位
+        // 从表里删掉、也不能把它的状态改回"已停止" —— 那正是"服务端在跑但界面显示已停止"
+        // 且再也停不掉的成因。remove(key, value) 是原子的"确认后才删"。
+        if (!slots.remove(slot.instance.id, slot)) return
         slot.process = null
         slot.waitJob?.cancel()
         slot.uptimeJob?.cancel()
         slot.uptimeSec.value = 0L
         slot.restartCount = 0
         slot.setState(ServerState.Stopped)
-        slots.remove(slot.instance.id)
         // 全部实例停止后撤下守护前台服务；仍有活跃实例则刷新聚合通知
         // （同上按状态判断：其他实例 Starting 部署中 process 为 null，不能只看 isAlive）
         val remaining = slots.values.filter { it.state.value in guardActiveStates }
