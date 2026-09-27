@@ -95,6 +95,8 @@ import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.clickable
+import androidx.compose.material3.Surface
 
 /**
  * 实例详情 —— 一个服务端的全部控制项，按「运行 / 配置 / 世界 / 附加」四个分区组织。
@@ -700,6 +702,7 @@ private fun AddonsTab(
 }
 
 /** 玩家管理：在线列表（list 命令解析 + 进出事件跟踪）+ OP/白名单/踢出快捷操作 */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PlayerManageCard(
     viewModel: AppViewModel,
@@ -731,9 +734,35 @@ private fun PlayerManageCard(
         content = {
             if (running) {
                 Text(
-                    if (players.isEmpty()) "在线玩家：暂无（点右上角刷新）" else "在线玩家：${players.joinToString("、")}",
+                    if (players.isEmpty()) "在线玩家：暂无（点右上角刷新）"
+                    else "在线玩家（点名字填入下方输入栏）：",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                // 每个名字一个可点标签：点一下就把名字填进下面的「玩家名」输入栏，
+                // 省掉手输（中文名、大小写、下划线都很容易打错），填完直接点 op / kick。
+                if (players.isNotEmpty()) {
+                    FlowRow(
+                        Modifier.padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        players.forEach { p ->
+                            Surface(
+                                shape = M3Shape.large,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier
+                                    .clickable { name = p }
+                                    .padding(bottom = 6.dp),
+                            ) {
+                                Text(
+                                    p,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                )
+                            }
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
