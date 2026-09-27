@@ -99,8 +99,13 @@ fun AddonsScreen(
     var searched by remember { mutableStateOf(false) }
     var refresh by remember { mutableIntStateOf(0) }
     val installed = remember(instanceId, refresh) { AddonManager.installed(instance, kind) }
-    val results by viewModel.addonResults.collectAsStateWithLifecycle()
+    val rawResults by viewModel.addonResults.collectAsStateWithLifecycle()
+    val resultsKind by viewModel.addonResultsKind.collectAsStateWithLifecycle()
+    // 结果槽位在 ViewModel 里是共享的：只认**本页类型**的那一批。
+    // 否则搜完插件进模组页，插件结果会照常显示，行尾「安装」还会按模组（fabric 过滤）去装。
+    val results = if (resultsKind == kind) rawResults else emptyList()
     val searching by viewModel.addonSearching.collectAsStateWithLifecycle()
+    val searchError by viewModel.addonSearchError.collectAsStateWithLifecycle()
     val installState by viewModel.addonInstall.collectAsStateWithLifecycle()
 
     // 安装是异步的：原来只在点击「安装」时 refresh++，那时文件还没落盘，
@@ -236,6 +241,15 @@ fun AddonsScreen(
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+            // 搜索失败单独显示：以前写进 installState.error，于是"搜索失败"看起来像
+            // "安装失败"，而且会污染安装空态判断（下面的空状态判定用的就是这个槽位）
+            searchError?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             if (installState.done) {
                 Text(
                     installState.message,
@@ -291,7 +305,7 @@ fun AddonsScreen(
                         },
                     )
                 }
-            } else if (searched && !searching && results.isEmpty() && installState.error == null) {
+            } else if (searched && !searching && results.isEmpty() && searchError == null) {
                 // 空状态：搜过了、不在搜、没结果、也没报错
                 M3EListItem(
                     headline = "没有找到相关$kindLabel",

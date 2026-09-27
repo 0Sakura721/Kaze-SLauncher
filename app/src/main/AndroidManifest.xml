@@ -4,8 +4,15 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+      maxSdkVersion 必须是 29（Android 10）而不是 28：
+      StorageDirUtil.hasAllFilesAccess() 在 SDK < 30 时就是查这个权限，而「所有文件访问」是
+      API 30 才有的概念。写成 28 的话 Android 10 上这个权限根本不存在（运行时申请被系统直接拒绝）
+      → 选择自定义实例目录永远失败，默认实例根 /sdcard/KazeS 也拿不到写权限。
+      11+ 走 MANAGE_EXTERNAL_STORAGE，本权限在那里没有意义，所以止于 29。
+    -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
+        android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />

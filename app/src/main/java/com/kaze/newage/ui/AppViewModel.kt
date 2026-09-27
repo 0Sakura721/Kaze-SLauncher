@@ -171,6 +171,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 附加组件（插件/模组）搜索 */
     private val _addonResults = MutableStateFlow<List<ModrinthSearchHit>>(emptyList())
     val addonResults: StateFlow<List<ModrinthSearchHit>> = _addonResults.asStateFlow()
+
+    /**
+     * 这批搜索结果属于哪个类型（插件 / 模组）。
+     *
+     * `_addonResults` 是**跨页面共享**的槽位：插件页搜完之后进模组页，模组页没有自己的结果，
+     * 却会因为"结果非空"直接把插件那批显示出来 —— 更糟的是行尾的「安装」会按**模组**去装
+     * 那批插件（用 fabric 过滤版本、写进 mods/），装完在服务端里毫无作用。
+     * 页面只在 `addonResultsKind == 本页 kind` 时渲染，类型不匹配就当没有结果。
+     */
+    private val _addonResultsKind = MutableStateFlow<AddonKind?>(null)
+    val addonResultsKind: StateFlow<AddonKind?> = _addonResultsKind.asStateFlow()
+
+    /** 搜索失败单独一个槽位：写进 addonInstall 会让插件页以为"正在安装/安装失败" */
+    private val _addonSearchError = MutableStateFlow<String?>(null)
+    val addonSearchError: StateFlow<String?> = _addonSearchError.asStateFlow()
+
+    /** 搜索请求序号：快速连续搜索时只认最后一次的结果（晚返回的旧请求会覆盖新结果） */
+    private val addonSearchSeq = java.util.concurrent.atomic.AtomicInteger(0)
+
     private val _addonSearching = MutableStateFlow(false)
     val addonSearching: StateFlow<Boolean> = _addonSearching.asStateFlow()
     private val _addonInstall = MutableStateFlow(DownloadState())
@@ -818,15 +837,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ── 动作：插件/模组（Modrinth）──
     fun searchAddons(query: String, kind: AddonKind) {
         if (query.isBlank()) return
+        val seq = addonSearchSeq.incrementAndGet()
+        // 换了类型：旧结果立刻作废（连同 kind 标记一起换掉），页面不会再拿它渲染
+        if (_addonResultsKind.value != kind) _addonResults.value = emptyList()
+        _addonResultsKind.value = kind
+        _addonSearchError.value = null
         _addonSearching.value = true
-        _addonResults.value = emptyList()
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _addonResults.value = ModrinthApi.search(query, kind)
+                val hits = ModrinthApi.search(query, kind)
+                // 序号不是最新的说明用户又搜了一次：丢弃这次结果，别把新结果覆盖回旧的
+                if (seq != addonSearchSeq.get()) return@launch
+                _addonResults.value = hits
             } catch (e: Exception) {
-                _addonInstall.value = DownloadState(error = "搜索失败：${e.message}")
+                if (seq == addonSearchSeq.get()) {
+                    _addonSearchError.value = "搜索失败：${e.message}"
+                }
             } finally {
-                _addonSearching.value = false
+                if (seq == addonSearchSeq.get()) _addonSearching.value = false
             }
         }
     }
