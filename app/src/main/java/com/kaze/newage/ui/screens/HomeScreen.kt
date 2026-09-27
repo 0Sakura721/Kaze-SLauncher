@@ -95,6 +95,8 @@ fun HomeScreen(
     // 部署进度走独立状态：与核心下载分开后，部署中进新建向导不会再串进度、下载中点部署也有反馈
     val download by viewModel.envTask.collectAsStateWithLifecycle()
     val serverState by viewModel.serverState.collectAsStateWithLifecycle()
+    // 全部实例的状态：实例下拉里每一行要按**它自己**的状态决定能否启动（见下方说明）
+    val states by viewModel.serverStates.collectAsStateWithLifecycle()
     val instances by viewModel.instances.collectAsStateWithLifecycle()
     val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()
     val uptime by viewModel.uptimeSec.collectAsStateWithLifecycle()
@@ -214,6 +216,13 @@ fun HomeScreen(
                     onClick = { },
                 )
                 instances.forEach { inst ->
+                    // 每个实例按**自己的**状态决定这一行：
+                    // 旧实现用的是"当前实例"的 busy —— 当前实例在启动/停止中时，
+                    // 列表里所有实例的启动按钮全被禁用；而已经在跑的实例照样显示「启动」，
+                    // 点下去只会撞上服务端管理器的防重入、什么都不发生（用户以为点了没反应）。
+                    val instState = states[inst.id] ?: ServerState.Idle
+                    val instRunning = instState == ServerState.Running
+                    val instBusy = instState.isBusy()
                     DropdownMenuItem(
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,9 +235,14 @@ fun HomeScreen(
                                         maxLines = 1,
                                     )
                                     Text(
-                                        text = "MC ${inst.mcVersion.ifBlank { "自定义" }} · ${inst.coreType.displayName}",
+                                        text = if (instRunning || instBusy) {
+                                            "MC ${inst.mcVersion.ifBlank { "自定义" }} · ${instState.toLabel()}"
+                                        } else {
+                                            "MC ${inst.mcVersion.ifBlank { "自定义" }} · ${inst.coreType.displayName}"
+                                        },
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        color = if (instRunning || instBusy) stateColor
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                     )
                                 }
@@ -237,17 +251,22 @@ fun HomeScreen(
                         trailingIcon = {
                             IconButton(
                                 onClick = {
-                                    if (busy) return@IconButton
+                                    if (instRunning || instBusy) return@IconButton
                                     listOpen = false
                                     viewModel.selectInstance(inst)
                                     viewModel.startInstance(inst)
                                 },
-                                enabled = !busy,
+                                enabled = !instRunning && !instBusy,
                             ) {
                                 Icon(
-                                    Icons.Filled.PlayArrow,
-                                    contentDescription = "启动 ${inst.name}",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    if (instRunning) Icons.Filled.CheckCircle else Icons.Filled.PlayArrow,
+                                    contentDescription = when {
+                                        instRunning -> "${inst.name} 运行中"
+                                        instBusy -> "${inst.name} ${instState.toLabel()}"
+                                        else -> "启动 ${inst.name}"
+                                    },
+                                    tint = if (instRunning) stateColor
+                                    else MaterialTheme.colorScheme.primary,
                                 )
                             }
                         },
@@ -266,8 +285,13 @@ fun HomeScreen(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
+                // Stopping 也属于 isBusy()，但它的语义与「启动中」相反：
+                // 旧实现把两种状态都写成「取消启动」——正在停止时按钮却喊"取消启动"，
+                // 用户以为点错了、又点一次。停止中不给重复触发，标签如实写「停止中…」。
+                val stopping = serverState == ServerState.Stopping
                 val actionLabel = when {
                     running -> "停止服务端"
+                    stopping -> "停止中…"
                     busy -> "取消启动"
                     else -> "启动服务端"
                 }
@@ -280,6 +304,7 @@ fun HomeScreen(
                     shape = M3Shape.groupFirst(56f),
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
+                    enabled = !stopping,
                     onClick = {
                         // 运行中或启动中（部署/装 Java/下载核心/Forge 安装）都走停止。
                         // 旧版 busy 时按钮被禁用，用户在长达几分钟的启动过程里没有任何中止手段。

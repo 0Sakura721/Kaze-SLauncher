@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -153,6 +155,11 @@ fun InstanceDetailScreen(
     var restoreTarget by remember { mutableStateOf<File?>(null) }
     // 删除备份：不可逆，且紧邻「恢复 / 导出」，必须二次确认（同页其它破坏性操作都有）
     var deleteTarget by remember { mutableStateOf<File?>(null) }
+    // server.properties 保存过的次数：运行状态卡里的端口要跟着刷新（见 RunTab 的说明）
+    var propsRevision by remember { mutableIntStateOf(0) }
+    // 「备份与恢复」快捷入口的落点：所有分区都在同一页滚动里，点它应该是**滚到备份区**，
+    // 而不是什么都不做（去掉标签栏时这里留下了 onOpenWorld = {} 的空实现）
+    val backupSection = remember { BringIntoViewRequester() }
     val backups = remember(instanceId, backupRefresh) { BackupManager.list(instance) }
     val backupScope = rememberCoroutineScope()
     val appContext = LocalContext.current.applicationContext
@@ -277,21 +284,28 @@ fun InstanceDetailScreen(
                             state = state,
                             stateColor = stateColor,
                             backups = backups,
+                            propsRevision = propsRevision,
                             onOpenLogs = onOpenLogs,
-                            onOpenWorld = {},
+                            // 四个分区都在同一页滚动里，快捷入口的语义就是"滚到备份区"
+                            onOpenWorld = { backupScope.launch { backupSection.bringIntoView() } },
                         )
 
                         PropertiesEditor(
                             dir = instance.dir,
                             instanceName = instance.name,
                             isRunning = state == ServerState.Running,
-                            onSave = { props -> ServerProperties.save(instance.dir, props) },
+                            onSave = { props ->
+                                ServerProperties.save(instance.dir, props)
+                                // 让运行状态卡的端口等信息重新读一次 server.properties
+                                propsRevision++
+                            },
                         )
 
                         WorldTab(
                             backups = backups,
                             busy = backupBusy,
                             message = backupMsg,
+                            modifier = Modifier.bringIntoViewRequester(backupSection),
                             onBackup = {
                                 if (!backupBusy) {
                                     backupBusy = true
@@ -398,6 +412,11 @@ fun InstanceDetailScreen(
                     onClick = {
                         val f = target
                         restoreTarget = null
+                        // 恢复要整体换掉实例目录，必须占用 backupBusy：
+                        // 否则恢复进行中「立即备份 / 导出 / 删除」全都还是可点的，
+                        // 一边解压换目录一边打包同一批文件，出来的备份是坏的一半。
+                        if (backupBusy) return@TextButton
+                        backupBusy = true
                         backupScope.launch(Dispatchers.IO) {
                             backupMsg = try {
                                 BackupManager.restore(instance, f)
@@ -405,6 +424,8 @@ fun InstanceDetailScreen(
                             } catch (e: Exception) {
                                 "恢复失败：${e.message}"
                             }
+                            backupRefresh++
+                            backupBusy = false
                         }
                     }
                 ) { Text("恢复", color = MaterialTheme.colorScheme.error) }
@@ -432,6 +453,9 @@ private fun InstanceActionRow(
 ) {
     val busy = state.isBusy()
     val running = state == ServerState.Running
+    // Stopping 也属于 isBusy()，但语义与「启动中」相反：旧实现两种状态共用「取消启动」，
+    // 正在停止时按钮却喊"取消启动"，用户以为点错了。停止中不给重复触发。
+    val stopping = state == ServerState.Stopping
     Row(
         Modifier
             .fillMaxWidth()
@@ -451,6 +475,7 @@ private fun InstanceActionRow(
                 // 旧版 busy 时按钮被禁用，用户在长达几分钟的启动过程里没有任何中止手段。
                 if (running || busy) onStop() else onStart()
             },
+            enabled = !stopping,
             modifier = Modifier.height(48.dp),
         ) {
             Icon(
@@ -462,6 +487,7 @@ private fun InstanceActionRow(
             Text(
                 when {
                     running -> "停止服务端"
+                    stopping -> "停止中…"
                     busy -> "取消启动"
                     else -> "启动服务端"
                 },
@@ -479,6 +505,7 @@ private fun RunTab(
     state: ServerState,
     stateColor: Color,
     backups: List<File>,
+    propsRevision: Int,
     onOpenLogs: () -> Unit,
     onOpenWorld: () -> Unit,
 ) {
@@ -486,8 +513,12 @@ private fun RunTab(
     val onlinePlayers by viewModel.onlinePlayers.collectAsStateWithLifecycle()
     val running = state == ServerState.Running
     val busy = state.isBusy()
-    // 端口取 server.properties 里的真实值；切回本页时会重新读一次（配置页保存过就会刷新）
-    val port = remember(instance.id) { ServerProperties.load(instance.dir)["server-port"] ?: "—" }
+    // 端口取 server.properties 里的真实值。**只按 instance.id 记忆是不够的**：
+    // 在下面的配置区把端口从 25565 改成 25570 之后，id 没变，这里就一直显示旧值 ——
+    // 用户会以为保存没生效。propsRevision 在每次保存后自增，用它把这一项刷新掉。
+    val port = remember(instance.id, propsRevision) {
+        ServerProperties.load(instance.dir)["server-port"] ?: "—"
+    }
     val latestBackup = backups.firstOrNull()
 
     M3ECard(
@@ -579,6 +610,7 @@ private fun WorldTab(
     backups: List<File>,
     busy: Boolean,
     message: String?,
+    modifier: Modifier = Modifier,
     onBackup: () -> Unit,
     onImport: () -> Unit,
     onRestoreRequest: (File) -> Unit,
@@ -586,6 +618,7 @@ private fun WorldTab(
     onDelete: (File) -> Unit,
 ) {
     M3ECard(
+        modifier = modifier,
         variant = M3ECardVariant.Filled,
         title = "备份",
         supporting = "世界 + 配置全量打包；运行中会先让服务端落盘（save-off → save-all flush）再打包",
@@ -851,10 +884,24 @@ private fun PropertiesEditor(
                 OutlinedTextField(
                     value = port,
                     // 必须拒绝空串：`"".all { isDigit }` 为 true，清空输入框再保存会写下 server-port=，
-                    // 之后 toIntOrNull() 得到 null，端口占用统计就漏掉这个实例，新建实例会撞端口
-                    onValueChange = { v -> if (v.isNotEmpty() && v.all { it.isDigit() }) set("server-port", v) },
+                    // 之后 toIntOrNull() 得到 null，端口占用统计就漏掉这个实例，新建实例会撞端口。
+                    // 同时**限长 5 位**并把范围卡在 1..65535：只判"全是数字"时 0 与 99999 都能存下去，
+                    // 服务端启动时才发现端口非法（或占用了系统端口），而配置页看起来一切正常。
+                    onValueChange = { v ->
+                        if (v.isNotEmpty() && v.length <= 5 && v.all { it.isDigit() } &&
+                            v.toIntOrNull()?.let { it in 1..65535 } == true
+                        ) {
+                            set("server-port", v)
+                        }
+                    },
                     label = { Text("端口") },
                     singleLine = true,
+                    isError = port.toIntOrNull()?.let { it !in 1..65535 } ?: true,
+                    supportingText = {
+                        if (port.toIntOrNull()?.let { it !in 1..65535 } ?: true) {
+                            Text("端口范围 1–65535", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
                     shape = M3Shape.large,
                     modifier = Modifier.weight(1f),
                 )

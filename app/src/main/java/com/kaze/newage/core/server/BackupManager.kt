@@ -25,6 +25,19 @@ object BackupManager {
     /** 打包时跳过的顶层目录名 */
     private val EXCLUDED_DIRS = setOf("cache", "logs", "crash-reports")
 
+    /**
+     * 备份文件名里可用的实例名。
+     *
+     * 显示名是**用户自由输入**的，可以带 `/`（甚至 `..`）：直接拼进文件名会写到备份目录之外，
+     * 或者因为父目录不存在而必然失败 —— 界面上只报一句"备份失败：No such file or directory"，
+     * 用户完全不知道是名字的问题。目录名本来就是 sanitize 过的，兜底用它。
+     */
+    private fun fileSafeName(instance: ServerInstance): String =
+        instance.name.replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+            .trim()
+            .trim('.')
+            .ifBlank { instance.dir.name }
+
     /** 备份根目录（实例目录之外，避免被备份自身包含） */
     private fun backupParent(instance: ServerInstance): File =
         File(instance.dir.parentFile ?: instance.dir, "backups")
@@ -64,7 +77,7 @@ object BackupManager {
         // 旧布局按**显示名**前缀平铺，而显示名是可以改的、也可以重复：改过名的实例
         // 看不到自己的旧备份（成了孤儿文件），同名实例之间还会互相串到对方的备份。
         // 目录名则是唯一的、且改名时不变（新布局也正是用它做目录），所以两个前缀都认。
-        val prefixes = listOf("${instance.name}_", "${instance.dir.name}_").distinct()
+        val prefixes = listOf("${fileSafeName(instance)}_", "${instance.dir.name}_").distinct()
         val legacy = backupParent(instance)
             .listFiles { f: File ->
                 f.isFile && f.name.endsWith(".zip") && prefixes.any { f.name.startsWith(it) }
@@ -88,7 +101,7 @@ object BackupManager {
     fun backup(instance: ServerInstance): File {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val dir = backupsRoot(instance)
-        val dest = File(dir, "${instance.name}_$stamp.zip")
+        val dest = File(dir, "${fileSafeName(instance)}_$stamp.zip")
         // 临时名带 .part：即使残留也不会被 list()（只认 .zip）当成可用备份
         val tmp = File(dir, "${dest.name}.part")
         try {
