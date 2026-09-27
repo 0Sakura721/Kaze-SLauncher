@@ -169,24 +169,24 @@ fun NewServerScreen(
 // ───────────────────────────────────────────────
 
 /**
- * 三步向导的进度条（波浪形）。
+ * 三步向导的步骤指示。
  *
- * 波浪进度条本身只有 10dp 高、没有文字位，所以步数写在下面一行 labelLarge 里；
- * 进度按"第 N 步"给 (N-1)/3 —— 第 1 步时是 0 而不是 1/3，这样进度条的推进
- * 与"走完一步"对齐（三步都填完时正好 2/3，等创建完成的动作接手）。
+ * 只有一行文字，**没有进度条**。
+ *
+ * 这里原来在文字下面还画了一条 `WavyLinearProgress((step-1)/total)`，本意是"第几步"的
+ * 静态指示。但真机反馈很一致："选择版本页在搜索栏和『第 2 步，共 3 步』之间有个常驻的
+ * 进度条" —— 无论怎么调（关掉动画、把值算对）它看起来都像"有个任务卡在那儿没跑完"，
+ * 因为一条**不动的进度条**在中文语境里天然读作"卡住了"。既然步骤文字已经把话说清楚
+ * （第 2 步，共 3 步 · 选版本与资源），这条条子只带来误导，直接删掉。
  */
 @Composable
 private fun WizardProgress(step: Int, total: Int, title: String) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            "第 $step 步，共 $total 步 · $title",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        // animated = false：这是"第几步"的静态指示，不是正在跑的任务。
-        // 开着动画时相位会一直流动，观感像有个进度条卡在那儿转。
-        WavyLinearProgress(progress = (step - 1).toFloat() / total, animated = false)
-    }
+    Text(
+        "第 $step 步，共 $total 步 · $title",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 // ───────────────────────────────────────────────
