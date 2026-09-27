@@ -345,17 +345,25 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             // 服务端进程的 CPU / 内存占用（每 2 秒刷新；未启动时为空 → 不占位）
             val stats by viewModel.procStats.collectAsStateWithLifecycle()
             val ctxForMem = androidx.compose.ui.platform.LocalContext.current
-            stats?.let { s ->
+            // 运行中就**一定**显示这一行：此前是 stats == null 就整行不渲染，
+            // 而 pid 在 proot 下匹配不上 → 用户看到的是"控制台根本没有占用数据"。
+            // 采样还没出来时显示"采样中"，比整行消失可诊断得多。
+            if (serverState == ServerState.Running) {
+                val s = stats
                 val totalKb = remember { ProcessStats.totalMemKb(ctxForMem) }
-                val memPct = if (totalKb > 0) s.rssKb.toFloat() / totalKb * 100f else 0f
+                val memPct = if (s != null && totalKb > 0) s.rssKb.toFloat() / totalKb * 100f else 0f
                 Text(
                     buildString {
-                        append("CPU ").append(fmt("%.0f", s.cpuPercent)).append("%")
-                        // 单核占用率可以超过 100%，所以把"用了几个核"也说清楚 ——
-                        // 否则 8 核机器上的 12% 会让人以为很闲，其实是吃满了一个核
-                        if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append(" 核）")
-                        append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append(" GB")
-                        append("（").append(fmt("%.0f", memPct)).append("%）")
+                        if (s == null) {
+                            append("CPU 采样中…")
+                        } else {
+                            append("CPU ").append(fmt("%.0f", s.cpuPercent)).append("%")
+                            // 单核占用率可以超过 100%，所以把"用了几个核"也说清楚 ——
+                            // 否则 8 核机器上的 12% 会让人以为很闲，其实是吃满了一个核
+                            if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append(" 核）")
+                            append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append(" GB")
+                            append("（").append(fmt("%.0f", memPct)).append("%）")
+                        }
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

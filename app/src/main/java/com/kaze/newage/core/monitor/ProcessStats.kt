@@ -100,19 +100,58 @@ object ProcessStats {
      * 扫不到返回 null（未启动 / 无权限 / 已经退出）。
      */
     fun findServerPid(instanceDirName: String): Int? {
-        if (instanceDirName.isBlank()) return null
         val proc = File("/proc")
-        val candidates = proc.listFiles { f -> f.isDirectory && f.name.all { it.isDigit() } } ?: return null
+        val candidates = proc.listFiles { f -> f.isDirectory && f.name.all { it.isDigit() } }
+            ?: return null
+        val myPid = android.os.Process.myPid()
+        val mine = ArrayList<Pair<Int, String>>()   // 后代里的 java
+        val anyJava = ArrayList<Pair<Int, String>>()  // 兜底：所有 java
         for (dir in candidates) {
             val pid = dir.name.toIntOrNull() ?: continue
             val cmdline = runCatching { File(dir, "cmdline").readBytes() }.getOrNull() ?: continue
             if (cmdline.isEmpty()) continue
             val text = String(cmdline, Charsets.UTF_8).replace('\u0000', ' ')
             if (!text.contains("java")) continue
-            if (text.contains(instanceDirName)) return pid
+            anyJava.add(pid to text)
+            if (isDescendant(pid, myPid)) mine.add(pid to text)
         }
-        return null
+        // ① 优先：**自己进程的后代**里的 java。
+        //    服务端是 app → proot → java，所以 java 一定是我们的后代。
+        //    这一条比"cmdline 里带实例目录名"可靠得多 —— proot 会把子进程 cmdline 里的
+        //    路径改写成 /mnt/...，实例目录名（Forge-26.3 之类）根本不出现，
+        //    旧版就是因此永远匹配不到、这一行数据从来不显示。
+        // ② 其中若有人真的带实例目录名，就是它。
+        // ③ 否则取 RSS 最大的那个（服务端是这里面最重的进程）。
+        for ((pid, text) in mine) if (text.contains(instanceDirName)) return pid
+        if (mine.isNotEmpty()) return mine.maxByOrNull { rssKb(it.first) }?.first
+        for ((pid, text) in anyJava) if (instanceDirName.isNotBlank() && text.contains(instanceDirName)) return pid
+        return anyJava.maxByOrNull { rssKb(it.first) }?.first
     }
+
+    /**
+     * [pid] 是不是 [root] 的后代 —— 顺着 `/proc/<pid>/stat` 的第 4 个字段（ppid）往上爬。
+     * 用于在 proot 下认出服务端 java：路径会被 proot 改写，但父子关系不会。
+     */
+    private fun isDescendant(pid: Int, root: Int): Boolean {
+        var cur = pid
+        repeat(16) {   // 防环 / 防异常深度
+            if (cur <= 1) return false
+            val ppid = runCatching {
+                File("/proc/$cur/stat").readText()
+                    .substringAfterLast(')')   // 进程名可能带空格与括号，得从最后一个 ')' 之后切
+                    .trim().split(' ').getOrNull(1)?.toIntOrNull()
+            }.getOrNull() ?: return false
+            if (ppid == root) return true
+            if (ppid == cur) return false
+            cur = ppid
+        }
+        return false
+    }
+
+    /** 单进程 RSS（KB）；读不到返回 -1（排序用，不进 UI） */
+    private fun rssKb(pid: Int): Long =
+        runCatching { File("/proc/$pid/status").readText() }.getOrNull()
+            ?.let { parseVmRssKb(it) } ?: -1L
 
     /** 设备核数（用来把"用了几个核"折算成整机占用率） */
     val cores: Int = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
