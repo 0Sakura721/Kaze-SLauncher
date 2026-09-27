@@ -667,6 +667,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { instance.dir.deleteRecursively() }
             // 备份目录在实例目录之外，删除实例后无任何入口再能访问——一并清理防死数据
             runCatching { com.kaze.newage.core.server.BackupManager.deleteAllBackups(instance) }
+            // 控制台缓冲 / 运行时长 / 状态表都是按 id 长期持有的，实例删了必须一起清：
+            // 否则反复建删实例时它们只增不减（控制台缓冲上限 5 万行 ≈ 6 MB/实例）
+            runCatching { serverManager.forget(instance.id) }
             if (_currentInstanceId.value == instance.id) _currentInstanceId.value = null
         }
     }

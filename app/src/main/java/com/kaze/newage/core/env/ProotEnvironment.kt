@@ -486,15 +486,20 @@ class ProotEnvironment(
             // rootfs 已解压 ≠ 部署完整：阶段 3（写 apt 源 + apt-get update）可能从未成功。
             // 旧实现无条件短路返回"环境已就绪"，于是部署中途失败后无论重试多少次，
             // apt 都补不上，后续 `apt-get install`（装 Java）全部失败。
-            ensureAptStage(onProgress)
-            if (_state.value == State.ERROR) {
-                isSetupRunning.set(false)
+            //
+            // 释放锁必须放进 finally：ensureAptStage 是**挂起点**，协程在这里被取消
+            //（用户离开页面 / 应用退后台被回收）时，旧实现那两行显式的
+            // `isSetupRunning.set(false)` 都执行不到 —— 锁永远为 true，
+            // 之后每次部署都要先干等 15 分钟才报「等待并发部署超时」。
+            try {
+                ensureAptStage(onProgress)
+                if (_state.value == State.ERROR) return@withContext
+                _state.value = State.READY
+                onProgress(1f, "环境已就绪")
                 return@withContext
+            } finally {
+                isSetupRunning.set(false)
             }
-            _state.value = State.READY
-            onProgress(1f, "环境已就绪")
-            isSetupRunning.set(false)
-            return@withContext
         }
         _state.value = State.SETTING_UP
 

@@ -229,6 +229,26 @@ class DefaultServerManager(
     override fun isRunning(instanceId: String): Boolean =
         slots[instanceId]?.process?.isAlive == true
 
+    /**
+     * 实例被删除：把它的常驻状态一并清掉。
+     *
+     * [consoles] / [uptimeFlows] / [_states] 都是按实例 id 长期持有的（这是刻意的：
+     * 停止后仍能翻控制台、重启后运行时长连续），但实例删掉之后再也没人会来取它们 ——
+     * 控制台环形缓冲上限 5 万行 ≈ 6 MB，反复建实例再删，内存只增不减。
+     * 槽位若还在（异常路径下删实例），连它的定时任务一起取消。
+     */
+    override fun forget(instanceId: String) {
+        slots.remove(instanceId)?.let { slot ->
+            slot.waitJob?.cancel()
+            slot.uptimeJob?.cancel()
+            slot.restartJob?.cancel()
+            slot.stopTimeoutJob?.cancel()
+        }
+        consoles.remove(instanceId)
+        uptimeFlows.remove(instanceId)
+        _states.update { it - instanceId }
+    }
+
     // ── 启动 ──
     override suspend fun start(instance: ServerInstance) {
         // 防重入必须是**原子**的：旧实现是"先 get 判断、再 put"的 check-then-act，
@@ -583,30 +603,35 @@ class DefaultServerManager(
             try {
                 // 逐字符流式读取：\r = 覆盖式进度行（控制台替换上一行，避免几百行刷屏），
                 // \n = 普通行。readLine 会把 \r 也当分隔符，无法区分，故手写分割。
-                val reader = proc.inputStream.bufferedReader()
-                val sb = StringBuilder()
-                // 块读取：syscall 从"每字符一次"降到每 8KB 一次，其余行为不变
-                val buf = CharArray(8 * 1024)
-                fun flushLine(replace: Boolean) {
-                    val text = sb.toString().trim()
-                    sb.setLength(0)
-                    if (text.isNotEmpty()) {
-                        if (replace) slot.logReplace(text, classify(text))
-                        else slot.log(text, classify(text))
-                    }
-                }
-                while (true) {
-                    val n = reader.read(buf)
-                    if (n < 0) break
-                    for (i in 0 until n) {
-                        when (buf[i]) {
-                            '\r' -> flushLine(replace = true)
-                            '\n' -> if (sb.isNotEmpty()) flushLine(replace = false)
-                            else -> sb.append(buf[i])
+                //
+                // 必须 use{}：旧实现直接 bufferedReader() 不关，进程退出后这条管道的
+                // 读端 fd 一直挂着 —— 每次启动/自动重启都漏一个，长时间挂着服务端
+                // 反复重启会把进程的 fd 用光。
+                proc.inputStream.bufferedReader().use { reader ->
+                    val sb = StringBuilder()
+                    // 块读取：syscall 从"每字符一次"降到每 8KB 一次，其余行为不变
+                    val buf = CharArray(8 * 1024)
+                    fun flushLine(replace: Boolean) {
+                        val text = sb.toString().trim()
+                        sb.setLength(0)
+                        if (text.isNotEmpty()) {
+                            if (replace) slot.logReplace(text, classify(text))
+                            else slot.log(text, classify(text))
                         }
                     }
+                    while (true) {
+                        val n = reader.read(buf)
+                        if (n < 0) break
+                        for (i in 0 until n) {
+                            when (buf[i]) {
+                                '\r' -> flushLine(replace = true)
+                                '\n' -> if (sb.isNotEmpty()) flushLine(replace = false)
+                                else -> sb.append(buf[i])
+                            }
+                        }
+                    }
+                    if (sb.isNotEmpty()) flushLine(replace = false)
                 }
-                if (sb.isNotEmpty()) flushLine(replace = false)
             } catch (_: Exception) { }
         }
 
@@ -918,12 +943,35 @@ class DefaultServerManager(
                 }
             }
             try {
-                env.execute(
+                // 用 launch 而不是 execute：安装器进程必须登记到 slot.process。
+                // 装 Forge/NeoForge 要联网跑几分钟，旧实现走 execute 时这个进程游离在 slot 之外：
+                // 用户点「停止」既不会进 10 秒强杀路径，也没有任何代码持有它的引用，只能干等；
+                // 而且界面显示"已停止"时安装器还在后台写 libraries/。
+                val proc = env.launch(
                     listOf(javaBin, "-jar", installer.name, "--installServer"),
                     instance.dir,
-                ) { line ->
-                    lastLineAt = System.currentTimeMillis()
-                    slot.log(line, classify(line))
+                ) ?: throw RuntimeException("无法启动 ${instance.coreType.displayName} 安装器（环境异常）")
+                slot.process = proc
+                try {
+                    proc.inputStream.bufferedReader().use { reader ->
+                        var line = reader.readLine()
+                        while (line != null) {
+                            lastLineAt = System.currentTimeMillis()
+                            slot.log(line, classify(line))
+                            // 安装期的取消检查点：用户点了停止就立刻结束安装器，
+                            // 不用等它把依赖下完（断点目录保留，下次重跑会把缺的库补齐）
+                            if (slot.manualStop) {
+                                slot.log("> 已请求停止：结束安装器", LineType.Warn)
+                                proc.destroyForcibly()
+                                break
+                            }
+                            line = reader.readLine()
+                        }
+                    }
+                    proc.waitFor()
+                    proc.exitValue()
+                } finally {
+                    if (slot.process === proc) slot.process = null
                 }
             } finally {
                 ticker.cancel()

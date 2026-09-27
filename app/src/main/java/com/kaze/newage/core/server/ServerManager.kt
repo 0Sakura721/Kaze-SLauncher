@@ -45,4 +45,13 @@ interface ServerManager {
 
     /** 发送控制台命令（写入进程 stdin，同步操作） */
     fun sendCommand(instance: ServerInstance, command: String)
+
+    /**
+     * 实例被删除时清掉它的常驻状态（控制台缓冲、运行时长、状态表）。
+     *
+     * 这三张表都是**按实例 id 长期持有**的（为了"停止后仍能翻日志""重启后时长连续"），
+     * 但实例真的被删掉之后就再也不会有人来取：控制台缓冲上限 5 万行 ≈ 6 MB，
+     * 反复建实例再删实例会一路攒下去。默认空实现，便于测试替身。
+     */
+    fun forget(instanceId: String) {}
 }

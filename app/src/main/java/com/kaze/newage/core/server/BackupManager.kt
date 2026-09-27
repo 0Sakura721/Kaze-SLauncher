@@ -61,10 +61,13 @@ object BackupManager {
     fun list(instance: ServerInstance): List<File> {
         val own = backupsRoot(instance)
             .listFiles { f: File -> f.isFile && f.name.endsWith(".zip") }
-        val legacyPrefix = "${instance.name}_"
+        // 旧布局按**显示名**前缀平铺，而显示名是可以改的、也可以重复：改过名的实例
+        // 看不到自己的旧备份（成了孤儿文件），同名实例之间还会互相串到对方的备份。
+        // 目录名则是唯一的、且改名时不变（新布局也正是用它做目录），所以两个前缀都认。
+        val prefixes = listOf("${instance.name}_", "${instance.dir.name}_").distinct()
         val legacy = backupParent(instance)
             .listFiles { f: File ->
-                f.isFile && f.name.endsWith(".zip") && f.name.startsWith(legacyPrefix)
+                f.isFile && f.name.endsWith(".zip") && prefixes.any { f.name.startsWith(it) }
             }
         return ((own ?: emptyArray()) + (legacy ?: emptyArray()))
             .distinct()
