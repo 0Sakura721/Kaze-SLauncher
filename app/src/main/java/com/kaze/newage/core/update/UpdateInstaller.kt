@@ -27,6 +27,12 @@ object UpdateInstaller {
         info: UpdateChecker.ReleaseInfo,
         onProgress: (doneMb: Long, totalMb: Long, percent: Float) -> Unit = { _, _, _ -> },
         shouldCancel: () -> Boolean = { false },
+        /**
+         * 阶段状态文本（"正在探测下载源…" / "使用增量补丁…" / "正在拼装补丁…"）。
+         * 界面要显示它 —— 之前只有一句"下载中"，探测那几秒和拼装补丁那几秒
+         * 看起来都像卡死了。
+         */
+        onStatus: (String) -> Unit = {},
     ): File? = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         // tag 来自远端（tag_name），参与拼文件名前先净化
@@ -41,7 +47,9 @@ object UpdateInstaller {
         }
         // 先试增量补丁：能省 90%+ 流量。任何一步不成立就静默回退整包 ——
         // 补丁是"加速手段"而不是"必经路径"，它失败绝不能让用户更新不了。
-        tryPatchUpdate(context, info, onProgress, shouldCancel)?.let { return@withContext it }
+        onStatus("正在检查增量补丁…")
+        tryPatchUpdate(context, info, onProgress, shouldCancel, onStatus)?.let { return@withContext it }
+        onStatus("正在探测最快的下载源…（多个镜像并发测速）")
         val used = Downloader.downloadFromSources(
             urls = UpdateChecker.sources(info.apkUrl),
             dest = file,
@@ -51,9 +59,12 @@ object UpdateInstaller {
             shouldCancel = shouldCancel,
             validate = { f -> isUsableApk(context, f, info) },
         )
-        if (used == null) null
-        else {
+        if (used == null) {
+            onStatus("所有下载源都失败了（共 ${UpdateChecker.sources(info.apkUrl).size} 个候选）")
+            null
+        } else {
             runCatching { doneMarker.writeText(info.tag) }
+            onStatus("下载完成，正在下载/准备安装…")
             file
         }
     }
@@ -73,6 +84,7 @@ object UpdateInstaller {
         info: UpdateChecker.ReleaseInfo,
         onProgress: (Long, Long, Float) -> Unit,
         shouldCancel: () -> Boolean,
+        onStatus: (String) -> Unit,
     ): File? {
         if (info.patchAssets.isEmpty()) return null
         val installedApk = runCatching { File(context.applicationInfo.sourceDir) }.getOrNull() ?: return null
@@ -104,8 +116,10 @@ object UpdateInstaller {
             ) ?: continue
             if (usedSource.isBlank() || !patchZip.isFile) continue
 
+            onStatus("命中增量补丁（省 ~95% 流量），正在下载补丁…")
             // ③ 拼装：apply 内部会比对 targetSha256（补丁被篡改/传输损坏都在这拦下）
             val out = File(dir, "patched-${safeTagOf(info)}.apk")
+            onStatus("正在拼装补丁并校验 sha256…")
             val got = runCatching { ApkPatchApplier.apply(installedApk, patchZip, out) }.getOrNull() ?: continue
 
             // ④ 与发布方给出的整包 sha256 对齐（有的话），再比对签名

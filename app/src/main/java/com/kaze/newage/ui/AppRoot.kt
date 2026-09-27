@@ -133,6 +133,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val scope = rememberCoroutineScope()
     var updateInfo by remember { mutableStateOf<UpdateChecker.ReleaseInfo?>(null) }
     var updateProgress by remember { mutableStateOf<String?>(null) }
+    // 更新阶段的**状态文本**（探测源 / 命中补丁 / 拼装校验…）：之前只有"下载中"，
+    // 探测那几秒和拼装补丁那几秒看起来都像卡死。
+    var updateStatus by remember { mutableStateOf<String?>(null) }
+    var updatePercent by remember { mutableStateOf(0f) }
     var updateBusy by remember { mutableStateOf(false) }
     var updateChecked by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -155,15 +159,19 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         if (updateBusy) return
         updateBusy = true
         updateCancelRequested = false
-        updateProgress = "准备下载…"
+        updateProgress = null
+        updatePercent = 0f
+        updateStatus = "准备更新…"
         scope.launch {
             val file = UpdateInstaller.download(
                 context = appContext,
                 info = info,
-                onProgress = { done, total, _ ->
-                    updateProgress = if (total > 0) "下载中 $done MB / $total MB" else "下载中 $done MB…"
+                onProgress = { done, total, percent ->
+                    updateProgress = if (total > 0) "$done MB / $total MB" else "$done MB…"
+                    updatePercent = percent
                 },
                 shouldCancel = { updateCancelRequested },
+                onStatus = { updateStatus = it },
             )
             updateBusy = false
             if (file != null) {
@@ -181,6 +189,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 updateProgress = null
             } else {
                 updateProgress = "下载失败，请稍后在设置中重试"
+                updateStatus = null
             }
         }
     }
@@ -365,16 +374,34 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                                     .verticalScroll(rememberScrollState()),
                             )
                         }
+                        // 阶段状态（探测源 / 命中补丁 / 拼装校验）：让用户知道卡在哪一步
+                        updateStatus?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
                         updateProgress?.let {
                             Text(
                                 it,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 8.dp),
+                                modifier = Modifier.padding(top = 4.dp),
                             )
                         }
                         if (updateBusy) {
-                            LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                            // 有进度就显示**确定**进度条，没有（探测/拼装/校验阶段）
+                            // 才退回不确定的滚动条 —— 一直转圈会让人以为卡死了
+                            if (updatePercent > 0f) {
+                                LinearProgressIndicator(
+                                    progress = { updatePercent },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                )
+                            } else {
+                                LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                            }
                         }
                     }
                 },
