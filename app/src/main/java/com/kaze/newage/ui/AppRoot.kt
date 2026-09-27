@@ -187,6 +187,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 // 用户主动取消：静默收起弹窗（下载已在 Downloader 内中止，断点保留）
                 updateInfo = null
                 updateProgress = null
+                updateStatus = null
             } else {
                 updateProgress = "下载失败，请稍后在设置中重试"
                 updateStatus = null
@@ -352,7 +353,10 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             AlertDialog(
                 // 下载中不锁死弹窗：点击外部 = 请求取消（下载会中止，断点保留）
                 onDismissRequest = {
-                    if (updateBusy) updateCancelRequested = true else updateInfo = null
+                    if (updateBusy) {
+                        updateCancelRequested = true
+                        updateStatus = "正在取消下载…"
+                    } else updateInfo = null
                 },
                 title = { Text("发现新版本 ${info.tag}") },
                 text = {
@@ -416,10 +420,24 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 dismissButton = {
                     TextButton(
                         onClick = {
-                            if (updateBusy) updateCancelRequested = true else updateInfo = null
+                            if (updateBusy) {
+                                // 立刻给反馈：只把标志置真的话，用户点了取消、界面几秒内毫无变化，
+                                // 观感就是"取消不了"（真机反馈）。这里马上换掉状态行并禁用按钮。
+                                updateCancelRequested = true
+                                updateStatus = "正在取消下载…"
+                            } else {
+                                updateInfo = null
+                            }
                         },
+                        enabled = !updateCancelRequested,
                     ) {
-                        Text(if (updateBusy) "取消下载" else "以后再说")
+                        Text(
+                            when {
+                                updateCancelRequested -> "正在取消…"
+                                updateBusy -> "取消下载"
+                                else -> "以后再说"
+                            },
+                        )
                     }
                 },
             )

@@ -94,15 +94,22 @@ object UpdateInstaller {
 
         for (asset in info.patchAssets) {
             if (shouldCancel()) return null
-            // ① 元数据只有 ~10KB：先拿它判断"这份补丁的基线是不是本机这个包"
+            // ① 元数据只有 ~10KB：先拿它判断"这份补丁的基线是不是本机这个包"。
+            //    ⚠️ 这一步超时 20 秒，期间**必须**能取消 —— 真机反馈的"更新过程中无法取消"
+            //    主要就是这段：点了取消，界面最长 20 秒毫无反应。
+            onStatus("正在获取补丁信息…")
+            if (shouldCancel()) return null
             val metaText = runCatching {
                 Downloader.downloadText(asset.jsonUrl, timeoutMs = 20_000)
             }.getOrNull() ?: continue
+            if (shouldCancel()) return null
             val meta = runCatching { JSONObject(metaText) }.getOrNull() ?: continue
             val base = meta.optString("baseSha256", "").trim().lowercase()
             if (base.length != 64 || !base.equals(baseSha, ignoreCase = true)) continue
 
             // ② 下补丁（走与整包同一条多镜像 + 断点续传链路）
+            //    状态要在**下载之前**报出去，否则整个补丁下载期间界面都停在上一条状态
+            onStatus("命中增量补丁（省 ~95% 流量），正在下载补丁…")
             val patchZip = File(dir, asset.name.removeSuffix(".json") + ".zip")
             // downloadFromSources 返回的是"最终用了哪个源"（字符串），文件在 dest 上
             val usedSource = Downloader.downloadFromSources(
@@ -114,13 +121,20 @@ object UpdateInstaller {
                 shouldCancel = shouldCancel,
                 validate = { f -> f.length() > 1024 },
             ) ?: continue
+            if (shouldCancel()) return null
             if (usedSource.isBlank() || !patchZip.isFile) continue
 
-            onStatus("命中增量补丁（省 ~95% 流量），正在下载补丁…")
-            // ③ 拼装：apply 内部会比对 targetSha256（补丁被篡改/传输损坏都在这拦下）
+            // ③ 拼装：apply 内部会比对 targetSha256（补丁被篡改/传输损坏都在这拦下）。
+            //    这一步是纯本地计算（1~3 秒）且没有取消回调，所以进去前后各查一次：
+            //    进去前是"别白干"，出来后是"别把用户已经取消掉的东西装上去"。
             val out = File(dir, "patched-${safeTagOf(info)}.apk")
             onStatus("正在拼装补丁并校验 sha256…")
+            if (shouldCancel()) return null
             val got = runCatching { ApkPatchApplier.apply(installedApk, patchZip, out) }.getOrNull() ?: continue
+            if (shouldCancel()) {
+                runCatching { out.delete() }
+                return null
+            }
 
             // ④ 与发布方给出的整包 sha256 对齐（有的话），再比对签名
             if (info.apkSha256 != null && !got.equals(info.apkSha256, ignoreCase = true)) continue
