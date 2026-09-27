@@ -1166,15 +1166,26 @@ private fun GameModePicker(gameMode: String, onGameModeChange: (String) -> Unit)
 }
 
 /**
- * EULA 卡片：整行是一个 toggleable(Checkbox)。
+ * EULA 卡片：勾选行是一个 toggleable(Checkbox)，**查看条款的链接另起一行**。
  *
  * Checkbox 的 onCheckedChange 必须是 null —— 整行的 toggleable 已经是唯一触控目标，
  * 否则同一个动作有两个可聚焦节点，TalkBack 会把"同意"读两遍。
+ *
+ * 链接必须放在 toggleable 的 Row **之外**：嵌在里面时它和整行的切换是两个重叠的
+ * 点击区域，用户想看一眼条款，结果把"已同意"勾上了（而同意是建服的硬前提）。
  */
 @Composable
 private fun EulaCard(agreed: Boolean, onAgreedChange: (Boolean) -> Unit) {
     val context = LocalContext.current
     val scheme = MaterialTheme.colorScheme
+    val openTerms: () -> Unit = {
+        runCatching {
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW, Uri.parse("https://aka.ms/MinecraftEULA"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        }
+    }
     M3ECard(
         variant = M3ECardVariant.Outlined,
         title = "Minecraft EULA",
@@ -1193,19 +1204,18 @@ private fun EulaCard(agreed: Boolean, onAgreedChange: (Boolean) -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text("我已阅读并同意 Minecraft EULA", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    "点此查看条款",
+                    "建服即表示接受该协议的全部条款",
                     style = MaterialTheme.typography.labelMedium,
-                    color = scheme.primary,
-                    modifier = Modifier.clickable {
-                        runCatching {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse("https://aka.ms/MinecraftEULA"))
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    },
+                    color = scheme.onSurfaceVariant,
                 )
             }
+        }
+        // 独立点击区域（自带点击padding，不会再碰到上面的勾选行）
+        TextButton(
+            onClick = openTerms,
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+        ) {
+            Text("点此查看条款", style = MaterialTheme.typography.labelLarge, color = scheme.primary)
         }
     }
 }

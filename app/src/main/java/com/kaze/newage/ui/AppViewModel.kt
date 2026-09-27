@@ -218,7 +218,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _hasMoreOlder.value = _olderCursor.value != null
                 // 批量发布的缓冲与定时器（见下面 collect 里的说明）。
                 // 定时器是 collectLatest 的子协程 → 切实例时自动取消。
-                synchronized(consoleLock) { consolePending.clear(); consolePendingReplace = false }
+                synchronized(consoleLock) { consolePending.clear() }
                 val consoleFlusher = launch {
                     while (isActive) {
                         delay(CONSOLE_FLUSH_INTERVAL_MS)
@@ -238,7 +238,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     // 否则服务端安静下来时，最关键的 "Done (3.2s)! For help, type help" 反而没了。
                     synchronized(consoleLock) {
                         consolePending.add(line)
-                        if (line.replaceLast) consolePendingReplace = true
                         // 小列表逐行即时发布（手感与改造前一致）；只有大列表才批量，
                         // 省掉的正是 O(N)/行 在万行级别上的代价。
                         if (consolePending.size >= CONSOLE_FLUSH_BATCH ||
@@ -509,16 +508,34 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // 就是每秒上千万次元素拷贝 + 同样次数的重组合 → 主线程卡死（真机反馈的"1.4 万行卡住"）。
     private val consoleLock = Any()
     private val consolePending = ArrayList<ConsoleLine>(CONSOLE_FLUSH_BATCH)
-    private var consolePendingReplace = false
 
-    /** 调用方必须持有 [consoleLock] */
+    /**
+     * 把攒下的行合并进列表。调用方必须持有 [consoleLock]。
+     *
+     * `replaceLast`（服务端用 `\r` 输出的原地进度行）必须**逐条**结算：
+     * 一条覆盖行的语义是"弹掉当前最后一行、再压入自己"。旧实现整批只记一个布尔、
+     * 发布时只 `dropLast(1)`，于是一批 256 行覆盖式输出会往列表里净增 255 行
+     * （真机表现：Forge 刷屏几秒就把控制台窗口冲爆，行数一路涨到上限）。
+     *
+     * 这里用一个只装本批行的局部栈精确模拟：栈非空时弹栈内的行，栈空了才向后弹
+     * **已经发布**的行（最多弹 cur 的长度）。批内被覆盖掉的中间行随之消失，
+     * 与逐行发布（小列表走的即时路径）得到的结果完全一致。
+     */
     private fun publishConsoleLocked() {
         if (consolePending.isEmpty()) return
         val cur = _consoleLines.value
-        val base = if (consolePendingReplace && cur.isNotEmpty()) cur.dropLast(1) else cur
-        _consoleLines.value = (base + consolePending).takeLast(CONSOLE_DISPLAY_MAX)
+        val pending = ArrayList<ConsoleLine>(consolePending.size)
+        var basePops = 0
+        for (line in consolePending) {
+            if (line.replaceLast) {
+                if (pending.isNotEmpty()) pending.removeAt(pending.size - 1)
+                else if (basePops < cur.size) basePops++
+            }
+            pending.add(line)
+        }
+        val base = if (basePops > 0) cur.dropLast(basePops) else cur
+        _consoleLines.value = (base + pending).takeLast(CONSOLE_DISPLAY_MAX)
         consolePending.clear()
-        consolePendingReplace = false
     }
 
     // ── 回读更早的日志（内存窗口之外的历史，来自 console-output.log / .old.log）──
