@@ -33,6 +33,11 @@ object UpdateInstaller {
          * 看起来都像卡死了。
          */
         onStatus: (String) -> Unit = {},
+        /**
+         * 是否允许走增量补丁。设置里默认是「完整安装包」→ 传 false 就直接下整包。
+         * 补丁只是省流量，不走它一样能更新。
+         */
+        allowPatch: Boolean = true,
     ): File? = withContext(Dispatchers.IO) {
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         // tag 来自远端（tag_name），参与拼文件名前先净化
@@ -47,8 +52,12 @@ object UpdateInstaller {
         }
         // 先试增量补丁：能省 90%+ 流量。任何一步不成立就静默回退整包 ——
         // 补丁是"加速手段"而不是"必经路径"，它失败绝不能让用户更新不了。
-        onStatus("正在检查增量补丁…")
-        tryPatchUpdate(context, info, onProgress, shouldCancel, onStatus)?.let { return@withContext it }
+        if (allowPatch) {
+            onStatus("正在检查增量补丁…")
+            tryPatchUpdate(context, info, onProgress, shouldCancel, onStatus)?.let { return@withContext it }
+        } else {
+            onStatus("按设置使用完整安装包…")
+        }
         onStatus("正在探测最快的下载源…（多个镜像并发测速）")
         val used = Downloader.downloadFromSources(
             urls = UpdateChecker.sources(info.apkUrl),

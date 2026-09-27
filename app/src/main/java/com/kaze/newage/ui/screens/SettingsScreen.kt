@@ -309,6 +309,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     updateState = UpdateUiState.Downloading(info, p, msg)
                 },
                 shouldCancel = { cancelDownload },
+                allowPatch = uiPrefs.updateMode.value == "patch",
             )
             if (file == null) {
                 withContext(Dispatchers.Main) {
@@ -759,6 +760,15 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         onClick = { openDialog = SettingsDialog.UpdateChannel },
                         trailing = { RowChevron() },
                     )
+                    3 -> M3EListItem(
+                        headline = "更新方式",
+                        supporting = updateModeLabel(uiPrefs.updateMode.value),
+                        leadingIcon = Icons.Filled.CloudDownload,
+                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = shape,
+                        onClick = { openDialog = SettingsDialog.UpdateMode },
+                        trailing = { RowChevron() },
+                    )
                     else -> M3EListItem(
                         headline = "检查更新",
                         supporting = "当前版本 $currentVersion · GitHub Releases · 自动测速选择最快下载线路",
@@ -928,6 +938,17 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 range = 0f..90f,
                 note = "越高越暗，0 为不遮",
                 onValueChange = { uiPrefs.setBgOpacity(it) },
+                onDismiss = { openDialog = null },
+            )
+
+            SettingsDialog.UpdateMode -> ChoiceDialog(
+                title = "更新方式",
+                options = listOf("full", "patch"),
+                selected = uiPrefs.updateMode.value,
+                label = { updateModeLabel(it) },
+                note = "完整安装包最稳妥（默认）；增量补丁只下载变化的部分，约省 95% 流量，" +
+                    "拼装后会校验 sha256 与签名，失败自动回退整包",
+                onSelect = { uiPrefs.setUpdateMode(it) },
                 onDismiss = { openDialog = null },
             )
 
@@ -1172,7 +1193,9 @@ private fun UpdateStatusCard(
         is UpdateUiState.Found -> M3ECard(
             variant = M3ECardVariant.Elevated,
             title = "发现新版本 ${state.info.tag}",
-            supporting = state.info.body.take(600).ifBlank { null },
+            // 设置页的检查更新**不显示 changelog**（真机要求）：只告知"有新版本"，
+                        // 想看更新说明请看应用启动时的更新弹窗，或点开 GitHub Release 页。
+                        supporting = "发现新版本 ${state.info.tag}，点「下载并安装」开始更新",
             content = {
                 Button(
                     onClick = { onDownload(state.info) },
@@ -1223,6 +1246,7 @@ private enum class SettingsDialog {
     BgBlur,
     BgMask,
     UpdateChannel,
+    UpdateMode,
     About,
 }
 
@@ -1236,6 +1260,11 @@ private fun themeModeLabel(value: Int): String = when (value) {
 }
 
 private fun darkStyleLabel(value: Int): String = if (value == 1) "AMOLED 纯黑" else "普通黑"
+
+private fun updateModeLabel(value: String): String = when (value) {
+    "patch" -> "增量补丁（省流量，约 5%）"
+    else -> "完整安装包（默认，最稳妥）"
+}
 
 private fun updateChannelLabel(value: String): String =
     if (value == "stable") "仅正式版" else "预览版（含测试版）"

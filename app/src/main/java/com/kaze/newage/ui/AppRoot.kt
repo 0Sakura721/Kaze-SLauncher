@@ -172,6 +172,8 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 },
                 shouldCancel = { updateCancelRequested },
                 onStatus = { updateStatus = it },
+                // 设置里默认「完整安装包」→ 不走增量补丁（补丁只是省流量）
+                allowPatch = uiPrefs.updateMode.value == "patch",
             )
             updateBusy = false
             if (file != null) {

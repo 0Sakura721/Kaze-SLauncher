@@ -106,9 +106,23 @@ emember(path) 缓存位图的话，
     /** 更新通道：preview（预览版，默认，含 prerelease）/ stable（仅正式版） */
     val updateChannel = mutableStateOf(prefs.getString("update_channel", "preview") ?: "preview")
 
+    /**
+     * 更新方式：`full`（完整安装包，**默认**）/ `patch`（增量补丁，省流量）。
+     *
+     * 默认整包是刻意的：补丁要拿本机已装 APK 当基线拼装，虽然每一道都校验
+     * （baseSha256 / targetSha256 / 签名），但它终究比"下一个完整包"多一环；
+     * 让用户显式选"省流量"更稳妥。
+     */
+    val updateMode = mutableStateOf(prefs.getString("update_mode", "full") ?: "full")
+
     fun setAutoUpdate(v: Boolean) {
         autoUpdate.value = v
         prefs.edit().putBoolean("auto_update", v).apply()
+    }
+
+    fun setUpdateMode(v: String) {
+        updateMode.value = v
+        prefs.edit().putString("update_mode", v).apply()
     }
 
     fun setUpdateChannel(v: String) {
