@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+（API 31）的分流规则：云备份与设备间直传都要遵守同一套排除项。
+  理由见 backup_rules.xml —— 排除带绝对路径的实例库、环境自检报告与缓存。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="instances.json" />
+        <exclude domain="file" path="instances.json.bak" />
+        <exclude domain="file" path="instances.json.tmp" />
+        <exclude domain="file" path="diagnostics.txt" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="instances.json" />
+        <exclude domain="file" path="instances.json.bak" />
+        <exclude domain="file" path="instances.json.tmp" />
+        <exclude domain="file" path="diagnostics.txt" />
+    </device-transfer>
+</data-extraction-rules>

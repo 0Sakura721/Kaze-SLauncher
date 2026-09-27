@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -136,6 +138,9 @@ fun AddonsScreen(
 
     // 哪一行正在安装：DownloadState 里没有 project_id，用本地记录把进度落到对应行上
     var installingId by remember { mutableStateOf<String?>(null) }
+    // 删除插件/模组：文件直接从 plugins/、mods/ 里消失且不可恢复（用户自己放进去的 jar
+    // 更是没有第二个副本），与其他破坏性操作一致，先二次确认
+    var deleteTarget by remember { mutableStateOf<java.io.File?>(null) }
     LaunchedEffect(installState.running) {
         if (!installState.running) installingId = null
     }
@@ -399,10 +404,7 @@ fun AddonsScreen(
                                             "${file.name}，${if (enabled) "已启用" else "已禁用"}"
                                     },
                                 )
-                                IconButton(onClick = {
-                                    AddonManager.delete(file)
-                                    refresh++
-                                }) {
+                                IconButton(onClick = { deleteTarget = file }) {
                                     Icon(
                                         Icons.Filled.Delete,
                                         contentDescription = "删除",
@@ -420,6 +422,24 @@ fun AddonsScreen(
                 )
             }
         }
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除「${target.name.removeSuffix(".disabled")}」？") },
+            text = { Text("该文件将从 ${if (kind == AddonKind.PLUGIN) "plugins" else "mods"}/ 目录中永久删除，无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteTarget = null
+                    AddonManager.delete(target)
+                    refresh++
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            },
+        )
     }
 }
 

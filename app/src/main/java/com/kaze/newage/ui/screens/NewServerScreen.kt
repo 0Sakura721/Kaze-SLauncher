@@ -1073,6 +1073,10 @@ private fun ConfigPage(
         // ── 精确输入内存对话框（FCLNumberSeekBar 点击数值行为）──
         if (showMemoryDialog) {
             var inputGb by remember { mutableStateOf(fmtGb(sliderMb).removeSuffix(" GB")) }
+            // 非法输入（空、字母、超范围）不能静默关掉对话框：用户点了「确定」什么都没发生、
+            // 弹窗自己消失，会以为已经改成了输入的那个值。给出行内错误并留在对话框里。
+            val parsed = inputGb.trim().toFloatOrNull()
+            val invalid = parsed == null || parsed * 1024f !in 512f..8192f
             AlertDialog(
                 onDismissRequest = { onShowMemoryDialog(false) },
                 title = { Text("精确设置内存") },
@@ -1083,15 +1087,23 @@ private fun ConfigPage(
                         label = { Text("内存（GB）") },
                         placeholder = { Text("2.0 ~ 8.0") },
                         singleLine = true,
+                        isError = invalid && inputGb.isNotBlank(),
+                        supportingText = {
+                            if (invalid && inputGb.isNotBlank()) {
+                                Text("请输入 0.5 ~ 8 之间的数字（GB）", color = MaterialTheme.colorScheme.error)
+                            }
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     )
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        inputGb.toFloatOrNull()?.let { gb ->
-                            onMemoryMb((gb * 1024f).coerceIn(512f, 8192f))
+                        val gb = inputGb.trim().toFloatOrNull()
+                        if (gb != null && gb * 1024f in 512f..8192f) {
+                            onMemoryMb(gb * 1024f)
+                            onShowMemoryDialog(false)
                         }
-                        onShowMemoryDialog(false)
+                        // 非法值：不关弹窗（上面的 isError 已经给出原因）
                     }) { Text("确定") }
                 },
                 dismissButton = {

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  备份/迁移规则（API 30 及以下，配合 manifest 的 android:fullBackupContent）。
+
+  `allowBackup="true"` 而没有任何规则时，系统会把 files/ 下的**全部**内容自动上传到云端备份
+  （或经 adb backup 导出）。这里逐项排除掉"带绝对路径、带设备状态"的文件：
+
+   - instances.json*：实例库记录的是实例目录的**绝对路径**（/sdcard/KazeS/... 或用户自选的
+     目录）。恢复到另一台设备上只会得到一批指向不存在目录的记录，紧接着 rescan() 会把
+     它们写回去，用户看到的是"一堆打不开的实例"。
+   - diagnostics.txt：环境自检报告里含设备路径、ABI、rootfs 状态等现场信息。
+
+  （cache/ 不需要写规则：系统本来就不会备份缓存目录。）
+
+  设置（DataStore）、应用日志则保留备份：换机时这些正是用户想要的。
+-->
+<full-backup-content>
+    <exclude domain="file" path="instances.json" />
+    <exclude domain="file" path="instances.json.bak" />
+    <exclude domain="file" path="instances.json.tmp" />
+    <exclude domain="file" path="diagnostics.txt" />
+</full-backup-content>

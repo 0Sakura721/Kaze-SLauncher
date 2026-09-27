@@ -20,6 +20,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,6 +58,8 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     var text by remember { mutableStateOf("读取中…") }
     var envText by remember { mutableStateOf("") }
     var reload by remember { mutableStateOf(0) }
+    // 清空应用日志不可逆，且这一页正是用户"出问题后唯一的现场"—— 必须二次确认
+    var confirmClear by remember { mutableStateOf(false) }
     val appLog = viewModel.appLog
     // 触发一次重读（刷新按钮 / 清空后）
     val tick by remember(reload) { mutableStateOf(reload) }
@@ -129,12 +133,7 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     Icon(Icons.Filled.Share, null, Modifier.size(18.dp))
                     Text("  分享", style = MaterialTheme.typography.labelLarge)
                 }
-                OutlinedButton(onClick = {
-                    scope.launch {
-                        appLog.clear()
-                        reload++
-                    }
-                }) {
+                OutlinedButton(onClick = { confirmClear = true }) {
                     Icon(Icons.Filled.Delete, null, Modifier.size(18.dp))
                     Text("  清空", style = MaterialTheme.typography.labelLarge)
                 }
@@ -170,5 +169,30 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("清空应用日志？") },
+            text = {
+                Text(
+                    "将删除已落盘的全部应用日志（最近 ${com.kaze.newage.core.log.AppLogStore.KEEP_FILES} 天）。\n" +
+                        "出问题时这份日志是唯一的现场，清空后无法恢复 —— 建议先「分享」出去。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    scope.launch {
+                        appLog.clear()
+                        reload++
+                    }
+                }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+            },
+        )
     }
 }
