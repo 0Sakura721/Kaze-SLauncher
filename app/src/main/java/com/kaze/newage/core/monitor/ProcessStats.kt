@@ -99,6 +99,17 @@ object ProcessStats {
      * 谁的 cmdline 里同时出现 `java` 与这台实例的目录名，谁就是。
      * 扫不到返回 null（未启动 / 无权限 / 已经退出）。
      */
+    /**
+     * 上一次扫描的计数，给界面显示用。
+     *
+     * 真机反馈"一直采样中"时，光看"采样中"没法判断是**匹配规则**不对，还是
+     * `/proc/<别的 pid>` **根本读不到** —— 这两件事的修法完全不同。
+     * 把候选数 / 可读 cmdline 数 / java 命中数 / 后代数摆在界面上，
+     * 用户截一张图就能定位，不必连 adb。
+     */
+    @Volatile
+    var lastDiag: String = ""
+
     fun findServerPid(instanceDirName: String): Int? {
         val proc = File("/proc")
         val candidates = proc.listFiles { f -> f.isDirectory && f.name.all { it.isDigit() } }
@@ -106,10 +117,18 @@ object ProcessStats {
         val myPid = android.os.Process.myPid()
         val mine = ArrayList<Pair<Int, String>>()   // 后代里的 java
         val anyJava = ArrayList<Pair<Int, String>>()  // 兜底：所有 java
+        var dirs = 0
+        var readableCmdline = 0
+        var unreadable = 0
         for (dir in candidates) {
             val pid = dir.name.toIntOrNull() ?: continue
-            val cmdline = runCatching { File(dir, "cmdline").readBytes() }.getOrNull() ?: continue
+            dirs++
+            // 读不到 cmdline（Android 对 /proc/<别的 pid>/cmdline 有限制、
+            // 或 proot 屏蔽）与"读到了但不是 java"是两回事，分开计数
+            val cmdline = runCatching { File(dir, "cmdline").readBytes() }.getOrNull()
+            if (cmdline == null) { unreadable++; continue }
             if (cmdline.isEmpty()) continue
+            readableCmdline++
             val text = String(cmdline, Charsets.UTF_8).replace('\u0000', ' ')
             if (!text.contains("java")) continue
             anyJava.add(pid to text)
@@ -122,6 +141,11 @@ object ProcessStats {
         //    旧版就是因此永远匹配不到、这一行数据从来不显示。
         // ② 其中若有人真的带实例目录名，就是它。
         // ③ 否则取 RSS 最大的那个（服务端是这里面最重的进程）。
+        lastDiag = "pid目录 $dirs · 可读 $readableCmdline · 读不到 $unreadable · java ${
+            anyJava.size
+        } · 后代 ${
+            mine.size
+        } · 自己 $myPid"
         for ((pid, text) in mine) if (text.contains(instanceDirName)) return pid
         if (mine.isNotEmpty()) return mine.maxByOrNull { rssKb(it.first) }?.first
         for ((pid, text) in anyJava) if (instanceDirName.isNotBlank() && text.contains(instanceDirName)) return pid

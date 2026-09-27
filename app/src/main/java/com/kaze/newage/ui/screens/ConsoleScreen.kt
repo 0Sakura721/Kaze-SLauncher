@@ -57,6 +57,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.core.console.LineType
@@ -355,7 +356,9 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                 Text(
                     buildString {
                         if (s == null) {
-                            append("CPU 采样中…")
+                            // 带上诊断计数：读不到 /proc 和匹配规则不对，修法完全不同
+                            append("CPU 采样中…（").append(ProcessStats.lastDiag.ifBlank { "扫描中" })
+                                .append("）")
                         } else {
                             append("CPU ").append(fmt("%.0f", s.cpuPercent)).append("%")
                             // 单核占用率可以超过 100%，所以把"用了几个核"也说清楚 ——
@@ -367,7 +370,14 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    // weight(fill = false)：这一项**最后**测量，只吃剩下的宽度。
+                    // 之前它不带权重，占用数据一长就把后面的「N 行」挤出屏幕
+                    // （真机反馈"把行数挤起来了"）—— 行数是常驻信息，不能被挤。
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
                 )
             }
             Text(
