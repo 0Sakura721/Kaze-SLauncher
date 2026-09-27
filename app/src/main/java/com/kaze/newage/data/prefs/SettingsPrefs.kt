@@ -137,18 +137,46 @@ emember(path) 缓存位图的话，
 
     fun backgroundImagePath(): String? = bgFile.takeIf { it.exists() }?.absolutePath
 
-    /** 保存选中的背景图（SAF Uri，压缩到屏幕尺寸，避免大图内存问题） */
+    /**
+     * 保存选中的背景图（SAF Uri）。**调用方必须放在 IO 线程**（选图回调里已改成协程）。
+     *
+     * 两步解码：先 `inJustDecodeBounds` 只读尺寸，再按需要降采样。
+     * 旧实现直接 `BitmapFactory.decodeStream` **全尺寸**解码：一张 5000×4000 的照片在内存里
+     * 是 ~76 MB（ARGB_8888），中端机直接 OOM；而它随后也不过是被缩到 1600 再压成 JPEG。
+     * 旧路径还跑在主线程（ActivityResult 回调），解码那几百毫秒到几秒就是一次卡死。
+     */
     fun saveBackgroundImage(uri: android.net.Uri) {
+        val maxDim = 1600
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            appContext.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
+        } catch (_: Exception) {
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return
+        // 只取够用的一档：2 的幂，保证解码后的长边 >= maxDim
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= maxDim || bounds.outHeight / (sample * 2) >= maxDim) {
+            sample *= 2
+        }
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
         val src: Bitmap? = try {
-            appContext.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+            appContext.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, opts)
+            }
         } catch (_: Exception) {
             null
         }
         if (src == null) return
-        val maxDim = 1600
         val scale = minOf(1f, maxDim.toFloat() / maxOf(src.width, src.height))
         val scaled = if (scale < 1f) {
-            Bitmap.createScaledBitmap(src, (src.width * scale).toInt(), (src.height * scale).toInt(), true)
+            Bitmap.createScaledBitmap(
+                src,
+                (src.width * scale).toInt().coerceAtLeast(1),
+                (src.height * scale).toInt().coerceAtLeast(1),
+                true,
+            )
         } else src
         bgFile.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) }
         if (scaled != src) scaled.recycle()

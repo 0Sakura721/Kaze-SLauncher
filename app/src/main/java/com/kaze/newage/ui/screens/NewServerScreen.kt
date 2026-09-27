@@ -61,6 +61,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -401,11 +403,20 @@ private fun VersionConfigPhase(
     // 端口建议与占用集合仍是上一个实例时的旧值（freePort 更是连 remember key 都没有，
     // 算一次就定死），用户可能选到已被别的实例占用的端口。
     val allInstances by viewModel.instances.collectAsStateWithLifecycle()
-    val freePort = remember(allInstances) { ServerProperties.findFreePort(allInstances) }
-    val usedPorts = remember(allInstances) {
-        allInstances.mapNotNull { inst ->
-            ServerProperties.load(inst.dir)["server-port"]?.toIntOrNull()
-        }.toSet()
+    // 端口占用集合与建议端口都要读每个实例目录里的 server.properties —— 那是磁盘 IO，
+    // 而实例目录常在外部存储/FUSE 上。放在 remember{} 里等于在**组合期**逐个读盘：
+    // 实例一多，进入向导就卡主线程。挪到 IO 线程算完再回填。
+    var usedPorts by remember { mutableStateOf(emptySet<Int>()) }
+    var freePort by remember { mutableStateOf(25565) }
+    LaunchedEffect(allInstances) {
+        val result = withContext(Dispatchers.IO) {
+            val ports = allInstances.mapNotNull { inst ->
+                ServerProperties.load(inst.dir)["server-port"]?.toIntOrNull()
+            }.toSet()
+            ports to ServerProperties.findFreePort(allInstances)
+        }
+        usedPorts = result.first
+        freePort = result.second
     }
 
     // 进入阶段 ② 时加载版本列表
@@ -421,6 +432,9 @@ private fun VersionConfigPhase(
         val sel = selected
         if (sel != null) {
             buildId = ""                       // 换版本就回到"最新构建"
+            // 上一次下载的失败/完成提示活在这个共享状态里：不清掉的话，进配置页就会看到
+            // 一条过期的"下载失败"和"重试下载（断点续传）"按钮
+            viewModel.clearDownloadState()
             viewModel.loadBuilds(coreType, sel.id)
             if (name.isBlank()) name = "${coreType.displayName}-${sel.id}"
         }

@@ -171,15 +171,20 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
     // 删除 Java 的二次确认（带版本号，单独一份状态）
     var javaDeleteConfirm by remember { mutableStateOf<Int?>(null) }
 
+    val bgScope = rememberCoroutineScope()
     val imageLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                // 选图即用：解码压缩保存（显示端自适应铺满 + 模糊/遮罩），无需手动裁剪
-                uiPrefs.saveBackgroundImage(uri)
-                uiPrefs.setBgEnabled(true)
-            } catch (_: Exception) { }
+            // 解码+缩放+重新压缩是重活（大图几十 MB 内存、几百毫秒），必须在 IO 线程：
+            // 这个回调跑在主线程，旧实现直接把整张图全尺寸解码，大图会卡住界面甚至 OOM
+            bgScope.launch(Dispatchers.IO) {
+                try {
+                    // 选图即用：解码压缩保存（显示端自适应铺满 + 模糊/遮罩），无需手动裁剪
+                    uiPrefs.saveBackgroundImage(uri)
+                    uiPrefs.setBgEnabled(true)
+                } catch (_: Exception) { }
+            }
         }
     }
 

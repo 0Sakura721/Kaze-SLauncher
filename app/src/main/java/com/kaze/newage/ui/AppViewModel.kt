@@ -910,6 +910,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
+     * 清掉上一次核心下载的残留状态（错误 / 完成提示）。
+     *
+     * 下载状态活在共享 ViewModel 里、跨页面存活：上次在某个版本上失败过之后，
+     * 再进一次配置页会直接看到"下载失败：…"和按钮上的"重试下载（断点续传）"，
+     * 而这一次根本还没开始下载 —— 用户会以为刚才那次失败还挂在后台。
+     * 正在下载时不动它（否则会把进行中的进度抹掉）。
+     */
+    fun clearDownloadState() {
+        if (_download.value.running) return
+        _download.value = DownloadState()
+    }
+
+    /**
      * 导入 jar：把用户选中的文件复制进一个新实例目录并登记实例。
      *
      * 复制必须在这里（IO）做，不能让调用方在主线程 `copyTo`：几十 MB 的 jar 会阻塞 UI（ANR 风险），
