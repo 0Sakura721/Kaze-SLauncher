@@ -308,6 +308,54 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             },
         )
 
+        // 服务端进程的 CPU / 内存占用（每 2 秒刷新；未启动时为空 → 不占位）
+        val stats by viewModel.procStats.collectAsStateWithLifecycle()
+        val ctxForMem = androidx.compose.ui.platform.LocalContext.current
+
+        // ── 性能监控：CPU / 内存占用（独立一行，只在运行中出现）──
+        //
+        // 为什么单独占一行，而不是塞进下面的动作行：
+        //  动作行左边是 4 个 48dp 圆钮，连间距共 224dp（360dp 屏上只剩 104dp），
+        //  行数自己还要 ~45dp。监控此前跟行数同处一个 Row，最多只分得到
+        //  「剩余宽度的一半」—— 旁边还有一个 `Spacer(weight(1f))` 在跟它抢同一份
+        //  空间，真机上只剩 20~50dp，被截成 "CP…"，看上去就像它在挤压行数。
+        //  挪出来后：监控吃满整行宽度、完整可读；动作行只剩「按钮 + 行数」，
+        //  行数谁也不用让（Compose 的 Row 先测所有不带 weight 的子项，
+        //  带 weight 的最后才分剩余空间，所以它本来也抢不走行数的宽度）。
+        //
+        // 运行中就**一定**渲染这一行：此前是 stats == null 就整行不显示，
+        // 而 pid 在 proot 下匹配不上 → 用户看到的是"控制台根本没有占用数据"。
+        // 采样还没出来时显示"采样中"（带诊断计数），比整行消失可诊断得多 ——
+        // 而这条诊断串很长，只有在整行宽度下才读得全，这也是它必须独占一行的原因之一。
+        if (serverState == ServerState.Running) {
+            val s = stats
+            val totalKb = remember { ProcessStats.totalMemKb(ctxForMem) }
+            val memPct = if (s != null && totalKb > 0) s.rssKb.toFloat() / totalKb * 100f else 0f
+            Text(
+                buildString {
+                    if (s == null) {
+                        // 带上诊断计数：读不到 /proc 和匹配规则不对，修法完全不同
+                        append("CPU 采样中…（").append(ProcessStats.lastDiag.ifBlank { "扫描中" })
+                            .append("）")
+                    } else {
+                        append("CPU ").append(fmt("%.0f", s.cpuPercent)).append("%")
+                        // 单核占用率可以超过 100%，所以把"用了几个核"也说清楚 ——
+                        // 否则 8 核机器上的 12% 会让人以为很闲，其实是吃满了一个核
+                        if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append(" 核）")
+                        append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append(" GB")
+                        append("（").append(fmt("%.0f", memPct)).append("%）")
+                    }
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = M3Spacing.screenMargin, vertical = 2.dp),
+            )
+        }
+
         // ── 日志动作行：复制 / 导出 / 跟随 / 清空 + 行数 ──
         Row(
             Modifier.fillMaxWidth().padding(horizontal = M3Spacing.screenMargin),
@@ -343,47 +391,17 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             // 内存里不可能真的无限（120 万行 ≈ 150 MB），真正的全量在磁盘上的 console-output.log，
             // 所以这里必须能告诉用户"完整日志多大、在哪"。
             var showCountDetail by remember { mutableStateOf(false) }
-            // 服务端进程的 CPU / 内存占用（每 2 秒刷新；未启动时为空 → 不占位）
-            val stats by viewModel.procStats.collectAsStateWithLifecycle()
-            val ctxForMem = androidx.compose.ui.platform.LocalContext.current
-            // 运行中就**一定**显示这一行：此前是 stats == null 就整行不渲染，
-            // 而 pid 在 proot 下匹配不上 → 用户看到的是"控制台根本没有占用数据"。
-            // 采样还没出来时显示"采样中"，比整行消失可诊断得多。
-            if (serverState == ServerState.Running) {
-                val s = stats
-                val totalKb = remember { ProcessStats.totalMemKb(ctxForMem) }
-                val memPct = if (s != null && totalKb > 0) s.rssKb.toFloat() / totalKb * 100f else 0f
-                Text(
-                    buildString {
-                        if (s == null) {
-                            // 带上诊断计数：读不到 /proc 和匹配规则不对，修法完全不同
-                            append("CPU 采样中…（").append(ProcessStats.lastDiag.ifBlank { "扫描中" })
-                                .append("）")
-                        } else {
-                            append("CPU ").append(fmt("%.0f", s.cpuPercent)).append("%")
-                            // 单核占用率可以超过 100%，所以把"用了几个核"也说清楚 ——
-                            // 否则 8 核机器上的 12% 会让人以为很闲，其实是吃满了一个核
-                            if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append(" 核）")
-                            append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append(" GB")
-                            append("（").append(fmt("%.0f", memPct)).append("%）")
-                        }
-                    },
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    // weight(fill = false)：这一项**最后**测量，只吃剩下的宽度。
-                    // 之前它不带权重，占用数据一长就把后面的「N 行」挤出屏幕
-                    // （真机反馈"把行数挤起来了"）—— 行数是常驻信息，不能被挤。
-                    modifier = Modifier
-                        .weight(1f, fill = false)
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                )
-            }
             Text(
                 "${CountFormat.short(lines.size.toLong())} 行",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // 行数是常驻信息，任何情况下都不许被压成两行：
+                // softWrap=false + maxLines=1 → 宽度不够时省略，而不是折成两行；
+                // 另外 Row 先测所有不带 weight 的子项（本项就是），带 weight 的最后
+                // 才分剩余空间 —— 所以它的宽度也不会被任何兄弟抢走。
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .clickable { showCountDetail = true }
                     .padding(horizontal = 6.dp, vertical = 4.dp),
