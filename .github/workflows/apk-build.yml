@@ -1,0 +1,135 @@
+name: APK (build only)
+
+# 只编译 APK 并作为 **artifact** 上传：不建 tag、不创建/更新 Release。
+# 本工作流 permissions 只有 contents: read，脚本里也没有任何 gh release 调用，
+# 所以它从设计上就发不了版。需要正式发版（含增量补丁、Release 说明）请走 release.yml。
+#
+# 用途：在真机上装一个"当前 main 的构建"来验证界面/改动，又不想动版本号和 release 记录。
+# 产物名带短 SHA，一眼能看出它不是某个正式版本。
+
+on:
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: '构建哪个 ABI'
+        type: choice
+        options:
+          - both
+          - arm64
+          - armhf
+        default: both
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 编译 release APK（不发版）
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 与 ci.yml 同一套做法：不用 android-actions/setup-android（它装的旧 `tools` 包已被下架）。
+      - name: 安装 Android SDK 组件
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          CMDLINE="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$CMDLINE" ]; then
+            echo "找不到 cmdline-tools，SDK 目录内容："; ls -la "$SDK" 2>&1 || true; exit 1
+          fi
+          export PATH="$CMDLINE:$PATH"
+          sdkmanager --version
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$CMDLINE" >> "$GITHUB_PATH"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # 与 release.yml 同一套还原逻辑（secrets 名一致）。
+      - name: 还原签名密钥
+        env:
+          KAZE_KEYSTORE_B64: ${{ secrets.KAZE_KEYSTORE_B64 }}
+          KAZE_STORE_PASS: ${{ secrets.KAZE_STORE_PASS }}
+          KAZE_KEY_ALIAS: ${{ secrets.KAZE_KEY_ALIAS }}
+          KAZE_KEY_PASS: ${{ secrets.KAZE_KEY_PASS }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KAZE_KEYSTORE_B64:-}" ]; then
+            # 没密钥就打不出可安装的 release 包（v0.3.2 事故：未签名包一路绿到发布）。
+            # 这里直接失败，而不是产出一个装不上的 APK。
+            echo "::error::仓库没有配置 KAZE_KEYSTORE_B64，release APK 会是未签名的（不可安装），已中止。"
+            exit 1
+          fi
+          echo "$KAZE_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/kaze-release.jks"
+          chmod 600 "$RUNNER_TEMP/kaze-release.jks"
+          {
+            echo "KAZE_KEYSTORE=$RUNNER_TEMP/kaze-release.jks"
+            echo "KAZE_STORE_PASS=$KAZE_STORE_PASS"
+            echo "KAZE_KEY_ALIAS=$KAZE_KEY_ALIAS"
+            echo "KAZE_KEY_PASS=$KAZE_KEY_PASS"
+          } >> "$GITHUB_ENV"
+          echo "签名密钥已还原"
+
+      - name: 构建 APK
+        run: |
+          set -euo pipefail
+          case "${{ inputs.abi }}" in
+            arm64) TASKS=":app:assembleArm64Release" ;;
+            armhf) TASKS=":app:assembleArmhfRelease" ;;
+            *)     TASKS=":app:assembleArm64Release :app:assembleArmhfRelease" ;;
+          esac
+          echo "构建任务：$TASKS"
+          ./gradlew $TASKS --console=plain --stacktrace
+
+      # 与 release.yml 同样的闸门：没签名就不许往下走。
+      - name: 校验 APK 已签名
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          APKSIGNER=$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f | sort | tail -1)
+          echo "apksigner: $APKSIGNER"
+          FAIL=0
+          for f in $(find app/build/outputs/apk -name '*.apk'); do
+            if "$APKSIGNER" verify --print-certs "$f" > /tmp/sig.txt 2>&1; then
+              echo "OK $f  $(grep -m1 'Signer #1 certificate DN' /tmp/sig.txt)"
+            else
+              echo "::error file=$f::$(basename "$f") 没有签名，装到手机上会报「缺少开发者证书」"
+              grep -E 'ERROR|DOES NOT VERIFY' /tmp/sig.txt || true
+              FAIL=1
+            fi
+          done
+          [ "$FAIL" = "0" ]
+
+      - name: 整理产物名
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          VER=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          SHA=$(git rev-parse --short HEAD)
+          echo "versionName=$VER  commit=$SHA"
+          find app/build/outputs -name '*.apk' -printf '  %p  %s bytes\n' || true
+          A64=$(find app/build/outputs/apk -path '*arm64*' -path '*release*' -name '*.apk' | head -1 || true)
+          AHF=$(find app/build/outputs/apk -path '*armhf*' -path '*release*' -name '*.apk' | head -1 || true)
+          if [ -n "$A64" ]; then cp "$A64" "out/Kaze-SLauncher-$VER+$SHA-arm64-v8a.apk"; fi
+          if [ -n "$AHF" ]; then cp "$AHF" "out/Kaze-SLauncher-$VER+$SHA-armeabi-v7a.apk"; fi
+          ls -la out/ || true
+          if [ -z "$(ls -A out 2>/dev/null)" ]; then echo "::error::out/ 里没有任何 APK"; exit 1; fi
+
+      - name: 上传 APK（artifact，不发版）
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-${{ github.sha }}
+          path: out/*.apk
+          if-no-files-found: error
