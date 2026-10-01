@@ -1,4 +1,4 @@
-# NEW AGE KAZE-SLAUNCHER — 项目计划（定稿 v1.0）
+# NA KAZE-SLAUNCHER — 项目计划（定稿 v1.0）
 
 > 状态：**已定稿并实施**（2026-08-14）。M0–M6 全部完成，debug APK 构建通过。
 > 目标：Android 上驱动 **Minecraft Java 服务端**的前端，自包含 Linux 环境 + Java 自动安装 + eula 全自动 + 实时控制台，**双主题设计系统**，GPL-3.0 合规。
