@@ -156,7 +156,7 @@ class ProcessStatsTest {
     }
 
     @Test
-    fun `平滑_之后按 0.5 权重向新值靠拢`() {
+    fun `平滑_之后按一半权重向新值靠拢`() {
         // 上一拍 1 核，这一拍 3 核 → 1*0.5 + 3*0.5 = 2 核
         assertEquals(2.0f, ProcessStats.smoothCores(prev = 1f, raw = 3f), 0.001f)
         // 再来一拍 3 核 → 2*0.5 + 3*0.5 = 2.5 核（不会一步跳到 3，这就是"防跳"）
