@@ -842,7 +842,7 @@ class ProotEnvironment(
                 } else {
                     val output = readJob.await()
                     if (proc.exitValue() == 0) Result.success(output)
-                    else Result.failure(RuntimeException("退出码 ${proc.exitValue()}：${output.take(300)}"))
+                    else Result.failure(RuntimeException("退出码 ${proc.exitValue()}：${summarizeGuestFailure(output)}"))
                 }
             } catch (e: Exception) {
                 Result.failure(e)
@@ -855,7 +855,8 @@ class ProotEnvironment(
         env["PROOT_LOADER"] = prootLoader.absolutePath
         // 注意：不能显式设 LD_PRELOAD=""——bionic 8.1 对空串预加载的解析会失控，
         // 把 LD_LIBRARY_PATH 目录当文件读导致 CANNOT LINK（v7a 真机二分实测）。
-        // 厂商注入的 libdirect-coredump.so 加载失败只是 "ignored" 警告，无害
+        // 厂商注入的 LD_PRELOAD 在 buildProotCommand 里**整个移除**：guest 的 ld.so
+        // 找不到 libdirect-coredump.so 时每个 guest 进程都会刷 ignored 警告。
         // 修补版为静态链接，nativeLibraryDir 兜底；非 arm64 时 termux 包的 lib/（talloc 等）
         // 必须前置，否则 loader 找不到 soname
         val libDir = context.applicationInfo.nativeLibraryDir
@@ -954,6 +955,14 @@ class ProotEnvironment(
         args.addAll(wrapped)
         val pb = ProcessBuilder(args).redirectErrorStream(true)
         pb.environment().putAll(prootEnvironment())
+        // 剥掉厂商注入的 LD_PRELOAD（MTK 会往应用进程塞 libdirect-coredump.so）：
+        // 对 proot 这个 Android 二进制它能在 /system/lib 找到、无害；但 proot 把它带进
+        // guest 后，Ubuntu 的 ld.so 给**每个** guest 进程都打一条
+        // "ERROR: ld.so: object 'libdirect-coredump.so' from LD_PRELOAD cannot be
+        // preloaded ... ignored."——apt 一次就刷十几条，真正的报错被挤出错误消息的
+        // 截断窗口（v7a 真机实锤：apt 初始化失败现场整段只剩 ld.so 噪音）。
+        // 注意是「整个移除」，不能设成空串——见 prootEnvironment() 里的 bionic 8.1 注释。
+        pb.environment().remove("LD_PRELOAD")
         return pb
     }
 
@@ -1213,4 +1222,24 @@ class ProotEnvironment(
     } catch (_: Exception) {
         false
     }
+}
+
+/**
+ * 从 guest 命令的合并输出里提炼失败原因（runCommand 的错误消息用）。
+ *
+ * 两个动作，都来自 v7a 真机现场（MTK，apt 初始化失败退出码 100）：
+ *  1. 滤掉厂商 LD_PRELOAD 噪音行（"ERROR: ld.so: object 'libdirect-coredump.so' from
+ *     LD_PRELOAD cannot be preloaded ... ignored."）——每条都是**非致命**的 ignored，
+ *     一次 apt-get 能刷十几条；
+ *  2. 取**末尾** [maxChars] 字符：apt/dpkg 的真错误（E: Unable to locate package、
+ *     E: Failed to fetch …）出现在输出的最后，头部只有进度行和噪音。
+ * 旧实现取头部 300 字符，失败现场整段都是 ld.so 噪音，真错误完全不可见。
+ */
+internal fun summarizeGuestFailure(output: String, maxChars: Int = 300): String {
+    val meaningful = output.lineSequence()
+        .filterNot { it.contains("from LD_PRELOAD cannot be preloaded") }
+        .joinToString("\n")
+        .trim()
+    if (meaningful.isEmpty()) return output.take(maxChars)
+    return if (meaningful.length <= maxChars) meaningful else meaningful.takeLast(maxChars)
 }

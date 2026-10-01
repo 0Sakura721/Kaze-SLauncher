@@ -123,19 +123,28 @@ class AppLogStore(private val context: Context) {
      *
      * 为什么要这么做：采集器活在应用进程里，闪退时它一起没了，崩溃现场（系统打的
      * FATAL EXCEPTION 堆栈、native 崩溃前后的几行）永远写不进文件。但 logcat 的环形缓冲
-     * 在进程死后仍在内存里，所以启动时用 `--uid`（上一次的 pid 已经不可知）dump 一次，
-     * 就能把上一段的末尾捞回来（800 行：崩溃到下次启动之间系统还会打不少字，窗口太小会把现场挤出缓冲）。
-    已经采过的行会重复一次，可接受 —— 诊断文件里重复远好过缺失。
+     * 在进程死后仍在内存里，所以启动时 dump 一次，就能把上一段的末尾捞回来
+     * （800 行：崩溃到下次启动之间系统还会打不少字，窗口太小会把现场挤出缓冲）。
+     * 已经采过的行会重复一次，可接受 —— 诊断文件里重复远好过缺失。
+     *
+     * 注意**不能用 `--uid=` 过滤**：老系统的 logcat（如 MTK Android 9）不认识这个选项，
+     * 会整屏打印用法帮助并退出——用法文本被当成"崩溃现场"记进诊断文件（v7a 真机实锤）。
+     * 应用进程跑 logcat 本就只能看到自己的条目（Android 4.1+ 按 UID 隔离），无需该参数。
      */
     private fun salvagePreviousSession() {
         val out = runCatching {
-            val p = ProcessBuilder("logcat", "-d", "-v", "threadtime", "--uid=${android.os.Process.myUid()}", "-t", "800")
+            val p = ProcessBuilder("logcat", "-d", "-v", "threadtime", "-t", "800")
                 .redirectErrorStream(true)
                 .start()
             val text = p.inputStream.bufferedReader().use { it.readText() }
             p.waitFor()
             text
         }.getOrNull().orEmpty().trim()
+        // 老系统 logcat 遇到不认识的参数会打印整屏用法帮助——那不是崩溃现场，绝不能记进诊断文件
+        if (out.contains("Unrecognized Option") || out.contains("Usage: logcat")) {
+            android.util.Log.w(TAG, "logcat 补捞输出异常（设备不支持当前参数），已忽略")
+            return
+        }
         if (out.isEmpty()) return
         appendRaw(
             buildString {
