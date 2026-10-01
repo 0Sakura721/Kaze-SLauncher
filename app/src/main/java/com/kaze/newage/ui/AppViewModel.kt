@@ -202,7 +202,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 _hasMoreOlder.value = _olderCursor.value != null
                 // 批量发布的缓冲与定时器（见下面 collect 里的说明）。
                 // 定时器是 collectLatest 的子协程 → 切实例时自动取消。
-                synchronized(consoleLock) { consolePending.clear(); consolePendingReplace = false }
+                synchronized(consoleLock) { consolePending.clear() }
                 val consoleFlusher = launch {
                     while (isActive) {
                         delay(CONSOLE_FLUSH_INTERVAL_MS)
@@ -222,9 +222,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     // 否则服务端安静下来时，最关键的 "Done (3.2s)! For help, type help" 反而没了。
                     synchronized(consoleLock) {
                         consolePending.add(line)
-                        if (line.replaceLast) consolePendingReplace = true
                         // 小列表逐行即时发布（手感与改造前一致）；只有大列表才批量，
                         // 省掉的正是 O(N)/行 在万行级别上的代价。
+                        // replaceLast 的结算全在 publishConsoleLocked 里逐条做，这里不额外记账。
                         if (consolePending.size >= CONSOLE_FLUSH_BATCH ||
                             _consoleLines.value.size < CONSOLE_EAGER_LIMIT
                         ) publishConsoleLocked()
@@ -580,16 +580,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // 就是每秒上千万次元素拷贝 + 同样次数的重组合 → 主线程卡死（真机反馈的"1.4 万行卡住"）。
     private val consoleLock = Any()
     private val consolePending = ArrayList<ConsoleLine>(CONSOLE_FLUSH_BATCH)
-    private var consolePendingReplace = false
 
-    /** 调用方必须持有 [consoleLock] */
+    /**
+     * 发布一批待写行。调用方必须持有 [consoleLock]。
+     *
+     * `replaceLast` 必须**逐条**结算，不能整批只记一个布尔。
+     * 旧实现用一个 `consolePendingReplace` 标记 + 发布时 `dropLast(1)`：一批里可能有 k 条
+     * 覆盖行（服务端的 `\r` 进度行正是这种，一批能攒到 CONSOLE_FLUSH_BATCH=256 条），
+     * 却只删掉一条 → 每批净增 k-1 行，Forge 刷屏几秒就能把控制台行数冲爆。
+     *
+     * 这里用一个只装本批行的局部栈模拟"弹掉最后一行、再压入自己"：
+     * 栈非空时弹出的必然是本批的行；批内第一条就是覆盖行时，它顶掉的是上一次发布留下的
+     * 最后一行（所以 base 再少一条）。结果与"小列表逐行即时发布"那条路径完全一致 ——
+     * 批内被覆盖掉的中间行随之消失。
+     */
     private fun publishConsoleLocked() {
         if (consolePending.isEmpty()) return
         val cur = _consoleLines.value
-        val base = if (consolePendingReplace && cur.isNotEmpty()) cur.dropLast(1) else cur
-        _consoleLines.value = (base + consolePending).takeLast(CONSOLE_DISPLAY_MAX)
+        val out = ArrayList<ConsoleLine>(consolePending.size)
+        for (line in consolePending) {
+            if (line.replaceLast && out.isNotEmpty()) out.removeAt(out.lastIndex)
+            out.add(line)
+        }
+        val base =
+            if (consolePending.first().replaceLast && cur.isNotEmpty()) cur.dropLast(1) else cur
+        _consoleLines.value = (base + out).takeLast(CONSOLE_DISPLAY_MAX)
         consolePending.clear()
-        consolePendingReplace = false
     }
 
     // ── 回读更早的日志（内存窗口之外的历史，来自 console-output.log / .old.log）──

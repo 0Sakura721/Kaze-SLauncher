@@ -516,9 +516,12 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         shape = shape,
                         onClick = { uiPrefs.setBgEnabled(!uiPrefs.bgEnabled.value) },
                         trailing = {
+                            // onCheckedChange 必须是 null：整行的 onClick 已经负责切换。
+                            // 两个都设 = 同一个动作有两条触发路径（开关自身的 toggleable +
+                            // 行的 clickable），点一下开关会被切换两次、又弹回原位。
                             Switch(
                                 checked = uiPrefs.bgEnabled.value,
-                                onCheckedChange = { uiPrefs.setBgEnabled(it) },
+                                onCheckedChange = null,
                             )
                         },
                     )
@@ -745,9 +748,11 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         shape = shape,
                         onClick = { uiPrefs.setAutoUpdate(!uiPrefs.autoUpdate.value) },
                         trailing = {
+                            // 同上：切换只由整行的 onClick 负责，Switch 不再单独绑定，
+                            // 否则两条触发路径互相抵消，开关看起来"按不动"
                             Switch(
                                 checked = uiPrefs.autoUpdate.value,
-                                onCheckedChange = { uiPrefs.setAutoUpdate(it) },
+                                onCheckedChange = null,
                             )
                         },
                     )

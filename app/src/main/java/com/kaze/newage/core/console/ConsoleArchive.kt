@@ -17,15 +17,23 @@ import java.io.RandomAccessFile
  * （约 12 万行）—— 不是数学意义上的无限，但比内存窗口大两个数量级。
  *
  * ## 两个必须处理对的细节（都是被测试抓出来的）
- * 1. **块边界会切断行**。块开头那半行要**带在 [Cursor.carry] 里交给下一次调用** ——
- *    只放在函数内的局部变量里，跨调用就丢了，而丢掉的往往正好是用户要找的报错。
- * 3. **已知限制（如实记录）**：单行超过 [MAX_LINE_CHARS]（128 KB）时会被截断并标记。
- *    往回读必须把一个逻辑行拼完整，超长行会让中间状态无限膨胀（测试里直接 OOM，
- *    或表现为同一段内容重复堆叠）。真实日志行都在 1 KB 以内，走不到这条路径；
- *    与其为极端情况留一个不牢靠的实现，不如**有界**并明确写出来。
+ * 1. **块边界会切断行**。所以每一次读都从**行首**开始：先从 `end` 往回退 [BLOCK]，
+ *    再向前找到最近的换行符当起点（见 [blockStart]），块里每个元素因此都是完整行。
  *
- * 2. **提前凑够行数时，偏移量要落在块内部**。若直接写成块起点，下次就会重复读同一块、
- *    看起来"翻不动了"。
+ *    旧实现不是这样：它把块首那半行带在游标 `carry` 里交给下一次调用，而那个半行的字节
+ *    范围是 `[start, 首个换行)`、下一块的读取区间是 `[end-BLOCK, end)` 且 `end > start` ——
+ *    两段**重叠**，同一段内容被读两遍、边界行被拼坏。它还得靠"把解出来的字符串重新编码"
+ *    来结算字节数，块边界切开一个多字节汉字时解码成替换字符、长度对不上，翻页继续错位。
+ *    对齐行首之后每个元素都是完整行，字节数就是文件里的真实字节数。
+ *
+ * 2. **提前凑够行数时，偏移量要落在"最老的已取走那一行"的行首**。若直接写成块起点，
+ *    下次就会重复读同一块、看起来"翻不动了"；落点必须按**字节**结算（中文一行 3 字节），
+ *    按行数或字符数算都会错位。
+ *
+ * ## 已知限制（如实记录）
+ * 单行超过 [MAX_LINE_CHARS]（128 KB）时，往回 128 KB 内找不到行首，于是退回原始块起点，
+ * 并把块首那段半行标记为"已截断"后丢弃。真实日志行都在 1 KB 以内，走不到这条路径；
+ * 与其为极端情况留一个不牢靠的实现，不如**有界**并明确写出来。
  */
 object ConsoleArchive {
 
@@ -35,19 +43,17 @@ object ConsoleArchive {
     const val DEFAULT_CHUNK_LINES = 3000
 
     /**
-     * 单行字符数上限：往回读时必须把一个逻辑行拼完整，超过这个长度就截断并标记。
-     * 目的是**有界** —— 一行几百 KB 时任其膨胀会把内存撑爆（测试里就是这么 OOM 的）。
-     * 真实日志行都在 1 KB 以内，走不到这条路径。
+     * 往回找行首时最多回退多少：再长就当作超长行按截断处理（见文件头"已知限制"）。
      */
     private const val MAX_LINE_CHARS = 128 * 1024
 
     /**
      * 读取位置：从 [file] 的 [offset] **往前**读（不含 offset 处）。
      *
-     * [carry] 是上一次分块在开头切出来的半行（它会接在下一块读取结果的**末尾**前面）。
-     * 首次调用传 `Cursor(files[0], files[0].length())`。
+     * [offset] 总落在行首（或文件头），所以游标里不需要携带"半行"状态 ——
+     * 那正是旧实现跨块拼坏边界行的原因，见文件头说明。
      */
-    data class Cursor(val file: File, val offset: Long, val carry: String = "")
+    data class Cursor(val file: File, val offset: Long)
 
     data class Chunk(
         /** 按时间**正序**（越靠前越早），与界面从上到下的顺序一致 */
@@ -70,11 +76,10 @@ object ConsoleArchive {
         val files = filesNewestFirst(dir)
         if (files.isEmpty()) return Chunk(emptyList(), null, false)
 
-        var cur = cursor ?: Cursor(files[0], files[0].length())
-        var fileIndex = files.indexOfFirst { it.absolutePath == cur.file.absolutePath }
+        var fileIndex = files.indexOfFirst { it.absolutePath == cursor?.file?.absolutePath }
         if (fileIndex < 0) fileIndex = 0
-        var end = cur.offset.coerceIn(0L, files[fileIndex].length())
-        var carry = cur.carry
+        var end = (cursor?.offset ?: files[fileIndex].length())
+            .coerceIn(0L, files[fileIndex].length())
 
         val collected = ArrayDeque<String>()   // 逆序收集，最后正序返回
 
@@ -83,60 +88,72 @@ object ConsoleArchive {
             val file = files[fileIndex]
             if (end <= 0L) {                   // 这一份读到头 → 换更旧的一份
                 fileIndex++
-                if (fileIndex < files.size) {
-                    end = files[fileIndex].length()
-                    carry = ""
-                }
+                if (fileIndex < files.size) end = files[fileIndex].length()
                 continue
             }
-            val start = maxOf(0L, end - BLOCK)
-            val text = readRange(file, start, end) + carry
-            carry = ""
-
-
-            val parts = text.split('\n')
-            val usable: List<String>
-            if (start > 0) {
-                carry = parts.first()          // 被切断的半行，交给下一块（接在它末尾）
-                usable = parts.drop(1)
-            } else {
-                carry = ""
-                usable = parts
-            }
-
-            // 有界兜底：carry 是"还没凑齐的一行"。正常日志里它最多几 KB，
-            // 但如果遇到几百 KB 的单行（把整个堆栈打在一行），任它膨胀就会 OOM。
-            // 超限就标记截断并**丢弃该行剩余部分** —— 宁可少显示一行，也不能炸内存或重复堆叠。
-            if (carry.length > MAX_LINE_CHARS) {
+            val blockEnd = end
+            val (start, aligned) = blockStart(file, blockEnd)
+            val parts = readRange(file, start, blockEnd).split('\n')
+            // 只有超长行（往回 128 KB 找不到行首）才会出现"块首不是完整行"
+            val usableFrom = if (aligned) 0 else 1
+            if (!aligned) {
                 collected.addFirst("[上一行过长（超过 ${MAX_LINE_CHARS / 1024} KB），已截断]")
-                carry = ""
-                end = start
-                continue
             }
 
-            // 从块的末尾往前取行，并累计**字节数**（不是字符数：中文一行 3 字节）
-            var consumed = 0L
-            for (i in usable.indices.reversed()) {
-                if (collected.size >= maxLines) break
-                val line = usable[i]
-                if (line.isEmpty() && i == usable.lastIndex) {   // 行尾 \n 造成的空串
-                    consumed += 1
-                    continue
+            // 从块的末尾往前取行，并累计**字节数**（不是字符数：中文一行 3 字节）。
+            // after = 从"最老的已取走那一行"的行首到块末尾的字节数。
+            var after = 0L
+            var stopped = false
+            val last = parts.lastIndex
+            for (i in last downTo usableFrom) {
+                if (collected.size >= maxLines) {
+                    stopped = true
+                    break
                 }
+                val line = parts[i]
+                if (line.isEmpty() && i == last) continue   // 行尾 \n 造成的空串
                 collected.addFirst(line)
-                consumed += line.toByteArray(Charsets.UTF_8).size + 1
+                // 块末尾那个元素后面没有换行符在块内，不能多算一个字节
+                after += line.toByteArray(Charsets.UTF_8).size + if (i == last) 0 else 1
             }
-            // 关键：落点必须往前走。
-            //  - 正常情况落到"块内已消费字节"处，否则下次会重复读同一块（表现为"翻不动"）；
-            //  - 一行都没消费（整个块落在一行内部，比如超长堆栈行）时直接退到块起点 ——
-            //    内容由 carry 带着，下一块会接在它前面，直到遇见 \n 才凑成完整行。
-            //    这里若忘了推进就是死循环（测试里表现为 OOM）。
-            end = if (consumed == 0L) start else (end - consumed).coerceIn(start, end)
+
+            end = if (stopped) {
+                // 提前凑够行数：落点正好是"最老的已取走那一行"的行首，
+                // 否则下次会重复读已取走的行、或跳掉还没取走的那几行
+                (blockEnd - after).coerceIn(start, blockEnd)
+            } else {
+                // 整块都取走了（或块首被截断丢弃）：落到行首，下次从更早处继续。
+                // 这里若写成"块尾减去已取走字节"就会落到已经取走的内容里（旧实现的错法）。
+                start
+            }
         }
 
-        val hasMore = end > 0L || fileIndex + 1 < files.size || carry.isNotEmpty()
-        val next = if (!hasMore) null else Cursor(files[fileIndex.coerceAtMost(files.size - 1)], end, carry)
+        val hasMore = end > 0L || fileIndex + 1 < files.size
+        val next = if (!hasMore) null else Cursor(files[fileIndex.coerceAtMost(files.size - 1)], end)
         return Chunk(collected.toList(), next, hasMore)
+    }
+
+    /**
+     * 这一块的起点，**保证落在行首**。
+     *
+     * 从 `end - BLOCK` 再往前找到最近的一个换行符，起点取它的下一个字节。
+     * 往回最多找 [MAX_LINE_CHARS]：再长就当作超长行，退回原始起点，由调用方按截断处理；
+     * 若已经回退到文件头，说明这一行就是文件第一行 —— 0 本身就是合法的行首。
+     */
+    private fun blockStart(file: File, end: Long): Pair<Long, Boolean> {
+        val raw = maxOf(0L, end - BLOCK)
+        if (raw == 0L) return 0L to true
+        val from = maxOf(0L, raw - MAX_LINE_CHARS)
+        val buf = ByteArray((raw - from).toInt())
+        RandomAccessFile(file, "r").use { raf ->
+            raf.seek(from)
+            raf.readFully(buf)
+        }
+        // UTF-8 的续字节都 ≥ 0x80，不可能等于 0x0A —— 按字节找换行是安全的
+        for (i in buf.indices.reversed()) {
+            if (buf[i] == '\n'.code.toByte()) return (from + i + 1) to true
+        }
+        return if (from == 0L) 0L to true else raw to false
     }
 
     private fun readRange(f: File, start: Long, end: Long): String {

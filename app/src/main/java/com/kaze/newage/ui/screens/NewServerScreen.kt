@@ -1144,7 +1144,12 @@ private fun GameModePicker(gameMode: String, onGameModeChange: (String) -> Unit)
 }
 
 /**
- * EULA 卡片：整行是一个 toggleable(Checkbox)。
+ * EULA 卡片：勾选行是一个 toggleable(Checkbox)。
+ *
+ * 两个点击区域必须**完全分开**：
+ *  - 「点此查看条款」原来嵌在 toggleable 的那一行里面，两个可点区域重叠 —— 用户只想看条款，
+ *    结果把"已同意"一起勾上了，而同意是建服的硬前提（勾上了用户还以为没勾）；
+ *  - 所以条款链接放到勾选行**之外**的独立一行，与整行切换不再有任何交叠。
  *
  * Checkbox 的 onCheckedChange 必须是 null —— 整行的 toggleable 已经是唯一触控目标，
  * 否则同一个动作有两个可聚焦节点，TalkBack 会把"同意"读两遍。
@@ -1168,23 +1173,25 @@ private fun EulaCard(agreed: Boolean, onAgreedChange: (Boolean) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(checked = agreed, onCheckedChange = null)
-            Column(Modifier.weight(1f)) {
-                Text("我已阅读并同意 Minecraft EULA", style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    "点此查看条款",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = scheme.primary,
-                    modifier = Modifier.clickable {
-                        runCatching {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse("https://aka.ms/MinecraftEULA"))
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            )
-                        }
-                    },
-                )
-            }
+            Text("我已阅读并同意 Minecraft EULA", style = MaterialTheme.typography.bodyMedium)
         }
+        // 条款链接独立成行：不在上面那个 toggleable 的范围内，点它只开浏览器
+        Text(
+            "点此查看条款",
+            style = MaterialTheme.typography.labelMedium,
+            color = scheme.primary,
+            modifier = Modifier
+                .clip(M3Shape.small)
+                .clickable {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://aka.ms/MinecraftEULA"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                }
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+        )
     }
 }
 
