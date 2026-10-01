@@ -131,11 +131,31 @@ class InstanceStore(
      *  与 add/remove/rename 同锁：多个协程（下载完成/删实例/切目录）并发时防丢更新 */
     @Synchronized
     fun rescan() {
+        val before = _instances.value
+        val fileBefore = storeFileSnapshot()
         _instances.value = load()
         // 迁移必须放在 load() 之后：要按已加载的实例列表同步它们记录的目录
         migrateInstancesToSharedRoot()
-        save() // 目录扫描恢复出的实例回存 JSON
+        val after = _instances.value
+        // 两道**防覆盖闸**（CI 实锤过：init 的后台扫描把外部直改的 instances.json 盖回旧快照，
+        // 用户刚写进库的记录就没了）：
+        //  1. 扫描结果与内存一致 → 文件本来就是这份内容的来源，重写一遍零收益，
+        //     只平白制造"后台扫描的旧快照盖掉新文件"的窗口；
+        //  2. 扫描期间文件被外部改过（用户并发增删改落盘 / 测试直写库）→ 本次扫描
+        //     基于旧文件，回写会丢外部的新数据 → 跳过并记日志。
+        // 少一次回写的最坏代价是"目录扫描的恢复项晚一轮落盘"，远小于丢数据。
+        if (after != before) {
+            if (fileBefore == storeFileSnapshot()) {
+                save()
+            } else {
+                android.util.Log.w("KazeSLauncher", "instances.json 在扫描期间被外部修改，跳过本次回写")
+            }
+        }
     }
+
+    /** instances.json 当前内容的快照（不存在 = null）；读写失败按 null 处理，只影响回写判断 */
+    private fun storeFileSnapshot(): String? =
+        runCatching { storeFile.takeIf { it.isFile }?.readText() }.getOrNull()
 
     /**
      * 共享存储里的默认实例根：`<手机根目录>/KazeS`，例如 `/sdcard/KazeS`。
