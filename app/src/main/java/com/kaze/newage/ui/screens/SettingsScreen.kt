@@ -88,8 +88,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.BuildConfig
 import com.kaze.newage.core.update.UpdateChecker
-import com.kaze.newage.core.update.UpdateInstaller
+import com.kaze.newage.ui.AppUpdateState
 import com.kaze.newage.ui.AppViewModel
+import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
 import com.kaze.newage.ui.components.M3ECard
 import com.kaze.newage.ui.components.M3ECardVariant
 import com.kaze.newage.ui.components.M3EConnectedList
@@ -106,9 +107,7 @@ import com.kaze.newage.ui.theme.M3Spacing
 import com.kaze.newage.ui.theme.parseSeedColor
 import com.kaze.newage.ui.theme.statusPalette
 import com.kaze.newage.util.StorageDirUtil
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.io.File
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.FilterChip
@@ -203,8 +202,16 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
         }
-        // 释放旧目录的持久授权
-        uiPrefs.instanceDirUri.value.takeIf { it.isNotBlank() }?.let { old ->
+        val old = uiPrefs.instanceDirUri.value
+        uiPrefs.setInstanceDir(dir.absolutePath, uri.toString())
+        // 释放旧目录的持久授权。
+        //
+        // **同一目录不能再释放一次**：`take` 把引用计数加到 2，紧接着释放一次只减到 1，
+        // 看着"没坏"，但只要系统或用户再释放一次（或这条路又走一遍），计数归零 ——
+        // 用户"重新选了一下同一个目录"就得到处重新授权。
+        // 顺序也必须是"先 take 新的、再 release 旧的"：反过来时，若两次选的是同一个
+        // 目录，release 会在 take 之前把授权清掉。
+        if (old.isNotBlank() && old != uri.toString()) {
             runCatching {
                 appContext.contentResolver.releasePersistableUriPermission(
                     Uri.parse(old),
@@ -212,9 +219,20 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 )
             }
         }
-        uiPrefs.setInstanceDir(dir.absolutePath, uri.toString())
         viewModel.rescanInstances()
         Toast.makeText(appContext, "实例目录已切换，正在扫描所选目录…", Toast.LENGTH_LONG).show()
+    }
+
+    /** 释放当前自定义目录的 SAF 持久授权（恢复默认目录时调用） */
+    fun releaseInstanceDirGrant() {
+        val uri = uiPrefs.instanceDirUri.value
+        if (uri.isBlank()) return
+        runCatching {
+            appContext.contentResolver.releasePersistableUriPermission(
+                Uri.parse(uri),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+        }
     }
 
     // Android 11 以下没有「所有文件访问」开关，走传统的 WRITE_EXTERNAL_STORAGE 运行时权限。
@@ -269,68 +287,21 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         } catch (_: Exception) { }
     }
 
-    // ── 检查更新：GitHub Releases API + 多线路加速下载（逻辑与旧版一致，只换了版式）──
-    val updateScope = rememberCoroutineScope()
-    var updateState by remember { mutableStateOf<UpdateUiState>(UpdateUiState.Idle) }
-    var cancelDownload by remember { mutableStateOf(false) }
-    val currentVersion = remember {
-        runCatching {
-            appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: ""
-        }.getOrDefault("")
-    }
+    // ── 检查更新：状态与下载都在 ViewModel 里（见 AppUpdateState）──
+    // 原来这里用 `remember` + `rememberCoroutineScope` 持有状态与协程：离开设置页或转屏
+    // 会让组合销毁 → 作用域取消 → 下载静默中止，回来看还是 Idle，像"没点过"。
+    val updateState by viewModel.appUpdate.collectAsStateWithLifecycle()
+    val currentVersion = remember { viewModel.currentVersionName() }
 
-    fun checkUpdate() {
-        updateState = UpdateUiState.Checking
-        updateScope.launch(Dispatchers.IO) {
-            try {
-                val info = UpdateChecker.check(uiPrefs.updateChannel.value)
-                if (info == null || !UpdateChecker.isNewer(info.tag, currentVersion)) {
-                    withContext(Dispatchers.Main) { updateState = UpdateUiState.Latest }
-                } else {
-                    withContext(Dispatchers.Main) { updateState = UpdateUiState.Found(info) }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    updateState = UpdateUiState.Error(e.message ?: "检查失败（网络不可达？）")
-                }
-            }
-        }
-    }
+    fun checkUpdate() = viewModel.checkUpdate()
 
-    fun downloadAndInstall(info: UpdateChecker.ReleaseInfo) {
-        cancelDownload = false
-        updateState = UpdateUiState.Downloading(info, 0f, "准备下载…")
-        updateScope.launch(Dispatchers.IO) {
-            val file = UpdateInstaller.download(
-                context = appContext,
-                info = info,
-                onProgress = { done, total, p ->
-                    val msg = "下载中 $done MB" + (if (total > 0) " / $total MB" else "")
-                    updateState = UpdateUiState.Downloading(info, p, msg)
-                },
-                shouldCancel = { cancelDownload },
-                allowPatch = uiPrefs.updateMode.value == "patch",
-            )
-            if (file == null) {
-                withContext(Dispatchers.Main) {
-                    updateState = if (cancelDownload) UpdateUiState.Idle
-                    else UpdateUiState.Error("下载失败：所有线路不可用，请稍后重试")
-                }
-                return@launch
-            }
-            withContext(Dispatchers.Main) {
-                if (UpdateInstaller.install(appContext, file)) {
-                    updateState = UpdateUiState.Idle
-                } else {
-                    updateState = UpdateUiState.Error("无法打开安装器，请到设置中开启「安装未知应用」权限")
-                }
-            }
-        }
-    }
+    fun downloadAndInstall(info: UpdateChecker.ReleaseInfo) = viewModel.downloadAndInstallUpdate(info)
 
-    val canCheckUpdate = updateState !is UpdateUiState.Checking &&
-        updateState !is UpdateUiState.Downloading &&
-        updateState !is UpdateUiState.Found
+    // 「发现新版本 / 已是最新」都是**终点状态**：卡片自己给了关闭入口（见 UpdateStatusCard），
+    // 检查入口则只在真正"正在检查/正在下载"时才禁用 —— 原来 Found 也禁用，
+    // 于是卡片一旦出现就既关不掉、也重查不了（死端）。
+    val canCheckUpdate = updateState !is AppUpdateState.Checking &&
+        updateState !is AppUpdateState.Downloading
 
     // 「AMOLED 只在深色下有意义」：读主题层解析后的实际深浅色（跟随系统也要看系统），
     // 不能读 isSystemInDarkTheme() —— 强制浅色/深色时系统值会和实际生效值不一致。
@@ -501,7 +472,10 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         leadingIcon = Icons.Filled.Wallpaper,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
-                        onClick = { imageLauncher.launch(arrayOf("image/*")) },
+                        // 整行 onClick 与行尾 TextButton **二选一**：两个都挂就是嵌套 clickable，
+                        // 一次点击两条路径都触发 —— 文件选择器被连拉两次，第二次 launch 会抛
+                        // IllegalStateException（"Can only use lifecycle-aware launchers…"）。
+                        // 行尾只留文字按钮，整行交给它，行为不变但不会发两次。
                         trailing = {
                             TextButton(onClick = { imageLauncher.launch(arrayOf("image/*")) }) {
                                 Text(if (hasBg) "更换" else "选择图片")
@@ -581,7 +555,9 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         leadingIcon = Icons.Filled.FolderOpen,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
-                        onClick = requestInstanceDir,
+                        // 同上：整行不再挂 onClick，只由行尾按钮触发。
+                        // 这条尤其不能连发：两次 requestInstanceDir 会连续拉两次目录选择器，
+                        // 而且"释放旧授权 + 持久化新授权"会连着跑两遍，授权计数对不上。
                         trailing = {
                             TextButton(onClick = requestInstanceDir) { Text("选择目录") }
                         },
@@ -594,6 +570,10 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
                         onClick = {
+                            // 恢复默认之后自定义目录的持久授权就没用了，必须释放：
+                            // 否则系统里一直挂着一条本应用对该目录的读写授权（设置页会一直列着它），
+                            // 用户以为"取消自定义 = 收回权限"，实际没有。
+                            releaseInstanceDirGrant()
                             uiPrefs.setInstanceDir("")
                             viewModel.rescanInstances()
                             Toast.makeText(appContext, "已恢复默认实例目录", Toast.LENGTH_SHORT).show()
@@ -780,11 +760,16 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         leadingIcon = Icons.Filled.CloudDownload,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
-                        // 检查中/下载中/已发现新版本时不给重复触发（旧版这些状态也没有按钮）
+                        // 整行点击就是"检查"：行尾不再放一个同动作的 TextButton ——
+                        // 嵌套 clickable 会让一次点击连发两次（目录选择器/文件选择器被拉两次，
+                        // 新版 Android 上第二次 launch 直接抛 IllegalStateException）。
+                        // 行尾只保留状态文字 + 箭头，动作统一由整行承担。
                         onClick = if (canCheckUpdate) ({ checkUpdate() }) else null,
                         trailing = {
-                            if (canCheckUpdate) {
-                                TextButton(onClick = { checkUpdate() }) { Text("检查") }
+                            if (updateState is AppUpdateState.Checking) {
+                                ExpressiveLoadingIndicator(size = 22.dp)
+                            } else {
+                                RowChevron()
                             }
                         },
                     )
@@ -797,7 +782,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 state = updateState,
                 onCheck = { checkUpdate() },
                 onDownload = { downloadAndInstall(it) },
-                onCancel = { cancelDownload = true },
+                onCancel = { viewModel.cancelUpdateDownload() },
+                onDismiss = { viewModel.resetUpdateState() },
             )
 
             // ═══ 关于与许可证 ═══
@@ -1160,19 +1146,28 @@ private fun AboutDialog(onDismiss: () -> Unit) {
     )
 }
 
-/** 更新流程的状态块：只有「有事发生」时才出现一张卡，Idle 时什么都不显示 */
+/**
+ * 更新流程的状态块：只有「有事发生」时才出现一张卡，Idle 时什么都不显示。
+ *
+ * 每个**终点状态**（已是最新 / 发现新版本 / 检查失败）都必须有出口，
+ * 否则用户点进来一次之后就再也回不到能操作的状态：
+ *  - Latest 与 Found 给「关闭」（[onDismiss] 回到 Idle，检查入口同时解禁）；
+ *  - Error 与 Latest 给「重新检查」；
+ *  - Found 不再同时禁用「检查更新」那一行（见调用点），所以即使不关卡片也能重查。
+ */
 @Composable
 private fun UpdateStatusCard(
-    state: UpdateUiState,
+    state: AppUpdateState,
     onCheck: () -> Unit,
     onDownload: (UpdateChecker.ReleaseInfo) -> Unit,
     onCancel: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     // 卡片的正文一律用 content 具名传入：尾随 lambda 会绑到 trailing（标题行右侧），不是正文区
     when (state) {
-        is UpdateUiState.Idle -> Unit
+        is AppUpdateState.Idle -> Unit
 
-        is UpdateUiState.Checking -> M3ECard(
+        is AppUpdateState.Checking -> M3ECard(
             variant = M3ECardVariant.Outlined,
             title = "正在检查更新…",
             content = {
@@ -1180,36 +1175,46 @@ private fun UpdateStatusCard(
             },
         )
 
-        is UpdateUiState.Error -> M3ECard(
+        is AppUpdateState.Error -> M3ECard(
             variant = M3ECardVariant.Outlined,
             title = "检查更新失败",
             supporting = state.msg,
             content = {
-                Button(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("重试") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onCheck) { Text("重试") }
+                    TextButton(onClick = onDismiss) { Text("关闭") }
+                }
             },
         )
 
-        is UpdateUiState.Latest -> M3ECard(
+        is AppUpdateState.Latest -> M3ECard(
             variant = M3ECardVariant.Outlined,
             title = "已是最新版本",
             supporting = "（或仓库暂未发布更新）",
-        )
-
-        is UpdateUiState.Found -> M3ECard(
-            variant = M3ECardVariant.Elevated,
-            title = "发现新版本 ${state.info.tag}",
-            // 设置页的检查更新**不显示 changelog**（真机要求）：这里只做"手动检查 + 一键更新"，
-                        // 不再把 Release 正文摊开。想看更新说明，去应用启动时的更新弹窗。
-                        supporting = "点「下载并安装」开始更新",
             content = {
-                Button(
-                    onClick = { onDownload(state.info) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("下载并安装") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onCheck) { Text("重新检查") }
+                    TextButton(onClick = onDismiss) { Text("关闭") }
+                }
             },
         )
 
-        is UpdateUiState.Downloading -> M3ECard(
+        is AppUpdateState.Found -> M3ECard(
+            variant = M3ECardVariant.Elevated,
+            title = "发现新版本 ${state.info.tag}",
+            // 设置页的检查更新**不显示 changelog**（真机要求）：这里只做"手动检查 + 一键更新"，
+            // 不再把 Release 正文摊开。想看更新说明，去应用启动时的更新弹窗。
+            supporting = "点「下载并安装」开始更新",
+            content = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { onDownload(state.info) }) { Text("下载并安装") }
+                    // 「以后再说」：卡片收起、检查入口解禁 —— 原来这一步是死端
+                    TextButton(onClick = onDismiss) { Text("以后再说") }
+                }
+            },
+        )
+
+        is AppUpdateState.Downloading -> M3ECard(
             variant = M3ECardVariant.Outlined,
             title = "正在下载更新",
             supporting = state.message,
@@ -1225,20 +1230,6 @@ private fun UpdateStatusCard(
             },
         )
     }
-}
-
-/** 更新流程 UI 状态 */
-private sealed interface UpdateUiState {
-    data object Idle : UpdateUiState
-    data object Checking : UpdateUiState
-    data class Error(val msg: String) : UpdateUiState
-    data object Latest : UpdateUiState
-    data class Found(val info: UpdateChecker.ReleaseInfo) : UpdateUiState
-    data class Downloading(
-        val info: UpdateChecker.ReleaseInfo,
-        val progress: Float,
-        val message: String,
-    ) : UpdateUiState
 }
 
 /** 「行 → 选择器」弹窗的标识（同一时刻只开一个） */

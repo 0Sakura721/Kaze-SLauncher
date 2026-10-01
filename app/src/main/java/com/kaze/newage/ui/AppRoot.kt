@@ -63,6 +63,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -131,80 +132,20 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     }
 
     // ── 启动自动检查更新（默认开；通道默认预览版，设置页可改）──
+    // 状态全部交给 ViewModel：更新包几十 MB、下载要几分钟，挂在组合上的话
+    // 离开设置页或转屏就会静默中止（见 AppUpdateState 的说明）。
     val appContext = LocalContext.current.applicationContext
-    val scope = rememberCoroutineScope()
-    var updateInfo by remember { mutableStateOf<UpdateChecker.ReleaseInfo?>(null) }
-    var updateProgress by remember { mutableStateOf<String?>(null) }
-    // 更新阶段的**状态文本**（探测源 / 命中补丁 / 拼装校验…）：之前只有"下载中"，
-    // 探测那几秒和拼装补丁那几秒看起来都像卡死。
-    var updateStatus by remember { mutableStateOf<String?>(null) }
-    var updatePercent by remember { mutableStateOf(0f) }
-    var updateBusy by remember { mutableStateOf(false) }
+    val updateState by viewModel.appUpdate.collectAsStateWithLifecycle()
+    val updateInfo = (updateState as? AppUpdateState.Found)?.info
+    val updateDownloading = (updateState as? AppUpdateState.Downloading)
     var updateChecked by rememberSaveable { mutableStateOf(false) }
+    // 用户点过「以后再说」：本次启动不再弹。否则清状态时若还留着 Error，
+    // 下一次任意重组都会把已经关掉的弹窗重新弹出来（过期的失败提示）
+    var updateDialogDismissed by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (uiPrefs.autoUpdate.value && !updateChecked) {
+        if (!updateChecked) {
             updateChecked = true
-            val channel = uiPrefs.updateChannel.value
-            val current = runCatching {
-                appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: ""
-            }.getOrDefault("")
-            try {
-                // 网络必须切到 IO 线程：LaunchedEffect 跑在**主线程**，而 UpdateChecker.check
-                // 是同步 HttpURLConnection（Downloader.downloadText）。旧实现直接在主线程调用，
-                // 抛出的 NetworkOnMainThreadException 又被下面那个 catch 吞掉 ——
-                // 于是「启动自动检查更新」在真机上从来没成功过，只有设置页里的手动检查能用。
-                val info = withContext(Dispatchers.IO) { UpdateChecker.check(channel) }
-                if (info != null && UpdateChecker.isNewer(info.tag, current)) {
-                    updateInfo = info
-                }
-            } catch (_: Exception) { /* 静默：启动检查失败不影响使用 */ }
-        }
-    }
-    var updateCancelRequested by remember { mutableStateOf(false) }
-    fun startUpdateDownload(info: UpdateChecker.ReleaseInfo) {
-        if (updateBusy) return
-        updateBusy = true
-        updateCancelRequested = false
-        updateProgress = null
-        updatePercent = 0f
-        updateStatus = "准备更新…"
-        scope.launch {
-            val file = UpdateInstaller.download(
-                context = appContext,
-                info = info,
-                onProgress = { done, total, percent ->
-                    updateProgress = if (total > 0) "$done MB / $total MB" else "$done MB…"
-                    updatePercent = percent
-                },
-                shouldCancel = { updateCancelRequested },
-                onStatus = { updateStatus = it },
-                // 设置里默认「完整安装包」→ 不走增量补丁（补丁只是省流量）
-                allowPatch = uiPrefs.updateMode.value == "patch",
-            )
-            updateBusy = false
-            if (file != null) {
-                // 检查安装器是否真的被拉起（没有「安装未知应用」权限、FileProvider 取不到文件…）。
-                //
-                // **失败时绝不能提前关掉弹窗**：updateProgress 只在 `updateInfo?.let` 的弹窗里
-                // 渲染，先置 null 就等于把失败文案写进死代码 —— 用户以为更新完成了，实际什么都没发生。
-                // 所以只有安装器真的起来了才收弹窗。
-                if (UpdateInstaller.install(appContext, file)) {
-                    updateInfo = null
-                    updateProgress = null
-                    updateStatus = null
-                } else {
-                    updateProgress = "无法启动安装器：请在系统设置中允许本应用「安装未知应用」后重试"
-                    updateStatus = null
-                }
-            } else if (updateCancelRequested) {
-                // 用户主动取消：静默收起弹窗（下载已在 Downloader 内中止，断点保留）
-                updateInfo = null
-                updateProgress = null
-                updateStatus = null
-            } else {
-                updateProgress = "下载失败，请稍后在设置中重试"
-                updateStatus = null
-            }
+            viewModel.checkUpdateOnStart(uiPrefs.autoUpdate.value)
         }
     }
 
@@ -361,28 +302,33 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             }
         }
 
-        // ── 启动自动检查：发现新版本弹窗 ──
-        updateInfo?.let { info ->
+        // ── 启动自动检查：发现新版本弹窗（下载阶段沿用同一个弹窗显示进度）──
+        val releaseInfo = updateInfo ?: updateDownloading?.info
+        if (releaseInfo != null && !updateDialogDismissed) {
+            val busy = updateDownloading != null
+            val cancelled = busy && viewModel.updateCancelRequestedFlag()
             AlertDialog(
                 // 下载中不锁死弹窗：点击外部 = 请求取消（下载会中止，断点保留）
                 onDismissRequest = {
-                    if (updateBusy) {
-                        updateCancelRequested = true
-                        updateStatus = "正在取消下载…"
-                    } else updateInfo = null
+                    if (busy) {
+                        viewModel.cancelUpdateDownload()
+                    } else {
+                        updateDialogDismissed = true
+                        viewModel.resetUpdateState()
+                    }
                 },
-                title = { Text("发现新版本 ${info.tag}") },
+                title = { Text("发现新版本 ${releaseInfo.tag}") },
                 text = {
                     Column {
-                        if (info.body.isNotBlank()) {
+                        if (releaseInfo.body.isNotBlank()) {
                             // 原来直接把 info.body 丢进 Text：用户看到的是**原始 Markdown**
                             // （## / > / ** / 表格竖线），而且 take(400) 把正文截断，后半截看不到。
                             // 现在转成可读纯文本，并给固定高度 + 可滚动 —— 全文都能翻。
                             Text(
-                                remember(info.tag, info.body) {
+                                remember(releaseInfo.tag, releaseInfo.body) {
                                     com.kaze.newage.core.update.ReleaseNotes
-                                        .toPlainText(info.body, dropTitle = info.tag)
-                                        .ifBlank { info.body }
+                                        .toPlainText(releaseInfo.body, dropTitle = releaseInfo.tag)
+                                        .ifBlank { releaseInfo.body }
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -391,29 +337,30 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                                     .verticalScroll(rememberScrollState()),
                             )
                         }
-                        // 阶段状态（探测源 / 命中补丁 / 拼装校验）：让用户知道卡在哪一步
-                        updateStatus?.let {
-                            Text(
-                                it,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 8.dp),
-                            )
-                        }
-                        updateProgress?.let {
+                        updateDownloading?.message?.let {
                             Text(
                                 it,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp),
+                                modifier = Modifier.padding(top = 8.dp),
                             )
                         }
-                        if (updateBusy) {
+                        // 下载失败时不能静默收弹窗（否则用户以为更新完成了）
+                        (updateState as? AppUpdateState.Error)?.let {
+                            Text(
+                                it.msg,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                        if (busy) {
                             // 有进度就显示**确定**进度条，没有（探测/拼装/校验阶段）
                             // 才退回不确定的滚动条 —— 一直转圈会让人以为卡死了
-                            if (updatePercent > 0f) {
+                            val percent = updateDownloading?.progress ?: 0f
+                            if (percent > 0f) {
                                 LinearProgressIndicator(
-                                    progress = { updatePercent },
+                                    progress = { percent },
                                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                                 )
                             } else {
@@ -424,30 +371,30 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 },
                 confirmButton = {
                     TextButton(
-                        onClick = { startUpdateDownload(info) },
-                        enabled = !updateBusy,
+                        onClick = { viewModel.downloadAndInstallUpdate(releaseInfo) },
+                        enabled = !busy,
                     ) {
-                        Text(if (updateBusy) "下载中…" else "下载并安装")
+                        Text(if (busy) "下载中…" else "下载并安装")
                     }
                 },
                 dismissButton = {
                     TextButton(
                         onClick = {
-                            if (updateBusy) {
-                                // 立刻给反馈：只把标志置真的话，用户点了取消、界面几秒内毫无变化，
-                                // 观感就是"取消不了"（真机反馈）。这里马上换掉状态行并禁用按钮。
-                                updateCancelRequested = true
-                                updateStatus = "正在取消下载…"
+                            // 下载中 = 取消（立刻给反馈：只把标志置真的话，用户点了取消、
+                            // 界面几秒内毫无变化，观感就是"取消不了"，真机反馈过）
+                            if (busy) {
+                                viewModel.cancelUpdateDownload()
                             } else {
-                                updateInfo = null
+                                updateDialogDismissed = true
+                                viewModel.resetUpdateState()
                             }
                         },
-                        enabled = !updateCancelRequested,
+                        enabled = !cancelled,
                     ) {
                         Text(
                             when {
-                                updateCancelRequested -> "正在取消…"
-                                updateBusy -> "取消下载"
+                                cancelled -> "正在取消…"
+                                busy -> "取消下载"
                                 else -> "以后再说"
                             },
                         )

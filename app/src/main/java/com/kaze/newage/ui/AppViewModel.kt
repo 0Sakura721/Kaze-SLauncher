@@ -20,6 +20,8 @@ import com.kaze.newage.data.model.CoreType
 import com.kaze.newage.data.model.GameVersion
 import com.kaze.newage.data.model.JavaVersionInference
 import com.kaze.newage.data.model.ServerInstance
+import com.kaze.newage.core.update.UpdateChecker
+import com.kaze.newage.core.update.UpdateInstaller
 import com.kaze.newage.util.Downloader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,6 +73,27 @@ data class JavaTaskState(
     /** 取消请求标志（下载循环轮询；true 时下载中止并保留断点） */
     val cancelRequested: Boolean = false,
 )
+
+/**
+ * 应用自身更新的状态机。
+ *
+ * 必须活在 ViewModel 里，不能像原来那样放在设置页的 `remember` + `rememberCoroutineScope`：
+ * 更新包几十 MB、下载要几分钟，用户点完「下载并安装」去别的页面看看、或转一下屏幕，
+ * 组合被销毁 → 协程作用域取消 → 下载静默中止，而界面不会有任何提示
+ *（回到设置页时状态已经重置成 Idle，看起来像"我根本没点过"）。
+ */
+sealed interface AppUpdateState {
+    data object Idle : AppUpdateState
+    data object Checking : AppUpdateState
+    data class Error(val msg: String) : AppUpdateState
+    data object Latest : AppUpdateState
+    data class Found(val info: UpdateChecker.ReleaseInfo) : AppUpdateState
+    data class Downloading(
+        val info: UpdateChecker.ReleaseInfo,
+        val progress: Float,
+        val message: String,
+    ) : AppUpdateState
+}
 
 /**
  * 服务端核心 jar 的最小可接受体积（64KB）。
@@ -1041,6 +1064,112 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearAddonInstallState() {
         _addonInstall.value = DownloadState()
+    }
+
+    // ── 动作：应用自身更新（设置页与启动弹窗共用同一份状态）──
+    private val _appUpdate = MutableStateFlow<AppUpdateState>(AppUpdateState.Idle)
+    val appUpdate: StateFlow<AppUpdateState> = _appUpdate.asStateFlow()
+
+    /** 启动检查发现新版本时，用户点了「以后再说」——本次启动不再弹窗 */
+    private var updatePostponed = false
+
+    /** 取消标志：由界面置位，下载循环轮询（断点保留） */
+    @Volatile
+    private var updateCancelRequested = false
+
+    fun updatePostpone() {
+        updatePostponed = true
+    }
+
+    /** 当前版本号（GitHub tag 比较用） */
+    fun currentVersionName(): String = runCatching {
+        container.appContext.packageManager
+            .getPackageInfo(container.appContext.packageName, 0).versionName ?: ""
+    }.getOrDefault("")
+
+    /**
+     * 启动时的自动检查（仅一次）。
+     *
+     * 网络必须切到 IO 线程：LaunchedEffect 跑在**主线程**，而 UpdateChecker.check 是同步
+     * HttpURLConnection（Downloader.downloadText）。旧实现直接在主线程调用，抛出的
+     * NetworkOnMainThreadException 又被 catch 吞掉 —— 「启动自动检查更新」在真机上从未成功过。
+     */
+    fun checkUpdateOnStart(autoUpdate: Boolean) {
+        if (!autoUpdate) return
+        container.appScope.launch {
+            try {
+                val info = withContext(Dispatchers.IO) { UpdateChecker.check(container.uiPrefs.updateChannel.value) }
+                if (info != null && UpdateChecker.isNewer(info.tag, currentVersionName())) {
+                    _appUpdate.value = AppUpdateState.Found(info)
+                }
+            } catch (_: Exception) { /* 静默：启动检查失败不影响使用 */ }
+        }
+    }
+
+    /** 手动检查更新（设置页） */
+    fun checkUpdate() {
+        if (_appUpdate.value is AppUpdateState.Checking) return
+        _appUpdate.value = AppUpdateState.Checking
+        container.appScope.launch {
+            try {
+                val info = withContext(Dispatchers.IO) { UpdateChecker.check(container.uiPrefs.updateChannel.value) }
+                _appUpdate.value = if (info == null || !UpdateChecker.isNewer(info.tag, currentVersionName())) {
+                    AppUpdateState.Latest
+                } else {
+                    AppUpdateState.Found(info)
+                }
+            } catch (e: Exception) {
+                _appUpdate.value = AppUpdateState.Error(e.message ?: "检查失败（网络不可达？）")
+            }
+        }
+    }
+
+    /** 下载并安装更新。跑在 appScope 上：离开设置页 / 转屏都不会中断 */
+    fun downloadAndInstallUpdate(info: UpdateChecker.ReleaseInfo) {
+        if (_appUpdate.value is AppUpdateState.Downloading) return
+        updateCancelRequested = false
+        _appUpdate.value = AppUpdateState.Downloading(info, 0f, "准备下载…")
+        container.appScope.launch {
+            val file = UpdateInstaller.download(
+                context = container.appContext,
+                info = info,
+                onProgress = { done, total, p ->
+                    val msg = "下载中 $done MB" + (if (total > 0) " / $total MB" else "")
+                    _appUpdate.value = AppUpdateState.Downloading(info, p, msg)
+                },
+                shouldCancel = { updateCancelRequested },
+                allowPatch = container.uiPrefs.updateMode.value == "patch",
+            )
+            if (file == null) {
+                _appUpdate.value = if (updateCancelRequested) AppUpdateState.Idle
+                else AppUpdateState.Error("下载失败：所有线路不可用，请稍后重试")
+                return@launch
+            }
+            val installed = withContext(Dispatchers.Main) {
+                UpdateInstaller.install(container.appContext, file)
+            }
+            _appUpdate.value = if (installed) AppUpdateState.Idle
+            else AppUpdateState.Error("无法打开安装器，请到设置中开启「安装未知应用」权限")
+        }
+    }
+
+    fun cancelUpdateDownload() {
+        if (_appUpdate.value is AppUpdateState.Downloading) updateCancelRequested = true
+    }
+
+    /**
+     * 是否已请求取消更新下载。
+     *
+     * 用一个普通的 getter 而不是 State：调用点只在**下载中**读它，
+     * 而下载中每收到一次进度回调都会重发 [appUpdate]（进而重组），所以不需要额外的可观察状态。
+     */
+    fun updateCancelRequestedFlag(): Boolean = updateCancelRequested
+
+    /** 清掉「发现新版本 / 已是最新 / 失败」的卡片状态，让用户可以重新检查 */
+    fun resetUpdateState() {
+        if (_appUpdate.value is AppUpdateState.Downloading) return
+        _appUpdate.value = AppUpdateState.Idle
+        updatePostponed = true
     }
 
     /** 导入 jar 的连点守卫（见 [importJar]） */
