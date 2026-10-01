@@ -280,7 +280,9 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                 if (shouldCancel()) return@withContext null
                 onProgress(1f, "系统 tar 不可用，回退内置解压…")
                 try {
-                    TarExtractor.extract(tarFile, tmpDir) { done, total, speed ->
+                    // shouldCancel 透传：取消要能打断几百 MB 的解压循环，
+                    // 而不是等全部写完才停（上面的系统 tar 路径就有逐拍取消）
+                    TarExtractor.extract(tarFile, tmpDir, shouldCancel = shouldCancel) { done, total, speed ->
                         onProgress(if (total > 0) done.toFloat() / total else 0f, "解压 OpenJDK：${done / 1024 / 1024}MB${if (total > 0) " / ${total / 1024 / 1024}MB" else ""}（${speed / 1024}KB/s）")
                     }
                 } catch (e: Exception) {

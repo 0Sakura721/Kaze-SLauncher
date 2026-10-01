@@ -12,12 +12,14 @@ enum class VersionType(val displayName: String) {
     OLD_ALPHA("远古预览版"),
 }
 
-/** 游戏版本条目（带类型分类） */
+/** 游戏版本条目（带类型分类）。
+ *  实现 Serializable 以便进 Bundle：向导里"选中的版本"用 rememberSaveable 持有，
+ *  转屏/进程回收后不再退回阶段②重新选版本（字段全是 String/enum/Boolean，序列化安全）。 */
 data class GameVersion(
     val id: String,
     val type: VersionType = VersionType.RELEASE,
     val stable: Boolean = true,
-) {
+) : java.io.Serializable {
     val isRelease: Boolean get() = type == VersionType.RELEASE
 }
 

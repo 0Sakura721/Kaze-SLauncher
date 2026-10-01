@@ -15,6 +15,25 @@ object Downloader {
     private const val USER_AGENT = "KazeSLauncher/3.0 (Android; Minecraft Server Launcher)"
 
     /**
+     * 解析重定向的下一跳（[download] 与 [downloadText] 共用）。
+     *
+     * 两条安全/正确性规则：
+     *  1. 缺 Location 直接报错——调用方在调用前已 `disconnect()`，连接不泄漏；
+     *  2. **明文 http 一律拒绝**：本项目全部下载源都是 https，被劫持的镜像把 Location
+     *     指向 `http://` 等于把内容降级成可窃改的明文流（哈希校验只能事后发现，
+     *     这里从源头堵住）。相对/协议相对目标（`/path`、`//host/path`）按当前跳的
+     *     scheme 解析——https 源解析出来仍是 https，天然安全。
+     */
+    private fun resolveRedirect(current: String, loc: String?): String {
+        if (loc.isNullOrBlank()) throw RuntimeException("重定向无 Location")
+        val absolute = loc.startsWith("http", ignoreCase = true)
+        if (absolute && !loc.startsWith("https://", ignoreCase = true)) {
+            throw RuntimeException("拒绝明文 http 重定向：$loc")
+        }
+        return if (absolute) loc else URL(URL(current), loc).toString()
+    }
+
+    /**
      * 计算文件 SHA-1（十六进制小写）；失败返回 null。
      * 用于校验官方清单已给出哈希的下载物（例如 vanilla 的 `downloads.server.sha1`）。
      */
@@ -96,18 +115,16 @@ object Downloader {
 
             when (val code = conn.responseCode) {
                 in 301..308 -> {
-                    val loc = conn.getHeaderField("Location") ?: throw RuntimeException("重定向无 Location")
+                    // 先断开再解析：Location 缺失抛异常的路径上连接必须归还
+                    //（此前 `?: throw` 直接跳过了下一行的 disconnect）
+                    val loc = conn.getHeaderField("Location")
                     conn.disconnect()
                     if (++redirects > MAX_REDIRECTS) throw RuntimeException("重定向过多")
                     // 相对 Location 必须基于**当前这一跳**的 URL 解析。
                     // 旧实现把第一跳的 URL 记进 `url` 之后就不再更新，第 3 跳起
                     // 相对地址会被拼到**第一跳**的地址上 → 请求打到错误的路径
                     //（downloadText() 里本来就是对的，这里与之保持一致）。
-                    current = if (loc.startsWith("http")) {
-                        loc
-                    } else {
-                        URL(URL(current), loc).toString()
-                    }
+                    current = resolveRedirect(current, loc)
                     continue
                 }
                 206 -> { /* 断点续传成功 */ }
@@ -179,15 +196,11 @@ object Downloader {
             conn.setRequestProperty("User-Agent", USER_AGENT)
             when (val code = conn.responseCode) {
                 in 301..308 -> {
-                    val loc = conn.getHeaderField("Location") ?: throw RuntimeException("重定向无 Location")
+                    val loc = conn.getHeaderField("Location")
                     conn.disconnect()
                     if (++redirects > MAX_REDIRECTS) throw RuntimeException("重定向过多")
                     // 相对 Location 基于当前 URL 解析（与 download() 同款写法）
-                    current = if (loc.startsWith("http")) {
-                        loc
-                    } else {
-                        URL(URL(current), loc).toString()
-                    }
+                    current = resolveRedirect(current, loc)
                     continue
                 }
                 200 -> {

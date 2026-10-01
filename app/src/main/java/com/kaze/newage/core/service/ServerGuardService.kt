@@ -9,6 +9,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.kaze.newage.R
@@ -28,9 +29,15 @@ import com.kaze.newage.R
  *     `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` 属性（缺一即 SecurityException）；
  *  3. 通知渠道 IMPORTANCE_LOW（静默、常驻）；
  *  4. 单实例显示名称/端口，多开时由 DefaultServerManager.updateGuard 聚合为
- *     "N 个实例运行中" + 实例名列表（单一通知，避免通知栏堆积）。
+ *     "N 个实例运行中" + 实例名列表（单一通知，避免通知栏堆积）；
+ *  5. 服务存活期持有**部分唤醒锁**：前台服务只保进程不死，不保证 CPU 常醒 ——
+ *     熄屏后 proot 里的 java 子进程可能被内核挂起，服务端表现为"没人动它也卡住"。
+ *     服务的生命周期 = 「有实例在跑」，acquire/release 挂在 onCreate/onDestroy 上
+ *     天然与之一一对应，不需要在管理器里做引用计数。
  */
 class ServerGuardService : Service() {
+
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -48,6 +55,31 @@ class ServerGuardService : Service() {
             buildNotification("Kaze SLauncher", "服务端运行中"),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
         )
+        // ③ 部分唤醒锁（manifest 的 WAKE_LOCK 权限即为此声明）
+        acquireWakeLock()
+    }
+
+    override fun onDestroy() {
+        try {
+            wakeLock?.takeIf { it.isHeld }?.release()
+        } catch (_: Exception) { }
+        wakeLock = null
+        super.onDestroy()
+    }
+
+    private fun acquireWakeLock() {
+        try {
+            val pm = getSystemService(PowerManager::class.java) ?: return
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "KazeSLauncher:server-guard")?.apply {
+                setReferenceCounted(false)
+                // 不设超时：服务端就是要小时级运行，超时到点 CPU 睡了服务端会无声卡死。
+                // 释放路径只有 onDestroy 与进程死亡（内核随进程清理），两条路都覆盖。
+                acquire()
+            }
+        } catch (e: Exception) {
+            // 拿不到锁不致命（服务端仍可运行），但熄屏后可能被挂起 —— 留线索
+            android.util.Log.w(TAG, "唤醒锁获取失败: ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -93,6 +125,7 @@ class ServerGuardService : Service() {
             .build()
 
     companion object {
+        private const val TAG = "KazeSLauncher"
         private const val CHANNEL_ID = "server_guard"
         private const val NOTIFICATION_ID = 1001
         private const val EXTRA_TITLE = "title"
@@ -104,13 +137,27 @@ class ServerGuardService : Service() {
                     .putExtra(EXTRA_TITLE, title)
                     .putExtra(EXTRA_TEXT, text)
                 androidx.core.content.ContextCompat.startForegroundService(context, intent)
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                // 不再完全静默：Android 12+ 在后台路径（如自动重启）启动 FGS 会抛
+                // ForegroundServiceStartNotAllowedException —— 服务端将在**无守护**状态下裸跑，
+                // 旧实现连 logcat 都没有，排查"熄屏后服务端卡死"时没有任何线索。
+                val msg = "前台守护服务启动失败（服务端仍在运行，但熄屏后可能被系统挂起）：" +
+                    "${e.javaClass.simpleName}: ${e.message}"
+                android.util.Log.w(TAG, msg)
+                // 同步进诊断日志：用户看得见的地方（设置 → 诊断日志），崩溃前那一段也留得住
+                runCatching {
+                    (context.applicationContext as? com.kaze.newage.NewAgeApp)
+                        ?.container?.appLog?.appendRaw("[FGS] $msg")
+                }
+            }
         }
 
         fun stop(context: Context) {
             try {
                 context.stopService(Intent(context, ServerGuardService::class.java))
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "停止守护服务失败: ${e.message}")
+            }
         }
     }
 }

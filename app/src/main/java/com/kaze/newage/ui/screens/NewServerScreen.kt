@@ -124,7 +124,8 @@ fun NewServerScreen(
     viewModel: AppViewModel,
     onBack: () -> Unit,
 ) {
-    var coreType by remember { mutableStateOf<CoreType?>(null) }
+    // rememberSaveable：转屏后不退回阶段①重新选核心（CoreType 是 enum，可直接进 Bundle）
+    var coreType by rememberSaveable { mutableStateOf<CoreType?>(null) }
 
     // 导入 jar（核心类型选择「导入 jar」时直接走文件选择）
     val importLauncher = rememberLauncherForActivityResult(
@@ -359,7 +360,9 @@ private fun VersionConfigPhase(
     // 存 name 字符串而不是枚举本身：rememberSaveable 只保证 Bundle 可存类型。
     var typeFilterName by rememberSaveable { mutableStateOf(VersionType.RELEASE.name) }
     val typeFilter: VersionType? = VersionType.entries.firstOrNull { it.name == typeFilterName }
-    var selected by remember { mutableStateOf<GameVersion?>(null) }
+    // rememberSaveable：转屏/重建后选中的版本不丢（GameVersion 已实现 Serializable），
+    // 否则用户选好版本、填了一半配置，一转屏就被踹回阶段②重新选
+    var selected by rememberSaveable { mutableStateOf<GameVersion?>(null) }
     // 配置状态提升到本层：返回列表再选其他版本时，已填内容保留
     var name by rememberSaveable { mutableStateOf("") }
     // 游戏内存：自动分配开关（开 = 系统建议，不可手动改；关 = 滑块手动分配）

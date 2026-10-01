@@ -18,9 +18,17 @@ import java.util.zip.GZIPInputStream
  */
 object TarExtractor {
 
+    /** 解压总量默认上限：rootfs + JDK 的真实体积远小于此（约 1–2 GB），
+     *  值取得极宽只为拦"gzip 炸弹/损坏归档把磁盘写满"，不拦合法大包 */
+    private const val DEFAULT_MAX_TOTAL_BYTES = 8L * 1024 * 1024 * 1024
+
     fun extract(
         tarFile: File,
         destDir: File,
+        // 新参数一律排在 onProgress **前面**：既有调用点全靠尾随 lambda 传 onProgress，
+        // 一旦它后面还有参数，lambda 就会绑错到末参（编译期才炸，且炸在调用方）
+        maxTotalBytes: Long = DEFAULT_MAX_TOTAL_BYTES,
+        shouldCancel: () -> Boolean = { false },
         onProgress: (Long, Long, Long) -> Unit = { _, _, _ -> },
     ) {
         destDir.mkdirs()
@@ -50,8 +58,6 @@ object TarExtractor {
         val header = ByteArray(512)
 
         /** 待解析的符号链接（两遍处理：第一遍收普通文件，第二遍统一建链/复制，保证目标必然存在） */
-        data class PendingLink(val target: File, val linkRel: String)
-
         val pendingLinks = mutableListOf<PendingLink>()
 
         fun readHeader(): Boolean {
@@ -81,6 +87,8 @@ object TarExtractor {
         }
 
         val destCanonical = destDir.canonicalPath + File.separator
+        val destRoot = destDir.canonicalPath
+        var writtenTotal = 0L
 
         /** 条目名 → 目标文件（路径穿越防护：../ 或拼进绝对路径时拒绝写出 destDir） */
         fun resolvedTarget(path: String): File {
@@ -95,6 +103,7 @@ object TarExtractor {
             val buffer = ByteArray(64 * 1024)
             var pendingLongName: String? = null
             while (readHeader()) {
+                if (shouldCancel()) throw InterruptedException("解压已取消")
                 val size = octal(header.copyOfRange(124, 136))
                 // tar 头的权限位（偏移 100，8 字节八进制）。必须解析并应用：
                 // 解压出的文件由 Java 创建，默认 0600 —— 旧实现只按路径给 bin/ 与 libexec/ 加 x，
@@ -168,6 +177,18 @@ object TarExtractor {
                         }
                     }
                     isRegular -> {
+                        if (shouldCancel()) throw InterruptedException("解压已取消")
+                        // 写出上限 + 剩余空间双保险：tar 头里的 size 就是解压后的真实大小，
+                        // "压缩包只有几 MB"的炸弹在这两关都会被拦在写盘之前
+                        if (writtenTotal + size > maxTotalBytes) {
+                            throw RuntimeException(
+                                "解压总量将超过上限 ${maxTotalBytes / (1L shl 20)} MB（已写 ${writtenTotal / (1L shl 20)} MB），归档可能损坏或为恶意炸弹"
+                            )
+                        }
+                        val usable = destDir.usableSpace
+                        if (usable in 1 until size) {
+                            throw RuntimeException("磁盘剩余空间不足：需要 $size 字节，仅剩 $usable 字节")
+                        }
                         val target = resolvedTarget(pathName)
                         if (pathName.contains("/")) target.parentFile?.mkdirs()
                         var remaining = size
@@ -183,6 +204,7 @@ object TarExtractor {
                             // 不做逐文件 fsync：真机内部 FUSE passthrough 上逐文件 sync
                             // 极慢且可能触发回刷缺陷；改用提取完成后的全局 sync()。
                         }
+                        writtenTotal += size
                         // 可执行位
                         // 权限：优先用 tar 里记录的真实模式（这是唯一能正确处理"lib 下的 .so 也需要
                         // 可执行位"的来源），chmod 不可用时退回路径启发式
@@ -214,6 +236,16 @@ object TarExtractor {
 
             // 第二遍：统一解析符号链接（此时所有普通文件已就位，复制兜底的目标必然存在）
             for (link in pendingLinks) {
+                // 建链**前**先校验目标不逃逸。链接内容是归档作者任意写的："../…" 型相对
+                // 目标可以指到 destDir 之外，此后任何顺链的读写删都越出沙箱目录
+                //（写穿透另有 resolvedTarget 的 canonical 校验兜着，这里堵的是链接自身）。
+                // 绝对目标**不能一刀切**：真实 rootfs 里有指向 proot 运行时必然绑定的
+                // 伪文件系统的合法绝对链接（/etc/mtab → /proc/mounts、/var/run → /run），
+                // 拒绝会让 guest 内工具异常；指向其它宿主路径的绝对链接一律拒绝。
+                if (linkEscapes(link, destDir, destCanonical, destRoot)) {
+                    android.util.Log.w("KazeSLauncher", "拒绝越界符号链接：${link.target.name} -> ${link.linkRel}")
+                    continue
+                }
                 try {
                     java.nio.file.Files.createSymbolicLink(
                         link.target.toPath(),
@@ -249,6 +281,31 @@ object TarExtractor {
             rawInput.close()
             fileStream.close()
         }
+    }
+
+    /** 待解析的符号链接条目（第一遍收集、第二遍建链） */
+    private data class PendingLink(val target: File, val linkRel: String)
+
+    /** 允许的绝对链接目标前缀：proot 运行时必然绑定的内核伪文件系统与 /run */
+    private val ABSOLUTE_LINK_OK = arrayOf("/proc/", "/sys/", "/dev/", "/run/")
+
+    /** 符号链接目标是否逃逸出解压目录（逃逸 → 拒绝建链/复制）。
+     *  解析失败按逃逸处理（宁可少一条链接，不可越界）。 */
+    private fun linkEscapes(
+        link: PendingLink,
+        destDir: File,
+        destCanonical: String,
+        destRoot: String,
+    ): Boolean {
+        val rel = link.linkRel
+        if (rel.startsWith("/")) {
+            return ABSOLUTE_LINK_OK.none { rel == it.trimEnd('/') || rel.startsWith(it) }
+        }
+        return runCatching {
+            val base = link.target.parentFile ?: destDir
+            val resolved = File(base, rel).canonicalPath
+            resolved != destRoot && !resolved.startsWith(destCanonical)
+        }.getOrDefault(true)
     }
 
     /**
