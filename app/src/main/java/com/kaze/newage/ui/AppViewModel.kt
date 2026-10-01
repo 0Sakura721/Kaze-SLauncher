@@ -76,6 +76,9 @@ data class JavaTaskState(
  */
 private const val MIN_CORE_JAR_BYTES = 64L * 1024L
 
+/** 占用采样节拍（毫秒）。CPU 靠两次求差，窗口越短越跟得上突发负载；配合 EMA 平滑防跳。 */
+private const val PROC_STATS_INTERVAL_MS = 1_000L
+
 /** 共享 ViewModel：接线 core 各组件与 UI（多开：每实例独立状态/控制台） */
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -475,9 +478,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // 这个顺序坑在 CI 上表现为 12 个 UI 测试报 UncaughtExceptionsBeforeTest（真机上同样会死，
     // 只是异常没人看见，还以为是 /proc 读不到）。
     init { startProcStatsPolling() }
-
-/** 占用采样节拍（毫秒）。CPU 靠两次求差，窗口越短越跟得上突发负载；配合 EMA 平滑防跳。 */
-private const val PROC_STATS_INTERVAL_MS = 1_000L
 
     /**
      * 每秒采一次服务端进程的 CPU / 内存，以及整机可用内存。
