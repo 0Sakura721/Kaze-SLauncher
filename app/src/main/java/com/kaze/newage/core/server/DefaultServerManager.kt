@@ -635,7 +635,8 @@ class DefaultServerManager(
             delay(60_000)
             if (!proc.isAlive) return@launch
             slot.log(
-                "> 仍未退出。若确认是卡死，再点一次「强制停止」；否则继续等它写完更安全（避免世界残缺）",
+                "> 仍未退出。若确认是卡死，再点一次「强制停止」；否则继续等它写完更稳妥" +
+                    "（中途强杀有可能让世界不完整，所以只有确实卡住了才建议强杀）",
                 LineType.Warn,
             )
         }
