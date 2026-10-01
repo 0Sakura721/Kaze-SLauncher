@@ -71,26 +71,49 @@ object BackupManager {
             .sortedByDescending { it.lastModified() }
     }
 
-    /** 创建备份，返回备份文件 */
+    /**
+     * 创建备份，返回备份文件。
+     *
+     * **先写同目录的 `.part`，全部写完后才 rename 成正式名**。
+     * 直接写最终文件名的话，中途失败（世界 region 被占住读不了、空间不足、进程被杀）会留下
+     * 一个"能列出、能解压、但少了几个 region"的半截 zip —— 恢复它就是把世界覆盖成残缺版本，
+     * 比没有备份更危险，而 [list] 完全看不出它坏了。
+     * 同目录 rename 在同一文件系统上是原子的，所以 [list] 只会看到两种状态：不存在、完整。
+     *
+     * `.part` 后缀也让中间态天然不被 [list] 命中（它只认 `.zip` 结尾）。
+     */
     @Throws(Exception::class)
     fun backup(instance: ServerInstance): File {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val dest = File(backupsRoot(instance), "${instance.name}_$stamp.zip")
-        ZipOutputStream(FileOutputStream(dest)).use { zip ->
-            val base = instance.dir
-            fun walk(dir: File) {
-                dir.listFiles()?.sortedBy { it.name }?.forEach { f ->
-                    if (f.isDirectory) walk(f) else {
-                        val rel = f.relativeTo(base).path.replace('\\', '/')
-                        if (!isExcluded(rel)) {
-                            zip.putNextEntry(ZipEntry(rel))
-                            FileInputStream(f).use { it.copyTo(zip) }
-                            zip.closeEntry()
+        val dir = backupsRoot(instance)
+        val dest = File(dir, "${instance.name}_$stamp.zip")
+        val tmp = File(dir, "${dest.name}.part")
+        try {
+            ZipOutputStream(FileOutputStream(tmp)).use { zip ->
+                val base = instance.dir
+                fun walk(d: File) {
+                    d.listFiles()?.sortedBy { it.name }?.forEach { f ->
+                        if (f.isDirectory) walk(f) else {
+                            val rel = f.relativeTo(base).path.replace('\\', '/')
+                            if (!isExcluded(rel)) {
+                                zip.putNextEntry(ZipEntry(rel))
+                                FileInputStream(f).use { it.copyTo(zip) }
+                                zip.closeEntry()
+                            }
                         }
                     }
                 }
+                walk(base)
             }
-            walk(base)
+            if (!tmp.renameTo(dest)) {
+                // 少数文件系统上 rename 会被拒；退回拷贝，成功了才删临时文件
+                tmp.copyTo(dest, overwrite = true)
+                tmp.delete()
+            }
+        } catch (e: Exception) {
+            // 失败绝不留下半截文件：既不能当备份用，又会被用户当成"备份成功了"
+            tmp.delete()
+            throw e
         }
         return dest
     }

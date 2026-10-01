@@ -261,31 +261,20 @@ class InstanceStore(
     fun get(id: String): ServerInstance? = _instances.value.firstOrNull { it.id == id }
 
     private fun load(): List<ServerInstance> {
-        // 1) 正常读 JSON。解析失败**绝不能**当成"没有实例"：
-        //    旧实现直接 emptyList()，紧接着 rescan() 把空列表写回去 —— 一旦文件半截
-        //    （writeText 先截断再写，进程被杀/掉电/FUSE 短写都会留下半截），用户的
-        //    全部实例就永久消失了。现在先把坏文件留档，再退回上一次的备份。
-        val text = runCatching { storeFile.takeIf { it.isFile }?.readText() }.getOrNull()
+        // 1) 正常读 JSON。**读失败**与**解析失败**必须走同一条留档 + 回退备份的路径：
+        //    "文件不存在"和"readText 抛 IO"（权限、空间、FUSE 短读、外部目录被拔）是两件
+        //    完全不同的事，旧实现把它们收敛进 `.getOrNull()` 的同一个 null → 都当成空列表，
+        //    紧接着 rescan() 把空列表 save() 回去 —— 一次读失败就把用户的全部实例记录
+        //    永久抹掉，而且因为没走留档分支，连"读过一次失败"都看不到。
         _loadWarning.value = null
-        val fromJson = if (text == null) {
-            emptyList()
-        } else {
-            runCatching { json.decodeFromString<List<StoredInstance>>(text).map { it.toInstance() } }
-                .getOrElse { e ->
-                    val archived = runCatching {
-                        val dst = File(storeFile.parentFile, storeFile.name + ".corrupt-" + System.currentTimeMillis())
-                        storeFile.renameTo(dst)
-                    }.getOrDefault(false)
-                    _loadWarning.value = buildString {
-                        append("实例列表读取失败：").append(e.message ?: e.javaClass.simpleName)
-                        if (archived) append("（原文件已留档为 instances.json.corrupt-…）")
-                    }
-                    runCatching {
-                        backupFile.takeIf { it.isFile }?.readText()?.let { b ->
-                            json.decodeFromString<List<StoredInstance>>(b).map { it.toInstance() }
-                        }
-                    }.getOrNull() ?: emptyList()
-                }
+        val read = runCatching { storeFile.takeIf { it.isFile }?.readText() }
+        val text = read.getOrNull()
+        val fromJson: List<ServerInstance> = when {
+            read.isFailure -> recoverAfterStoreFailure(read.exceptionOrNull())
+            text == null -> emptyList() // 真的没有文件：首次启动
+            else -> runCatching {
+                json.decodeFromString<List<StoredInstance>>(text).map { it.toInstance() }
+            }.getOrElse { e -> recoverAfterStoreFailure(e) }
         }
 
         // 2) 目录扫描恢复：JSON 丢失（内部存储不可靠）但实例目录还在时重建记录
@@ -302,6 +291,29 @@ class InstanceStore(
                 inst.copy(javaMajor = 25)
             } else inst
         }
+    }
+
+    /**
+     * 实例库读/解析失败的统一善后：坏文件留档 → 退回上一次的备份 → 写进 [loadWarning]。
+     *
+     * 解析失败时把半截文件 rename 走，是为了不让它挡住下一次启动 —— 但**绝不能**顺手
+     * 把它删掉：那半截里往往还留着用户手改过的实例名/目录路径，是最后的手工抢救线索。
+     * 返回空列表是最后手段，此时 [loadWarning] 一定有值，界面必须让用户看见。
+     */
+    private fun recoverAfterStoreFailure(e: Throwable?): List<ServerInstance> {
+        val archived = runCatching {
+            val dst = File(storeFile.parentFile, storeFile.name + ".corrupt-" + System.currentTimeMillis())
+            storeFile.renameTo(dst)
+        }.getOrDefault(false)
+        _loadWarning.value = buildString {
+            append("实例列表读取失败：").append(e?.message ?: e?.javaClass?.simpleName ?: "未知原因")
+            if (archived) append("（原文件已留档为 instances.json.corrupt-…）")
+        }
+        return runCatching {
+            backupFile.takeIf { it.isFile }?.readText()?.let { b ->
+                json.decodeFromString<List<StoredInstance>>(b).map { it.toInstance() }
+            }
+        }.getOrNull() ?: emptyList()
     }
 
     /** 从实例目录重建：vanilla-X.Y.Z.jar / paper-X.jar 等文件名推断元数据 */
