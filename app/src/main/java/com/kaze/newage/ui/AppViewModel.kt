@@ -181,12 +181,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 真机上"部署失败/启动失败"往往只有一句笼统提示，用户可以直接把这个文件发出来。
         container.appScope.launch { runCatching { container.env.dumpDiagnostics() } }
 
-        // 服务端进程的 CPU / 内存占用（控制台那一行）。这个轮询函数早就写好了，
-        // 但**全仓库一直没有调用点** → `_procStats` 永远是 null → 界面永远停在
-        // 「CPU 采样中…」（真机反馈"cpu 一直显示采样"的根因）。
-        // 和上面 snapshot() 是同一类疏漏：定义了却没人调，单测也覆盖不到。
-        startProcStatsPolling()
-
         // 跟随当前实例切换控制台（每实例独立日志流），并跟踪在线玩家
         viewModelScope.launch(Dispatchers.IO) {
             _currentInstanceId.collectLatest { id ->
@@ -446,6 +440,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ── 服务端进程的 CPU / 内存占用 ──
     private val _procStats = MutableStateFlow<ProcessStats.Reading?>(null)
     val procStats: StateFlow<ProcessStats.Reading?> = _procStats.asStateFlow()
+
+    // 启动采样轮询。**必须放在 `_procStats` 声明之后**：Kotlin 的 init 块按声明顺序执行，
+    // 若把它写进文件上方那个 init（第 179 行附近），执行到那里时 `_procStats` 还是 null ——
+    // 协程被 Dispatchers.IO 立刻调度后读到 null 就抛 NPE，采样循环当场死掉，界面依旧是"采样中"。
+    // 这个顺序坑在 CI 上表现为 12 个 UI 测试报 UncaughtExceptionsBeforeTest（真机上同样会死，
+    // 只是异常没人看见，还以为是 /proc 读不到）。
+    init { startProcStatsPolling() }
 
     /**
      * 每 2 秒采一次服务端进程的 CPU / 内存。

@@ -15,6 +15,10 @@
   上一轮把它误判成"`/proc` 读不到 / 匹配规则不对"，加了诊断计数、改了 pid 识别方式，
   但循环不启动，改多少匹配逻辑都还是"采样中"。
   - `init` 里启动该轮询 —— 与仓库里 `snapshot()` 那类"定义了却没人调"的疏漏同源。
+  - ⚠️ 首版把它写进了文件上方那个 `init`，而 `_procStats` 声明在 441 行：Kotlin 的 init 块
+    **按声明顺序**执行，协程被 `Dispatchers.IO` 立刻调度时 `_procStats` 还是 null → NPE →
+    循环当场死掉（真机上也一样死，只是异常没人看见，依旧显示"采样中"）。CI 立刻抓到了：
+    12 个 UI 测试报 `UncaughtExceptionsBeforeTest`。现改在 `_procStats` 声明之后的 init 里启动。
   - 顺带：只在当前实例处于 `Running` 时才扫描 `/proc`。原来是不管运行与否每 2 秒
     把整机 `/proc` 扫一遍（几百次文件读），纯浪费电；而这一行本来就只在 Running 时渲染。
   - 新增 `ProcStatsWiringTest`：纯 JVM 的"接线检查"，防这一类"定义了却没人调"再犯
