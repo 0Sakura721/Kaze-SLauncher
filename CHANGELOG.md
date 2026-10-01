@@ -5,6 +5,12 @@
 
 ---
 
+## [0.4.0-fix] - 2026-10-01
+
+### Fixed
+- 修 v7a（MTK）部署失败现场被噪音淹没：厂商注入应用的 `LD_PRELOAD`（`libdirect-coredump.so`）不再带入 guest——此前 proot 把它带进 Ubuntu，guest 的 ld.so 给**每个** guest 进程刷一条 `ERROR: ld.so: ... ignored.`（非致命）；失败消息改为滤掉该噪音并取输出**末尾** 300 字符（apt 的真错误在最后），下次失败能直接看到真原因
+- 修诊断日志「闪退现场补捞」在老系统（MTK Android 9）整屏打印 logcat 用法帮助：`--uid=` 是老 logcat 不认识的参数，已去掉（应用跑 logcat 本就只能看到自己的条目）并加防护——再遇到不支持的参数不会把用法文本当日志尾巴记录
+
 ## [0.4.0] - 2026-10-01
 
 ### Changed
