@@ -30,6 +30,26 @@ object BackupManager {
         File(instance.dir.parentFile ?: instance.dir, "backups")
 
     /**
+     * 备份文件名里可用的实例名。
+     *
+     * 实例名是**用户输入**，与实例目录名（`InstanceStore.sanitize` 出来的）是两回事：
+     *  `BackupManager.backup` 用 `"${instance.name}_$stamp.zip"` 拼文件名，而 `list` 用
+     * `startsWith("${instance.name}_")` 匹配。名字里带 `/`（或 `\`、`:` 等）时：
+     *  - 路径被解析到**子目录**里，而那一级目录从没被创建过 → `FileOutputStream` 直接
+     *    FileNotFoundException，备份永远失败；
+     *  - Android 上 `:` 等字符在部分文件系统同样非法。
+     * 顺带也挡住 `..` 前缀这类会指到备份目录之外的相对路径。
+     */
+    private fun sanitizeName(name: String): String =
+        name.trim()
+            .replace(Regex("[\\\\/:*?\"<>|\\s\\u0000-\\u001f]+"), "_")
+            .trim('.')
+
+    /** 新备份文件名前缀（`<净化后的实例名>_`） */
+    private fun backupPrefix(instance: ServerInstance): String =
+        sanitizeName(instance.name).ifBlank { "backup" } + "_"
+
+    /**
      * 该实例专属的备份目录：`backups/<实例目录名>/`
      *
      * 旧布局把所有实例的备份平铺在共享的 `backups/` 下、靠文件名前缀区分，后果是：
@@ -56,12 +76,14 @@ object BackupManager {
     /**
      * 该实例的全部备份（新→旧）。
      * 同时兼容旧布局：平铺在 `backups/` 下的 `<实例名>_<时间戳>.zip` 依然可见、可恢复。
-     * 前缀必须带 `_` 分隔符，否则 `survival` 会匹配到 `survival2` 的备份。
+     * 前缀必须带 `_` 分隔符，否则 `survival` 会匹配到 `survival2` 的备份；
+     * 也必须与 [backup] **用同一个净化函数**，否则名字里带 `/` 的实例新建的备份（文件名里是 `_`）
+     * 会被这里的前缀匹配漏掉 —— 备份建出来了却列不出来，等于没备份。
      */
     fun list(instance: ServerInstance): List<File> {
         val own = backupsRoot(instance)
             .listFiles { f: File -> f.isFile && f.name.endsWith(".zip") }
-        val legacyPrefix = "${instance.name}_"
+        val legacyPrefix = backupPrefix(instance)
         val legacy = backupParent(instance)
             .listFiles { f: File ->
                 f.isFile && f.name.endsWith(".zip") && f.name.startsWith(legacyPrefix)
@@ -86,7 +108,8 @@ object BackupManager {
     fun backup(instance: ServerInstance): File {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val dir = backupsRoot(instance)
-        val dest = File(dir, "${instance.name}_$stamp.zip")
+        // 名字必须净化：见 [sanitizeName]（带 `/` 的名字会让路径落进不存在的子目录 → 备份必然失败）
+        val dest = File(dir, "${backupPrefix(instance)}$stamp.zip")
         val tmp = File(dir, "${dest.name}.part")
         try {
             ZipOutputStream(FileOutputStream(tmp)).use { zip ->

@@ -878,6 +878,18 @@ private fun ConfigPage(
                 onValueChange = onNameChange,
                 label = { Text("实例名称") },
                 placeholder = { Text("如 我的生存服") },
+                // 名字里的 `/` 不会被文件系统接受：实例目录名与备份文件名都会做替换
+                // （InstanceStore.sanitize / BackupManager.sanitizeName）。不写出来的话，
+                // 用户填「生存/正式」会以为建出的是带斜杠的目录，实际拿到的是「生存_正式」。
+                supportingText = {
+                    val asDir = name.trim()
+                        .replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+                        .trim('.')
+                        .ifBlank { "instance" }
+                    if (name.isNotBlank() && asDir != name.trim()) {
+                        Text("「/ \\ : * ? \" < > |」与空格会写成 _：目录名 $asDir")
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
             )

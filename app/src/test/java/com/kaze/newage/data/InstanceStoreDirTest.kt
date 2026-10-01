@@ -75,4 +75,53 @@ class InstanceStoreDirTest {
         // 目录为空时不加序号，避免重试一次就多出一个 "(2)" 目录
         assertEquals(first.canonicalPath, s.createInstanceDir("空目录测试").canonicalPath)
     }
+
+    /**
+     * 目录扫描恢复出来的记录，id 不能撞上实例库里已有的 id。
+     *
+     * 恢复项的 id 原来直接取目录名（正常创建的实例 id 是随机 UUID，手改过库、
+     * 或由旧版本写下的库就可能撞上），而按 id 去重时 **JSON 里的记录优先** ——
+     * 一旦撞上，被丢掉的正是用户那条真实记录（核心类型 / 内存 / MC 版本都在里面），
+     * 留下的是一条从 jar 文件名猜出来的恢复项。
+     */
+    @Test
+    fun `恢复出来的实例 id 不与已有记录相撞`() {
+        val app = ApplicationProvider.getApplicationContext<NewAgeApp>()
+        val s = app.container.instanceStore
+        val dup = "撞ID测试"
+
+        // 真实实例：目录名与 JSON 里的记录名不同，避免被"同目录"规则合并掉
+        val realDir = s.createInstanceDir("真实实例")
+        File(realDir, "server.jar").writeText("dummy")
+
+        // 另建一个目录，目录名恰好等于上面那条记录的 id
+        val strayDir = File(s.instancesRoot(), dup).apply { mkdirs() }
+        File(strayDir, "server.jar").writeText("dummy")
+
+        val json = File(app.filesDir, "instances.json")
+        json.writeText(
+            "[" +
+                "{\"id\":\"$dup\",\"name\":\"用户自己起的名字\",\"coreType\":\"PAPER\"," +
+                "\"mcVersion\":\"1.20.4\",\"javaMajor\":17,\"memoryMb\":4096,\"nogui\":true," +
+                "\"autoRestart\":false,\"maxRestarts\":3," +
+                "\"dirPath\":\"${realDir.absolutePath.replace("\\", "\\\\")}\"}" +
+                "]"
+        )
+        s.rescan()
+        val after = s.instances.value
+
+        assertEquals("两条实例记录被 id 去重并成了一条", 2, after.size)
+        val real = after.firstOrNull { it.dir == realDir }
+        assertEquals("真实记录被恢复项顶掉了", "用户自己起的名字", real?.name)
+        assertEquals("真实记录的内存应该保留", 4096, real?.memoryMb)
+        assertEquals("恢复项目录不对", strayDir, after.firstOrNull { it.dir == strayDir }?.dir)
+        assertTrue(
+            "恢复项复用了已有记录的 id —— JSON 里的真实记录会被按 id 去重丢掉",
+            after.first { it.dir == strayDir }.id != dup,
+        )
+
+        // id 必须稳定：再扫一次不能累积出更多记录
+        s.rescan()
+        assertEquals("重复扫描累积了记录", 2, s.instances.value.size)
+    }
 }

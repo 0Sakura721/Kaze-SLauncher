@@ -1032,8 +1032,20 @@ private fun PropertiesEditor(
                     value = port,
                     // 必须拒绝空串：`"".all { isDigit }` 为 true，清空输入框再保存会写下 server-port=，
                     // 之后 toIntOrNull() 得到 null，端口占用统计就漏掉这个实例，新建实例会撞端口
-                    onValueChange = { v -> if (v.isNotEmpty() && v.all { it.isDigit() }) set("server-port", v) },
+                    //
+                    // 也要拒绝越界值：`0` 与 `99999` 都不是能 bind 的端口（0 = 由系统随机分配，
+                    // >65535 直接 IllegalArgumentException），存进去之后服务端每次启动都停在
+                    // 绑定阶段失败，而界面里看不出哪里不对。范围与创建向导、端口占用统计一致。
+                    onValueChange = { v ->
+                        val n = v.toIntOrNull()
+                        if (v.isNotEmpty() && v.all { it.isDigit() } && n != null && n in 1024..65535) {
+                            set("server-port", v)
+                        }
+                    },
                     label = { Text("端口") },
+                    // 越界输入根本写不进 state（输入框会"打不进字"），必须说明原因，
+                    // 否则用户只会以为应用坏了
+                    supportingText = { Text("1024 ~ 65535，超出范围的输入不会保存") },
                     singleLine = true,
                     shape = M3Shape.large,
                     modifier = Modifier.weight(1f),

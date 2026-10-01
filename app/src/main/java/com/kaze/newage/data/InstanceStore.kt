@@ -214,7 +214,12 @@ class InstanceStore(
      * 同名不再复用：向导的默认名是「核心-版本」，用户不改名连续建两次会落到同一目录，
      * 第二条实例的 core jar 覆盖第一条的、新建时的 propsOverride 还会改写第一条的
      * server.properties（端口/正版验证/游戏模式被换掉），而两条记录指向同一目录互相踩。
+     *
+     * `@Synchronized` 与 [rescan] / [add] 同锁：连点两次（或下载与导入并发）时，
+     * 两个调用会各自"看到没有冲突"然后落到同一个目录 —— 于是两条实例记录共用一份目录，
+     * 与上面那条"同名复用"是同一个后果。"已存在且非空"的判断必须与建目录在同一个临界区里。
      */
+    @Synchronized
     fun createInstanceDir(name: String): File {
         val root = instancesRoot()
         val canonicalRoot = runCatching { root.canonicalFile }.getOrElse { root.absoluteFile }
@@ -277,8 +282,12 @@ class InstanceStore(
             }.getOrElse { e -> recoverAfterStoreFailure(e) }
         }
 
-        // 2) 目录扫描恢复：JSON 丢失（内部存储不可靠）但实例目录还在时重建记录
-        val recovered = recoverFromDirs()
+        // 2) 目录扫描恢复：JSON 丢失（内部存储不可靠）但实例目录还在时重建记录。
+        //    必须把「JSON 里已有的 id」传进去：恢复出来的 id 原来是目录名，而正常创建的实例
+        //    id 是随机 UUID —— 两者本来不会相等，但只要有一条记录（手改过的 JSON、旧版本写的
+        //    库、用户把目录名改成跟某条记录 id 一样）撞上，下面按 id 去重就会把**真实记录**丢掉，
+        //    留下一条元数据（核心类型/内存/MC 版本）全是猜出来的恢复项。
+        val recovered = recoverFromDirs(fromJson.map { it.id }.toSet())
 
         // 合并：JSON 优先，目录里多出的实例补回来
         val merged = fromJson + recovered.filter { r -> fromJson.none { it.id == r.id || it.dir == r.dir } }
@@ -316,8 +325,14 @@ class InstanceStore(
         }.getOrNull() ?: emptyList()
     }
 
-    /** 从实例目录重建：vanilla-X.Y.Z.jar / paper-X.jar 等文件名推断元数据 */
-    private fun recoverFromDirs(): List<ServerInstance> {
+    /**
+     * 从实例目录重建：vanilla-X.Y.Z.jar / paper-X.jar 等文件名推断元数据。
+     *
+     * @param takenIds JSON 里已经存在的实例 id。恢复项的 id 取目录名，所以必须先避开这些 id ——
+     *   撞上就等于用一条猜出来的记录顶掉用户的真实记录（见 [load]）。撞了就加序号后缀，
+     *   目录名本身不变（`dir` 才是这条记录的全部依据）。
+     */
+    private fun recoverFromDirs(takenIds: Set<String> = emptySet()): List<ServerInstance> {
         val root = instancesRoot()
         return try {
             // 跳过隐藏目录与备份/恢复临时目录：BackupManager 的 restore_tmp_*/restore_old_*
@@ -326,6 +341,7 @@ class InstanceStore(
             val dirs = root.listFiles()
                 ?.filter { it.isDirectory && !it.name.startsWith(".") && !it.name.startsWith("restore_") }
                 ?: emptyList()
+            val usedIds = takenIds.toMutableSet()
             dirs.mapNotNull { dir ->
                 val jar = dir.listFiles()?.firstOrNull { it.isFile && it.name.endsWith(".jar") && !it.name.contains("installer", true) }
                     ?: return@mapNotNull null
@@ -337,8 +353,14 @@ class InstanceStore(
                     else -> CoreType.CUSTOM
                 }
                 val mcVersion = parts.getOrNull(1)?.takeIf { it.firstOrNull()?.isDigit() == true } ?: ""
+                var id = dir.name
+                var n = 2
+                while (!usedIds.add(id)) {
+                    id = "${dir.name}#$n"
+                    n++
+                }
                 ServerInstance(
-                    id = dir.name,
+                    id = id,
                     name = dir.name,
                     coreType = core,
                     mcVersion = mcVersion,

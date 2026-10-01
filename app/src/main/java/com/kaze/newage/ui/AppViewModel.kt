@@ -962,6 +962,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _addonInstall.value = DownloadState()
     }
 
+    /** 导入 jar 的连点守卫（见 [importJar]） */
+    @Volatile
+    private var importJarRunning = false
+
     /**
      * 导入 jar：把用户选中的文件复制进一个新实例目录并登记实例。
      *
@@ -972,8 +976,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * Toast 一律回到主线程发：`Toast.show()` 需要当前线程有 Looper，
      * 在 Dispatchers.IO 上直接调用会抛 "Can't create handler inside thread that has not called Looper.prepare()"
      * ——导入成功/失败两条路径都会走到 Toast，等于每次导入都崩。
+     *
+     * 连点守卫与 [downloadAndCreate] 同理：两个并发导入会各自 createInstanceDir + add，
+     * 复制几十 MB 的期间界面上的按钮还是可点的（enabled 要等重组）。
      */
     fun importJar(uri: android.net.Uri, name: String, memoryMb: Int) {
+        if (importJarRunning) return
+        importJarRunning = true
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = container.appContext
             var dir: File? = null
@@ -1007,6 +1016,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         ctx, "导入失败：${e.message ?: "未知错误"}", android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
+            } finally {
+                importJarRunning = false
             }
         }
     }
