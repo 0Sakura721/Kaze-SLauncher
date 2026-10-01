@@ -20,6 +20,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,6 +57,7 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     var text by remember { mutableStateOf("读取中…") }
     var envText by remember { mutableStateOf("") }
     var reload by remember { mutableStateOf(0) }
+    var confirmClear by remember { mutableStateOf(false) }
     val appLog = viewModel.appLog
     // 触发一次重读（刷新按钮 / 清空后）
     val tick by remember(reload) { mutableStateOf(reload) }
@@ -129,15 +131,36 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     Icon(Icons.Filled.Share, null, Modifier.size(18.dp))
                     Text("  分享", style = MaterialTheme.typography.labelLarge)
                 }
-                OutlinedButton(onClick = {
-                    scope.launch {
-                        appLog.clear()
-                        reload++
-                    }
-                }) {
+                OutlinedButton(onClick = { confirmClear = true }) {
                     Icon(Icons.Filled.Delete, null, Modifier.size(18.dp))
                     Text("  清空", style = MaterialTheme.typography.labelLarge)
                 }
+            }
+            // 清空不可撤销，而且这些日志正是"崩溃前那一段"的唯一现场 ——
+            // 本页其它破坏性操作（实例/备份）都有二次确认，这里不能一点就没
+            if (confirmClear) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { confirmClear = false },
+                    title = { Text("清空应用日志？") },
+                    text = {
+                        Text(
+                            "已落盘的诊断日志将被永久删除，无法恢复。" +
+                                "如果正准备反馈问题，建议先点「分享」把当前日志发出去。"
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmClear = false
+                            scope.launch {
+                                appLog.clear()
+                                reload++
+                            }
+                        }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmClear = false }) { Text("取消") }
+                    },
+                )
             }
 
             M3ECard(

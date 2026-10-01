@@ -62,6 +62,7 @@ import com.kaze.newage.ui.theme.consoleBackgroundColor
 import com.kaze.newage.ui.theme.consoleLineColor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -121,7 +122,9 @@ fun LogsScreen(
     ) { uri ->
         uri?.let { target ->
             scope.launch(Dispatchers.IO) {
-                runCatching {
+                // 导出失败必须**说出来**：旧实现把整段包在 runCatching 里、什么都不报，
+                // 用户点了「导出全部」看到的是"毫无反应"，只能反复点。
+                val err = runCatching {
                     val text = buildString {
                         appendLine("KAZE SLauncher 日志导出")
                         appendLine("实例：${instance.name}")
@@ -133,8 +136,17 @@ fun LogsScreen(
                             appendLine(readTail(f))
                         }
                     }
-                    context.contentResolver.openOutputStream(target)?.use { out ->
-                        out.write(text.toByteArray(Charsets.UTF_8))
+                    val out = context.contentResolver.openOutputStream(target)
+                        ?: error("无法写入所选位置")
+                    out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                }.exceptionOrNull()
+                if (err != null) {
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "导出失败：${err.message ?: err.javaClass.simpleName}",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
                     }
                 }
             }
@@ -304,7 +316,9 @@ fun LogsScreen(
                     shape = M3Shape.groupFirst(56f),
                     enabled = exportable.isNotEmpty(),
                 ) {
-                    val name = "kaze-${instance.name}-logs-${
+                    // 文件名里**不能直接拼实例名**：实例名允许含 `/`（重命名对话框不过滤字符），
+                    // 而 SAF 的 displayName 带路径分隔符时写入会失败 —— 这里换成安全的占位符。
+                    val name = "kaze-${safeFileName(instance.name)}-logs-${
                         SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
                     }.txt"
                     exportLauncher.launch(name)
@@ -456,9 +470,21 @@ private fun readTail(file: File, maxBytes: Int = 300 * 1024): String {
     val len = file.length()
     val skip = if (len > maxBytes) len - maxBytes else 0L
     return file.inputStream().use { ins ->
-        ins.skip(skip)
+        // `skip()` 允许只跳过一部分并返回实际跳过的字节数（socket / 部分 FUSE 实现就会这样），
+        // 旧实现丢掉返回值只跳一次 —— 跳不够就会把远超 maxBytes 的内容整段读进内存，
+        // 而且"截断"标记还照着 skip > 0 打，看起来一切正常。这里循环补跳。
+        var remaining = skip
+        while (remaining > 0) {
+            val n = ins.skip(remaining)
+            if (n <= 0) break
+            remaining -= n
+        }
         val bytes = ins.readBytes()
         val text = String(bytes, Charsets.UTF_8)
         if (skip > 0) "…（已截断，仅显示末尾）\n$text" else text
     }
 }
+
+/** 导出文件名里可用的实例名：SAF 的 displayName 带路径分隔符时写入会失败 */
+private fun safeFileName(raw: String): String =
+    raw.replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]+"), "_").trim().trim('.').ifBlank { "instance" }

@@ -96,6 +96,8 @@ fun HomeScreen(
     // 部署进度走独立状态：与核心下载分开后，部署中进新建向导不会再串进度、下载中点部署也有反馈
     val download by viewModel.envTask.collectAsStateWithLifecycle()
     val serverState by viewModel.serverState.collectAsStateWithLifecycle()
+    // 下拉列表里每一行要显示/判断**自己**的状态（不能借用当前实例的）
+    val serverStates by viewModel.serverStates.collectAsStateWithLifecycle()
     val instances by viewModel.instances.collectAsStateWithLifecycle()
     val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()
     val uptime by viewModel.uptimeSec.collectAsStateWithLifecycle()
@@ -215,6 +217,12 @@ fun HomeScreen(
                     onClick = { },
                 )
                 instances.forEach { inst ->
+                    // 每一行看**自己**的状态：旧实现用当前实例的 busy 去禁用所有行的启动按钮，
+                    // 于是"当前实例在启动/停止中"会让别的空闲实例也点不动；
+                    // 反过来，已经在跑的实例行尾却仍然画着「启动」图标，点了还会再拉一次。
+                    val instState = serverStates[inst.id] ?: ServerState.Idle
+                    val instRunning = instState == ServerState.Running
+                    val instCanAct = !instState.isBusy()
                     DropdownMenuItem(
                         text = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,7 +235,8 @@ fun HomeScreen(
                                         maxLines = 1,
                                     )
                                     Text(
-                                        text = "MC ${inst.mcVersion.ifBlank { "自定义" }} · ${inst.coreType.displayName}",
+                                        text = "MC ${inst.mcVersion.ifBlank { "自定义" }} · " +
+                                            "${inst.coreType.displayName} · ${instState.toLabel()}",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
@@ -238,17 +247,20 @@ fun HomeScreen(
                         trailingIcon = {
                             IconButton(
                                 onClick = {
-                                    if (busy) return@IconButton
+                                    if (!instCanAct) return@IconButton
                                     listOpen = false
                                     viewModel.selectInstance(inst)
-                                    viewModel.startInstance(inst)
+                                    if (instRunning) viewModel.stopInstance(inst)
+                                    else viewModel.startInstance(inst)
                                 },
-                                enabled = !busy,
+                                enabled = instCanAct,
                             ) {
                                 Icon(
-                                    Icons.Filled.PlayArrow,
-                                    contentDescription = "启动 ${inst.name}",
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    if (instRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow,
+                                    contentDescription =
+                                        if (instRunning) "停止 ${inst.name}" else "启动 ${inst.name}",
+                                    tint = if (instRunning) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.primary,
                                 )
                             }
                         },

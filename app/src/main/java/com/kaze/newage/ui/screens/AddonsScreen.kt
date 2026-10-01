@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -35,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,6 +68,7 @@ import com.kaze.newage.ui.components.M3EScreenHeader
 import com.kaze.newage.ui.components.WavyLinearProgress
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
+import java.io.File
 import java.util.Locale
 
 /**
@@ -131,6 +134,9 @@ fun AddonsScreen(
 
     // 已安装筛选：0 全部 / 1 已启用 / 2 已禁用
     var installedFilter by rememberSaveable { mutableIntStateOf(0) }
+    // 删除已下载的插件/模组：文件是用户花流量下下来的，删掉只能重下，必须二次确认
+    // （同一页其它不可逆操作——实例、备份——都有确认框）
+    var deleteTarget by remember { mutableStateOf<File?>(null) }
     val enabledCount = installed.count { AddonManager.isEnabled(it) }
     val shownInstalled = remember(installed, installedFilter) {
         when (installedFilter) {
@@ -380,10 +386,7 @@ fun AddonsScreen(
                                             "${file.name}，${if (enabled) "已启用" else "已禁用"}"
                                     },
                                 )
-                                IconButton(onClick = {
-                                    AddonManager.delete(file)
-                                    refresh++
-                                }) {
+                                IconButton(onClick = { deleteTarget = file }) {
                                     Icon(
                                         Icons.Filled.Delete,
                                         contentDescription = "删除",
@@ -401,6 +404,24 @@ fun AddonsScreen(
                 )
             }
         }
+    }
+
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("删除「${target.name.removeSuffix(".disabled")}」？") },
+            text = { Text("文件将从${kindLabel}目录里永久删除，需要时只能重新下载。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteTarget = null
+                    AddonManager.delete(target)
+                    refresh++
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+            },
+        )
     }
 }
 

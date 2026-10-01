@@ -154,6 +154,8 @@ fun InstanceDetailScreen(
     var backupMsg by remember { mutableStateOf<String?>(null) }
     var exportTarget by remember { mutableStateOf<File?>(null) }
     var restoreTarget by remember { mutableStateOf<File?>(null) }
+    // 配置保存的版本号：状态卡里的端口要跟着它重读（见 RunTab），否则改完端口仍显示旧值
+    var propsRevision by remember { mutableIntStateOf(0) }
     // 删除备份：不可逆，且紧邻「恢复 / 导出」，必须二次确认（同页其它破坏性操作都有）
     var deleteTarget by remember { mutableStateOf<File?>(null) }
     val backups = remember(instanceId, backupRefresh) { BackupManager.list(instance) }
@@ -290,56 +292,64 @@ fun InstanceDetailScreen(
                     verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenGroups),
                 ) {
                     run {
+                        // 备份动作提到这里：「运行」分区的快捷入口与「世界」分区的按钮要走同一条路径，
+                        // 否则两处的行为会各自漂移
+                        val doBackup: () -> Unit = {
+                            if (!backupBusy) {
+                                backupBusy = true
+                                backupScope.launch(Dispatchers.IO) {
+                                    backupMsg = try {
+                                        // 运行中备份：先让服务端把世界数据完整落盘（MC 标准做法），
+                                        // 否则直接拷 region 文件可能备出损坏世界
+                                        val wasRunning = state == ServerState.Running
+                                        if (wasRunning) {
+                                            viewModel.serverManager.sendCommand(instance, "save-off")
+                                            viewModel.serverManager.sendCommand(instance, "save-all flush")
+                                            delay(1500)
+                                        }
+                                        try {
+                                            val f = BackupManager.backup(instance)
+                                            "已备份：${f.name}"
+                                        } finally {
+                                            if (wasRunning) {
+                                                viewModel.serverManager.sendCommand(instance, "save-on")
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        "备份失败：${e.message}"
+                                    }
+                                    backupRefresh++
+                                    backupBusy = false
+                                }
+                            }
+                        }
                         RunTab(
                             viewModel = viewModel,
                             instance = instance,
                             state = state,
                             stateColor = stateColor,
                             backups = backups,
+                            propsRevision = propsRevision,
+                            onBackup = doBackup,
                             onOpenLogs = onOpenLogs,
-                            onOpenWorld = {},
                         )
 
                         PropertiesEditor(
                             dir = instance.dir,
                             instanceName = instance.name,
                             isRunning = state == ServerState.Running,
-                            onSave = { props -> ServerProperties.save(instance.dir, props) },
+                            onSave = { props ->
+                                ServerProperties.save(instance.dir, props)
+                                // 让状态卡的端口重新读一次文件（remember 的 key 变了才会重算）
+                                propsRevision++
+                            },
                         )
 
                         WorldTab(
                             backups = backups,
                             busy = backupBusy,
                             message = backupMsg,
-                            onBackup = {
-                                if (!backupBusy) {
-                                    backupBusy = true
-                                    backupScope.launch(Dispatchers.IO) {
-                                        backupMsg = try {
-                                            // 运行中备份：先让服务端把世界数据完整落盘（MC 标准做法），
-                                            // 否则直接拷 region 文件可能备出损坏世界
-                                            val wasRunning = state == ServerState.Running
-                                            if (wasRunning) {
-                                                viewModel.serverManager.sendCommand(instance, "save-off")
-                                                viewModel.serverManager.sendCommand(instance, "save-all flush")
-                                                delay(1500)
-                                            }
-                                            try {
-                                                val f = BackupManager.backup(instance)
-                                                "已备份：${f.name}"
-                                            } finally {
-                                                if (wasRunning) {
-                                                    viewModel.serverManager.sendCommand(instance, "save-on")
-                                                }
-                                            }
-                                        } catch (e: Exception) {
-                                            "备份失败：${e.message}"
-                                        }
-                                        backupRefresh++
-                                        backupBusy = false
-                                    }
-                                }
-                            },
+                            onBackup = doBackup,
                             onImport = {
                                 importLauncher.launch(
                                     arrayOf("application/zip", "application/octet-stream", "*/*")
@@ -500,15 +510,21 @@ private fun RunTab(
     state: ServerState,
     stateColor: Color,
     backups: List<File>,
+    propsRevision: Int,
+    onBackup: () -> Unit,
     onOpenLogs: () -> Unit,
-    onOpenWorld: () -> Unit,
 ) {
     val uptime by viewModel.uptimeSec.collectAsStateWithLifecycle()
     val onlinePlayers by viewModel.onlinePlayers.collectAsStateWithLifecycle()
     val running = state == ServerState.Running
     val busy = state.isBusy()
-    // 端口取 server.properties 里的真实值；切回本页时会重新读一次（配置页保存过就会刷新）
-    val port = remember(instance.id) { ServerProperties.load(instance.dir)["server-port"] ?: "—" }
+    // 端口取 server.properties 里的真实值。
+    // key 必须带上 propsRevision：只用 `remember(instance.id)` 的话，同一个实例内
+    // 组合不会重建，用户在「服务器」分区把端口改掉并保存后这里仍显示旧端口 ——
+    // 状态卡说 25565、配置卡说 25570，用户不知道该信哪个。
+    val port = remember(instance.id, propsRevision) {
+        ServerProperties.load(instance.dir)["server-port"] ?: "—"
+    }
     val latestBackup = backups.firstOrNull()
 
     M3ECard(
@@ -580,19 +596,21 @@ private fun RunTab(
     )
 
     // 快捷入口：草图里的「自动备份 / 查看启动日志」两条。
-    // 备份入口显示真实的最近备份与份数（后端没有自动备份，标签如实写「备份与恢复」），点了切到「世界」页
+    // 这一页的四个分区现在都在同一个滚动容器里（没有标签栏了），所以"切到世界分区"这个旧语义
+    // 已经不存在 —— 原来这里传的是空的 onOpenWorld，点了完全没反应（死入口）。
+    // 改为直接执行备份：这正是入口标题承诺的动作，也和「世界」分区的按钮走同一条路径。
     M3EConnectedList(count = 2) { index, shape ->
         if (index == 0) {
             M3EListItem(
-                headline = "备份与恢复",
+                headline = "立即备份",
                 supporting = if (latestBackup == null) {
-                    "还没有备份 · 世界数据珍贵，建议定期备份"
+                    "还没有备份 · 世界数据珍贵，建议现在就备一份"
                 } else {
-                    "最近 ${backupStamp(latestBackup)} · 共 ${backups.size} 份"
+                    "最近 ${backupStamp(latestBackup)} · 共 ${backups.size} 份 · 点一下再备一份"
                 },
                 leadingIcon = Icons.Filled.History,
                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                onClick = onOpenWorld,
+                onClick = onBackup,
                 shape = shape,
             )
         } else {
