@@ -64,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -79,6 +80,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import com.kaze.newage.core.download.CoreBuild
 import com.kaze.newage.core.server.ServerProperties
@@ -404,10 +407,16 @@ private fun VersionConfigPhase(
     // 算一次就定死），用户可能选到已被别的实例占用的端口。
     val allInstances by viewModel.instances.collectAsStateWithLifecycle()
     val freePort = remember(allInstances) { ServerProperties.findFreePort(allInstances) }
-    val usedPorts = remember(allInstances) {
-        allInstances.mapNotNull { inst ->
-            ServerProperties.load(inst.dir)["server-port"]?.toIntOrNull()
-        }.toSet()
+    // 占用集合要在 **IO 线程**上算：`ServerProperties.load` 是实打实的磁盘读，而实例目录
+    // 完全可能在共享存储或 SD 卡上（FUSE / sdcardfs 单次读几十到几百毫秒）。原来用
+    // `remember { allInstances.map { load(it.dir) } }` 是在**组合期**逐个读，实例一多就卡首帧，
+    // 慢卡上直接 ANR。produceState 让它在 IO 上算完再回填，组合期只读一个 Set。
+    val usedPorts by produceState(initialValue = emptySet<Int>(), allInstances) {
+        value = withContext(Dispatchers.IO) {
+            allInstances.mapNotNull { inst ->
+                ServerProperties.load(inst.dir)["server-port"]?.toIntOrNull()
+            }.toSet()
+        }
     }
 
     // 进入阶段 ② 时加载版本列表
@@ -1087,25 +1096,42 @@ private fun ConfigPage(
         // ── 精确输入内存对话框（FCLNumberSeekBar 点击数值行为）──
         if (showMemoryDialog) {
             var inputGb by remember { mutableStateOf(fmtGb(sliderMb).removeSuffix(" GB")) }
+            // 非法输入（空 / "abc" / 超出 0.5~8 GB）原来静默关框：用户以为"确定没生效"，
+            // 只能反复点、不知道是哪里错了。改成框内报错并不关闭。
+            var inputBad by remember { mutableStateOf(false) }
+            val parsedGb = inputGb.trim().replace(',', '.').toFloatOrNull()
+            val gb = parsedGb?.takeIf { it in 0.5f..8f }
             AlertDialog(
                 onDismissRequest = { onShowMemoryDialog(false) },
                 title = { Text("精确设置内存") },
                 text = {
-                    OutlinedTextField(
-                        value = inputGb,
-                        onValueChange = { inputGb = it },
-                        label = { Text("内存（GB）") },
-                        placeholder = { Text("2.0 ~ 8.0") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(
+                            value = inputGb,
+                            onValueChange = { inputGb = it; inputBad = false },
+                            label = { Text("内存（GB）") },
+                            placeholder = { Text("2.0 ~ 8.0") },
+                            singleLine = true,
+                            isError = inputBad,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        )
+                        if (inputBad) {
+                            Text(
+                                "请输入 0.5 ~ 8 之间的数字（如 2.5）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        inputGb.toFloatOrNull()?.let { gb ->
+                        if (gb == null) {
+                            inputBad = true      // 不关框：让用户就地改，而不是猜为什么没生效
+                        } else {
                             onMemoryMb((gb * 1024f).coerceIn(512f, 8192f))
+                            onShowMemoryDialog(false)
                         }
-                        onShowMemoryDialog(false)
                     }) { Text("确定") }
                 },
                 dismissButton = {

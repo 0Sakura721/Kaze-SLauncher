@@ -867,6 +867,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 连点守卫 + 同步置位：两个并发下载会写同一个 .part 文件，把包写坏。
         // （UI 上的 enabled 要等重组才更新，靠它拦不住快速双击或脚本连续点击）
         if (_download.value.running) return
+        // 每次创建都从**干净的空槽位**开始：`download` 是跨页面共享的，上一次安装留下的
+        // error/done 会被配置页读出来 —— 用户刚进向导就看到一条过期的「下载失败」，
+        // 按钮还写着"重试下载（断点续传）"，而这次什么都没下载过。
         _download.value = DownloadState(running = true, progress = 0f, message = "解析下载地址…")
         downloadCancelRequested = false
         // 核心 jar 可能几十 MB：用户点返回键去干别的，下载应继续完成并建出实例

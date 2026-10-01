@@ -186,6 +186,10 @@ fun InstanceDetailScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
+            // 导入也要占住 backupBusy：导入期间实例目录里会多出一个 zip，
+            // 而"删除全部备份/立即备份"都在同一目录上操作
+            if (backupBusy) return@rememberLauncherForActivityResult
+            backupBusy = true
             backupScope.launch(Dispatchers.IO) {
                 backupMsg = try {
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "imported.zip"
@@ -197,6 +201,7 @@ fun InstanceDetailScreen(
                     "导入失败：${e.message}"
                 }
                 backupRefresh++
+                backupBusy = false
             }
         }
     }
@@ -427,6 +432,15 @@ fun InstanceDetailScreen(
                     onClick = {
                         val f = target
                         restoreTarget = null
+                        // 恢复期间必须占住 backupBusy：恢复是把实例目录整体换掉
+                        //（解压到 restore_tmp_ → 旧目录改名 → 新目录换入），若同时还能点
+                        //「立即备份 / 导入 / 删除备份」，就会一边换目录一边打包/删文件，
+                        // 轻则备份里混进半截 tmp 内容，重则两边互相删对方的中间目录。
+                        if (backupBusy) {
+                            backupMsg = "有其它备份任务正在进行，请稍后再恢复"
+                            return@TextButton
+                        }
+                        backupBusy = true
                         backupScope.launch(Dispatchers.IO) {
                             backupMsg = try {
                                 BackupManager.restore(instance, f)
@@ -434,6 +448,8 @@ fun InstanceDetailScreen(
                             } catch (e: Exception) {
                                 "恢复失败：${e.message}"
                             }
+                            backupRefresh++
+                            backupBusy = false
                         }
                     }
                 ) { Text("恢复", color = MaterialTheme.colorScheme.error) }
@@ -677,9 +693,11 @@ private fun WorldTab(
                         shape = shape,
                         trailing = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                TextButton(onClick = { onRestoreRequest(f) }) { Text("恢复") }
-                                TextButton(onClick = { onExport(f) }) { Text("导出") }
-                                IconButton(onClick = { onDelete(f) }) {
+                                // 有备份任务在跑（备份 / 恢复 / 导入 / 导出）时全部禁用：
+                                // 恢复会把实例目录整体换掉，跟其余的读写并发会互相踩
+                                TextButton(onClick = { onRestoreRequest(f) }, enabled = !busy) { Text("恢复") }
+                                TextButton(onClick = { onExport(f) }, enabled = !busy) { Text("导出") }
+                                IconButton(onClick = { onDelete(f) }, enabled = !busy) {
                                     Icon(
                                         Icons.Filled.Delete,
                                         contentDescription = "删除备份",
