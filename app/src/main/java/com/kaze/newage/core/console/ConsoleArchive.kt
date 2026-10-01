@@ -78,8 +78,27 @@ object ConsoleArchive {
 
         var fileIndex = files.indexOfFirst { it.absolutePath == cursor?.file?.absolutePath }
         if (fileIndex < 0) fileIndex = 0
-        var end = (cursor?.offset ?: files[fileIndex].length())
-            .coerceIn(0L, files[fileIndex].length())
+        // **先记下未钳制的原始偏移**：轮转判定要靠它，钳制之后就永远看不出"越界"了
+        //（这正是第一版修复没生效的原因）。
+        val rawOffset = cursor?.offset ?: files[fileIndex].length()
+        var end = rawOffset.coerceIn(0L, files[fileIndex].length())
+
+        // 落点越过文件末尾 = 这份日志在两次回读之间**被轮转过**：
+        // `persistLine` 超过 8MB 时把 console-output.log 改名成 console-output.old.log、
+        // 再新建一个空的 console-output.log。游标记的是绝对路径，于是它认到的其实是**那个新文件**，
+        // 偏移被 coerce 到新文件的末尾（0，或轮转后新写入的那点内容），接着就会把刚写进来、
+        // 用户已经在内存窗口里看过的行再读一遍 —— 界面上表现为"往上翻又看到刚才那些行"。
+        //
+        // 而且**只在新文件里读一点、再接着读旧文件**同样不对（翻页会出现"旧的最早几行 +
+        // 新的最后几行"这种两头拼起来的怪页）。所以这里直接跟到旧文件，完全不碰轮转后的新文件：
+        // 里面那点内容必然已经显示过（它们就排在用户刚刚看过的最后几行之后）。
+        // 偏移**不需要换算**：改名不改内容，同一个偏移在新名字下指向同一行边界。
+        // （游标为 null 时 end 必然等于当前文件长度，进不来这个分支）
+        val from = cursor
+        if (from != null && rawOffset > files[fileIndex].length() && fileIndex + 1 < files.size) {
+            fileIndex++
+            end = rawOffset.coerceIn(0L, files[fileIndex].length())
+        }
 
         val collected = ArrayDeque<String>()   // 逆序收集，最后正序返回
 

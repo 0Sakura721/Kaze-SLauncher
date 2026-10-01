@@ -19,8 +19,8 @@ import org.junit.Test
  */
 class BackupManagerNameTest {
 
-    private fun instanceWith(name: String, dir: File): ServerInstance =
-        ServerInstance(name = name, dir = dir)
+    private fun instanceWith(name: String, dir: File, id: String = java.util.UUID.randomUUID().toString()): ServerInstance =
+        ServerInstance(id = id, name = name, dir = dir)
 
     @Test
     fun `名字带斜杠时备份仍然建得出来并列得出来`() {
@@ -59,5 +59,56 @@ class BackupManagerNameTest {
         assertTrue(backup.isFile)
         assertTrue(!backup.name.contains(':') && !backup.name.contains(' '))
         assertTrue(BackupManager.list(instance).any { it.absolutePath == backup.absolutePath })
+    }
+
+    /**
+     * 重命名实例后老备份必须还认得出。
+     *
+     * 备份文件名里原来只写显示名，`list()` 也只比显示名前缀 —— 用户在实例详情里改个名字，
+     * 之前所有的备份就在界面里**凭空消失**了（文件其实还在磁盘上）。
+     */
+    @Test
+    fun `重命名实例后备份仍然列得出来`() {
+        val root = Files.createTempDirectory("kaze-backup-rename").toFile()
+        val dir = File(root, "生存服").apply { mkdirs() }
+        File(dir, "server.properties").writeText("server-port=25565\n")
+
+        val before = instanceWith("生存服", dir)
+        val backup = BackupManager.backup(before)
+
+        val renamed = before.copy(name = "我的生存服（第二季）")
+        val listed = BackupManager.list(renamed)
+        assertTrue(
+            "改名后老备份从列表里消失了：${listed.map { it.name }}",
+            listed.any { it.absolutePath == backup.absolutePath },
+        )
+    }
+
+    /**
+     * 两个同名实例的备份不能互相串。
+     *
+     * 显示名可以重复（实例详情里改成一样），而文件名前缀 + 秒级时间戳完全可能撞上。
+     * 恢复时串台就是把别人的世界存档盖到自己实例上。新备份带实例 id，按 id 认。
+     */
+    @Test
+    fun `同名实例的备份互不串台`() {
+        val root = Files.createTempDirectory("kaze-backup-dup").toFile()
+        val dirA = File(root, "生存A").apply { mkdirs() }
+        val dirB = File(root, "生存B").apply { mkdirs() }
+        File(dirA, "world.marker").writeText("A")
+        File(dirB, "world.marker").writeText("B")
+
+        val a = instanceWith("同名服", dirA)
+        val b = instanceWith("同名服", dirB)
+
+        // 把 A 的备份挪到共享 backups/ 根下（模拟旧布局平铺），B 不该把它当成自己的
+        val backupA = BackupManager.backup(a)
+        val flat = File(root, "backups/" + backupA.name)
+        assertTrue("用例前提：挪动必须成功", backupA.renameTo(flat))
+
+        assertTrue(
+            "B 认领了 A 的备份（恢复会把 A 的存档盖到 B 上）",
+            BackupManager.list(b).none { it.absolutePath == flat.absolutePath },
+        )
     }
 }

@@ -143,4 +143,50 @@ class ConsoleArchiveTest {
 
         assertEquals(lines, drain(dir, chunk = 200))
     }
+
+    /**
+     * 回读**中途发生日志轮转**。
+     *
+     * 复刻 persistLine 的做法：console-output.log 超过 8MB 时 → 删掉 .old.log、
+     * 把 .log 改名成 .old.log、再新建一个空的 .log。
+     *
+     * 游标记的是**绝对路径**（console-output.log），轮转后这个路径指向的是那个**新文件**，
+     * 偏移被 coerce 到新文件的长度 —— 旧实现于是把轮转后新写进来的行又读了一遍
+     *（用户往上翻会看到刚才屏幕上的那些行重复出现），而 .old.log 里真正更早的内容再也翻不到。
+     */
+    @Test
+    fun `回读途中发生轮转不会重复读也不会漏掉旧文件`() {
+        val lines = (1..2_000).map { "第 $it 行：内容 content-$it" }
+        val dir = dirWith("console-output.log", lines.joinToString("\n") + "\n")
+
+        // 第一段：从最新往回读两页（每页 400 行），制造出一个"读到文件中段"的游标
+        var cursor: ConsoleArchive.Cursor? = null
+        val shown = LinkedHashSet<String>()
+        repeat(2) {
+            val c = ConsoleArchive.readOlder(dir, cursor, 400)
+            shown.addAll(c.lines)
+            cursor = c.cursor
+        }
+        check(cursor != null) { "用例前提：文件要够大，两页之后游标还在文件内" }
+
+        // 轮转：.log → .old.log，新的 .log 里写入轮转之后产生的行
+        val afterRotation = (1..50).map { "轮转后新行 new-$it" }
+        val log = File(dir, "console-output.log")
+        File(dir, "console-output.old.log").let { if (it.exists()) it.delete() }
+        assertTrue("用例前提：rename 必须成功", log.renameTo(File(dir, "console-output.old.log")))
+        log.writeText(afterRotation.joinToString("\n") + "\n")
+
+        // 继续往回翻：必须接着读 .old.log 里更早的内容，而不是新的 .log
+        val c = ConsoleArchive.readOlder(dir, cursor, 400)
+        assertTrue("轮转后这一页不该为空（旧内容还在 .old.log 里）", c.lines.isNotEmpty())
+        assertTrue(
+            "轮转后这一页读到了新文件里的行：first=${c.lines.first()} last=${c.lines.last()} " +
+                "count=${c.lines.size} hasMore=${c.hasMore}",
+            c.lines.none { it.startsWith("轮转后新行") },
+        )
+        assertTrue(
+            "轮转后重复读到了已经显示过的行（已显示 ${shown.size} 行）：first=${c.lines.first()}",
+            c.lines.none { it in shown },
+        )
+    }
 }

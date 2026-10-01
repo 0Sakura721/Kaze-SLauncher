@@ -45,9 +45,50 @@ object BackupManager {
             .replace(Regex("[\\\\/:*?\"<>|\\s\\u0000-\\u001f]+"), "_")
             .trim('.')
 
-    /** 新备份文件名前缀（`<净化后的实例名>_`） */
-    private fun backupPrefix(instance: ServerInstance): String =
+    /** 文件名前缀：净化后的实例名（+ `_`），例：`生存_正式_` */
+    private fun namePrefix(instance: ServerInstance): String =
         sanitizeName(instance.name).ifBlank { "backup" } + "_"
+
+    /** 平铺布局里的文件名必须**以这个前缀开头**才算该实例的备份（见 [isLegacyBackupOf]） */
+    private fun backupPrefix(instance: ServerInstance): String = namePrefix(instance)
+
+    /** 实例标识：`<净化名>_<实例 id>_<时间戳>.zip` 里那段 id 就是它 */
+    private fun idMarker(instance: ServerInstance): String = "_${instance.id}_"
+
+    /** 文件名里那段 id 的位置；`-1` = 这个文件名没有 id 标记 */
+    private fun idMarkerAt(fileName: String, instance: ServerInstance): Int =
+        fileName.indexOf(idMarker(instance))
+
+    /**
+     * 平铺布局（旧版）里的这个文件是不是**该实例**的备份。
+     *
+     * 旧实现只比显示名前缀，两个真实后果：
+     *  - **同名实例串台**：`<根>/a/survival` 与 `<根>/b/survival` 的备份都叫 `survival_<时间戳>.zip`，
+     *    时间戳又只到秒，恢复时可能把另一个实例的存档盖到自己头上；
+     *  - **改名即孤儿**：备份文件名里写的是当时的显示名，重命名实例（`InstanceStore.rename`）
+     *    之后 `list()` 再也匹配不到，老备份在界面里直接消失 —— 文件还在磁盘上，用户却以为丢了。
+     *
+     * 所以判定分两路：
+     *  1. 文件名里带 id 标记（`<名字>_<id>_<时间戳>.zip`，新版本写的）→ 只认 id，与名字无关；
+     *  2. 老备份没有 id → 退化成"前缀 + 时间戳形状"，再额外要求**目录名也不冲突**：
+     *     只有当目录里没有别的实例（同名实例）时才把它算作本实例的，宁可漏认也不串台。
+     */
+    private fun isLegacyBackupOf(instance: ServerInstance, f: File): Boolean {
+        if (!f.isFile || !f.name.endsWith(".zip")) return false
+        val named = namePrefix(instance)
+        val marked = idMarkerAt(f.name, instance)
+        if (marked >= 0) return true                       // id 命中：与显示名无关
+        if (!f.name.startsWith(named)) return false
+        // 老备份：`<名字>_<8位日期>-<6位时间>.zip`（SimpleDateFormat("yyyyMMdd-HHmmss")）
+        if (!Regex("^\\d{8}-\\d{6}\\.zip$").matches(f.name.removePrefix(named))) return false
+        // 同名实例（另一个实例的目录名 == 本实例的目录名是不可能的，但显示名可以相同）：
+        // 目录名不同、名字相同的两个实例，老备份无法区分 → 谁都不要认，避免恢复错存档
+        return !hasSiblingInstanceWithSameName(instance)
+    }
+
+    private fun hasSiblingInstanceWithSameName(instance: ServerInstance): Boolean =
+        backupParent(instance).listFiles()
+            ?.count { it.isDirectory && it.name == instance.dir.name } != 1
 
     /**
      * 该实例专属的备份目录：`backups/<实例目录名>/`
@@ -75,19 +116,15 @@ object BackupManager {
 
     /**
      * 该实例的全部备份（新→旧）。
-     * 同时兼容旧布局：平铺在 `backups/` 下的 `<实例名>_<时间戳>.zip` 依然可见、可恢复。
-     * 前缀必须带 `_` 分隔符，否则 `survival` 会匹配到 `survival2` 的备份；
-     * 也必须与 [backup] **用同一个净化函数**，否则名字里带 `/` 的实例新建的备份（文件名里是 `_`）
-     * 会被这里的前缀匹配漏掉 —— 备份建出来了却列不出来，等于没备份。
+     * 同时兼容旧布局：平铺在 `backups/` 下的 `<实例名>_<时间戳>.zip` 依然可见、可恢复
+     *（判定见 [isLegacyBackupOf]：新备份靠文件名里的实例 id 认，老备份靠"前缀 + 时间戳形状"，
+     * 且只在没有同名实例时才认，宁可漏认也不串台）。
      */
     fun list(instance: ServerInstance): List<File> {
         val own = backupsRoot(instance)
             .listFiles { f: File -> f.isFile && f.name.endsWith(".zip") }
-        val legacyPrefix = backupPrefix(instance)
         val legacy = backupParent(instance)
-            .listFiles { f: File ->
-                f.isFile && f.name.endsWith(".zip") && f.name.startsWith(legacyPrefix)
-            }
+            .listFiles { f: File -> isLegacyBackupOf(instance, f) }
         return ((own ?: emptyArray()) + (legacy ?: emptyArray()))
             .distinct()
             .sortedByDescending { it.lastModified() }
@@ -95,6 +132,11 @@ object BackupManager {
 
     /**
      * 创建备份，返回备份文件。
+     *
+     * 文件名 = `<净化后的实例名>_<实例 id>_<时间戳>.zip`。
+     * **必须带上实例 id**：显示名可以随时改（`InstanceStore.rename`），也可以两个实例起同一个
+     * 名字，只靠名字前缀的话改名后老备份认不出来（界面上直接消失）、同名实例之间还会互相串
+     *（恢复时把别人的存档盖到自己头上）。id 稳定且唯一，[list] 因此不依赖显示名。
      *
      * **先写同目录的 `.part`，全部写完后才 rename 成正式名**。
      * 直接写最终文件名的话，中途失败（世界 region 被占住读不了、空间不足、进程被杀）会留下
@@ -109,7 +151,7 @@ object BackupManager {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val dir = backupsRoot(instance)
         // 名字必须净化：见 [sanitizeName]（带 `/` 的名字会让路径落进不存在的子目录 → 备份必然失败）
-        val dest = File(dir, "${backupPrefix(instance)}$stamp.zip")
+        val dest = File(dir, "${namePrefix(instance)}${instance.id}_$stamp.zip")
         val tmp = File(dir, "${dest.name}.part")
         try {
             ZipOutputStream(FileOutputStream(tmp)).use { zip ->

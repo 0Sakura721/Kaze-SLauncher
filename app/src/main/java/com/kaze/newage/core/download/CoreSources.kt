@@ -287,14 +287,28 @@ object CoreSources {
     }
 
     // ── Forge（maven 索引解析） ──
+    /**
+     * Forge maven 的版本 id 里取出 MC 版本号。两种命名都要认：
+     *  - 常见：`1.20.1-47.2.0`、`1.12.2-14.23.5.2860`（build 段可能四段）；
+     *  - 老格式（1.7.10 时代）：`1.7.10-10.13.4.1614-1.7.10` —— **最后还有一段 MC 版本**，
+     *    原来的 `^(\d+\.\d+(?:\.\d+)?)-[\d.]+$` 因为末尾的 `$` 匹配不上，
+     *    这一整代 Forge 版本在列表里全部消失（用户看不到 1.7.10，以为不支持）。
+     *
+     * 所以只认"MC 版本 + 第一个连字符"，后面是什么都不管；形状仍要校验，
+     * 免得把 `1.8.9-11.15.1.2318-1.8.9` 之外的东西（如 `1.20.1` 这种没 build 的畸形行）也塞进列表。
+     */
+    internal fun forgeMcVersionOf(id: String): String? {
+        val mc = id.substringBefore('-')
+        if (mc == id) return null                                  // 没有 build 段，不是 forge 版本行
+        if (!Regex("^\\d+\\.\\d+(?:\\.\\d+)?$").matches(mc)) return null
+        return mc
+    }
+
     suspend fun fetchForgeVersions(): Result<List<GameVersion>> = withContext(Dispatchers.IO) {
         try {
             val html = httpGet("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
-            // build 段放宽为任意位数：老版本如 1.12.2-14.23.5.2860 是四段，原三段正则会漏
-            val mcVersions = versions.mapNotNull { v ->
-                Regex("^(\\d+\\.\\d+(?:\\.\\d+)?)-[\\d.]+$").find(v)?.groupValues?.get(1)
-            }.distinct()
+            val mcVersions = versions.mapNotNull { forgeMcVersionOf(it) }.distinct()
             Result.success(mcVersions.map { GameVersion(it) })
         } catch (e: Exception) { Result.failure(e) }
     }
@@ -304,13 +318,25 @@ object CoreSources {
             val html = httpGet("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
             // 不依赖 XML 行序：按 build 号语义取最大（中间可能夹 RC/回移植行）
-            val match = versions.filter { it.startsWith("$mcVersion-") }
-                .maxWithOrNull(Comparator { x, y -> compareVersions(x.substringAfter('-'), y.substringAfter('-')) })
+            val match = versions.filter { forgeMcVersionOf(it) == mcVersion }
+                .maxWithOrNull(Comparator { x, y -> compareVersions(forgeBuildOf(x), forgeBuildOf(y)) })
                 ?: return@withContext Result.failure(RuntimeException("Forge 不支持 $mcVersion"))
             Result.success(CoreDownload(
                 "https://maven.minecraftforge.net/net/minecraftforge/forge/$match/forge-$match-installer.jar",
                 "forge-$match-installer.jar"))
         } catch (e: Exception) { Result.failure(e) }
+    }
+
+    /**
+     * 从 Forge 版本 id 里取 build 段（用于比较）：
+     * `1.20.1-47.2.0` → `47.2.0`；老格式 `1.7.10-10.13.4.1614-1.7.10` → `10.13.4.1614`
+     *（第一段是 MC 版本，最后一段又是 MC 版本号，中间才是 build 号 ——
+     * 直接参与比较会把重复的 MC 版本号算成 build 段）。
+     */
+    private fun forgeBuildOf(id: String): String {
+        val rest = id.substringAfter('-', "")
+        val dash = rest.indexOf('-')
+        return if (dash >= 0) rest.substring(0, dash) else rest
     }
 
     // ── NeoForge ──
