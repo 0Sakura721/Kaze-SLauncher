@@ -144,14 +144,27 @@ object ProcessStats {
      * （≈2.8 MB，两位小数就是 `0.00 GB`）—— 用户看到的就是"CPU 偏低 + ram 显示 0"。
      *
      * 现在的优先级：
-     *  1. 只在**本进程的后代**里挑（服务端一定是我们的后代）；一个后代都没有时退回全体。
+     *  1. 只在**本进程的后代**里挑（服务端一定是我们的后代）；一个后代都没有时按 [dirHint] 兜底。
      *  2. 再优先 `comm == "java"` 的：这一条把 proot / sh 这类包装进程排除掉。
      *  3. 同级取 **RSS 最大**的：真正在跑的 JVM 是这里面最重的（proot 只有几 MB）。
      *  4. RSS 都读不到时（全是 -1）取 pid 最大的：服务端是最后被拉起来的那个。
+     *
+     * @param dirHint 本实例的目录名（如 `Paper-1.20.1`）。**只在兜底分支用到**：
+     *   一个后代都没有时（应用被系统重启过、proot 的 ppid 链断了…），旧实现直接退回
+     *   "整机所有含 java 的进程"，于是当前实例会显示**别的实例 / 别的应用**的 java 的
+     *   CPU 与内存（"明明没启动，占用却有数"）。现在兜底只认 cmdline 里带本实例目录名的
+     *   候选，对不上就如实返回 null（界面显示采样中，而不是别人的数字）。
      */
-    fun pickServer(cands: List<Candidate>): Candidate? {
+    fun pickServer(cands: List<Candidate>, dirHint: String? = null): Candidate? {
         if (cands.isEmpty()) return null
-        val pool = cands.filter { it.descendant }.ifEmpty { cands }
+        val descendants = cands.filter { it.descendant }
+        val pool = if (descendants.isNotEmpty()) {
+            descendants
+        } else {
+            val hint = dirHint?.takeIf { it.isNotBlank() } ?: return null
+            cands.filter { it.cmdline.contains(hint) }
+        }
+        if (pool.isEmpty()) return null
         val jvms = pool.filter { it.comm == "java" }
         return (jvms.ifEmpty { pool }).maxWithOrNull(compareBy({ it.rssKb }, { it.pid }))
     }
@@ -172,8 +185,10 @@ object ProcessStats {
      *
      * 只负责"扫"：把 /proc 里 cmdline 含 `java` 的进程收集成 [Candidate]，
      * 选谁交给纯函数 [pickServer]（那条规则踩过坑，见它的注释）。
+     *
+     * @param dirHint 本实例的目录名，仅用于 [pickServer] 的兜底匹配（见其注释）
      */
-    fun findServerPid(): Int? {
+    fun findServerPid(dirHint: String? = null): Int? {
         val proc = File("/proc")
         val dirs = proc.listFiles { f -> f.isDirectory && f.name.all { it.isDigit() } }
             ?: return null
@@ -201,7 +216,7 @@ object ProcessStats {
                 )
             )
         }
-        val picked = pickServer(cands)
+        val picked = pickServer(cands, dirHint)
         lastDiag = "pid目录 ${dirs.size} · 可读 $readableCmdline · 读不到 $unreadable · " +
             "java ${cands.size} · 后代 ${cands.count { it.descendant }} · " +
             "选中 ${picked?.let { "pid ${it.pid}/${it.comm.ifBlank { "?" }}/rss ${it.rssKb}" } ?: "无"} · 自己 $myPid"

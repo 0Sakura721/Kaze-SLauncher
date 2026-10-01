@@ -146,6 +146,20 @@ class ProcessStatsTest {
         assertNull(ProcessStats.pickServer(emptyList()))
     }
 
+    @Test
+    fun `选进程_一个后代都没有时不能抓别人家的 java`() {
+        // ppid 链断了（应用被系统重启过、proot 被回收）时，旧实现会退回"整机所有含 java 的
+        // 进程" —— 于是当前实例显示的是**别的实例 / 别的应用**的 CPU 与内存。
+        // 兜底只认 cmdline 里带本实例目录名的候选；一个都对不上就如实返回 null。
+        val others = listOf(
+            ProcessStats.Candidate(900, "java -jar other-app.jar", "java", false, 9_000_000),
+            ProcessStats.Candidate(901, "/x/java -jar /sdcard/KazeS/Paper-1.20.1/server.jar", "java", false, 1_000_000),
+        )
+        assertNull("没有后代、也没有本实例目录名的候选时必须返回 null", ProcessStats.pickServer(others))
+        // 带上本实例目录名作提示：只认命中它的那条（pid 901），那条 9GB 的外来进程被排除
+        assertEquals(901, ProcessStats.pickServer(others, dirHint = "Paper-1.20.1")!!.pid)
+    }
+
     // ── CPU 平滑（读数别乱跳）──────────────────────────────────────────────
     // 采样窗口只有 1 秒，服务端负载是突发的（GC / 区块生成 / 玩家进服），
     // 单拍求差的原始值会让界面上的百分比和"（x 核）"来回闪。

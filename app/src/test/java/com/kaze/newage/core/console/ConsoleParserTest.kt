@@ -51,6 +51,17 @@ class ConsoleParserTest {
     }
 
     @Test
+    fun `聊天内容不算名单`() {
+        // 玩家打出这个句式时，日志行里同样含 "There are … players online:"。
+        // 若照收，在线名单会被聊天内容整体覆盖 —— 人数与列表当场失真。
+        assertNull(
+            ConsoleParser.parseOnlinePlayers(
+                "[12:00:00] [Server thread/INFO]: <Steve> There are 3 of a max of 20 players online: Alex, Bob"
+            )
+        )
+    }
+
+    @Test
     fun `与事件无关的行返回 null`() {
         assertNull(ConsoleParser.parseJoin("[12:00:00] [Server thread/INFO]: Preparing spawn area: 50%"))
         assertNull(ConsoleParser.parseLeave("[12:00:00] [Server thread/INFO]: Saving chunks"))

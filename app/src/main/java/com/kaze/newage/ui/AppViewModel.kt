@@ -534,7 +534,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 var cur = pid
                 var got = cur?.let { ProcessStats.sample(it) }
                 if (got == null) {
-                    val fresh = ProcessStats.findServerPid()
+                    // 传实例目录名：兜底分支只认 cmdline 里带它的候选，
+                    // 免得"一个后代都没扫到"时把别的实例/别的应用的 java 当成自己的
+                    val fresh = ProcessStats.findServerPid(dirName)
                     if (fresh != pid) {
                         // 认到了别的进程（或刚认到）：基线作废，重新等两拍再出数
                         pid = fresh; lastTicks = 0L; lastAt = 0L; smoothCores = -1f
@@ -737,6 +739,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { instance.dir.deleteRecursively() }
             // 备份目录在实例目录之外，删除实例后无任何入口再能访问——一并清理防死数据
             runCatching { com.kaze.newage.core.server.BackupManager.deleteAllBackups(instance) }
+            // 控制台缓冲 / 运行时长流 / 状态表条目都是按 id 长期持有的，实例没了就再没有任何
+            // 入口能到达它们 —— 不回收就是纯泄漏（控制台缓冲是按实例上限存行的）
+            runCatching { serverManager.release(instance.id) }
             if (_currentInstanceId.value == instance.id) _currentInstanceId.value = null
         }
     }

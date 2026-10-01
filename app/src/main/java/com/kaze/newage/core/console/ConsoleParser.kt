@@ -23,8 +23,15 @@ object ConsoleParser {
      */
     private val CHAT_LINE = Regex(""":\s*<[^>]{1,32}>\s""")
 
-    /** 若该行是玩家列表响应，返回名单（可能为空列表）；否则返回 null */
+    /**
+     * 玩家列表响应 → 名单（可能为空列表）；否则返回 null。
+     *
+     * 与 [parseJoin]/[parseLeave] 一样必须先排除聊天行：玩家打出
+     * `There are 3 of a max of 20 players online: Steve` 时，日志里同样含这个句式，
+     * 本方法若照收就会把在线名单**整体覆盖**成聊天内容 —— 在线人数与玩家列表当场失真。
+     */
     fun parseOnlinePlayers(line: String): List<String>? {
+        if (CHAT_LINE.containsMatchIn(line)) return null
         val m = LIST_PATTERN.find(line) ?: return null
         val tail = m.groupValues[1].trim()
         if (tail.isEmpty()) return emptyList()

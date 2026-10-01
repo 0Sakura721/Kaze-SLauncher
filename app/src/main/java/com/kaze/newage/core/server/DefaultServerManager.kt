@@ -138,6 +138,12 @@ class DefaultServerManager(
         var uptimeJob: Job? = null
 
         /**
+         * 这一轮进程退出是否已经处理过（见 [handleExit] 的幂等闸门）。
+         * 每次 [launchServer] 拉起新进程时复位。
+         */
+        var exitHandled = false
+
+        /**
          * 排定中的自动重启（崩溃后 `delay(3000)` 再拉起）。
          *
          * 停止时必须取消：否则用户在崩溃后的 3 秒窗口里点「停止」只会走 finalizeStop
@@ -219,6 +225,20 @@ class DefaultServerManager(
 
     override fun isRunning(instanceId: String): Boolean =
         slots[instanceId]?.process?.isAlive == true
+
+    /**
+     * 实例被删除后的资源回收（见接口说明）。
+     *
+     * 只会被 AppViewModel 在"实例确实已停止且记录已删除"之后调用，
+     * 所以这里不再判在跑没在跑 —— 但保险起见仍然保留槽位：真要还有槽位（不该发生），
+     * 宁可少清一个控制台，也不能把正在跑的进程的管理句柄丢掉。
+     */
+    override fun release(instanceId: String) {
+        if (slots.containsKey(instanceId)) return
+        consoles.remove(instanceId)
+        uptimeFlows.remove(instanceId)
+        _states.update { it - instanceId }
+    }
 
     // ── 启动 ──
     override suspend fun start(instance: ServerInstance) {
@@ -552,6 +572,8 @@ class DefaultServerManager(
         val proc = env.launch(args, slot.instance.dir)
             ?: throw RuntimeException("无法启动 proot 进程（环境异常）")
         slot.process = proc
+        // 新进程 = 新的一轮生命周期：幂等闸门必须复位，否则第二次退出会被当成"已处理"而漏掉
+        slot.exitHandled = false
         // 上一轮的「10s 强杀」若还挂着，必须取消：它捕获的是旧进程，留着只会误杀本次新进程
         slot.stopTimeoutJob?.cancel()
         slot.stopTimeoutJob = null
@@ -714,7 +736,17 @@ class DefaultServerManager(
     }
 
     // ── 退出处理 ──
+    /**
+     * 进程退出收尾。**幂等**：同一个槽位只处理一次。
+     *
+     * 同一个 process 有两条路径会判定"退出了" —— [launchServer] 里那条 `proc.waitFor()` 的
+     * waitJob，和 init 里每秒自愈的状态巡检。两者都盯同一个 process，几乎同时触发时
+     * 旧实现会把一次崩溃处理两遍：restartCount 多算一次（实际只重启一半的次数就"用完"了）、
+     * "服务器进程退出"这类日志重复、甚至并发起两个 [start]。
+     */
     private fun handleExit(slot: RuntimeSlot) {
+        if (slot.exitHandled) return
+        slot.exitHandled = true
         if (slot.manualStop) {
             finalizeStop(slot)
             return

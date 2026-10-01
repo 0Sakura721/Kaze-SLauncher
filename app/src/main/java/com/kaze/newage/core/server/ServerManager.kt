@@ -54,4 +54,13 @@ interface ServerManager {
 
     /** 发送控制台命令（写入进程 stdin，同步操作） */
     fun sendCommand(instance: ServerInstance, command: String)
+
+    /**
+     * 实例已被删除：释放只属于它的常驻状态（控制台缓冲、运行时长流、状态表条目）。
+     *
+     * 这三张表都是按 instanceId 长期持有的（控制台与时长流必须跨"停止→再启动"存活，
+     * 否则重启后控制台空白、时长恒 0）。但**实例被删除**时它们没有任何入口再能到达，
+     * 不清理就是纯内存泄漏：控制台缓冲是按实例上限存行的，删几个实例就能攒住几十 MB。
+     */
+    fun release(instanceId: String)
 }
