@@ -145,4 +145,28 @@ class ProcessStatsTest {
     fun `选进程_没有候选时返回 null`() {
         assertNull(ProcessStats.pickServer(emptyList()))
     }
+
+    // ── CPU 平滑（读数别乱跳）──────────────────────────────────────────────
+    // 采样窗口只有 1 秒，服务端负载是突发的（GC / 区块生成 / 玩家进服），
+    // 单拍求差的原始值会让界面上的百分比和"（x 核）"来回闪。
+
+    @Test
+    fun `平滑_第一拍直接用原始值`() {
+        assertEquals(2.0f, ProcessStats.smoothCores(prev = -1f, raw = 2.0f), 0.001f)
+    }
+
+    @Test
+    fun `平滑_之后按 0.5 权重向新值靠拢`() {
+        // 上一拍 1 核，这一拍 3 核 → 1*0.5 + 3*0.5 = 2 核
+        assertEquals(2.0f, ProcessStats.smoothCores(prev = 1f, raw = 3f), 0.001f)
+        // 再来一拍 3 核 → 2*0.5 + 3*0.5 = 2.5 核（不会一步跳到 3，这就是"防跳"）
+        assertEquals(2.5f, ProcessStats.smoothCores(prev = 2f, raw = 3f), 0.001f)
+    }
+
+    @Test
+    fun `平滑_异常输入不产生 NaN 或负值`() {
+        assertEquals(0f, ProcessStats.smoothCores(prev = -1f, raw = Float.NaN), 0.001f)
+        assertEquals(1.5f, ProcessStats.smoothCores(prev = 1.5f, raw = Float.NaN), 0.001f)
+        assertEquals(0f, ProcessStats.smoothCores(prev = -1f, raw = -5f), 0.001f)
+    }
 }

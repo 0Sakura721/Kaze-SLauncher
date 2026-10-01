@@ -36,6 +36,12 @@ object ProcessStats {
         val rssKb: Long,
         /** 采样用的 pid。诊断用：读数不对时一眼就能看出是"选错了进程" */
         val pid: Int,
+        /** 设备当前**可用**内存（KB，含可回收的 page cache）；**-1 = 读不到** */
+        val availMemKb: Long = -1,
+        /** 设备总内存（KB）；-1 = 读不到 */
+        val totalMemKb: Long = -1,
+        /** 系统是否已判定为低内存 */
+        val lowMemory: Boolean = false,
     )
 
     /**
@@ -82,6 +88,19 @@ object ProcessStats {
         val total = if (cores <= 0) 1 else cores
         val percent = (coresUsed / total * 100f).coerceIn(0f, 100f)
         return percent to coresUsed
+    }
+
+    /**
+     * CPU 读数的指数滑动平均（α = 0.5），单位与 [cpuFrom] 的 `coresUsed` 一致（核）。
+     *
+     * 为什么需要：采样窗口只有 1 秒，而服务端的负载是**突发**的（GC、区块生成、玩家进服），
+     * 单拍求差会让百分比和"（x 核）"来回跳。平滑后既跟得上趋势，读数也稳。
+     * [prev] <= 0 表示第一拍（或刚换了进程），直接采用原始值。
+     */
+    fun smoothCores(prev: Float, raw: Float): Float {
+        if (!raw.isFinite()) return if (prev > 0f) prev else 0f
+        val r = raw.coerceAtLeast(0f)
+        return if (prev <= 0f) r else prev * 0.5f + r * 0.5f
     }
 
     /**
@@ -223,4 +242,21 @@ object ProcessStats {
         (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(mi)
         return mi.totalMem / 1024
     }
+
+    /**
+     * 设备内存快照：`(可用 KB, 总 KB, 是否低内存)`，读不到给 `(-1, -1, false)`。
+     *
+     * "可用"用的是 `MemoryInfo.availMem` —— 它把**可回收的 page cache** 算作可用，
+     * 比 `MemFree` 有意义得多（Android 上 MemFree 常年只有几百 MB，看着像要炸，
+     * 其实一大半文件缓存随时能回收）。服务端 OOM 是手机上最常见的"莫名其妙崩"，
+     * 所以要把剩余量摆在服务端占用旁边。
+     *
+     * 读不到返回 -1 而不是 0：0 会被界面显示成"可用 0.00 GB"，比不显示更吓人。
+     */
+    fun memorySnapshot(context: android.content.Context): Triple<Long, Long, Boolean> = runCatching {
+        val mi = android.app.ActivityManager.MemoryInfo()
+        (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager)
+            .getMemoryInfo(mi)
+        Triple(mi.availMem / 1024, mi.totalMem / 1024, mi.lowMemory)
+    }.getOrElse { Triple(-1L, -1L, false) }
 }

@@ -308,9 +308,8 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             },
         )
 
-        // 服务端进程的 CPU / 内存占用（每 2 秒刷新；未启动时为空 → 不占位）
+        // 服务端进程的 CPU / 内存占用 + 整机可用内存（每秒刷新；未启动时为空 → 不占位）
         val stats by viewModel.procStats.collectAsStateWithLifecycle()
-        val ctxForMem = androidx.compose.ui.platform.LocalContext.current
 
         // ── 性能监控：CPU / 内存占用（独立一行，只在运行中出现）──
         //
@@ -329,9 +328,12 @@ fun ConsoleScreen(viewModel: AppViewModel) {
         // 而这条诊断串很长，只有在整行宽度下才读得全，这也是它必须独占一行的原因之一。
         if (serverState == ServerState.Running) {
             val s = stats
-            val totalKb = remember { ProcessStats.totalMemKb(ctxForMem) }
-            val memPct =
-                if (s != null && totalKb > 0 && s.rssKb >= 0) s.rssKb.toFloat() / totalKb * 100f else 0f
+            // 服务端 RSS 占**整机内存**的比例（totalMemKb 来自同一次采样，见 ProcessStats.Reading）
+            val memPct = if (s != null && s.totalMemKb > 0 && s.rssKb >= 0) {
+                s.rssKb.toFloat() / s.totalMemKb * 100f
+            } else {
+                0f
+            }
             Text(
                 buildString {
                     if (s == null) {
@@ -351,6 +353,12 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                         } else {
                             append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append(" GB")
                             append("（").append(fmt("%.0f", memPct)).append("%）")
+                        }
+                        // 整机还剩多少可用内存：手机上服务端"莫名其妙崩"多半是 OOM，
+                        // 把剩余量摆在服务端占用旁边，一眼能看出还有多少余量。
+                        if (s.availMemKb >= 0) {
+                            append(" · 整机可用 ").append(fmt("%.2f", s.availMemKb / 1024f / 1024f)).append(" GB")
+                            if (s.lowMemory) append("（系统低内存）")
                         }
                     }
                 },

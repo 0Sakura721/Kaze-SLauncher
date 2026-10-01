@@ -476,13 +476,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // 只是异常没人看见，还以为是 /proc 读不到）。
     init { startProcStatsPolling() }
 
+/** 占用采样节拍（毫秒）。CPU 靠两次求差，窗口越短越跟得上突发负载；配合 EMA 平滑防跳。 */
+private const val PROC_STATS_INTERVAL_MS = 1_000L
+
     /**
-     * 每 2 秒采一次服务端进程的 CPU / 内存。
+     * 每秒采一次服务端进程的 CPU / 内存，以及整机可用内存。
      *
      * 服务端是 proot 的孙进程（app → proot → java），拿不到 Process 句柄，只能按 pid 读
-     * `/proc`；pid 靠扫 `/proc` 里 cmdline 同时含 `java` 与实例目录名来认。
-     * 扫不到就置 null，界面据此隐藏指标（未启动 / 已退出）。
-     * CPU 必须两次采样求差，所以第一次只记基线、不出数。
+     * `/proc`；pid 由 [ProcessStats.pickServer] 在候选里挑（踩过"选中 proot 包装进程"的坑）。
+     * CPU 必须两次采样求差，所以第一拍只记基线、不出数；读数再过一次 EMA 平滑。
+     *
+     * 节拍从 2 秒缩到 1 秒：窗口越短越跟得上突发负载（8 核上一个核忙 0.2 秒，
+     * 摊到 2 秒窗口里几乎看不见），代价只是每秒两次很小的 /proc 读。
      *
      * 由 [init] 启动 —— **这一环曾经是漏的**：函数写好了却没有任何调用点，
      * 于是 `_procStats` 恒为 null，界面永远显示「CPU 采样中…」。
@@ -490,41 +495,68 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun startProcStatsPolling() {
         viewModelScope.launch(Dispatchers.IO) {
+            val appCtx = container.appContext
             var pid: Int? = null
             var lastTicks = 0L
             var lastAt = 0L
+            // CPU 平滑值（单位：核）。单拍求差的原始值很跳（GC、区块生成都是突发的）
+            var smoothCores = -1f
+            // 连续读失败的拍数：连着丢几拍才认定"读不到"，避免瞬时失败把整行闪回"采样中"
+            var missCount = 0
             while (true) {
                 val id = _currentInstanceId.value
                 val dirName = id?.let { instanceStore.get(it)?.dir?.name }
-                // 只在「当前实例正在运行」时才扫描 /proc：不运行时也每 2 秒把整机
-                // /proc 扫一遍（几百次文件读）纯属浪费电，而这一行本来就只在 Running 时渲染。
+                // 只在「当前实例正在运行」时才扫描 /proc：不运行时也扫整机 /proc
+                // （几百次文件读）纯属浪费电，而这一行本来就只在 Running 时渲染。
                 val running = id != null && serverManager.states.value[id] == ServerState.Running
                 if (dirName == null || !running) {
                     _procStats.value = null
-                    pid = null
-                    delay(2000)
+                    pid = null; lastTicks = 0L; lastAt = 0L; smoothCores = -1f; missCount = 0
+                    delay(PROC_STATS_INTERVAL_MS)
                     continue
                 }
-                if (pid == null || ProcessStats.sample(pid) == null) {
-                    pid = ProcessStats.findServerPid()
-                    lastTicks = 0L
-                    lastAt = 0L
-                }
-                val curPid = pid
-                val got = curPid?.let { ProcessStats.sample(it) }
-                if (got == null || curPid == null) {
-                    _procStats.value = null
-                    pid = null
-                } else {
-                    val now = System.currentTimeMillis()
-                    if (lastAt > 0L) {
-                        val (percent, cores) = ProcessStats.cpuFrom(lastTicks, got.first, now - lastAt, ProcessStats.cores)
-                        _procStats.value = ProcessStats.Reading(percent, cores, got.second, curPid)
+                // 每拍只读一次 /proc。旧实现写成 `if (pid == null || sample(pid) == null) …`
+                // 之后又 `sample(pid)`，同一拍读两遍，白花一倍系统调用。
+                var cur = pid
+                var got = cur?.let { ProcessStats.sample(it) }
+                if (got == null) {
+                    val fresh = ProcessStats.findServerPid()
+                    if (fresh != pid) {
+                        // 认到了别的进程（或刚认到）：基线作废，重新等两拍再出数
+                        pid = fresh; lastTicks = 0L; lastAt = 0L; smoothCores = -1f
                     }
-                    lastTicks = got.first
-                    lastAt = now
+                    // fresh == pid：同一个进程，只是这一拍没读到 —— **保留基线**，
+                    // 下一拍用更长的时间窗继续求差（旧实现在这里清零，数字会一顿一顿）
+                    cur = fresh
+                    got = fresh?.let { ProcessStats.sample(it) }
                 }
-                delay(2000)
+                if (got == null || cur == null) {
+                    missCount++
+                    if (missCount >= 3) _procStats.value = null   // ≈3 秒都读不到才清空
+                    delay(PROC_STATS_INTERVAL_MS)
+                    continue
+                }
+                missCount = 0
+                val now = System.currentTimeMillis()
+                if (lastAt > 0L) {
+                    val (_, rawCores) = ProcessStats.cpuFrom(lastTicks, got.first, now - lastAt, ProcessStats.cores)
+                    smoothCores = ProcessStats.smoothCores(smoothCores, rawCores)
+                    val total = ProcessStats.cores.coerceAtLeast(1)
+                    val percent = (smoothCores / total * 100f).coerceIn(0f, 100f)
+                    val (availKb, totalMemKb, lowMem) = ProcessStats.memorySnapshot(appCtx)
+                    _procStats.value = ProcessStats.Reading(
+                        cpuPercent = percent,
+                        coresUsed = smoothCores,
+                        rssKb = got.second,
+                        pid = cur,
+                        availMemKb = availKb,
+                        totalMemKb = totalMemKb,
+                        lowMemory = lowMem,
+                    )
+                }
+                lastTicks = got.first
+                lastAt = now
+                delay(PROC_STATS_INTERVAL_MS)
             }
         }
     }
