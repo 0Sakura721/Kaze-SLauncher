@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12 以下（API 12~30）的自动备份规则。
+
+  `allowBackup="true"` 而不写规则时，系统会把整个 filesDir 纳入 Auto Backup：
+  这里面装着 linux/（rootfs 解压结果，134MB+）与 native-extract/（proot 运行时兜底副本），
+  两者都是可以从网络 / APK 重新生成的，却会把 Auto Backup 的 25MB 配额一次性撑爆 ——
+  配额超限后系统是**按文件逐个截断**的，真正该备份的 instances.json 反而可能没进去；
+  恢复时还可能拿到一份"解压到一半"的 rootfs，proot 直接起不来。
+
+  实例目录、世界存档、备份 zip 都在共享存储 /sdcard/KazeS 下，本来就不在备份范围内。
+-->
+<full-backup-content>
+    <exclude domain="file" path="linux" />
+    <exclude domain="file" path="native-extract" />
+</full-backup-content>

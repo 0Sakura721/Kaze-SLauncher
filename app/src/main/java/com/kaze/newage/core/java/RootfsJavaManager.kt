@@ -22,11 +22,19 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
      *  设置的 installJava/uninstallJava 可绕过——与自动安装并发写同一目录/tar 包会损坏） */
     private val taskMutex = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /**
+     * 已安装的运行时。
+     *
+     * `home` 必须取**实际目录名**：`installedJdks()` 扫的就是 `usr/lib/jvm` 下的真实子目录，
+     * 并已按 release 文件/目录名认出主版本。按主版本写死 `java-N-openjdk-<arch>` 是错的
+     * —— apt 装出来的是 `java-1.17.0-openjdk-arm64`，调用方拿这个 home 拼 `bin/java`
+     * 会指向一个不存在的目录。
+     */
     override fun installed(): List<JavaRuntime> =
-        env.installedJdkVersions().map { version ->
+        env.installedJdks().entries.sortedBy { it.key }.map { (version, dirName) ->
             JavaRuntime(
                 version = version.toString(),
-                home = File(env.javaHomeDir, "java-$version-openjdk-${archSuffix()}"),
+                home = File(env.javaHomeDir, dirName),
                 architecture = archSuffix(),
             )
         }
@@ -105,8 +113,15 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
     }
 
     private suspend fun doUninstall(majorVersion: Int) {
-        val jvmDir = File(env.javaHomeDir, "java-$majorVersion-openjdk-${archSuffix()}")
-        runCatching { jvmDir.deleteRecursively() }
+        // 按**实际目录名**删。写死 `java-$majorVersion-openjdk-${archSuffix()}` 的旧实现删不掉
+        // apt 装出来的 `java-1.17.0-openjdk-arm64` —— 界面上"卸载"成功了，目录与磁盘占用
+        // 都还在，下次进设置页它仍被判为已安装（用户以为没生效，反复点也没用）。
+        val actual = env.installedJdks()[majorVersion]
+        buildList {
+            if (actual != null) add(File(env.javaHomeDir, actual))
+            // 兜底：Adoptium 直装路径的固定名（installedJdks 扫不到半成品时仍然清掉它）
+            add(File(env.javaHomeDir, "java-$majorVersion-openjdk-${archSuffix()}"))
+        }.distinct().forEach { runCatching { it.deleteRecursively() } }
         // 清理下载残留（tar 包与临时解压目录）
         runCatching { File(env.javaHomeDir, "openjdk-$majorVersion.tar.gz").delete() }
         runCatching { File(env.javaHomeDir, "openjdk-$majorVersion-tmp").deleteRecursively() }

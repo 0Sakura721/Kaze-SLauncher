@@ -139,15 +139,26 @@ object UpdateInstaller {
             val out = File(dir, "patched-${safeTagOf(info)}.apk")
             onStatus("正在拼装补丁并校验 sha256…")
             if (shouldCancel()) return null
-            val got = runCatching { ApkPatchApplier.apply(installedApk, patchZip, out) }.getOrNull() ?: continue
+            // 拼装失败 / 校验不过时**必须删掉半成品**：它是 APK 体积（几十 MB）的残留，
+            // 而下面失败会 continue 去试下一个补丁资产，每试一个就多留一份，
+            // cacheDir 很快被塞满（旧实现只在"用户取消"这一条路径上删了它）。
+            val got = runCatching { ApkPatchApplier.apply(installedApk, patchZip, out) }
+                .onFailure { runCatching { out.delete() } }
+                .getOrNull() ?: continue
             if (shouldCancel()) {
                 runCatching { out.delete() }
                 return null
             }
 
             // ④ 与发布方给出的整包 sha256 对齐（有的话），再比对签名
-            if (info.apkSha256 != null && !got.equals(info.apkSha256, ignoreCase = true)) continue
-            if (!isSignedBySameKey(context, out)) continue
+            if (info.apkSha256 != null && !got.equals(info.apkSha256, ignoreCase = true)) {
+                runCatching { out.delete() }
+                continue
+            }
+            if (!isSignedBySameKey(context, out)) {
+                runCatching { out.delete() }
+                continue
+            }
             return out
         }
         return null

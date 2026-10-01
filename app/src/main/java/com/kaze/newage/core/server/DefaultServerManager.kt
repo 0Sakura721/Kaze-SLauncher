@@ -587,30 +587,34 @@ class DefaultServerManager(
             try {
                 // 逐字符流式读取：\r = 覆盖式进度行（控制台替换上一行，避免几百行刷屏），
                 // \n = 普通行。readLine 会把 \r 也当分隔符，无法区分，故手写分割。
-                val reader = proc.inputStream.bufferedReader()
-                val sb = StringBuilder()
-                // 块读取：syscall 从"每字符一次"降到每 8KB 一次，其余行为不变
-                val buf = CharArray(8 * 1024)
-                fun flushLine(replace: Boolean) {
-                    val text = sb.toString().trim()
-                    sb.setLength(0)
-                    if (text.isNotEmpty()) {
-                        if (replace) slot.logReplace(text, classify(text))
-                        else slot.log(text, classify(text))
-                    }
-                }
-                while (true) {
-                    val n = reader.read(buf)
-                    if (n < 0) break
-                    for (i in 0 until n) {
-                        when (buf[i]) {
-                            '\r' -> flushLine(replace = true)
-                            '\n' -> if (sb.isNotEmpty()) flushLine(replace = false)
-                            else -> sb.append(buf[i])
+                //
+                // 必须 `.use{}`：reader 包着进程的 stdout 管道，读完不关就是**每启动一次泄一个
+                // fd**（服务端被反复自动重启时很快堆到进程上限，之后所有 open/socket 全失败）。
+                proc.inputStream.bufferedReader().use { reader ->
+                    val sb = StringBuilder()
+                    // 块读取：syscall 从"每字符一次"降到每 8KB 一次，其余行为不变
+                    val buf = CharArray(8 * 1024)
+                    fun flushLine(replace: Boolean) {
+                        val text = sb.toString().trim()
+                        sb.setLength(0)
+                        if (text.isNotEmpty()) {
+                            if (replace) slot.logReplace(text, classify(text))
+                            else slot.log(text, classify(text))
                         }
                     }
+                    while (true) {
+                        val n = reader.read(buf)
+                        if (n < 0) break
+                        for (i in 0 until n) {
+                            when (buf[i]) {
+                                '\r' -> flushLine(replace = true)
+                                '\n' -> if (sb.isNotEmpty()) flushLine(replace = false)
+                                else -> sb.append(buf[i])
+                            }
+                        }
+                    }
+                    if (sb.isNotEmpty()) flushLine(replace = false)
                 }
-                if (sb.isNotEmpty()) flushLine(replace = false)
             } catch (_: Exception) { }
         }
 
@@ -973,12 +977,56 @@ class DefaultServerManager(
                 }
             }
             try {
-                env.execute(
+                // 必须把安装器进程**登记到 slot.process**，并在这里轮询取消标志：
+                // 旧实现走 env.execute()，那个进程游离在 slot 之外 —— 安装要联网跑好几分钟，
+                // 期间用户点「停止」只会置上 manualStop，然后干等到安装器自己跑完
+                //（`slot.checkCancelled()` 在 execute 返回之后才执行），
+                // 而槽位里 process 一直是 null，连"强制停止"都没有可杀的句柄。
+                val proc = env.launch(
                     listOf(javaBin, "-jar", installer.name, "--installServer"),
                     instance.dir,
-                ) { line ->
-                    lastLineAt = System.currentTimeMillis()
-                    slot.log(line, classify(line))
+                ) ?: throw RuntimeException("无法启动 ${instance.coreType.displayName} 安装器（环境异常）")
+                slot.process = proc
+                try {
+                    proc.inputStream.bufferedReader().use { reader ->
+                        val buf = CharArray(8 * 1024)
+                        val sb = StringBuilder()
+                        fun flush() {
+                            val text = sb.toString().trim()
+                            sb.setLength(0)
+                            if (text.isNotEmpty()) {
+                                lastLineAt = System.currentTimeMillis()
+                                slot.log(text, classify(text))
+                            }
+                        }
+                        while (true) {
+                            // 取消检查点：读管道是阻塞的，用 available() 让出机会轮询取消标志
+                            if (slot.manualStop) {
+                                proc.destroy()
+                                throw StartCancelled()
+                            }
+                            if (reader.ready()) {
+                                val n = reader.read(buf)
+                                if (n < 0) break
+                                for (i in 0 until n) {
+                                    when (buf[i]) {
+                                        '\r' -> flush()
+                                        '\n' -> flush()
+                                        else -> sb.append(buf[i])
+                                    }
+                                }
+                            } else {
+                                if (!proc.isAlive) break
+                                delay(200)
+                            }
+                        }
+                        flush()
+                    }
+                    proc.waitFor()
+                    proc.exitValue()
+                } finally {
+                    // 槽位里的句柄只在安装期间有效：留着会让"停止"去杀一个已经结束的进程
+                    if (slot.process === proc) slot.process = null
                 }
             } finally {
                 ticker.cancel()
