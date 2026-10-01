@@ -70,7 +70,8 @@ object StorageDirUtil {
      * `Environment.isExternalStorageManager()` 是 **API 30 才加入**的，而本应用 minSdk 27：
      * 不加版本判断会在 Android 8.0–10 上抛 `NoSuchMethodError`（属于 Error，不会被
      * `catch (Exception)` 接住）→ 点「选择目录」直接崩。这些系统没有「所有文件访问」这个概念，
-     * 走的是传统的 `WRITE_EXTERNAL_STORAGE` 运行时权限（manifest 已按 maxSdkVersion=28 声明）。
+     * 走的是传统的 `WRITE_EXTERNAL_STORAGE` 运行时权限（manifest 必须按 maxSdkVersion=29 声明：
+     * 写成 28 的话 Android 10 上这个权限不存在，运行时申请会被系统直接拒绝、连弹窗都没有）。
      */
     fun hasAllFilesAccess(context: Context): Boolean = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> Environment.isExternalStorageManager()

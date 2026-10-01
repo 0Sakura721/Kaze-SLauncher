@@ -59,7 +59,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -147,7 +149,11 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: ""
             }.getOrDefault("")
             try {
-                val info = UpdateChecker.check(channel)
+                // 网络必须切到 IO 线程：LaunchedEffect 跑在**主线程**，而 UpdateChecker.check
+                // 是同步 HttpURLConnection（Downloader.downloadText）。旧实现直接在主线程调用，
+                // 抛出的 NetworkOnMainThreadException 又被下面那个 catch 吞掉 ——
+                // 于是「启动自动检查更新」在真机上从来没成功过，只有设置页里的手动检查能用。
+                val info = withContext(Dispatchers.IO) { UpdateChecker.check(channel) }
                 if (info != null && UpdateChecker.isNewer(info.tag, current)) {
                     updateInfo = info
                 }
@@ -177,13 +183,18 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             )
             updateBusy = false
             if (file != null) {
-                updateInfo = null
-                // 检查安装器是否真的被拉起：失败时（没有「安装未知应用」权限、
-                // FileProvider 取不到文件等）旧实现直接收掉弹窗、什么都不说，
-                // 用户以为更新完成了，实际什么都没发生
-                if (!UpdateInstaller.install(appContext, file)) {
+                // 检查安装器是否真的被拉起（没有「安装未知应用」权限、FileProvider 取不到文件…）。
+                //
+                // **失败时绝不能提前关掉弹窗**：updateProgress 只在 `updateInfo?.let` 的弹窗里
+                // 渲染，先置 null 就等于把失败文案写进死代码 —— 用户以为更新完成了，实际什么都没发生。
+                // 所以只有安装器真的起来了才收弹窗。
+                if (UpdateInstaller.install(appContext, file)) {
                     updateInfo = null
+                    updateProgress = null
+                    updateStatus = null
+                } else {
                     updateProgress = "无法启动安装器：请在系统设置中允许本应用「安装未知应用」后重试"
+                    updateStatus = null
                 }
             } else if (updateCancelRequested) {
                 // 用户主动取消：静默收起弹窗（下载已在 Downloader 内中止，断点保留）

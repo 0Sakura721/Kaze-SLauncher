@@ -256,7 +256,10 @@ fun AddonsScreen(
             verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenParts),
         ) {
             // 搜索结果
-            if (shown.isNotEmpty()) {
+            // `searched` 这个条件是必须的：addonResults 是 ViewModel 里**跨页面共享**的槽位，
+            // 只判 isNotEmpty 的话，搜完插件再进模组页（本页 searched 还是 false）会照常渲染
+            // 上一批插件结果，行尾「安装」还会按模组（fabric 过滤）去装配件 —— 错装。
+            if (searched && shown.isNotEmpty()) {
                 Text(
                     "搜索结果（${shown.size}）",
                     style = MaterialTheme.typography.titleMedium,
