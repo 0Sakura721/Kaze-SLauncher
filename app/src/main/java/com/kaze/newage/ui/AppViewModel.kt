@@ -54,6 +54,11 @@ data class DownloadState(
     val message: String = "",
     val done: Boolean = false,
     val error: String? = null,
+    /**
+     * 附加组件专用：解析出目标文件与已装文件同名，正等用户确认是否替换。
+     * 此时 [running] 为 false（没有任务在跑），界面据此弹确认框而不是显示进度条。
+     */
+    val replacePending: Boolean = false,
 )
 
 /** Java 安装/卸载任务状态 */
@@ -927,19 +932,95 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ── 动作：插件/模组（Modrinth）──
+    /** 搜索结果请求序号：只有"最新一次搜索"有权写结果与复位 loading（快速连续搜索会乱序返回） */
+    @Volatile
+    private var addonSearchRequestId = 0
+
+    /** 搜索失败信息（**独立槽位**，见 [searchAddons]） */
+    private val _addonSearchError = MutableStateFlow<String?>(null)
+    val addonSearchError: StateFlow<String?> = _addonSearchError.asStateFlow()
+
+    fun clearAddonSearchError() {
+        _addonSearchError.value = null
+    }
+
+    /**
+     * 搜索 Modrinth。
+     *
+     * 两条守卫：
+     *  1. **请求序号**：搜索是同步网络请求（几秒都正常），用户打完一个词没出结果又改一个词回车，
+     *     两次请求并发在 IO 线程池上，先发的后回来就会用旧结果覆盖新结果 —— 输入框写着 A、
+     *     列表却是 B 的结果，点安装就装错东西。
+     *  2. 失败写**自己的**槽位，不能写进 [addonInstall]：那个槽位是"安装"的状态，
+     *     列表用 `installState.error == null` 判断要不要显示空状态，安装页也用它的
+     *     error/done 决定横幅 —— 一次搜索失败会污染安装流程的空态判断。
+     */
     fun searchAddons(query: String, kind: AddonKind) {
         if (query.isBlank()) return
+        val requestId = ++addonSearchRequestId
         _addonSearching.value = true
+        _addonSearchError.value = null
         _addonResults.value = emptyList()
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                _addonResults.value = ModrinthApi.search(query, kind)
+                val hits = ModrinthApi.search(query, kind)
+                if (requestId == addonSearchRequestId) _addonResults.value = hits
             } catch (e: Exception) {
-                _addonInstall.value = DownloadState(error = "搜索失败：${e.message}")
+                if (requestId == addonSearchRequestId) {
+                    _addonSearchError.value = "搜索失败：${e.message ?: e.javaClass.simpleName}"
+                }
             } finally {
-                _addonSearching.value = false
+                // 带序号：旧请求的 finally 可能晚于新请求置位，无条件复位会把新请求的
+                // loading 提前关掉（版本列表加载里踩过同一个坑）
+                if (requestId == addonSearchRequestId) _addonSearching.value = false
             }
         }
+    }
+
+    /**
+     * 安装前的同名检查：文件名与已装插件/模组相同时先停下来问一句。
+     *
+     * 同名替换本身是对的（Bukkit/Fabric 的惯例：同名 = 同一份插件的新版本，
+     * 改名会让两份 jar 被同时加载），但它会**直接覆盖用户已经下好的文件**，
+     * 属于不可逆动作 —— 和本页的删除一样必须先确认。目标文件名的解析要走网络，
+     * 所以整个检查放在 ViewModel 的 IO 协程里做，不依赖调用方的组合作用域。
+     */
+    fun installAddonChecked(instance: ServerInstance, kind: AddonKind, hit: ModrinthSearchHit) {
+        if (_addonInstall.value.running) return
+        _addonInstall.value = DownloadState(running = true, message = "检查 ${hit.title} 的适配版本…")
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val target = AddonManager.targetFile(instance, kind, hit.project_id, instance.mcVersion)
+                val existing = AddonManager.existingCollision(instance, kind, target)
+                if (existing != null) {
+                    // running=false + replacePending=true：界面据此弹确认，取消时直接清掉
+                    _addonInstall.value = DownloadState(
+                        message = "同名文件已存在：${existing.name}",
+                        replacePending = true,
+                    )
+                    return@launch
+                }
+            } catch (e: Exception) {
+                // 解析失败（没有适配当前 MC 版本 / 文件名非法）：直接把原因说出来，
+                // 继续走 install 只会拿到同一句错误、白白多一次网络请求
+                _addonInstall.value = DownloadState(error = e.message ?: "解析适配版本失败")
+                return@launch
+            }
+            _addonInstall.value = DownloadState()
+            installAddon(instance, kind, hit)
+        }
+    }
+
+    /** 同名替换确认：继续安装（[installAddon] 内部会原子换入新文件） */
+    fun confirmReplaceAddon(instance: ServerInstance, kind: AddonKind, hit: ModrinthSearchHit) {
+        if (!_addonInstall.value.replacePending) return
+        _addonInstall.value = DownloadState()
+        installAddon(instance, kind, hit)
+    }
+
+    /** 同名替换取消：把待确认状态清掉，不动磁盘上的原文件 */
+    fun cancelReplaceAddon() {
+        if (_addonInstall.value.replacePending) _addonInstall.value = DownloadState()
     }
 
     fun installAddon(instance: ServerInstance, kind: AddonKind, hit: ModrinthSearchHit) {

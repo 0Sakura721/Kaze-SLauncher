@@ -56,10 +56,20 @@ object ModrinthApi {
     private const val USER_AGENT = "KazeSLauncher/3.0 (com.kaze.newage; server launcher)"
     private val json = Json { ignoreUnknownKeys = true }
 
-    /** 搜索项目 */
+    /**
+     * 搜索项目。
+     *
+     * facet 只按 **project_type** 过滤，不写死 `categories:paper`。
+     *
+     * 原来插件搜索固定带 `["categories:paper"]`：Modrinth 的 categories facet 要求项目**显式**
+     * 勾了该分类，而 Spigot / Purpur / 通用 Bukkit 插件基本不会勾 paper —— 于是 Spigot、Purpur
+     * 实例搜「EssentialsX」之类能跑得很好的插件，结果为空，用户以为"没有这个插件"。
+     * 按加载器筛选发生在 [versions]（安装时按实例核心取 paper/spigot/purpur/fabric/forge/neoforge），
+     * 不支持当前核心的项目会在那一步给出明确提示，不会装错。
+     */
     fun search(query: String, kind: AddonKind, limit: Int = 20): List<ModrinthSearchHit> {
         val facets = when (kind) {
-            AddonKind.PLUGIN -> """[["project_type:plugin"],["categories:paper"]]"""
+            AddonKind.PLUGIN -> """[["project_type:plugin"]]"""
             AddonKind.MOD -> """[["project_type:mod"]]"""
         }
         val url = "$BASE/search?query=${enc(query)}&limit=$limit&index=relevance&facets=${enc(facets)}"

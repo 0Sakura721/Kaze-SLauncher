@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.core.addons.AddonKind
 import com.kaze.newage.core.addons.AddonManager
+import com.kaze.newage.core.addons.ModrinthSearchHit
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.components.ExpressiveLoadingRing
@@ -97,6 +98,10 @@ fun AddonsScreen(
     }
 
     val kindLabel = if (kind == AddonKind.PLUGIN) "插件" else "模组"
+    // 核心不支持这类附件时整页只读：搜索/安装全部禁用。
+    // 原来只有一条警示横幅，搜索与安装照常可用 —— 用户能把 Fabric 模组装进 Paper 实例
+    // （mods/ 目录对 Paper 毫无意义，白下几十 MB 还不报错）。
+    val supported = AddonManager.supports(instance, kind)
 
     var query by remember { mutableStateOf("") }
     var searched by remember { mutableStateOf(false) }
@@ -104,6 +109,7 @@ fun AddonsScreen(
     val installed = remember(instanceId, refresh) { AddonManager.installed(instance, kind) }
     val results by viewModel.addonResults.collectAsStateWithLifecycle()
     val searching by viewModel.addonSearching.collectAsStateWithLifecycle()
+    val searchError by viewModel.addonSearchError.collectAsStateWithLifecycle()
     val installState by viewModel.addonInstall.collectAsStateWithLifecycle()
 
     // 安装是异步的：原来只在点击「安装」时 refresh++，那时文件还没落盘，
@@ -118,6 +124,7 @@ fun AddonsScreen(
     // 正在安装时不动它，否则会把进行中的进度显示抹掉。
     LaunchedEffect(Unit) {
         if (!viewModel.addonInstall.value.running) viewModel.clearAddonInstallState()
+        viewModel.clearAddonSearchError()
     }
 
     // 排序：搜索接口的 index 固定为 relevance，下载量排序在客户端做（结果集只有 20 条）
@@ -148,9 +155,38 @@ fun AddonsScreen(
 
     // 回车与右侧图标都走这里；状态在调用时现读，避免闭包捕获到过期的可点状态
     fun submitSearch() {
-        if (query.isBlank() || searching) return
+        if (!supported || query.isBlank() || searching) return
         searched = true
         viewModel.searchAddons(query.trim(), kind)
+    }
+
+    // 同名替换确认框：installAddonChecked 在解析出目标文件名与已装文件相同时停在这里。
+    // 点的是哪一行要记下来 —— 确认时要按同一条项目继续安装。
+    var replaceTarget by remember { mutableStateOf<ModrinthSearchHit?>(null) }
+    LaunchedEffect(installState.replacePending) {
+        if (!installState.replacePending) replaceTarget = null
+    }
+    replaceTarget?.takeIf { installState.replacePending }?.let { hit ->
+        AlertDialog(
+            onDismissRequest = { viewModel.cancelReplaceAddon() },
+            title = { Text("已存在同名文件") },
+            text = {
+                Text(
+                    "${installState.message}\n\n" +
+                        "继续安装会用它替换掉原文件（Bukkit / Fabric 按文件名加载，改名会让同一个" +
+                        "${kindLabel}被加载两遍，所以只能替换）。原文件将被覆盖，无法撤销。"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.confirmReplaceAddon(instance, kind, hit)
+                    refresh++
+                }) { Text("替换", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.cancelReplaceAddon() }) { Text("取消") }
+            },
+        )
     }
 
     Column(
@@ -195,7 +231,13 @@ fun AddonsScreen(
             SearchField(
                 query = query,
                 searching = searching,
-                onQueryChange = { query = it },
+                enabled = supported,
+                onQueryChange = {
+                    query = it
+                    // 开始改关键词就把上一次的失败提示收起来：否则旧报错会挂在输入框下面，
+                    // 看起来像"这次搜索也失败了"
+                    viewModel.clearAddonSearchError()
+                },
                 onSubmit = { submitSearch() },
             )
 
@@ -236,6 +278,14 @@ fun AddonsScreen(
                 )
             }
             installState.error?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            // 搜索失败走**独立**槽位：写进 addonInstall 会让"安装"的空态判断跟着变
+            searchError?.let {
                 Text(
                     it,
                     color = MaterialTheme.colorScheme.error,
@@ -291,10 +341,11 @@ fun AddonsScreen(
                                     onClick = {
                                         // 先记下是哪一行在装，进度才能落到这一行上
                                         installingId = hit.project_id
-                                        viewModel.installAddon(instance, kind, hit)
-                                        refresh++
+                                        replaceTarget = hit
+                                        // 先解析目标文件名、与已装文件比对：同名时弹确认
+                                        viewModel.installAddonChecked(instance, kind, hit)
                                     },
-                                    enabled = !installState.running,
+                                    enabled = supported && !installState.running,
                                 ) { Text("安装") }
                             }
                         },
@@ -428,11 +479,15 @@ fun AddonsScreen(
 /**
  * Modrinth 搜索栏：高 56dp、全圆角、surfaceContainerHigh 底。
  * 左侧搜索图标；右侧是搜索动作（搜索中换成加载指示器）；回车同样发起搜索。
+ *
+ * [enabled] = false（当前核心不支持这类附件）时整条搜索栏不可点、不可输入：
+ * 只挂一条警示横幅却照常能搜能装，等于把"不支持"说成了一句废话。
  */
 @Composable
 private fun SearchField(
     query: String,
     searching: Boolean,
+    enabled: Boolean,
     onQueryChange: (String) -> Unit,
     onSubmit: () -> Unit,
 ) {
@@ -441,7 +496,8 @@ private fun SearchField(
         modifier = Modifier.fillMaxWidth().height(56.dp),
         shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        contentColor = if (enabled) MaterialTheme.colorScheme.onSurface
+        else MaterialTheme.colorScheme.onSurfaceVariant,
     ) {
         Row(
             Modifier.fillMaxSize().padding(start = 16.dp, end = 4.dp),
@@ -461,6 +517,7 @@ private fun SearchField(
                     // 整条胶囊都要能点进输入框：BasicTextField 本身只有一行文字那么高，
                     // 点它上下两侧原本是死区（不发 ripple，只是把焦点交给输入框）
                     .clickable(
+                        enabled = enabled,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) { focusRequester.requestFocus() },
@@ -468,7 +525,7 @@ private fun SearchField(
             ) {
                 if (query.isEmpty()) {
                     Text(
-                        "搜索 Modrinth",
+                        if (enabled) "搜索 Modrinth" else "当前核心不支持这类附件",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -477,6 +534,7 @@ private fun SearchField(
                 BasicTextField(
                     value = query,
                     onValueChange = onQueryChange,
+                    enabled = enabled,
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = MaterialTheme.colorScheme.onSurface,
@@ -493,7 +551,7 @@ private fun SearchField(
                     ExpressiveLoadingRing(size = 22.dp, speed = 1.6f)
                 }
             } else {
-                IconButton(onClick = onSubmit, enabled = query.isNotBlank()) {
+                IconButton(onClick = onSubmit, enabled = enabled && query.isNotBlank()) {
                     Icon(Icons.Filled.Search, contentDescription = "搜索")
                 }
             }
