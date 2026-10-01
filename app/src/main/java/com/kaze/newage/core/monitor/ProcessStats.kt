@@ -32,8 +32,10 @@ object ProcessStats {
         val cpuPercent: Float,
         /** 相当于占满几个核（可以 >1） */
         val coresUsed: Float,
-        /** 常驻内存（KB） */
+        /** 常驻内存（KB）；**-1 = 读不到**（不能写成 0：界面会显示"内存 0.00 GB"，像是服务端不占内存） */
         val rssKb: Long,
+        /** 采样用的 pid。诊断用：读数不对时一眼就能看出是"选错了进程" */
+        val pid: Int,
     )
 
     /**
@@ -82,47 +84,86 @@ object ProcessStats {
         return percent to coresUsed
     }
 
-    /** 读一次累计 tick + VmRSS；进程不在了返回 null */
+    /**
+     * 读一次累计 tick + VmRSS；进程不在了返回 null。
+     *
+     * ⚠️ RSS 读不到时返回 **-1**，**不能退化成 0**：0 会被界面显示成「内存 0.00 GB（0%）」，
+     * 看起来像"服务端不占内存 / ram 没读出来"，而真机上那其实是**选错了进程**的典型症状
+     * （选中的是只占 2.8 MB 的 proot 包装进程）。读不到就如实说"读不到"。
+     */
     fun sample(pid: Int): Pair<Long, Long>? {
         val statFile = File("/proc/$pid/stat")
-        val statusFile = File("/proc/$pid/status")
         if (!statFile.canRead()) return null
         val ticks = runCatching { statFile.readText() }.getOrNull()?.let { parseCpuTicks(it) } ?: return null
-        val rss = runCatching { statusFile.readText() }.getOrNull()?.let { parseVmRssKb(it) } ?: 0L
+        val rss = runCatching { File("/proc/$pid/status").readText() }.getOrNull()
+            ?.let { parseVmRssKb(it) } ?: -1L
         return ticks to rss
     }
 
     /**
-     * 找出这台实例的服务端 pid。
+     * 扫描到的一个候选进程。
      *
-     * 服务端是 proot 的子进程，句柄拿不到，只能扫 `/proc`：
-     * 谁的 cmdline 里同时出现 `java` 与这台实例的目录名，谁就是。
-     * 扫不到返回 null（未启动 / 无权限 / 已经退出）。
+     * @param comm `/proc/<pid>/comm`（可执行名，如 `java` / `proot`）—— 用来排除包装进程
+     * @param descendant 是不是本进程的后代（服务端是 app → proot → java）
+     * @param rssKb 常驻内存；**读不到是 -1**，不是 0
      */
+    data class Candidate(
+        val pid: Int,
+        val cmdline: String,
+        val comm: String,
+        val descendant: Boolean,
+        val rssKb: Long,
+    )
+
+    /**
+     * 从候选里挑出**真正的服务端 JVM**（纯函数，好测）。
+     *
+     * 这条规则是踩坑改出来的：`proot` 自己的 cmdline 里也含 `java`（它就是要去跑的
+     * java 路径），而它的 pid 比它拉起的 JVM 小、会被先扫到。旧逻辑有一句
+     * `if (cmdline.contains(实例目录名)) return pid` 的短路，于是**把 proot 包装进程
+     * 当成了服务端**：CPU 显示 proot 的（偏低，真机实测 8%）、内存显示 proot 的 RSS
+     * （≈2.8 MB，两位小数就是 `0.00 GB`）—— 用户看到的就是"CPU 偏低 + ram 显示 0"。
+     *
+     * 现在的优先级：
+     *  1. 只在**本进程的后代**里挑（服务端一定是我们的后代）；一个后代都没有时退回全体。
+     *  2. 再优先 `comm == "java"` 的：这一条把 proot / sh 这类包装进程排除掉。
+     *  3. 同级取 **RSS 最大**的：真正在跑的 JVM 是这里面最重的（proot 只有几 MB）。
+     *  4. RSS 都读不到时（全是 -1）取 pid 最大的：服务端是最后被拉起来的那个。
+     */
+    fun pickServer(cands: List<Candidate>): Candidate? {
+        if (cands.isEmpty()) return null
+        val pool = cands.filter { it.descendant }.ifEmpty { cands }
+        val jvms = pool.filter { it.comm == "java" }
+        return (jvms.ifEmpty { pool }).maxWithOrNull(compareBy({ it.rssKb }, { it.pid }))
+    }
+
     /**
      * 上一次扫描的计数，给界面显示用。
      *
      * 真机反馈"一直采样中"时，光看"采样中"没法判断是**匹配规则**不对，还是
      * `/proc/<别的 pid>` **根本读不到** —— 这两件事的修法完全不同。
-     * 把候选数 / 可读 cmdline 数 / java 命中数 / 后代数摆在界面上，
+     * 把候选数 / 可读 cmdline 数 / java 命中数 / 后代数 / **选中的是哪个 pid** 摆在界面上，
      * 用户截一张图就能定位，不必连 adb。
      */
     @Volatile
     var lastDiag: String = ""
 
-    fun findServerPid(instanceDirName: String): Int? {
+    /**
+     * 找出这台实例的服务端 pid。扫不到返回 null（未启动 / 无权限 / 已经退出）。
+     *
+     * 只负责"扫"：把 /proc 里 cmdline 含 `java` 的进程收集成 [Candidate]，
+     * 选谁交给纯函数 [pickServer]（那条规则踩过坑，见它的注释）。
+     */
+    fun findServerPid(): Int? {
         val proc = File("/proc")
-        val candidates = proc.listFiles { f -> f.isDirectory && f.name.all { it.isDigit() } }
+        val dirs = proc.listFiles { f -> f.isDirectory && f.name.all { it.isDigit() } }
             ?: return null
         val myPid = android.os.Process.myPid()
-        val mine = ArrayList<Pair<Int, String>>()   // 后代里的 java
-        val anyJava = ArrayList<Pair<Int, String>>()  // 兜底：所有 java
-        var dirs = 0
+        val cands = ArrayList<Candidate>()
         var readableCmdline = 0
         var unreadable = 0
-        for (dir in candidates) {
+        for (dir in dirs) {
             val pid = dir.name.toIntOrNull() ?: continue
-            dirs++
             // 读不到 cmdline（Android 对 /proc/<别的 pid>/cmdline 有限制、
             // 或 proot 屏蔽）与"读到了但不是 java"是两回事，分开计数
             val cmdline = runCatching { File(dir, "cmdline").readBytes() }.getOrNull()
@@ -131,25 +172,21 @@ object ProcessStats {
             readableCmdline++
             val text = String(cmdline, Charsets.UTF_8).replace('\u0000', ' ')
             if (!text.contains("java")) continue
-            anyJava.add(pid to text)
-            if (isDescendant(pid, myPid)) mine.add(pid to text)
+            cands.add(
+                Candidate(
+                    pid = pid,
+                    cmdline = text,
+                    comm = runCatching { File(dir, "comm").readText().trim() }.getOrNull().orEmpty(),
+                    descendant = isDescendant(pid, myPid),
+                    rssKb = rssKb(pid),
+                )
+            )
         }
-        // ① 优先：**自己进程的后代**里的 java。
-        //    服务端是 app → proot → java，所以 java 一定是我们的后代。
-        //    这一条比"cmdline 里带实例目录名"可靠得多 —— proot 会把子进程 cmdline 里的
-        //    路径改写成 /mnt/...，实例目录名（Forge-26.3 之类）根本不出现，
-        //    旧版就是因此永远匹配不到、这一行数据从来不显示。
-        // ② 其中若有人真的带实例目录名，就是它。
-        // ③ 否则取 RSS 最大的那个（服务端是这里面最重的进程）。
-        lastDiag = "pid目录 $dirs · 可读 $readableCmdline · 读不到 $unreadable · java ${
-            anyJava.size
-        } · 后代 ${
-            mine.size
-        } · 自己 $myPid"
-        for ((pid, text) in mine) if (text.contains(instanceDirName)) return pid
-        if (mine.isNotEmpty()) return mine.maxByOrNull { rssKb(it.first) }?.first
-        for ((pid, text) in anyJava) if (instanceDirName.isNotBlank() && text.contains(instanceDirName)) return pid
-        return anyJava.maxByOrNull { rssKb(it.first) }?.first
+        val picked = pickServer(cands)
+        lastDiag = "pid目录 ${dirs.size} · 可读 $readableCmdline · 读不到 $unreadable · " +
+            "java ${cands.size} · 后代 ${cands.count { it.descendant }} · " +
+            "选中 ${picked?.let { "pid ${it.pid}/${it.comm.ifBlank { "?" }}/rss ${it.rssKb}" } ?: "无"} · 自己 $myPid"
+        return picked?.pid
     }
 
     /**

@@ -8,6 +8,17 @@
 ## [Unreleased]
 
 ### Fixed
+- **控制台占用数据选错了进程：CPU 偏低、内存显示 `0.00 GB`**（真机反馈："cpu 显示占用过低，我觉得有问题，ram 没读取到，显示 0"）。
+  根因是 `findServerPid` 两条规则叠加：**`proot` 自己的 cmdline 里也含 `java`**（它就是要去跑的
+  java 路径），而它的 pid 比它拉起的 JVM 小、会被先扫到；旧逻辑紧接着还有一句
+  `if (cmdline.contains(实例目录名)) return pid` 的短路 —— 于是**把 proot 包装进程当成了服务端**：
+  真机上那个 `CPU 8%` 是 proot 自己的、`0.00 GB` 是 proot 自己的 RSS（≈2.8 MB，两位小数就是这么来的）。
+  所以不是"没读取到"，而是"读错了进程"；而 `sample()` 又把读不到静默退化成 0，看起来更像没读到。
+  - 选进程抽成纯函数 `pickServer()`：① 只在本进程**后代**里挑 ② 优先 `comm == "java"`
+    （把 proot / sh 这类包装进程排除掉）③ 同级取 **RSS 最大** ④ RSS 全读不到时取 pid 最大。
+  - `sample()` 读不到 `VmRSS` 时返回 **-1**（不再退化成 0）；界面显示「内存 读不到（pid N）」
+    而不是误导性的 `0.00 GB（0%）` —— 下次一眼就能看出是"读错进程"还是"真读不到"。
+  - `ProcessStatsTest` 增加 5 条选进程用例，含"proot 的 cmdline 也含 java"这条真机回归。
 - **控制台一直显示「CPU 采样中…」**（真机反馈："cpu 一直显示采样"）。
   根因**不是** `/proc` 权限，而是**采样循环从来没被启动过**：
   `AppViewModel.startProcStatsPolling()` 只有定义、**全仓库没有任何调用点** →

@@ -84,4 +84,65 @@ class ProcessStatsTest {
         val (p, _) = ProcessStats.cpuFrom(0, 100, 1000, cores = 0)
         assertTrue("核数非法时按 1 核处理，不该出现 NaN/Inf", p.isFinite() && p in 0f..100f)
     }
+
+    // ── 选进程（真机反馈"CPU 偏低 + ram 显示 0"）────────────────────────────
+    // `proot` 自己的 cmdline 里也含 "java"（它就是要去跑的 java 路径），而它的 pid 更小、
+    // 会被先扫到。旧逻辑有一句 `cmdline.contains(实例目录名) -> return pid` 的短路，
+    // 于是把 **proot 包装进程**当成了服务端：CPU 显示 proot 的（实测 8%）、
+    // 内存显示 proot 的 RSS（≈2.8 MB，两位小数就是 `0.00 GB`）。
+
+    /** 真实形态：proot 包装进程 + 它拉起的 JVM */
+    private fun prootAndJvm() = listOf(
+        ProcessStats.Candidate(
+            pid = 21360,
+            cmdline = "proot --link2symlink -0 -r /rootfs /rootfs/usr/lib/jvm/java-17/bin/java -Xmx2048M -jar server.jar nogui Forge-1.20.1",
+            comm = "proot",
+            descendant = true,
+            rssKb = 2_820,
+        ),
+        ProcessStats.Candidate(
+            pid = 21365,
+            cmdline = "/rootfs/usr/lib/jvm/java-17/bin/java -Xmx2048M -jar server.jar nogui",
+            comm = "java",
+            descendant = true,
+            rssKb = 1_800_000,
+        ),
+    )
+
+    @Test
+    fun `选进程_proot 的 cmdline 也含 java_必须选 JVM 而不是它`() {
+        assertEquals(21365, ProcessStats.pickServer(prootAndJvm())!!.pid)
+    }
+
+    @Test
+    fun `选进程_comm 读不到时按 RSS 取最重的`() {
+        val cands = listOf(
+            ProcessStats.Candidate(1, "proot ... java ...", "proot", true, 2_820),
+            ProcessStats.Candidate(2, "/x/java -jar server.jar", "", true, 1_800_000),
+        )
+        assertEquals(2, ProcessStats.pickServer(cands)!!.pid)
+    }
+
+    @Test
+    fun `选进程_RSS 全读不到时取 pid 最大的`() {
+        val cands = listOf(
+            ProcessStats.Candidate(100, "proot ... java ...", "proot", true, -1),
+            ProcessStats.Candidate(220, "java -jar server.jar", "java", true, -1),
+        )
+        assertEquals(220, ProcessStats.pickServer(cands)!!.pid)
+    }
+
+    @Test
+    fun `选进程_优先本进程的后代_别人家的 java 再重也不要`() {
+        val cands = listOf(
+            ProcessStats.Candidate(900, "java -jar some-other-app.jar", "java", false, 9_000_000),
+            ProcessStats.Candidate(9000, "java -jar server.jar", "java", true, 1_000_000),
+        )
+        assertEquals(9000, ProcessStats.pickServer(cands)!!.pid)
+    }
+
+    @Test
+    fun `选进程_没有候选时返回 null`() {
+        assertNull(ProcessStats.pickServer(emptyList()))
+    }
 }

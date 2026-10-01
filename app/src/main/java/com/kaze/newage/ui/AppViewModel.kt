@@ -478,19 +478,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     continue
                 }
                 if (pid == null || ProcessStats.sample(pid) == null) {
-                    pid = ProcessStats.findServerPid(dirName)
+                    pid = ProcessStats.findServerPid()
                     lastTicks = 0L
                     lastAt = 0L
                 }
-                val got = pid?.let { ProcessStats.sample(it) }
-                if (got == null) {
+                val curPid = pid
+                val got = curPid?.let { ProcessStats.sample(it) }
+                if (got == null || curPid == null) {
                     _procStats.value = null
                     pid = null
                 } else {
                     val now = System.currentTimeMillis()
                     if (lastAt > 0L) {
                         val (percent, cores) = ProcessStats.cpuFrom(lastTicks, got.first, now - lastAt, ProcessStats.cores)
-                        _procStats.value = ProcessStats.Reading(percent, cores, got.second)
+                        _procStats.value = ProcessStats.Reading(percent, cores, got.second, curPid)
                     }
                     lastTicks = got.first
                     lastAt = now
