@@ -60,6 +60,7 @@ import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.CoreCategory
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.AppViewModel
+import com.kaze.newage.ui.components.ForceStopConfirmDialog
 import com.kaze.newage.ui.components.M3EConnectedList
 import com.kaze.newage.ui.components.M3EListItem
 import com.kaze.newage.ui.components.M3EScreenHeader
@@ -105,6 +106,21 @@ fun ServerScreen(
     }
     fun countOf(cat: CoreCategory?): Int =
         if (cat == null) instances.size else instances.count { it.coreType.category == cat }
+
+    // 「强制停止」必须先弹确认（真机要求）。这里只记"要强制哪个实例"；
+    // 若框开着的时候它自己停稳了，ForceStopConfirmDialog 会自己收起（见其注释）。
+    var forceStopTarget by remember { mutableStateOf<ServerInstance?>(null) }
+    ForceStopConfirmDialog(
+        visible = forceStopTarget != null,
+        instanceName = forceStopTarget?.name.orEmpty(),
+        stillStopping = forceStopTarget
+            ?.let { (states[it.id] ?: ServerState.Idle) == ServerState.Stopping } == true,
+        onConfirm = {
+            forceStopTarget?.let { viewModel.forceStopInstance(it) }
+            forceStopTarget = null
+        },
+        onDismiss = { forceStopTarget = null },
+    )
 
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -219,7 +235,14 @@ fun ServerScreen(
                                 onOpenInstance(instance)
                             },
                             onStart = { viewModel.startInstance(instance) },
-                            onStop = { viewModel.stopInstance(instance) },
+                            onStop = {
+                                // 停止中再点一次 = 请求强制停止 → 先弹确认（见上面的 ForceStopConfirmDialog）
+                                if ((states[instance.id] ?: ServerState.Idle) == ServerState.Stopping) {
+                                    forceStopTarget = instance
+                                } else {
+                                    viewModel.stopInstance(instance)
+                                }
+                            },
                             onDelete = { viewModel.removeInstance(instance) },
                         )
                     }

@@ -68,6 +68,7 @@ import com.kaze.newage.core.server.ServerProperties
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.AppViewModel
+import com.kaze.newage.ui.components.ForceStopConfirmDialog
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
 import com.kaze.newage.ui.components.M3ECard
@@ -235,11 +236,27 @@ fun InstanceDetailScreen(
         )
 
         // ── 常驻状态条：状态胶囊 + 主行动（不随标签页切换而消失）──
+        // 「强制停止」必须先弹确认（真机要求）；框开着时服务器自己停稳 → 框自动收起。
+        var askForceStop by remember { mutableStateOf(false) }
         InstanceActionRow(
             state = state,
             stateColor = stateColor,
             onStart = { viewModel.startInstance(instance) },
-            onStop = { viewModel.stopInstance(instance) },
+            onStop = {
+                // 停止中再点一次 = 请求强制停止 → 先问一句；其余情况是优雅停止
+                if (state == ServerState.Stopping) askForceStop = true
+                else viewModel.stopInstance(instance)
+            },
+        )
+        ForceStopConfirmDialog(
+            visible = askForceStop,
+            instanceName = instance.name,
+            stillStopping = state == ServerState.Stopping,
+            onConfirm = {
+                askForceStop = false
+                viewModel.forceStopInstance(instance)
+            },
+            onDismiss = { askForceStop = false },
         )
 
         // 启动失败必须被看到，也要有出路：常驻失败条 + 直达启动日志

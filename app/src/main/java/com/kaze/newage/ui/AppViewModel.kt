@@ -436,24 +436,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 停止实例。
+     * 停止实例（**优雅**：发 `stop` 命令，然后一直等它把世界存完，不自动强杀）。
      *
-     * **停止中再点一次 = 强制停止**（真机需求："把强制停止的选择权留给用户，停止中时
-     * 再点一次按钮就强制停"）。正常停止只发 `stop` 命令，然后一直等服务器把世界存完，
-     * 不再自动强杀 —— 要不要砍掉由用户决定。
+     * 停止中再调它**不会**强制 —— 强制必须经过确认框，由界面确认后调 [forceStopInstance]
+     * （真机要求："点强制关闭按钮，要提示确定强制关闭"）。这里保留一个兜底：
+     * 状态已是 Stopping 时直接忽略，避免任何入口绕过确认就把进程砍掉。
      */
     fun stopInstance(instance: ServerInstance) {
         val state = serverManager.states.value[instance.id] ?: ServerState.Idle
-        if (state == ServerState.Stopping) {
-            forceStopInstance(instance)
-            return
-        }
+        if (state == ServerState.Stopping) return
         container.appScope.launch {
             serverManager.stop(instance)
         }
     }
 
-    /** 强制停止：SIGTERM（让 proot 清理 guest）→ 5 秒 → SIGKILL */
+    /** 强制停止（**界面确认后**才调用）：SIGTERM 让 proot 把 guest 的 java 一起带走 → 5 秒 → SIGKILL */
     fun forceStopInstance(instance: ServerInstance) {
         serverManager.forceStop(instance)
     }

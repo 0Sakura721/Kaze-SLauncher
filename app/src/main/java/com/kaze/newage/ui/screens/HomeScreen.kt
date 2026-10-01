@@ -52,6 +52,7 @@ import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.Dest
+import com.kaze.newage.ui.components.ForceStopConfirmDialog
 import com.kaze.newage.ui.components.ExpressiveLoadingGlyph
 import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
 import com.kaze.newage.ui.components.InstanceIcon
@@ -262,13 +263,26 @@ fun HomeScreen(
 
         // ── 主行动：启动 / 停止（connected button group）──
         if (current != null) {
+            // 「强制停止」必须先弹确认（真机要求）。框开着的时候如果服务器自己停稳了，
+            // ForceStopConfirmDialog 会自己收起（它监听 stillStopping）。
+            var askForceStop by remember { mutableStateOf(false) }
+            ForceStopConfirmDialog(
+                visible = askForceStop,
+                instanceName = current.name,
+                stillStopping = serverState == ServerState.Stopping,
+                onConfirm = {
+                    askForceStop = false
+                    viewModel.forceStopInstance(current)
+                },
+                onDismiss = { askForceStop = false },
+            )
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 val actionLabel = when {
                     // 停止中再点一次 = 强制停止：正常停止会一直等服务器存完世界，
-                    // 要不要砍掉由用户决定（点这里才会走 SIGTERM→SIGKILL）
+                    // 要不要砍掉由用户拍板（点了会先弹确认框）
                     serverState == ServerState.Stopping -> "强制停止"
                     running -> "停止服务端"
                     busy -> "取消启动"
@@ -284,9 +298,14 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                     onClick = {
-                        // 运行中或启动中（部署/装 Java/下载核心/Forge 安装）都走停止。
-                        // 旧版 busy 时按钮被禁用，用户在长达几分钟的启动过程里没有任何中止手段。
-                        if (running || busy) viewModel.stopInstance(current) else viewModel.startInstance(current)
+                        when {
+                            // 停止中再点一次 = 请求强制停止 → **先问一句**，确认后才真砍
+                            serverState == ServerState.Stopping -> askForceStop = true
+                            // 运行中或启动中（部署/装 Java/下载核心/Forge 安装）都走优雅停止。
+                            // 旧版 busy 时按钮被禁用，用户在长达几分钟的启动过程里没有任何中止手段。
+                            running || busy -> viewModel.stopInstance(current)
+                            else -> viewModel.startInstance(current)
+                        }
                     },
                 ) {
                     Row(
