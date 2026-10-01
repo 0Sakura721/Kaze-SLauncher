@@ -377,6 +377,23 @@ class InstanceStore(
     }
 
     /**
+     * 改实例的内存分配（`-Xmx`/`-Xms`）。
+     *
+     * 真机需求："创建完实例，还是可以像创建时那样编辑内存分配"。以前范围与对齐规则只写在
+     * 创建向导里，实例建好之后就再也改不了内存了。规则现在收到 [MemoryLimits]，
+     * 向导与详情页共用同一套，值一律过一遍 [MemoryLimits.clamp]。
+     *
+     * 注意：内存是**启动参数**，这里只落盘，不影响正在跑的进程（生效时机由调用方说明）。
+     */
+    fun setMemory(id: String, memoryMb: Int) {
+        val mb = com.kaze.newage.core.server.MemoryLimits.clamp(memoryMb)
+        _instances.value = _instances.value.map {
+            if (it.id == id) it.copy(memoryMb = mb) else it
+        }
+        save()
+    }
+
+    /**
      * 目录名净化。
      *
      * 除了替换文件系统非法字符，还必须 `trim('.')`：`.` 与 `..` 不含任何会被替换的字符，

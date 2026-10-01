@@ -246,17 +246,29 @@ object ProcessStats {
     /**
      * 设备内存快照：`(可用 KB, 总 KB, 是否低内存)`，读不到给 `(-1, -1, false)`。
      *
-     * "可用"用的是 `MemoryInfo.availMem` —— 它把**可回收的 page cache** 算作可用，
-     * 比 `MemFree` 有意义得多（Android 上 MemFree 常年只有几百 MB，看着像要炸，
-     * 其实一大半文件缓存随时能回收）。服务端 OOM 是手机上最常见的"莫名其妙崩"，
-     * 所以要把剩余量摆在服务端占用旁边。
+     * ⚠️ **大小读 `/proc/meminfo`，不走 `ActivityManager`**：创建向导里踩过这个坑 ——
+     * 真机实测 `MemoryInfo.availMem` 会异常地返回 `totalMem`，于是"可用"恒等于"总量"，
+     * 看着像内存怎么用都不掉。`MemAvailable` 才是把**可回收 page cache** 算进去的可用量
+     * （Android 上单看 `MemFree` 常年只有几百 MB，像要炸，其实一大半能回收）。
+     * 只有 `lowMemory` 这个系统判定继续用 ActivityManager —— /proc 里没有对应字段。
      *
      * 读不到返回 -1 而不是 0：0 会被界面显示成"可用 0.00 GB"，比不显示更吓人。
      */
-    fun memorySnapshot(context: android.content.Context): Triple<Long, Long, Boolean> = runCatching {
-        val mi = android.app.ActivityManager.MemoryInfo()
-        (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager)
-            .getMemoryInfo(mi)
-        Triple(mi.availMem / 1024, mi.totalMem / 1024, mi.lowMemory)
-    }.getOrElse { Triple(-1L, -1L, false) }
+    fun memorySnapshot(context: android.content.Context): Triple<Long, Long, Boolean> {
+        fun readKb(key: String): Long = runCatching {
+            java.io.File("/proc/meminfo").useLines { lines ->
+                lines.firstOrNull { it.startsWith(key) }
+                    ?.split(Regex("\\s+"))?.getOrNull(1)?.toLongOrNull() ?: 0L
+            }
+        }.getOrDefault(0L)
+        val total = readKb("MemTotal")
+        val avail = readKb("MemAvailable")
+        val low = runCatching {
+            val mi = android.app.ActivityManager.MemoryInfo()
+            (context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager)
+                .getMemoryInfo(mi)
+            mi.lowMemory
+        }.getOrDefault(false)
+        return if (total > 0L && avail > 0L) Triple(avail, total, low) else Triple(-1L, -1L, false)
+    }
 }

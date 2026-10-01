@@ -6,6 +6,10 @@
          「打开实例目录」必须交给别的应用 content:// —— targetSdk≥24 传 file:// 会抛
          FileUriExposedException，异常被吞掉后按钮就是"点了没反应"。 -->
     <external-files-path name="instances" path="instances/" />
+    <!-- 默认实例根：手机根目录下的 KazeS/（/sdcard/KazeS）。
+         「用其他应用打开 server.properties」靠它才能取到 content:// —— 少了这条，
+         默认布局下 FileProvider 会抛"找不到配置的根"，按钮只能退化成提示真实路径。 -->
+    <external-path name="kaze_shared" path="KazeS/" />
     <!-- 应用日志（诊断日志页的「分享」） -->
     <files-path name="logs" path="logs/" />
 </paths>

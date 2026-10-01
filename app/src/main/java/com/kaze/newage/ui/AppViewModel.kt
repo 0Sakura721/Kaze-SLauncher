@@ -455,6 +455,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         serverManager.forceStop(instance)
     }
 
+    /**
+     * 改实例的内存分配（真机需求："创建完实例，还是可以像创建时那样编辑内存分配"）。
+     *
+     * 内存是启动参数（`-Xmx`/`-Xms`），**不会**作用到正在跑的进程：运行中改的话，
+     * 明确往控制台写一句"重启后生效"，别让用户以为当前的上限已经变了。
+     */
+    fun setInstanceMemory(instance: ServerInstance, memoryMb: Int) {
+        val mb = com.kaze.newage.core.server.MemoryLimits.clamp(memoryMb)
+        instanceStore.setMemory(instance.id, mb)
+        val running = serverManager.states.value[instance.id] == ServerState.Running
+        serverManager.consoleFor(instance.id).emit(
+            "> 内存上限已改为 $mb MB" +
+                if (running) "（当前进程仍按旧值运行，重启后生效）" else "（下次启动生效）",
+            LineType.System,
+        )
+    }
+
     fun sendCommand(command: String) {
         val id = _currentInstanceId.value ?: return
         instanceStore.get(id)?.let { serverManager.sendCommand(it, command) }

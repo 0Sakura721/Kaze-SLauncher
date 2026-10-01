@@ -98,6 +98,7 @@ import com.kaze.newage.ui.components.M3ESegmentedRow
 import com.kaze.newage.ui.components.M3EStatusChip
 import com.kaze.newage.ui.components.WavyLinearProgress
 import com.kaze.newage.ui.theme.M3Motion
+import com.kaze.newage.ui.components.MemorySliderRow
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
 import androidx.compose.material3.OutlinedButton
@@ -390,7 +391,8 @@ private fun VersionConfigPhase(
     // 自动分配建议 = 可用内存一半（MB），256MB 对齐；
     // 下限 1024MB：512MB 连原版服务端都起不来（用户反馈"有的太小开都开不了"），上限 8192
     val suggestMb = remember(availMemGb) {
-        (((availMemGb * 1024f * 0.5f) / 256f).toInt() * 256f).coerceIn(1024f, 8192f)
+        // 规则与「实例详情 → 改内存」共用，避免两处各写一套
+        com.kaze.newage.core.server.MemoryLimits.suggestFrom(availMemGb * 1024f)
     }
     // 实际生效内存：自动 = 系统建议（不可手动改）；手动 = 滑块值
     val effectiveMb = if (autoMemory) suggestMb else memoryMb
@@ -1109,43 +1111,19 @@ private fun ConfigPage(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SliderRow(
+
     sliderMb: Float,
     autoMemory: Boolean,
     exceeded: Boolean,
     fmtGb: (Float) -> String,
     onMemoryMb: (Float) -> Unit,
-) {
-    val scheme = MaterialTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            if (autoMemory) "自动分配（建议 ${fmtGb(sliderMb)}）" else "游戏分配",
-            style = MaterialTheme.typography.labelMedium,
-            color = scheme.onSurfaceVariant,
-        )
-        Slider(
-            value = sliderMb,
-            onValueChange = { onMemoryMb(it) },
-            enabled = !autoMemory,
-            valueRange = 512f..8192f,
-            steps = 29, // 每 256MB 一档
-            thumb = {
-                Box(
-                    Modifier
-                        .size(width = 64.dp, height = 30.dp)
-                        .clip(M3Shape.small)
-                        .background(if (exceeded) scheme.error else scheme.primary),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        fmtGb(sliderMb),
-                        color = if (exceeded) scheme.onError else scheme.onPrimary,
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-            },
-        )
-    }
-}
+) = MemorySliderRow(
+    sliderMb = sliderMb,
+    autoMemory = autoMemory,
+    exceeded = exceeded,
+    fmtGb = fmtGb,
+    onMemoryMb = onMemoryMb,
+)
 
 /** 默认游戏模式：四选一 */
 @Composable

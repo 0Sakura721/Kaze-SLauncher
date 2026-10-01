@@ -69,6 +69,8 @@ import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.ForceStopConfirmDialog
+import com.kaze.newage.core.server.MemoryLimits
+import com.kaze.newage.ui.components.MemorySliderRow
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
 import com.kaze.newage.ui.components.M3ECard
@@ -540,6 +542,26 @@ private fun RunTab(
                     modifier = Modifier.weight(1f),
                 )
             }
+            // 建好之后还能改内存（真机需求："创建完实例，还是可以像创建时那样编辑内存分配"）。
+            // 内存是启动参数，运行中改只会落盘，AppViewModel 会往控制台写"重启后生效"。
+            var showMemoryEditor by remember { mutableStateOf(false) }
+            TextButton(
+                onClick = { showMemoryEditor = true },
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                Text("修改内存分配", style = MaterialTheme.typography.labelMedium)
+            }
+            EditMemoryDialog(
+                visible = showMemoryEditor,
+                instanceName = instance.name,
+                currentMb = instance.memoryMb,
+                isRunning = running,
+                onConfirm = { mb ->
+                    showMemoryEditor = false
+                    viewModel.setInstanceMemory(instance, mb)
+                },
+                onDismiss = { showMemoryEditor = false },
+            )
             // 过渡状态用不定态波浪进度条：后端只暴露 -Xmx 上限，没有 JVM 实时占用读数，
             // 画一个百分比会是在编数据；「正在进行」这一点是真实的
             if (busy) {
@@ -807,6 +829,104 @@ private fun PlayerManageCard(
     )
 }
 
+/**
+ * 「改内存分配」对话框：**与创建向导共用同一个滑块控件（[MemorySliderRow]）和同一套规则
+ * （[MemoryLimits]）**，所以"建好之后再改"看到的东西与创建时一致（真机需求）。
+ *
+ * 内存是启动参数（-Xmx/-Xms），改完要重启才生效 —— 运行中打开时在正文里写明。
+ */
+@Composable
+private fun EditMemoryDialog(
+    visible: Boolean,
+    instanceName: String,
+    currentMb: Int,
+    isRunning: Boolean,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    if (!visible) return
+
+    // 设备内存：读 /proc/meminfo。创建向导里已经踩过 —— 真机实测
+    // ActivityManager.getMemoryInfo().availMem 会异常地返回 totalMem，两者保持一致。
+    val mem = remember {
+        fun read(key: String): Long = runCatching {
+            File("/proc/meminfo").useLines { lines ->
+                lines.firstOrNull { it.startsWith(key) }
+                    ?.split(Regex("\\s+"))?.getOrNull(1)?.toLongOrNull() ?: 0L
+            }
+        }.getOrDefault(0L)
+        read("MemTotal") to read("MemAvailable")
+    }
+    val totalMb = mem.first / 1024f
+    val suggestMb = MemoryLimits.suggestFrom(mem.second / 1024f)
+
+    var mb by remember(visible, currentMb) {
+        mutableStateOf(currentMb.toFloat().coerceIn(MemoryLimits.MIN_MB.toFloat(), MemoryLimits.MAX_MB.toFloat()))
+    }
+    var showExact by remember { mutableStateOf(false) }
+    var exactText by remember { mutableStateOf("") }
+    val fmtGb: (Float) -> String = { String.format(java.util.Locale.US, "%.1f GB", it / 1024f) }
+    val exceeded = totalMb > 0f && mb > totalMb * 0.8f
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("内存分配") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "「$instanceName」当前 ${currentMb} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                MemorySliderRow(
+                    sliderMb = mb,
+                    autoMemory = false,
+                    exceeded = exceeded,
+                    fmtGb = fmtGb,
+                    onMemoryMb = { mb = it },
+                )
+                Text(
+                    if (exceeded) "超过设备内存的 80%（设备共 ${fmtGb(totalMb)}）"
+                    else "设备共 ${fmtGb(totalMb)} · 建议 ${suggestMb.toInt()} MB",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (exceeded) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { mb = suggestMb }) {
+                        Text("用建议值", style = MaterialTheme.typography.labelMedium)
+                    }
+                    OutlinedButton(onClick = { exactText = mb.toInt().toString(); showExact = true }) {
+                        Text("精确输入", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                if (showExact) {
+                    OutlinedTextField(
+                        value = exactText,
+                        onValueChange = { t -> exactText = t.filter { it.isDigit() }.take(5) },
+                        label = { Text("MB") },
+                        singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+                        ),
+                    )
+                }
+                Text(
+                    "范围 ${MemoryLimits.MIN_MB} ~ ${MemoryLimits.MAX_MB} MB，每 ${MemoryLimits.STEP_MB} MB 一档；" +
+                        if (isRunning) "服务器运行中，重启后生效。" else "下次启动生效。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            val typed = if (showExact) exactText.toIntOrNull() else null
+            TextButton(onClick = { onConfirm(MemoryLimits.clamp(typed ?: mb.toInt())) }) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
 /** 「配置」页：server.properties 可视化编辑器（三个分组卡 + 保存） */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -832,6 +952,29 @@ private fun PropertiesEditor(
         props = next
         saved = false
     }
+
+    // 「用其他应用打开 server.properties」：真机需求 —— 不依赖应用内编辑器，
+    // 交给系统或第三方编辑器，方便高级用户自由改（写权限也一起授，否则存不回去）。
+    // 走 FileProvider 的 content://：targetSdk≥24 传 file:// 会抛 FileUriExposedException。
+    val ctx = LocalContext.current
+    val propsFile = File(dir, "server.properties")
+    M3EListItem(
+        headline = "用其他应用打开",
+        supporting = "交给系统或第三方编辑器改 server.properties，改完保存后重启服务端生效",
+        trailing = {
+            TextButton(onClick = {
+                // 文件还不存在（没启动过）就先按编辑器里的当前值落一份，否则对方打开的是空文件
+                if (!propsFile.isFile) runCatching { ServerProperties.save(dir, props) }
+                if (!com.kaze.newage.util.openFileExternally(ctx, propsFile)) {
+                    android.widget.Toast.makeText(
+                        ctx,
+                        "无法交给外部应用打开（实例目录不在可共享范围）：${propsFile.absolutePath}",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }) { Text("打开") }
+        },
+    )
 
     val motd = value("motd", instanceName)
     val port = value("server-port", "25565")
