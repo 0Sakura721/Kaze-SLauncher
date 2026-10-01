@@ -43,6 +43,15 @@ interface ServerManager {
 
     suspend fun stop(instance: ServerInstance)
 
+    /**
+     * **强制停止**：只由用户「停止中再点一次」触发。
+     *
+     * 正常停止只发 `stop` 命令，然后就**一直等**服务器把世界存完 —— 不再自动强杀
+     * （旧实现在 10 秒后自动 SIGTERM→SIGKILL，真机上"还没 saving world 完就停了"）。
+     * 要不要砍掉、什么时候砍，交给用户决定。
+     */
+    fun forceStop(instance: ServerInstance)
+
     /** 发送控制台命令（写入进程 stdin，同步操作） */
     fun sendCommand(instance: ServerInstance, command: String)
 }

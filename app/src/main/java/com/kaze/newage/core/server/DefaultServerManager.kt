@@ -137,7 +137,7 @@ class DefaultServerManager(
         var waitJob: Job? = null
         var uptimeJob: Job? = null
 
-        /** 「优雅停止 → 10s 后强杀」的延时任务。重启前必须取消，否则它会杀掉新进程。
+        /** 优雅停止期间的**提示**任务（只写日志，绝不动进程）。重启前必须取消，否则提示会串到下一轮。
          *  见 stop() 的说明。 */
         var stopTimeoutJob: Job? = null
 
@@ -615,23 +615,66 @@ class DefaultServerManager(
         slot.setState(ServerState.Stopping)
         slot.log("> 正在停止服务器…", LineType.System)
         sendCommand(instance, "stop")
-        // 优雅停止等待 10s，超时强杀。
-        // 注意捕获当前的 proc，而不是在延时回调里读 slot.process ——
-        // 若用户在 10s 内重新启动，slot.process 已指向新进程，旧写法会把刚启动的服务端杀掉；
-        // 同时把 Job 存起来，重启前取消它。
+        // 优雅停止：**一直等**，绝不自动强杀。
+        //
+        // 真机反馈："停止服务器，还没 saving world 完就强制停了。" —— 旧实现在这里挂了
+        // 一个 10 秒定时器，到点就 SIGTERM→SIGKILL。forge 存一个世界可以远超 10 秒，
+        // 于是世界被砍在半路。要不要强杀是**用户的决定**：停止中再点一次按钮会走
+        // [forceStop]。这里只定期提示进度，绝不动进程。
+        //
+        // 只捕获当前的 proc（不在延时里读 slot.process），并把它存进 slot：
+        // 重启前要取消，否则这些提示会串到下一轮启动的日志里。
         slot.stopTimeoutJob?.cancel()
         slot.stopTimeoutJob = scope.launch {
-            delay(10_000)
-            if (proc.isAlive) {
-                // 先 SIGTERM，而不是直接 SIGKILL：proot 收到 SIGTERM 才有机会执行 `--kill-on-exit`
-                // 的清理，把它 trace 的 guest 进程（java）一起带走。
-                // 旧实现直接 destroyForcibly()（SIGKILL）→ proot 被瞬间杀死、来不及清理，
-                // 它下面的 java 会脱离继续运行：界面显示"已停止"，实际仍有 java 占着端口
-                // 和世界文件；用户再点启动就会在同一个世界目录上拉起第二个 java。
-                slot.log("> 停止超时，正在结束进程（SIGTERM，让 proot 清理 guest）…", LineType.Warn)
-                proc.destroy()
-                delay(5_000)
+            delay(15_000)
+            if (!proc.isAlive) return@launch
+            slot.log(
+                "> 仍在等服务器收尾（保存世界可能要几十秒）…要立即终止请再点一次「强制停止」",
+                LineType.System,
+            )
+            delay(60_000)
+            if (!proc.isAlive) return@launch
+            slot.log(
+                "> 仍未退出。若确认是卡死，再点一次「强制停止」；否则继续等它写完更安全（避免世界残缺）",
+                LineType.Warn,
+            )
+        }
+    }
+
+    /**
+     * 强制停止：**只由用户第二次点击触发**（停止中再点一次）。
+     *
+     * 顺序沿用旧版（先 SIGTERM 让 proot 执行 `--kill-on-exit` 把 guest 的 java 一起带走，
+     * 5 秒不退再 SIGKILL）—— 因为 proot 被 SIGKILL 时它 trace 的 java 会脱离继续跑，
+     * 界面显示"已停止"但端口和世界文件仍被占着，所以必须先给它 SIGTERM 的机会。
+     * 与旧版的唯一区别：它不再自动发生。
+     */
+    override fun forceStop(instance: ServerInstance) {
+        val slot = slots[instance.id] ?: run {
+            putState(instance.id, ServerState.Stopped)
+            return
+        }
+        val proc = slot.process
+        if (proc == null || !proc.isAlive) {
+            // 进程还没创建，但 start() 的协程仍在推进（部署 / 装 Java / 首启探测）：
+            // 置取消标志让 start() 自己收尾（与 stop() 同一套处理）。
+            if (slot.state.value in startingStates) {
+                slot.manualStop = true
+                slot.setState(ServerState.Stopping)
+                slot.log("> 已请求强制停止：先等当前启动流程收尾…", LineType.System)
+                return
             }
+            finalizeStop(slot)
+            return
+        }
+        slot.manualStop = true
+        slot.stopTimeoutJob?.cancel()
+        slot.stopTimeoutJob = null
+        slot.setState(ServerState.Stopping)
+        slot.log("> 强制停止：先给 proot 发 SIGTERM（让它把 guest 里的 java 一起带走）…", LineType.Warn)
+        scope.launch {
+            proc.destroy()
+            delay(5_000)
             if (proc.isAlive) {
                 slot.log(
                     "> 进程仍未退出，强制结束。若随后端口仍被占用，说明 guest 里的 java 未被回收",

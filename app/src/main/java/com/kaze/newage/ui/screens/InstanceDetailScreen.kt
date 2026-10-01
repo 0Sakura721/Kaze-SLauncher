@@ -461,6 +461,8 @@ private fun InstanceActionRow(
             Spacer(Modifier.width(8.dp))
             Text(
                 when {
+                    // 停止中再点一次 = 强制停止（正常停止会一直等服务器存完世界）
+                    state == ServerState.Stopping -> "强制停止"
                     running -> "停止服务端"
                     busy -> "取消启动"
                     else -> "启动服务端"

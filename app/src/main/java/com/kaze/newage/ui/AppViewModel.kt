@@ -410,21 +410,49 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val cur = serverManager.states.value[instance.id] ?: ServerState.Idle
             if (cur.isBusy()) return@launch
             serverManager.stop(instance)
-            // 有上限地等：卡住时也不能让按钮看起来永远没反应
-            withTimeoutOrNull(60_000) {
+            // 等它**真的停稳**再启动；超时就放弃本次启动，而不是硬启。
+            //
+            // 优雅停止现在会一直等服务器把世界存完（不再 10 秒自动强杀），世界大时
+            // 超过 60 秒很正常。硬启会在同一个世界目录上拉起第二个 java（旧版的
+            // 10 秒强杀恰好掩盖了这一点），所以宁可这次不启动，也要先把话说明白。
+            val stopped = withTimeoutOrNull(120_000) {
                 serverManager.states.first { m ->
                     val s = m[instance.id] ?: ServerState.Idle
                     s != ServerState.Running && !s.isBusy()
                 }
             }
+            if (stopped == null) {
+                serverManager.consoleFor(instance.id).emit(
+                    "> 仍在停止中（多半还在保存世界）：已取消本次启动。要立即终止请再点一次「强制停止」",
+                    LineType.Warn,
+                )
+                return@launch
+            }
             serverManager.start(instance)
         }
     }
 
+    /**
+     * 停止实例。
+     *
+     * **停止中再点一次 = 强制停止**（真机需求："把强制停止的选择权留给用户，停止中时
+     * 再点一次按钮就强制停"）。正常停止只发 `stop` 命令，然后一直等服务器把世界存完，
+     * 不再自动强杀 —— 要不要砍掉由用户决定。
+     */
     fun stopInstance(instance: ServerInstance) {
+        val state = serverManager.states.value[instance.id] ?: ServerState.Idle
+        if (state == ServerState.Stopping) {
+            forceStopInstance(instance)
+            return
+        }
         container.appScope.launch {
             serverManager.stop(instance)
         }
+    }
+
+    /** 强制停止：SIGTERM（让 proot 清理 guest）→ 5 秒 → SIGKILL */
+    fun forceStopInstance(instance: ServerInstance) {
+        serverManager.forceStop(instance)
     }
 
     fun sendCommand(command: String) {

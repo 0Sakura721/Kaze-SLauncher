@@ -267,6 +267,9 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 val actionLabel = when {
+                    // 停止中再点一次 = 强制停止：正常停止会一直等服务器存完世界，
+                    // 要不要砍掉由用户决定（点这里才会走 SIGTERM→SIGKILL）
+                    serverState == ServerState.Stopping -> "强制停止"
                     running -> "停止服务端"
                     busy -> "取消启动"
                     else -> "启动服务端"

@@ -503,7 +503,12 @@ private fun InstanceRow(
                     }
                     RoundActionButton(
                         icon = if (showStop) Icons.Filled.Stop else Icons.Filled.PlayArrow,
-                        description = if (showStop) "停止" else "启动",
+                        description = when {
+                            // 停止中再点一次 = 强制停止（正常停止会一直等服务器存完世界）
+                            state == ServerState.Stopping -> "强制停止"
+                            showStop -> "停止"
+                            else -> "启动"
+                        },
                         container = if (showStop) {
                             MaterialTheme.colorScheme.errorContainer
                         } else {
