@@ -225,15 +225,13 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             title = current?.name ?: "未选择实例",
             subtitle = if (current != null) {
                 buildString {
-                    append("MC ")
+                    // 真机上这段会被截断成 "Java 17 · ··"：去掉冗余的 "MC " 与内存上限
+                    // （上限在实例详情里，实际占用就在下面那一行监控里）
                     append(current.mcVersion.ifBlank { "自定义" })
                     append(" · ")
                     append(current.coreType.displayName)
                     append(" · Java ")
                     append(current.javaMajor)
-                    append(" · ")
-                    append(current.memoryMb)
-                    append(" MB")
                 }
             } else {
                 "还没有服务端实例，去「服务端」页新建"
@@ -344,21 +342,22 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                         append("CPU ").append(fmt("%.0f", s.cpuPercent)).append("%")
                         // 单核占用率可以超过 100%，所以把"用了几个核"也说清楚 ——
                         // 否则 8 核机器上的 12% 会让人以为很闲，其实是吃满了一个核
-                        if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append(" 核）")
+                        if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append("核）")
                         if (s.rssKb < 0) {
                             // 读不到就直说，**不要显示成 0.00 GB** —— 那看起来像"服务端不占内存"，
                             // 真机上就是这么被误判成"ram 没读出来"的（其实多半是选错了进程）。
                             // 顺带把 pid 打出来，下一次一眼就能核对。
-                            append(" · 内存 读不到（pid ").append(s.pid).append("）")
+                            append(" · 内存读不到（pid ").append(s.pid).append("）")
                         } else {
-                            append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append(" GB")
+                            append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append("G")
                             append("（").append(fmt("%.0f", memPct)).append("%）")
                         }
                         // 整机还剩多少可用内存：手机上服务端"莫名其妙崩"多半是 OOM，
                         // 把剩余量摆在服务端占用旁边，一眼能看出还有多少余量。
                         if (s.availMemKb >= 0) {
-                            append(" · 整机可用 ").append(fmt("%.2f", s.availMemKb / 1024f / 1024f)).append(" GB")
-                            if (s.lowMemory) append("（系统低内存）")
+                            // 简写"可用 3.2G"：真机 360dp 宽度下，"整机可用 3.20 GB" 会被截成 "整机可…"
+                            append(" · 可用 ").append(fmt("%.1f", s.availMemKb / 1024f / 1024f)).append("G")
+                            if (s.lowMemory) append("（低内存）")
                         }
                     }
                 },
@@ -580,7 +579,7 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                 modifier = Modifier.weight(1f),
                 placeholder = {
                     Text(
-                        if (serverState == ServerState.Running) "输入命令（stop / op 玩家名 / say …）"
+                        if (serverState == ServerState.Running) "输入命令（stop / op…）"
                         else "服务端运行后可输入命令"
                     )
                 },
