@@ -76,4 +76,19 @@ class CountFormatTest {
         assertEquals("12.3 MB", CountFormat.bytes((12.3 * 1024 * 1024).toLong()))
         assertEquals("1.2 GB", CountFormat.bytes((1.2 * 1024 * 1024 * 1024).toLong()))
     }
+
+    @Test
+    fun `体积档位也按舍入之后判_不会出现 1024_0 KB`() {
+        // 只比原始字节数的话 1048575 B 会落进 KB 档算出 1023.999 → "1024.0 KB" —— 一个
+        // 本不该存在的档位（与 short() 的 999,999 → "100.0万" 是同一类错法）
+        assertEquals("1.0 MB", CountFormat.bytes(1024L * 1024 - 1))
+        assertEquals("1.0 GB", CountFormat.bytes(1024L * 1024 * 1024 - 1))
+        // 门槛正好卡在"再差 0.05 个档位单位就要进位成 1024.0"处
+        assertEquals("1023.9 KB", CountFormat.bytes(1024L * 1024 - 52))
+        assertEquals("1.0 MB", CountFormat.bytes(1024L * 1024 - 51))
+        // 不足 KB 档照旧显示精确字节数（不会变成难读的 "0.9 KB"）
+        assertEquals("1018 B", CountFormat.bytes(1018))
+        assertEquals("1023 B", CountFormat.bytes(1023))
+        assertEquals("1.0 KB", CountFormat.bytes(1024))
+    }
 }

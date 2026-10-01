@@ -119,4 +119,40 @@ class ServerPropertiesTest {
         ServerProperties.ensureInitial(a, listOf(a))
         assertEquals("60", ServerProperties.load(a.dir)["pause-when-empty-seconds"])
     }
+
+    @Test
+    fun `保存时保留原有注释与空行`() {
+        val dir = inst("a").dir
+        // 用户手写的批注、被注释掉的备用配置：改一个开关就全没了的话，
+        // 下次用外部编辑器打开会以为文件被清过
+        File(dir, "server.properties").writeText(
+            "# 我的服务器\n" +
+                "# 下面这行是备用端口，别删\n" +
+                "# server-port=25599\n" +
+                "\n" +
+                "server-port=25565\n" +
+                "motd=hello\n"
+        )
+        ServerProperties.save(dir, linkedMapOf("server-port" to "25580"))
+        val text = File(dir, "server.properties").readText()
+        assertTrue("用户注释必须保留", text.contains("# 我的服务器"))
+        assertTrue("被注释掉的备用端口必须保留", text.contains("# server-port=25599"))
+        // 原文件里的键保持原有顺序，新值就地替换
+        assertTrue(
+            "server-port 必须在 motd 之前（沿用原文件顺序）",
+            text.indexOf("server-port=25580") < text.indexOf("motd=hello"),
+        )
+        assertEquals("25580", ServerProperties.load(dir)["server-port"])
+        assertEquals("hello", ServerProperties.load(dir)["motd"])
+    }
+
+    @Test
+    fun `保存时不动本次未修改的键的写法`() {
+        val dir = inst("a").dir
+        File(dir, "server.properties").writeText("# 头部注释\nserver-port=25565\nfoo = bar\n")
+        ServerProperties.save(dir, linkedMapOf("server-port" to "25566"))
+        val text = File(dir, "server.properties").readText()
+        assertTrue("未改动的行应原样保留（含它周围的注释）", text.contains("foo = bar"))
+        assertTrue(text.startsWith("# 头部注释"))
+    }
 }

@@ -37,13 +37,27 @@ object CountFormat {
         return n.toString()
     }
 
-    /** 日志体积：1.2 GB / 12.3 MB / 456 KB / 789 B */
+    /**
+     * 日志体积：1.2 GB / 12.3 MB / 456 KB / 789 B
+     *
+     * 档位门槛要按**这一次舍入会不会印出 1024.0** 来定，不能只比原始字节数：
+     * MB 档印的是 `n/1024` 保留一位小数，它在 n ≥ 1048525（1023.95 KB）时会进位成
+     * `1024.0` —— 于是 1048575 B 显示成 `1024.0 KB`，一个本不该出现的档位。
+     * 所以 KB 档止于 0.05 KB 之前，MB 档同理止于 0.05 MB 之前。
+     *
+     * 注意门槛比 [short] 的 0.95 紧得多，这是有意的：那边不足档位时显示的是精确数字，
+     * 而这里不足 KB 档要显示 `B` —— 放宽到 0.95 会让 972 B 变成难读的 `0.9 KB`。
+     */
     fun bytes(n: Long): String = when {
-        n >= 1024L * 1024 * 1024 -> one(n / (1024.0 * 1024 * 1024)) + " GB"
-        n >= 1024L * 1024 -> one(n / (1024.0 * 1024)) + " MB"
-        n >= 1024L -> one(n / 1024.0) + " KB"
+        n >= GB - MB * 5 / 100 -> one(n / GB.toDouble()) + " GB"
+        n >= MB - KB * 5 / 100 -> one(n / MB.toDouble()) + " MB"
+        n >= KB -> one(n / KB.toDouble()) + " KB"
         else -> "$n B"
     }
+
+    private const val KB = 1024L
+    private const val MB = 1024L * 1024
+    private const val GB = 1024L * 1024 * 1024
 
     private fun one(v: Double): String = String.format(Locale.US, "%.1f", v)
 }

@@ -16,10 +16,26 @@ data class EulaResult(
  */
 object EulaHandler {
 
+    /**
+     * 一行**有效**的 `eula=true`（大小写不敏感，允许键值两侧空白）。
+     * 行首的 `#`/`!` 是 Properties 的注释前缀，被注释掉的备用行不算数。
+     */
+    private val TRUE_LINE = Regex("(?i)^eula\\s*=\\s*true\\s*$")
+
+    /**
+     * eula.txt 里是否已经 `eula=true`。
+     *
+     * 必须**逐行锚定**匹配，不能用无锚定的 `contains("eula=true")`：
+     * 服务端生成的 eula.txt 头部注释里就写着
+     * `#By changing the setting below to TRUE you are indicating your agreement…`，
+     * 而用户/教程也常留下 `# eula=true` 这类被注释掉的备用行 —— 无锚定匹配会把它们
+     * 当成"已接受"，于是服务端启动后立刻因为 `You need to agree to the EULA` 退出，
+     * 界面只报一句笼统的早退错误，用户完全不知道问题出在 eula.txt。
+     */
     fun isAccepted(serverDir: File): Boolean {
         val f = File(serverDir, "eula.txt")
         if (!f.exists()) return false
-        return f.readText().contains(Regex("(?i)eula\\s*=\\s*true"))
+        return f.readLines().any { TRUE_LINE.matches(it.trim()) }
     }
 
     /** 主动写入 eula=true（覆盖/新建） */

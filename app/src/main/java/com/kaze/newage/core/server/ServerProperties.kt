@@ -29,23 +29,58 @@ object ServerProperties {
         return map
     }
 
-    /** 写入（追加未知键）。原子写：先写临时文件再 rename——写入中断不产生半截配置文件
-     *  （否则下次载入为空 → 按默认 25565 重新生成,端口可能与他人冲突） */
+    /**
+     * 写入（未管理的键原样保留）。原子写：先写临时文件再 rename——写入中断不产生半截配置文件
+     *  （否则下次载入为空 → 按默认 25565 重新生成,端口可能与他人冲突）
+     *
+     * **以原文件为骨架重写**：注释、空行、键的顺序都保留。
+     * 旧实现是"从零拼一份新的"（[load] 只留键值），于是用户手写的注释、分组标题、
+     * 被注释掉的备用配置在一次保存后全部消失 —— 而详情页改任意一个开关就会触发一次 save，
+     * 用户下次用外部编辑器打开 server.properties 会发现批注没了。
+     */
     @Synchronized
     fun save(dir: File, props: Map<String, String>) {
         val file = File(dir, "server.properties")
         file.parentFile?.mkdirs()
         val sb = StringBuilder()
-        sb.append("# Minecraft server properties\n")
-        sb.append("# 由 Kaze SLauncher 管理（手动编辑同名文件会被覆盖）\n")
         val written = mutableSetOf<String>()
-        for ((k, v) in props) {
-            sb.append(k).append('=').append(v).append('\n')
-            written.add(k)
+        val original = runCatching {
+            if (file.isFile) file.readLines() else emptyList()
+        }.getOrDefault(emptyList())
+        if (original.isEmpty()) {
+            sb.append("# Minecraft server properties\n")
+            sb.append("# 由 Kaze SLauncher 管理（手动编辑同名文件会被覆盖）\n")
+        }
+        for (line in original) {
+            val trimmed = line.trim()
+            val eq = trimmed.indexOf('=')
+            val key = if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("!") || eq <= 0) {
+                null
+            } else {
+                trimmed.substring(0, eq).trim().ifEmpty { null }
+            }
+            val newValue = key?.let { props[it] }
+            when {
+                // 注释 / 空行 / 认不出的行：一字不动
+                key == null -> sb.append(line).append('\n')
+                newValue != null -> {
+                    sb.append(key).append('=').append(newValue).append('\n')
+                    written.add(key)
+                }
+                // 本次不改的键：保留原行（连同它周围的注释与位置）
+                else -> sb.append(line).append('\n')
+            }
         }
         // 追加原文件中未管理的键，避免丢配置
         val existing = load(dir)
         for ((k, v) in existing) {
+            if (k !in written) {
+                sb.append(k).append('=').append(v).append('\n')
+                written.add(k)
+            }
+        }
+        // props 里有、文件里没有的键（新实例首次写入就是这条路径）
+        for ((k, v) in props) {
             if (k !in written) {
                 sb.append(k).append('=').append(v).append('\n')
                 written.add(k)
@@ -95,8 +130,14 @@ object ServerProperties {
         "max-tick-time" to "-1",
     )
 
-    /** 为新实例分配空闲端口（25565 起，跳过已占用的）。同步：两个实例并发创建时
-     *  ensureInitial 会竞态看到同一份列表 → 撞端口；加对象锁串行化 */
+    /**
+     * 为新实例分配空闲端口（25565 起，跳过已占用的）。
+     *
+     * 本方法自身的 `@Synchronized` **只保护"读一遍别人的配置"这一步**，不够：
+     * 调用方 [ensureInitial] 是"先算空闲端口、再写进 server.properties"两步，
+     * 两个实例并发创建时两边都会在对方写盘之前算出同一个空闲端口，然后各写各的 →
+     * 第二个实例启动就是 `Address already in use`。合并进 [portAllocLock] 才是完整临界区。
+     */
     @Synchronized
     fun findFreePort(instances: List<ServerInstance>): Int {
         val used = instances.mapNotNull { inst ->
@@ -107,6 +148,9 @@ object ServerProperties {
         return port
     }
 
+    /** 端口"分配 + 写盘"的组合锁，见 [ensureInitial] */
+    private val portAllocLock = Any()
+
     /** 若实例目录无 server.properties，写入默认模板（端口自动分配，motd 用实例名）；
      *  已有文件若缺失 pause-when-empty-seconds 键则补写 -1（旧实例兼容：MC 26 无键默认 60s
      *  自动暂停，proot 下暂停唤醒会卡死 → Watchdog 崩溃循环，见记忆 2026-08-18）。
@@ -114,8 +158,17 @@ object ServerProperties {
     fun ensureInitial(instance: ServerInstance, allInstances: List<ServerInstance>) {
         val file = File(instance.dir, "server.properties")
         if (!file.exists()) {
-            val port = findFreePort(allInstances.filter { it.id != instance.id })
-            save(instance.dir, defaults(port, instance.name))
+            // 「算空闲端口」与「把端口写进 server.properties」必须在同一个临界区里。
+            // 只靠 findFreePort 自己的 @Synchronized 挡不住：它返回时端口还没落盘，
+            // 另一个协程紧接着也会算出同一个端口。串行化之后，后进来的那次 load()
+            // 能看到前一个实例刚写下的端口，于是自动往后顺延。
+            synchronized(portAllocLock) {
+                // 等锁期间别的协程可能已经把文件建好了（同一实例被并发 ensureInitial）
+                if (!file.exists()) {
+                    val port = findFreePort(allInstances.filter { it.id != instance.id })
+                    save(instance.dir, defaults(port, instance.name))
+                }
+            }
             return
         }
         val existing = load(instance.dir)
