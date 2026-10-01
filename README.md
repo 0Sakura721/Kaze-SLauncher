@@ -49,6 +49,15 @@
 - 👥 **玩家管理**：解析 `list` 响应与 join/leave 事件，提供 OP / 白名单 / 踢出快捷命令
 - 🔄 **应用内更新**：GitHub Releases + 多个国内加速镜像测速择优，下载后校验收包 SHA-256
 
+## 📖 文档
+
+| 想了解 | 看这个 |
+|---|---|
+| **怎么用**：新建实例、启停、控制台、玩家管理、备份、设置、[常见问题速查](docs/使用说明.md#常见问题) | **[📘 使用说明](docs/使用说明.md)** |
+| 怎么改、踩过哪些坑（面向接手的人） | [维护笔记](docs/MAINTENANCE.md) |
+| 发版签名与密钥轮换 | [发布签名手册](docs/RELEASE-SIGNING.md) |
+| 版本计划 | [项目计划](docs/PLAN.md) |
+
 ## 📱 快速开始
 
 1. 从 [Releases](https://github.com/0Sakura721/Kaze-SLauncher/releases) 下载对应架构的 APK 安装
@@ -58,6 +67,8 @@
 
 **选哪个安装包**：64 位手机用 `arm64-v8a`；32 位老设备用 `armeabi-v7a`（标记 experimental，真机验证较少）。
 不再发布 `universal` 包。
+
+> 📖 **每个按钮做什么、出问题先看哪里**：见 [docs/使用说明.md](docs/使用说明.md)（含常见问题速查表）。
 
 ## 🛠️ 构建
 
