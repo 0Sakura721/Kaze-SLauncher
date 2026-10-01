@@ -102,7 +102,6 @@ emember(path) 缓存位图的话，
 
     /** 每次启动自动检查更新（默认开） */
     val autoUpdate = mutableStateOf(prefs.getBoolean("auto_update", true))
-
     /** 更新通道：preview（预览版，默认，含 prerelease）/ stable（仅正式版） */
     val updateChannel = mutableStateOf(prefs.getString("update_channel", "preview") ?: "preview")
 
@@ -137,20 +136,38 @@ emember(path) 缓存位图的话，
 
     fun backgroundImagePath(): String? = bgFile.takeIf { it.exists() }?.absolutePath
 
-    /** 保存选中的背景图（SAF Uri，压缩到屏幕尺寸，避免大图内存问题） */
+    /**
+     * 保存选中的背景图（SAF Uri，压缩到 [BG_MAX_DIM] 见方，避免大图内存问题）。
+     *
+     * **必须先探边界再按 inSampleSize 解码**：`BitmapFactory.decodeStream` 一把梭会把整张原图
+     * 解进内存 —— 4800 万像素的相机照是 ARGB_8888 下的 192MB，任何机型的堆都扛不住，
+     * 结果是 OOM 闪退（而且是在用户刚点完选图的瞬间）。
+     * 两遍解码的代价只是读一次文件头。
+     */
     fun saveBackgroundImage(uri: android.net.Uri) {
-        val src: Bitmap? = try {
-            appContext.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            appContext.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            } ?: return
+        } catch (_: Exception) {
+            return
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return
+        val sample = sampleSizeFor(bounds.outWidth, bounds.outHeight, BG_MAX_DIM)
+        val decoded: Bitmap? = try {
+            appContext.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+            }
         } catch (_: Exception) {
             null
         }
-        if (src == null) return
-        val maxDim = 1600
-        val scale = minOf(1f, maxDim.toFloat() / maxOf(src.width, src.height))
+        val src = decoded ?: return
+        val scale = minOf(1f, BG_MAX_DIM.toFloat() / maxOf(src.width, src.height))
         val scaled = if (scale < 1f) {
             Bitmap.createScaledBitmap(src, (src.width * scale).toInt(), (src.height * scale).toInt(), true)
         } else src
-        bgFile.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        runCatching { bgFile.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) } }
         if (scaled != src) scaled.recycle()
         src.recycle()
         bgExists.value = true
@@ -244,5 +261,22 @@ emember(path) 缓存位图的话，
     fun setBgOpacity(v: Float) {
         bgOpacity.floatValue = v
         prefs.edit().putFloat("bg_opacity", v).apply()
+    }
+
+    companion object {
+        /** 背景图保存后的最长边：显示端只做 Crop，超过这个尺寸纯属浪费内存与磁盘 */
+        private const val BG_MAX_DIM = 1600
+
+        /**
+         * 采样率：让解码结果的最长边**不小于** [target] 的最小 2 的幂。
+         *
+         * 必须"不小于"：取大了只是多占一点内存（显示端还会再缩放），取小了会先丢掉分辨率、
+         * 再被放大回来看，背景图直接糊掉。
+         */
+        internal fun sampleSizeFor(width: Int, height: Int, target: Int): Int {
+            var sample = 1
+            while (maxOf(width, height) / (sample * 2) >= target) sample *= 2
+            return sample
+        }
     }
 }

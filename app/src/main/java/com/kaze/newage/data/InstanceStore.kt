@@ -6,6 +6,7 @@ import com.kaze.newage.data.model.ServerInstance
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -62,6 +63,11 @@ class InstanceStore(
     private val context: Context = context.applicationContext
     private val json = Json { prettyPrint = true; ignoreUnknownKeys = true }
 
+    /** 首次加载用的 IO 作用域：不能让 Application.onCreate 等它 */
+    private val scope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    )
+
     /**
      * 实例库落在**内部** `filesDir`。
      *
@@ -97,8 +103,19 @@ class InstanceStore(
     val instances: StateFlow<List<ServerInstance>> = _instances.asStateFlow()
 
     init {
+        // 构造发生在 **Application.onCreate 的主线程**上，所以这里只做**必须立刻生效**的事：
+        // 两次迁移都会改写实例记录里的目录路径，调用方（界面、启动服务端）随读随用，
+        // 必须同步完成 —— 但两次迁移都很便宜：前者是最多一次文件拷贝（且只在旧库里存在文件
+        // 时才发生），后者是同一分区内的 rename，几 GB 的世界也是瞬间完成。
+        //
+        // 真正贵的部分（读 instances.json、对共享存储做可写探针、扫描实例根下的每个目录、
+        // 最后把 JSON 写回去）不在这里做主线程 I/O —— 实例目录可能在共享存储或 SD 卡上
+        //（FUSE / sdcardfs 单次读几十到几百毫秒），全部压在冷启动的关键路径上会直接拖长首帧、
+        // 慢卡上是肉眼可见的白屏。改为丢到 IO 上跑：结果通过 [instances] 这个 StateFlow
+        // 推给界面，扫完自然刷新，期间界面看到的是空列表（和"还没扫完"语义一致）。
         migrateLegacyStore()
-        rescan()
+        migrateInstancesToSharedRoot()
+        scope.launch { runCatching { rescan() } }
     }
 
     /** 把旧版放在外部私有目录的实例库迁到内部（只做一次，且不覆盖已有的内部文件） */
@@ -154,6 +171,10 @@ class InstanceStore(
      * 路径是绝对的，留在原处照常能用，只是不在 KazeS 里）。
      *
      * 搬完必须同步实例记录里的 dirPath，否则重启后指向已经不存在的旧目录。
+     *
+     * 这里**不是** `@Synchronized`：它由 [rescan]（持锁）或构造器（还没有并发读者）调用，
+     * 自己再加锁就会变成同一线程重入 —— Kotlin 的 `@Synchronized` 用可重入监视器实现，
+     * 重入其实没问题，但"这个函数假定调用方已经持锁"这件事要写明，免得日后被当独立入口调。
      */
     private fun migrateInstancesToSharedRoot() {
         if (prefs.instanceDirPath.value.isNotBlank()) return // 用户自己指定了目录，不动

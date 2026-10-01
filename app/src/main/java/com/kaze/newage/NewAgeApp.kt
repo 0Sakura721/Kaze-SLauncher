@@ -55,6 +55,15 @@ class AppContainer(context: Context) {
 
     val javaManager: RootfsJavaManager = RootfsJavaManager(env)
 
+    init {
+        // proot 运行时的首次读取（非 arm64 解压 assets 里的 proot tar；x86_64 首选设备从 APK
+        // 抽 libproot.so）是同步磁盘活，几 MB 起步。谁先在**主线程**上摸到 env.isReady
+        // （设置页刷新 Java、主页状态、环境探测）谁就把首帧卡住 —— 这里主动挂到 IO 上预热，
+        // 后面所有调用都只是几次 stat。ProotEnvironment 自己的 init 里也会判一次就绪状态，
+        // 两处都跑在 IO 上且幂等。
+        env.warmUp()
+    }
+
     val serverManager: DefaultServerManager = DefaultServerManager(env, javaManager, console, appContext)
 
     val instanceStore: InstanceStore = InstanceStore(appContext, uiPrefs)

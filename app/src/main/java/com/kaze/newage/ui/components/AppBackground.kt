@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -19,6 +21,8 @@ import com.kaze.newage.ui.theme.LocalHazeState
 import com.kaze.newage.ui.theme.ThemeBackdrop
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 应用级状态提供者：提供 Haze 模糊状态与玻璃模糊开关。
@@ -46,11 +50,15 @@ fun BackdropLayer(prefs: SettingsPrefs, modifier: Modifier = Modifier) {
     Box(modifier) {
         val path = if (prefs.bgEnabled.value) prefs.backgroundImagePath() else null
         // 带上版本号：背景图固定写同一路径，只用 path 作 key 的话换图不会重新解码
-    val revision = prefs.bgRevision.value
-    val bitmap = remember(path, revision) { path?.let { BitmapFactory.decodeFile(it) } }
+        val revision = prefs.bgRevision.value
+        // 解码必须在 IO 线程上做：这是一次真实的文件解码（1600px JPEG 约 2~3MB 位图），
+        // 放在组合期就等于在**主线程**上做，换图/切到有背景的页面时会掉帧甚至 ANR。
+        val bitmap by produceState<android.graphics.Bitmap?>(null, path, revision) {
+            value = path?.let { withContext(Dispatchers.IO) { BitmapFactory.decodeFile(it) } }
+        }
         if (bitmap != null) {
             Image(
-                bitmap = bitmap.asImageBitmap(),
+                bitmap = bitmap!!.asImageBitmap(),
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier

@@ -10,6 +10,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -56,9 +57,36 @@ class ProotEnvironment(
 
     private val isSetupRunning = AtomicBoolean(false)
 
+    /** 预热与"恢复就绪状态"用的 IO 作用域（见 [warmUp]）：不能让 Application.onCreate 等它 */
+    private val warmUpScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
+    )
+
     init {
-        // 进程重启后恢复状态：文件已就绪则直接标记 READY（避免 UI 一直显示「未部署」）
-        if (isReady) _state.value = State.READY
+        // 进程重启后恢复状态：文件已就绪则直接标记 READY（避免 UI 一直显示「未部署」）。
+        // **必须在 IO 上判**：`isReady` 第一次被调用时会做实质工作（见 [warmUp]），
+        // 而这里就是冷启动的主线程路径 —— 直接 `if (isReady)` 等于把解压/抽取挪到了首帧前。
+        warmUpScope.launch {
+            if (isReady) _state.value = State.READY
+        }
+    }
+
+    /**
+     * 预热运行时的首次读取。
+     *
+     * [isReady] / [prootBinary] 的第一次调用会做**重活**：
+     *  - 非 arm64（v7a / 模拟器）：把 `assets/bundled/proot-*.tar.gz`（几 MB）解压到
+     *    `linux/proot-home`，再建 soname 链接、设执行位；
+     *  - x86_64 首选设备（如 MuMu）：`nativeLibraryDir` 里没有 libproot.so，于是从 APK zip 里
+     *    抽出 arm64 的 proot + loader 写到 filesDir。
+     * 两者都是同步磁盘活，谁先在主线程上摸到 `isReady`（设置页刷新 Java、主页状态、
+     * Application 里的任何一次探测）谁就把首帧卡住。
+     *
+     * 启动时挂到 IO 上跑一遍即可：结果会落盘（且 [isReady] 里有幂等短路），
+     * 之后所有调用都只是几次 stat。
+     */
+    fun warmUp() {
+        warmUpScope.launch { runCatching { isReady } }
     }
 
     // ── 路径 ──
@@ -451,35 +479,54 @@ class ProotEnvironment(
         // 没抢到：等待对方完成——成功直接收工；失败则自己整体重试，不再误报"正在进行"。
         if (!isSetupRunning.compareAndSet(false, true)) {
             onProgress(0f, "另一部署正在进行，等待其完成…")
-            val deadline = System.currentTimeMillis() + 900_000
-            // timedOut 只在「deadline 真的到期」时置位。
-            // 旧写法初始为 true、在循环里每次 delay 后置 false，而 15 分钟的 deadline
-            // 不可能在首次迭代前到达 —— 于是超时分支永远不可达：真卡住时只会在
-            // 循环结束后静默返回，既不置 ERROR 也不通知调用方，UI 永远停在"部署中"。
-            var timedOut = false
-            while (isSetupRunning.get()) {
-                if (System.currentTimeMillis() >= deadline) {
-                    timedOut = true
-                    break
+            // 等待期间**这个协程自己**可能被取消（界面退出、appScope 被取消、超时包装…），
+            // 而 `delay` 在取消时抛 CancellationException，会直接跳过下面的 return 与
+            // `finally { isSetupRunning.set(false) }` —— 于是标志永久停在 true：
+            // 之后每一次部署都会走"没抢到锁"分支，白等 15 分钟才超时，
+            // 环境再也部署不起来（只能杀进程）。所以取消路径必须自己把标志放掉。
+            //
+            // 注意区分两种身份：走到这里说明**这次调用没有拿到锁**，等待期间并不持有它；
+            // 但等待结束时若抢到了锁（下面的 CAS 成功），就必须由这条 finally 负责释放。
+            var reachedTail = false
+            try {
+                val deadline = System.currentTimeMillis() + 900_000
+                // timedOut 只在「deadline 真的到期」时置位。
+                // 旧写法初始为 true、在循环里每次 delay 后置 false，而 15 分钟的 deadline
+                // 不可能在首次迭代前到达 —— 于是超时分支永远不可达：真卡住时只会在
+                // 循环结束后静默返回，既不置 ERROR 也不通知调用方，UI 永远停在"部署中"。
+                var timedOut = false
+                while (isSetupRunning.get()) {
+                    if (System.currentTimeMillis() >= deadline) {
+                        timedOut = true
+                        break
+                    }
+                    kotlinx.coroutines.delay(500)
                 }
-                kotlinx.coroutines.delay(500)
-            }
-            if (timedOut) {
-                _state.value = State.ERROR
-                onProgress(0f, "等待并发部署超时")
-                return@withContext
-            }
-            if (isReady) {
-                ensureAptStage(onProgress)
-                if (_state.value == State.ERROR) return@withContext
-                _state.value = State.READY
-                onProgress(1f, "环境已就绪")
-                return@withContext
-            }
-            // 对方失败/未成功：自己接手重试；抢不到说明又有新的部署进场，交给它
-            if (!isSetupRunning.compareAndSet(false, true)) {
-                onProgress(0f, "等待并发部署完成…")
-                return@withContext
+                if (timedOut) {
+                    _state.value = State.ERROR
+                    onProgress(0f, "等待并发部署超时")
+                    return@withContext
+                }
+                if (isReady) {
+                    ensureAptStage(onProgress)
+                    if (_state.value == State.ERROR) return@withContext
+                    _state.value = State.READY
+                    onProgress(1f, "环境已就绪")
+                    return@withContext
+                }
+                // 对方失败/未成功：自己接手重试；抢不到说明又有新的部署进场，交给它
+                if (!isSetupRunning.compareAndSet(false, true)) {
+                    onProgress(0f, "等待并发部署完成…")
+                    return@withContext
+                }
+                // 抢到锁了就往下走公共尾段（它自己会负责释放标志；被取消时那条路径由
+                // finally 兜底，见下）
+                reachedTail = true
+            } finally {
+                // 只兜"没能走到公共尾段"的取消/异常路径：此时锁是我们抢到的，
+                // 却再也没有别人会去释放它 —— 不还回去，后续每次部署都要白等 15 分钟。
+                // 置 false 让公共尾段自己决定什么时候还（它每条退出路径都还）。
+                if (reachedTail) reachedTail = false else isSetupRunning.set(false)
             }
         }
         if (isReady) {
