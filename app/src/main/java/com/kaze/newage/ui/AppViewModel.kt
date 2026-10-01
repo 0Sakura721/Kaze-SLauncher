@@ -181,6 +181,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 真机上"部署失败/启动失败"往往只有一句笼统提示，用户可以直接把这个文件发出来。
         container.appScope.launch { runCatching { container.env.dumpDiagnostics() } }
 
+        // 服务端进程的 CPU / 内存占用（控制台那一行）。这个轮询函数早就写好了，
+        // 但**全仓库一直没有调用点** → `_procStats` 永远是 null → 界面永远停在
+        // 「CPU 采样中…」（真机反馈"cpu 一直显示采样"的根因）。
+        // 和上面 snapshot() 是同一类疏漏：定义了却没人调，单测也覆盖不到。
+        startProcStatsPolling()
+
         // 跟随当前实例切换控制台（每实例独立日志流），并跟踪在线玩家
         viewModelScope.launch(Dispatchers.IO) {
             _currentInstanceId.collectLatest { id ->
@@ -448,6 +454,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * `/proc`；pid 靠扫 `/proc` 里 cmdline 同时含 `java` 与实例目录名来认。
      * 扫不到就置 null，界面据此隐藏指标（未启动 / 已退出）。
      * CPU 必须两次采样求差，所以第一次只记基线、不出数。
+     *
+     * 由 [init] 启动 —— **这一环曾经是漏的**：函数写好了却没有任何调用点，
+     * 于是 `_procStats` 恒为 null，界面永远显示「CPU 采样中…」。
+     * 另外只在当前实例处于 Running 时才扫 /proc（空闲时不白扫一遍整机）。
      */
     fun startProcStatsPolling() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -455,8 +465,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             var lastTicks = 0L
             var lastAt = 0L
             while (true) {
-                val dirName = _currentInstanceId.value?.let { instanceStore.get(it)?.dir?.name }
-                if (dirName == null) {
+                val id = _currentInstanceId.value
+                val dirName = id?.let { instanceStore.get(it)?.dir?.name }
+                // 只在「当前实例正在运行」时才扫描 /proc：不运行时也每 2 秒把整机
+                // /proc 扫一遍（几百次文件读）纯属浪费电，而这一行本来就只在 Running 时渲染。
+                val running = id != null && serverManager.states.value[id] == ServerState.Running
+                if (dirName == null || !running) {
                     _procStats.value = null
                     pid = null
                     delay(2000)
