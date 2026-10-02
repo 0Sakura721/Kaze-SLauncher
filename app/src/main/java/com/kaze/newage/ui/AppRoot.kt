@@ -75,6 +75,8 @@ import com.kaze.newage.core.update.UpdateInstaller
 import com.kaze.newage.ui.components.AppBackground
 import com.kaze.newage.ui.components.BackdropLayer
 import com.kaze.newage.ui.screens.AddonsScreen
+import com.kaze.newage.ui.screens.AiScreen
+import com.kaze.newage.ui.screens.AiSettingsScreen
 import com.kaze.newage.ui.screens.ConsoleScreen
 import com.kaze.newage.ui.screens.DiagnosticsScreen
 import com.kaze.newage.ui.screens.HomeScreen
@@ -223,7 +225,19 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         },
                     )
                 }
-                composable(Dest.Console.route) { ConsoleScreen(viewModel) }
+                composable(Dest.Console.route) {
+                    ConsoleScreen(viewModel, onOpenAi = { navController.navigate("ai") })
+                }
+                composable("ai") {
+                    AiScreen(
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() },
+                        onOpenSettings = { navController.navigate("ai/settings") },
+                    )
+                }
+                composable("ai/settings") {
+                    AiSettingsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+                }
                 composable(Dest.Settings.route) {
                     SettingsScreen(
                         viewModel = viewModel,
