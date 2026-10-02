@@ -9,8 +9,12 @@
   恢复时还可能拿到一份"解压到一半"的 rootfs，proot 直接起不来。
 
   实例目录、世界存档、备份 zip 都在共享存储 /sdcard/KazeS 下，本来就不在备份范围内。
+
+  sharedpref 域只排除 kaze_ai_secrets：AI 接口与联网搜索的 API Key 是**明文**存在
+  SharedPreferences 里的，进了云备份就等于交给了备份服务；其余设置照常备份。
 -->
 <full-backup-content>
     <exclude domain="file" path="linux" />
     <exclude domain="file" path="native-extract" />
+    <exclude domain="sharedpref" path="kaze_ai_secrets.xml" />
 </full-backup-content>

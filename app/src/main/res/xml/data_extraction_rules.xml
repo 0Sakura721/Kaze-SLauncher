@@ -1,17 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Android 12+（API 31 起）的备份 / 换机迁移规则。理由与 backup_rules.xml 相同：
-  linux/（rootfs 134MB+）与 native-extract/ 都可以再生成，纳入备份会撑爆 25MB 配额，
-  系统随后按文件逐个截断 —— 该备份的 instances.json 反而可能没进去，
-  恢复时还可能拿到解压到一半的 rootfs。
+  Android 12+（API 31 起）的备份 / 换机迁移规则。
+
+  文件域的理由与 backup_rules.xml 相同：linux/（rootfs 134MB+）与 native-extract/
+  都可以再生成，纳入备份会撑爆 25MB 配额，系统随后按文件逐个截断 —— 该备份的
+  instances.json 反而可能没进去，恢复时还可能拿到解压到一半的 rootfs。
+
+  sharedpref 域只排除 kaze_ai_secrets（AI 接口 / 联网搜索的 API Key，明文存
+  SharedPreferences）：云备份与换机迁移都不该带走密钥。其余 prefs（kaze_ui_settings）
+  照常备份 —— 主题、背景、更新通道这些设置是需要跟着用户走的。
 -->
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="file" path="linux" />
         <exclude domain="file" path="native-extract" />
+        <exclude domain="sharedpref" path="kaze_ai_secrets.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="linux" />
         <exclude domain="file" path="native-extract" />
+        <exclude domain="sharedpref" path="kaze_ai_secrets.xml" />
     </device-transfer>
 </data-extraction-rules>

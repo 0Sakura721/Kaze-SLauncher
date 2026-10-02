@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiProfile
@@ -19,6 +20,21 @@ class SettingsPrefs(context: Context) {
 
     private val appContext: Context = context.applicationContext
     private val prefs = context.getSharedPreferences("kaze_ui_settings", Context.MODE_PRIVATE)
+
+    /**
+     * 只装 AI 密钥（模型档案里的 apiKey + 各搜索源的 Key）的独立 SharedPreferences 文件。
+     *
+     * 为什么不跟其它设置放一个文件：SharedPreferences 是**明文**存储，而
+     * `allowBackup="true"` 会把 `kaze_ui_settings` 整个带进云备份 / 换机迁移。
+     * 密钥独立成文件后，备份规则（res/xml/backup_rules.xml 与 data_extraction_rules.xml）
+     * 就能按 sharedpref 域精确排除它，而主题、背景、更新通道这些普通设置照常备份。
+     *
+     * 旧数据的一次性迁移挂在属性初始化里：Kotlin 按声明顺序执行，`aiProfiles`
+     * 与搜索 Key 都在下面声明，必须保证它们读到的已经是迁移后的值。
+     */
+    private val secretPrefs = context.getSharedPreferences(SECRET_PREFS_NAME, Context.MODE_PRIVATE)
+        .also { migrateAiSecrets(it, prefs) }
+
     private val bgFile = File(context.filesDir, "background.png")
 
     /** 背景图是否存在（State：保存/清除后自动刷新 UI） */
@@ -125,8 +141,9 @@ emember(path) 缓存位图的话，
     //   分配 = 「对话」这一个功能用哪个档案（以后加功能只需再加一个分配键）；
     //   思考强度 = DeepSeek V4 起由请求参数 thinking 控制（不再是两个模型名）；
     //   其它服务商若思考=换模型名，可把第二个模型名填进档案。
-    // API Key / 搜索 Key 只存应用私有的 SharedPreferences（别的应用读不到），绝不入库、绝不写日志。
-    val aiProfiles = mutableStateOf(AiProfileStore.decode(prefs.getString("ai_profiles", "") ?: ""))
+    // API Key / 搜索 Key 只存应用私有的 [secretPrefs]（别的应用读不到，也不进云备份），
+    // 绝不入库、绝不写日志。
+    val aiProfiles = mutableStateOf(AiProfileStore.decode(secretPrefs.getString("ai_profiles", "") ?: ""))
 
     /** 「对话」功能分配到的档案 id */
     val aiChatProfileId = mutableStateOf(prefs.getString("ai_chat_profile_id", "") ?: "")
@@ -139,7 +156,22 @@ emember(path) 缓存位图的话，
     val aiSearchProviderId = mutableStateOf(
         prefs.getString("ai_search_provider", AiSearch.Provider.TAVILY.id) ?: AiSearch.Provider.TAVILY.id
     )
-    val aiSearchKey = mutableStateOf(prefs.getString("ai_search_key", "") ?: "")
+
+    /**
+     * 各搜索源**各自的** Key（槽名见 [AiSearch.Provider.keySlot]）。
+     *
+     * 为什么必须分槽：原来全局只有一个 `ai_search_key`，切换搜索源时那份 Key 会被原样
+     * 发给新的服务商 —— 点一下"换成博查"，Tavily 的密钥就交给了博查。
+     * 分槽后换个源只会读到它自己那一格（没填过就是空，界面提示重新填写）。
+     */
+    private val searchKeys = mutableStateMapOf<String, String>().apply {
+        AiSearch.Provider.entries.forEach { p ->
+            secretPrefs.getString(AiSearch.Provider.keySlot(p.id), "")?.takeIf { it.isNotEmpty() }?.let { put(p.id, it) }
+        }
+    }
+
+    /** 取某个搜索源该用的 Key（免 Key 的源恒为空串，见 [AiSearch.keyFor]） */
+    fun aiSearchKey(providerId: String): String = AiSearch.keyFor(providerId, searchKeys)
 
     init {
         // 旧单配置 → 档案：P0/P1 存的是散键（ai_api_key + ai_base_url + ai_model_standard/thinking，
@@ -168,11 +200,20 @@ emember(path) 缓存位图的话，
                 )
                 aiProfiles.value = listOf(legacy)
                 aiChatProfileId.value = legacy.id
-                prefs.edit()
+                secretPrefs.edit()
                     .putString("ai_profiles", AiProfileStore.encode(listOf(legacy)))
+                    .apply()
+                prefs.edit()
                     .putString("ai_chat_profile_id", legacy.id)
                     .apply()
             }
+        }
+        // 更老的散键 ai_api_key 已经进了档案（上面那段迁移）：同一份明文 Key 不该继续躺在
+        // 会被云备份带走的 kaze_ui_settings 里。**先确认档案里确实有这个 Key 再删**，
+        // 免得某条路径没迁移成功时把用户的 Key 直接抹掉。
+        val legacyApiKey = prefs.getString("ai_api_key", "")?.trim().orEmpty()
+        if (legacyApiKey.isNotBlank() && aiProfiles.value.any { it.apiKey.trim() == legacyApiKey }) {
+            prefs.edit().remove("ai_api_key").apply()
         }
         // 存量档案里的旧模型名归一：deepseek-chat / deepseek-reasoner 在官方端点已停用
         // （2026-07-24），deepseek.com 的档案统一为 deepseek-flash，避免界面继续显示旧名
@@ -183,7 +224,7 @@ emember(path) 缓存位图的话，
         }
         if (normalized != aiProfiles.value) {
             aiProfiles.value = normalized
-            prefs.edit().putString("ai_profiles", AiProfileStore.encode(normalized)).apply()
+            secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(normalized)).apply()
         }
         // 分配指向的档案被删/损坏时回退到第一个（或空 = 未配置，界面会引导新增）
         if (aiChatProfileId.value.isNotBlank() &&
@@ -208,7 +249,7 @@ emember(path) 缓存位图的话，
             aiProfiles.value + profile
         }
         aiProfiles.value = list
-        prefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+        secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
         if (aiChatProfileId.value.isBlank() || aiProfiles.value.none { it.id == aiChatProfileId.value }) {
             setChatAiProfile(profile.id)
         }
@@ -218,7 +259,7 @@ emember(path) 缓存位图的话，
     fun deleteAiProfile(id: String) {
         val list = aiProfiles.value.filterNot { it.id == id }
         aiProfiles.value = list
-        prefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+        secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
         if (aiChatProfileId.value == id) setChatAiProfile(list.firstOrNull()?.id.orEmpty())
     }
 
@@ -234,13 +275,19 @@ emember(path) 缓存位图的话，
         prefs.edit().putBoolean("ai_thinking", v).apply()
     }
 
-    /** 保存联网搜索配置（源 + Key） */
+    /**
+     * 保存联网搜索配置（源 + 该源的 Key）。
+     *
+     * 只写**这个源自己的槽**：切源不会顺手把上一个源的 Key 复制过去
+     * （那正是"A 家 Key 发给 B 家"的来源）。
+     */
     fun setAiSearch(providerId: String, key: String) {
-        val p = providerId.trim()
+        val p = AiSearch.Provider.byId(providerId.trim())
         val k = key.trim()
-        aiSearchProviderId.value = p
-        aiSearchKey.value = k
-        prefs.edit().putString("ai_search_provider", p).putString("ai_search_key", k).apply()
+        aiSearchProviderId.value = p.id
+        searchKeys[p.id] = k
+        prefs.edit().putString("ai_search_provider", p.id).apply()
+        secretPrefs.edit().putString(AiSearch.Provider.keySlot(p.id), k).apply()
     }
 
     /** 联网搜索开关（聊天面板随时可切） */
@@ -418,6 +465,35 @@ emember(path) 缓存位图的话，
     companion object {
         /** 背景图保存后的最长边：显示端只做 Crop，超过这个尺寸纯属浪费内存与磁盘 */
         private const val BG_MAX_DIM = 1600
+
+        /** 只装 AI 密钥的 prefs 文件名（备份规则按这个文件名排除，改它必须同步改两个 xml） */
+        internal const val SECRET_PREFS_NAME = "kaze_ai_secrets"
+
+        /**
+         * 把 AI 密钥从旧的 `kaze_ui_settings` 搬进独立文件（一次性，构造 SettingsPrefs 时执行）。
+         *
+         * 判据是"旧文件里还有这些键"：搬完就从旧文件删掉，之后不再触发。新文件里已经有值
+         *（全新安装、或从新版设备恢复）时**不覆盖** —— 恢复出来的 Key 比旧文件里的更可信。
+         *
+         * 搜索 Key 迁到**当前选中源自己的槽**：旧实现里它是一份被所有源共用的 Key，
+         * 只能认为它是"给当时选中的那个源填的"，不能复制给其它源。
+         */
+        internal fun migrateAiSecrets(secret: android.content.SharedPreferences, legacy: android.content.SharedPreferences) {
+            if (!legacy.contains("ai_profiles") && !legacy.contains("ai_search_key")) return
+            val editor = secret.edit()
+            if (!secret.contains("ai_profiles") && legacy.contains("ai_profiles")) {
+                legacy.getString("ai_profiles", null)?.let { editor.putString("ai_profiles", it) }
+            }
+            if (legacy.contains("ai_search_key")) {
+                val provider = AiSearch.Provider.byId(legacy.getString("ai_search_provider", "") ?: "")
+                val slot = AiSearch.Provider.keySlot(provider.id)
+                val old = legacy.getString("ai_search_key", "").orEmpty()
+                if (!secret.contains(slot) && old.isNotEmpty()) editor.putString(slot, old)
+            }
+            editor.apply()
+            // 旧文件里的这两个键必须清掉：它们正是"会被云备份带走"的那份明文密钥
+            legacy.edit().remove("ai_profiles").remove("ai_search_key").apply()
+        }
 
         /**
          * 采样率：让解码结果的最长边**不小于** [target] 的最小 2 的幂。

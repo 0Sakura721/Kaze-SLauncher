@@ -315,14 +315,15 @@ private fun AiProfileEditForm(
 private fun SearchSection(viewModel: AppViewModel) {
     val prefs = viewModel.uiPrefs
     var providerId by remember { mutableStateOf(prefs.aiSearchProviderId.value) }
-    var searchKey by remember { mutableStateOf(prefs.aiSearchKey.value) }
+    // 输入框初值 = **当前源自己的** Key（每个源分槽存，换源后不会带过来别家的 Key）
+    var searchKey by remember { mutableStateOf(prefs.aiSearchKey(prefs.aiSearchProviderId.value)) }
     var keySaved by remember { mutableStateOf(false) }
     val provider = AiSearch.Provider.byId(providerId)
 
     SectionTitle("联网搜索")
     SectionNote(
         "开启对话页的「联网」后，AI 会先生成搜索词、把结果带入回答；搜索失败不影响回答。" +
-            "选一个搜索源："
+            "选一个搜索源（每个源的 Key 分开保存，换源后要为当前源单独填写）："
     )
     Spacer(Modifier.height(8.dp))
 
@@ -336,9 +337,10 @@ private fun SearchSection(viewModel: AppViewModel) {
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             onClick = {
                 providerId = prov.id
-                // 换源立即生效（Key 沿用已保存的值），并把本地编辑框回读成已保存值
-                viewModel.setAiSearch(prov.id, prefs.aiSearchKey.value)
-                searchKey = prefs.aiSearchKey.value
+                // 换源立即生效；Key 输入框回读**该源自己的**已保存值（没填过就是空）。
+                // 绝不能把上一个源的 Key 原样带过来 —— 那等于把 A 家的密钥发给 B 家。
+                viewModel.setAiSearch(prov.id, prefs.aiSearchKey(prov.id))
+                searchKey = prefs.aiSearchKey(prov.id)
                 keySaved = false
             },
         ) {

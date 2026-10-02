@@ -40,7 +40,27 @@ object AiSearch {
 
         companion object {
             fun byId(id: String): Provider = entries.firstOrNull { it.id == id } ?: TAVILY
+
+            /**
+             * 搜索 Key 的存储槽名：**按 provider 分槽**。
+             *
+             * 原来全局只有一个 `ai_search_key`，切换搜索源时那份 Key 会被原样发给新的服务商
+             * （A 家的密钥交给 B 家）。分槽后每个源只认自己那一格；未知 id 先经 [byId] 回退，
+             * 落到的也是**回退后那个源自己的槽**，不会读到别家的 Key。
+             */
+            fun keySlot(providerId: String): String = "ai_search_key_" + byId(providerId).id
         }
+    }
+
+    /**
+     * 从「provider id → Key」的表里取某次搜索真正该用的 Key。
+     *
+     * 免 Key 的源（本机浏览器）恒返回空串：界面上残留的旧 Key 不该被顺手带出去。
+     */
+    fun keyFor(providerId: String, keys: Map<String, String>): String {
+        val p = Provider.byId(providerId)
+        if (!p.needsKey) return ""
+        return keys[p.id].orEmpty().trim()
     }
 
     /** 一条搜索结果（标题 + 链接 + 摘要） */

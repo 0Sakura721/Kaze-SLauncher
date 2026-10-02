@@ -694,7 +694,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 var searchError: String? = null
                 var searchBlock = ""
                 val provider = AiSearch.Provider.byId(uiPrefs.aiSearchProviderId.value)
-                val searchKey = uiPrefs.aiSearchKey.value
+                // Key 按 provider 分槽取：切换搜索源后这里拿到的只会是该源自己的 Key
+                val searchKey = uiPrefs.aiSearchKey(provider.id)
                 if (uiPrefs.aiSearchOn.value && (!provider.needsKey || searchKey.isNotBlank())) {
                     try {
                         // 生成查询词是小事：强制用标准模型（省掉思考模式的等待），小 max_tokens

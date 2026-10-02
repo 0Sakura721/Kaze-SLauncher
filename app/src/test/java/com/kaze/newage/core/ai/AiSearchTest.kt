@@ -93,6 +93,23 @@ class AiSearchTest {
         assertTrue(AiSearch.Provider.BOCHA.needsKey)
     }
 
+    @Test
+    fun `搜索 Key 按 provider 分槽且不串用`() {
+        assertEquals("ai_search_key_tavily", AiSearch.Provider.keySlot("tavily"))
+        assertEquals("ai_search_key_bocha", AiSearch.Provider.keySlot("bocha"))
+        // 未知 id 回退到 Tavily 时取的是 Tavily 自己的槽，而不是别家的 Key
+        assertEquals("ai_search_key_tavily", AiSearch.Provider.keySlot("unknown"))
+
+        val keys = mapOf("tavily" to "T-KEY", "bocha" to "B-KEY")
+        assertEquals("T-KEY", AiSearch.keyFor("tavily", keys))
+        assertEquals("B-KEY", AiSearch.keyFor("bocha", keys))
+        assertEquals("T-KEY", AiSearch.keyFor("unknown", keys))
+        // 免 Key 的源恒为空串：界面上残留的旧 Key 不会被顺手带出去
+        assertEquals("", AiSearch.keyFor("bing_local", keys))
+        // A 家的 Key 绝不会被当成 B 家的用
+        assertEquals("", AiSearch.keyFor("bocha", mapOf("tavily" to "T-KEY")))
+    }
+
     // ── 本机浏览器源（Bing）的纯解析部分 ──
 
     @Test

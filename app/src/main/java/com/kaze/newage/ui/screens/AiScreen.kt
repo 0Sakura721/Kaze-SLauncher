@@ -245,9 +245,10 @@ fun AiScreen(
             searchOn = searchOn,
             busy = busy,
             onToggleSearch = {
-                // API 源需要 Key（没配就带去设置页）；本机浏览器源零 Key，直接开
+                // API 源需要 Key（没配就带去设置页）；本机浏览器源零 Key，直接开。
+                // Key 按源分槽取：换源后"这个源没配 Key"要如实判定，不能拿别家的 Key 顶上
                 val prov = com.kaze.newage.core.ai.AiSearch.Provider.byId(prefs.aiSearchProviderId.value)
-                if (prov.needsKey && prefs.aiSearchKey.value.isBlank()) onOpenSettings()
+                if (prov.needsKey && prefs.aiSearchKey(prov.id).isBlank()) onOpenSettings()
                 else viewModel.setAiSearchOn(!prefs.aiSearchOn.value)
             },
         )
