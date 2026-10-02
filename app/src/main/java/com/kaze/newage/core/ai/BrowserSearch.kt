@@ -1,8 +1,12 @@
 package com.kaze.newage.core.ai
 
 import android.content.Context
+import android.graphics.PixelFormat
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
+import android.view.Gravity
+import android.view.WindowManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.Dispatchers
@@ -10,18 +14,22 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /**
- * 本机浏览器搜索（Operit 式）：无头 WebView 加载必应结果页，页内 JS 提取条目。
+ * 本机浏览器搜索（Operit 式）：WebView 加载必应结果页，页内 JS 提取条目。
  *
- * 为什么不用 HttpURLConnection 直接抓：必应对"非浏览器"特征更容易弹验证码，
- * WebView 是真浏览器内核（带 Cookie/JS），成功率高得多；代价是必须主线程创建与
- * 回调（WebView 的硬性要求），且依赖桌面版必应的 DOM 结构（`li.b_algo`，多年稳定）。
+ * 两种挂载方式（按悬浮窗权限自动选择）：
+ *  - **真实窗口**（已授予「显示在其他应用上层」）：1px 透明、不可触摸的 overlay 窗口。
+ *    WebView 拿到真窗口后渲染器以全优先级调度，不会被 ROM 当后台冻结 —— 必应页面
+ *    的 JS 与网络请求最稳（vivo 等激进后台管理的机器上差别明显）；
+ *  - **无头模式**（未授权，默认兜底）：WebView 不挂窗口直接加载。多数设备可用，
+ *    个别 ROM 会限流后台渲染导致超时。
  *
- * 设计要点：
+ * 其余设计要点：
  *  - 全程不阻塞主线程：WebView 异步加载，协程经 [suspendCancellableCoroutine] 挂起等待；
  *  - 提取交给页内 JS（[AiSearch.EXTRACT_BING_JS]），Kotlin 只做纯解析（可单测）；
  *  - onPageFinished 可能因重定向多次触发：每次都尝试提取，**只有解析出结果才算完成**，
  *    一直为空就继续等（超时兜底），避免把重定向中间页当成"没有结果"；
- *  - 超时 / 协程取消都要 destroy WebView，否则每次提问泄漏一个内核实例。
+ *  - 超时 / 协程取消都要摘除窗口并 destroy WebView，否则泄漏一个内核实例
+ *    （overlay 窗口泄漏的后果更严重：系统会一直显示那个 1px 窗口）。
  */
 object BrowserSearch {
 
@@ -33,6 +41,9 @@ object BrowserSearch {
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
+    /** onPageFinished 后等摘要渲染的延迟（毫秒） */
+    private const val EXTRACT_DELAY_MS = 800L
+
     suspend fun searchBing(
         context: Context,
         query: String,
@@ -42,9 +53,10 @@ object BrowserSearch {
         val q = query.trim()
         if (q.isEmpty()) return@withContext emptyList()
 
+        val appContext = context.applicationContext
         suspendCancellableCoroutine { cont ->
             val webView = try {
-                WebView(context.applicationContext)
+                WebView(appContext)
             } catch (t: Throwable) {
                 // 个别 ROM 上 WebView 创建失败：按降级路径给可读错误，不闪退
                 cont.resumeWith(
@@ -53,18 +65,44 @@ object BrowserSearch {
                 return@suspendCancellableCoroutine
             }
 
+            val windowManager =
+                appContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            // 真窗口模式：1px 透明、不可触摸不可聚焦 —— 用户看不到也摸不到，
+            // 但 WebView 拿到真 window surface，渲染器全优先级（悬浮窗权限的价值所在）
+            var attached = false
+            val overlayParams = WindowManager.LayoutParams(
+                1,
+                1,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+            }
+
             val mainHandler = Handler(Looper.getMainLooper())
             var settled = false
 
-            fun settle(results: List<AiSearch.Result>) {
-                if (settled) return
-                settled = true
-                mainHandler.removeCallbacksAndMessages(null)
+            fun detach() {
+                if (attached) {
+                    attached = false
+                    runCatching { windowManager?.removeView(webView) }
+                }
                 try {
                     webView.stopLoading()
                     webView.destroy()
                 } catch (_: Throwable) {
                 }
+            }
+
+            fun settle(results: List<AiSearch.Result>) {
+                if (settled) return
+                settled = true
+                mainHandler.removeCallbacksAndMessages(null)
+                detach()
                 if (cont.isActive) cont.resumeWith(Result.success(results))
             }
 
@@ -89,25 +127,29 @@ object BrowserSearch {
                 }
             }
 
+            // 授权了悬浮窗 → 真窗口挂载；addView 万一失败（权限被收回等）静默回退无头
+            if (Settings.canDrawOverlays(appContext)) {
+                try {
+                    windowManager?.addView(webView, overlayParams)
+                    attached = true
+                } catch (_: Throwable) {
+                    attached = false
+                }
+            }
+
             mainHandler.postDelayed({ settle(emptyList()) }, timeoutMs)
             webView.loadUrl(AiSearch.buildBingSearchUrl(q))
 
-            // 协程被取消（提问流程整体超时/界面退出）：也要清掉 WebView，泄漏的是整个内核
+            // 协程被取消（提问流程整体超时/界面退出）：也要摘窗 + 销毁，
+            // overlay 窗口泄漏系统会一直挂着那个 1px 窗口
             cont.invokeOnCancellation {
                 mainHandler.post {
                     if (!settled) {
                         settled = true
-                        try {
-                            webView.stopLoading()
-                            webView.destroy()
-                        } catch (_: Throwable) {
-                        }
+                        detach()
                     }
                 }
             }
         }
     }
-
-    /** onPageFinished 后等摘要渲染的延迟（毫秒） */
-    private const val EXTRACT_DELAY_MS = 800L
 }

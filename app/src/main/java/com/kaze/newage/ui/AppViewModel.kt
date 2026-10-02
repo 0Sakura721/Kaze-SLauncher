@@ -15,6 +15,7 @@ import com.kaze.newage.core.ai.AiFileTools
 import com.kaze.newage.core.ai.AiMessage
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiPrompt
+import com.kaze.newage.core.ai.AiReply
 import com.kaze.newage.core.ai.AiSearch
 import com.kaze.newage.core.ai.AiSuggestion
 import com.kaze.newage.core.ai.BrowserSearch
@@ -555,6 +556,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
          * 不能把命令/写入落到另一个实例上。
          */
         val instanceId: String? = null,
+        /** 模型的思考过程（reasoning_content 或正文 <think> 段）；null = 无 */
+        val reasoning: String? = null,
     )
 
     private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
@@ -621,6 +624,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         uiPrefs.setAiThinking(v)
     }
 
+    /** 是否已授予悬浮窗权限（本机浏览器搜索走真实窗口的前提） */
+    fun canDrawOverlays(): Boolean = android.provider.Settings.canDrawOverlays(container.appContext)
+
+    /** 引导去系统设置授予悬浮窗权限（一次性手动操作，与电池白名单同一套做法） */
+    fun requestOverlayPermission() {
+        try {
+            val intent = android.content.Intent(
+                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:${container.appContext.packageName}"),
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            container.appContext.startActivity(intent)
+        } catch (_: Exception) {
+        }
+    }
+
     /** 清空 AI 对话：忙时不允许（正在生成的回复会找不到落点）；挂起中的写入会话一并作废 */
     fun clearAiChat() {
         if (_aiBusy.value) return
@@ -671,7 +689,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             AI_QUERY_TIMEOUT_MS,
                             maxTokens = 128,
                         )
-                        val query = AiSearch.extractQuery(queryRaw)
+                        val query = AiSearch.extractQuery(queryRaw.content)
                         if (query.isNotEmpty()) {
                             val results = when (provider) {
                                 // 本机浏览器：WebView 在主线程自起自收，结果解析是纯函数
@@ -749,7 +767,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 return
             }
             session.roundsLeft--
-            val reply = callAiWithTimeout(
+            val aiReply = callAiWithTimeout(
                 session.config,
                 session.apiMessages,
                 // 深度思考先出推理再出答案，界面可见超时也放宽一倍
@@ -757,13 +775,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 // write_file 可能携带整个配置文件，输出预算放宽
                 maxTokens = 2048,
             )
-            // 剥掉混在正文里的 <think> 推理段；历史回喂与展示都用干净文本
-            val cleaned = AiSuggestion.stripThinking(reply)
+            // 剥掉混在正文里的 <think> 推理段；历史回喂与展示都用干净文本，
+            // 推理过程（reasoning_content 或 <think> 段）单独保存供 UI 折叠展示
+            val (cleaned, inlineThink) = AiSuggestion.splitThinking(aiReply.content)
+            val reasoning = (aiReply.reasoning ?: inlineThink)
+                ?.take(AI_MAX_REASONING_CHARS)
             val parsed = AiSuggestion.parse(cleaned)
             lastAnalysis = parsed.analysis
             val tool = parsed.tool
             if (tool == null) {
-                appendFinalAiMessage(session, parsed, cleaned)
+                appendFinalAiMessage(session, parsed, cleaned, reasoning)
                 return
             }
             when (tool.name) {
@@ -810,7 +831,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
                 else -> {
-                    appendFinalAiMessage(session, parsed, cleaned)
+                    appendFinalAiMessage(session, parsed, cleaned, reasoning)
                     return
                 }
             }
@@ -826,7 +847,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    private fun appendFinalAiMessage(session: AiTurnSession, parsed: AiSuggestion.Parsed, cleaned: String) {
+    private fun appendFinalAiMessage(
+        session: AiTurnSession,
+        parsed: AiSuggestion.Parsed,
+        cleaned: String,
+        reasoning: String?,
+    ) {
         aiSession = null
         appendAiMessage(
             AiChatMessage(
@@ -839,6 +865,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 searchCount = session.searchCount,
                 searchError = session.searchError,
                 instanceId = session.instanceId,
+                reasoning = reasoning,
             )
         )
     }
@@ -986,8 +1013,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         messages: List<AiMessage>,
         timeoutMs: Long,
         maxTokens: Int = 1024,
-    ): String {
-        val deferred = kotlinx.coroutines.CompletableDeferred<String>()
+    ): AiReply {
+        val deferred = kotlinx.coroutines.CompletableDeferred<AiReply>()
         kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai") {
             try {
                 deferred.complete(AiClient.chat(config, messages, maxTokens))
@@ -1785,3 +1812,6 @@ private const val AI_QUERY_TIMEOUT_MS = 60_000L
  * 文件工具是多轮循环，设上限防止模型无限读文件烧 token；正常诊断 2~3 轮足够。
  */
 private const val AI_MAX_TOOL_ROUNDS = 4
+
+/** 保存的思考过程上限（reasoner 的推理可能非常长，展示端有滚动条，但不能无限占内存） */
+private const val AI_MAX_REASONING_CHARS = 20_000

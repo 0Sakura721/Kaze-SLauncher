@@ -16,6 +16,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -402,5 +403,39 @@ private fun SearchSection(viewModel: AppViewModel) {
         }
     } else {
         SectionNote("该搜索源无需 Key、不注册任何服务：由手机直接加载搜索结果页解析。")
+    }
+
+    // 本机浏览器源：引导授予悬浮窗权限，让 WebView 挂真窗口（渲染器全优先级、不被 ROM 冻结）
+    if (provider.id == AiSearch.Provider.BING_LOCAL.id && !viewModel.canDrawOverlays()) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+            shape = M3Shape.largeIncreased,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            onClick = { viewModel.requestOverlayPermission() },
+        ) {
+            Row(
+                Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Layers,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.width(20.dp),
+                )
+                Column(Modifier.weight(1f)) {
+                    Text("建议授予悬浮窗权限", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "授予「显示在其他应用上层」后，本机搜索在真实窗口中加载，成功率更高；" +
+                            "不授予也能用（无头模式）。点此前往系统设置。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }

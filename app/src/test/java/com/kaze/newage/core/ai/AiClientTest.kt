@@ -75,7 +75,17 @@ class AiClientTest {
     @Test
     fun `响应解析取首个 choice 的 content`() {
         val reply = """{"choices":[{"message":{"role":"assistant","content":"hello 世界"}}]}"""
-        assertEquals("hello 世界", AiClient.parseReply(reply))
+        val parsed = AiClient.parseReply(reply)
+        assertEquals("hello 世界", parsed.content)
+        assertEquals(null, parsed.reasoning)
+    }
+
+    @Test
+    fun `思考类模型的 reasoning_content 被解析出来`() {
+        val reply = """{"choices":[{"message":{"role":"assistant","content":"答案","reasoning_content":"我是推理过程"}}]}"""
+        val parsed = AiClient.parseReply(reply)
+        assertEquals("答案", parsed.content)
+        assertEquals("我是推理过程", parsed.reasoning)
     }
 
     @Test

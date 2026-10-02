@@ -1,6 +1,7 @@
 package com.kaze.newage.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,7 +38,10 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TravelExplore
@@ -58,6 +62,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -380,6 +387,10 @@ private fun ChatMessageRow(
                 Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // 思考过程：默认折叠，点开可看模型的完整推理（Operit 式）
+                msg.reasoning?.let { reasoning ->
+                    ThinkingPanel(reasoning)
+                }
                 // 联网搜索的情况先交代：搜到了什么词 / 为什么没搜成
                 if (msg.searchError != null) {
                     Text(
@@ -424,6 +435,61 @@ private fun ChatMessageRow(
 /** 用户气泡：右下角收口；助手气泡：左下角收口 */
 private val USER_BUBBLE_SHAPE = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
 private val AI_BUBBLE_SHAPE = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
+
+/**
+ * 思考过程面板：默认折叠的一块"草稿纸"（Operit 式）。
+ * 深度思考模型的推理可能很长 —— 展开后限高滚动，不撑爆气泡。
+ */
+@Composable
+private fun ThinkingPanel(reasoning: String) {
+    val scheme = MaterialTheme.colorScheme
+    var expanded by remember { mutableStateOf(false) }
+    Surface(
+        shape = M3Shape.small,
+        color = scheme.surfaceContainerHighest.copy(alpha = 0.5f),
+        contentColor = scheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    Icons.Filled.Psychology,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = scheme.onSurfaceVariant,
+                )
+                Text(
+                    "思考过程（${reasoning.length} 字）",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "收起" else "展开",
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            if (expanded) {
+                Column(
+                    Modifier
+                        .padding(horizontal = 10.dp)
+                        .padding(bottom = 10.dp)
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(reasoning, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
 
 /** 工具动作行：轻量居中提示（读取/列出/写入了哪个文件），不占气泡 */
 @Composable

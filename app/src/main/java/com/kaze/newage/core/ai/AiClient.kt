@@ -17,7 +17,20 @@ internal data class ChatResponseDto(val choices: List<ChoiceDto> = emptyList())
 internal data class ChoiceDto(val message: MessageDto = MessageDto())
 
 @Serializable
-internal data class MessageDto(val role: String = "", val content: String? = null)
+internal data class MessageDto(
+    val role: String = "",
+    val content: String? = null,
+    /** 思考类模型（deepseek-reasoner 等）的推理过程，与正文分开返回 */
+    val reasoning_content: String? = null,
+)
+
+/** 一轮对话的完整回复：正文 + 可选的思考过程 */
+data class AiReply(
+    /** 模型的推理过程（reasoning_content 或正文里的 <think> 段）；null = 没有思考内容 */
+    val reasoning: String?,
+    /** 最终回答正文 */
+    val content: String,
+)
 
 /**
  * OpenAI 兼容对话客户端（/chat/completions，非流式）。
@@ -100,12 +113,16 @@ object AiClient {
         }
     }
 
-    internal fun parseReply(body: String): String {
+    internal fun parseReply(body: String): AiReply {
         val resp = runCatching { json.decodeFromString<ChatResponseDto>(body) }.getOrElse {
             throw RuntimeException("AI 返回了无法解析的内容（HTTP 200 但不是预期的 JSON）")
         }
-        return resp.choices.firstOrNull()?.message?.content
+        val message = resp.choices.firstOrNull()?.message
             ?: throw RuntimeException("AI 返回为空（choices 为空）")
+        return AiReply(
+            reasoning = message.reasoning_content?.takeIf { it.isNotBlank() },
+            content = message.content ?: "",
+        )
     }
 
     /**

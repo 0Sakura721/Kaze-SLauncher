@@ -62,6 +62,27 @@ class AiSuggestionTest {
     }
 
     @Test
+    fun `splitThinking 把推理段提取出来`() {
+        val (stripped, reasoning) = AiSuggestion.splitThinking("<think>先查日志</think>{\"analysis\":\"A\"}")
+        assertEquals("{\"analysis\":\"A\"}", stripped)
+        assertEquals("先查日志", reasoning)
+    }
+
+    @Test
+    fun `无 think 时推理为 null`() {
+        val (stripped, reasoning) = AiSuggestion.splitThinking("纯文本回答")
+        assertEquals("纯文本回答", stripped)
+        assertEquals(null, reasoning)
+    }
+
+    @Test
+    fun `未闭合 think 的内容也算推理`() {
+        val (stripped, reasoning) = AiSuggestion.splitThinking("<think>推理了一半没有结论")
+        assertEquals("", stripped)
+        assertEquals("推理了一半没有结论", reasoning)
+    }
+
+    @Test
     fun `多个 think 段全部剥离`() {
         val p = AiSuggestion.parse(
             "<think>第一段</think>中间不该出现<think>第二段</think>{\"analysis\":\"B\",\"command\":\"\"}"

@@ -54,15 +54,25 @@ object AiSuggestion {
     private const val MAX_ANALYSIS_LEN = 2000
 
     /**
-     * 剥离思考类模型混在正文里的 <think> 推理段。
+     * 剥离思考类模型混在正文里的 <think> 推理段，并把推理内容提取出来供 UI 展示。
      * DeepSeek 官方把推理放在独立的 reasoning_content 字段（content 本来就干净），
      * 这里主要兜住把推理直接写进 content 的其他 OpenAI 兼容服务。
+     * 返回（剥掉推理后的正文, 推理过程文本或 null）。
      */
-    fun stripThinking(raw: String): String {
-        val stripped = THINK_BLOCK.replace(raw, " ")
+    fun splitThinking(raw: String): Pair<String, String?> {
+        val blocks = THINK_BLOCK.findAll(raw).mapNotNull { m ->
+            m.value.removePrefix("<think>").removeSuffix("</think>").trim().takeIf { it.isNotEmpty() }
+        }
         // 开头就是未闭合的 <think>（整段只有推理、没有结论）：没有可用的答案
-        return UNCLOSED_THINK.replace(stripped, "").trim()
+        val unclosed = UNCLOSED_THINK.find(raw)?.value
+            ?.removePrefix("<think>")?.trim()?.takeIf { it.isNotEmpty() }
+        val stripped = UNCLOSED_THINK.replace(THINK_BLOCK.replace(raw, " "), "").trim()
+        val reasoning = (blocks + listOfNotNull(unclosed)).joinToString("\n\n").trim().takeIf { it.isNotEmpty() }
+        return stripped to reasoning
     }
+
+    /** 只需要剥掉推理段时的便捷封装 */
+    fun stripThinking(raw: String): String = splitThinking(raw).first
 
     fun parse(raw: String): Parsed {
         val text = stripThinking(raw)
