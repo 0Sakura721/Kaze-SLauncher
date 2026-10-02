@@ -281,33 +281,14 @@ fun AiScreen(
             }
         }
 
-            // 「回到底部」：用户翻历史或流式输出追不上时浮出，一键滑到最新
-            AnimatedVisibility(
+            // 「回到底部」：用户翻历史或流式输出追不上时浮出，一键滑到最新。
+            // 写成顶层私有组件：外层是 Column —— Box 里的 AnimatedVisibility 会被解析成
+            // ColumnScope 的那个重载编译不过（控制台页踩过同一个坑）
+            JumpToBottomPill(
                 visible = showJumpToBottom,
-                enter = fadeIn(),
-                exit = fadeOut(),
                 modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
             ) {
-                Surface(
-                    modifier = Modifier.clip(M3Shape.groupSingle(36f)),
-                    shape = M3Shape.groupSingle(36f),
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    onClick = { scope.launch { scrollToBottom(animated = true) } },
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.ArrowDownward,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Text("回到底部", style = MaterialTheme.typography.labelLarge)
-                    }
-                }
+                scope.launch { scrollToBottom(animated = true) }
             }
         }
 
@@ -1038,6 +1019,44 @@ private fun InputDock(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 「回到底部」浮动胶囊（顶层私有组件，见调用点的说明：ColumnScope 重载冲突）。
+ */
+@Composable
+private fun JumpToBottomPill(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = modifier,
+    ) {
+        Surface(
+            modifier = Modifier.clip(M3Shape.groupSingle(36f)),
+            shape = M3Shape.groupSingle(36f),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            onClick = onClick,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Icon(
+                    Icons.Filled.ArrowDownward,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Text("回到底部", style = MaterialTheme.typography.labelLarge)
             }
         }
     }
