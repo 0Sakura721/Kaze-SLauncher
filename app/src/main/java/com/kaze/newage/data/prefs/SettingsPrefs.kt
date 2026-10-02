@@ -116,15 +116,36 @@ emember(path) 缓存位图的话，
     val updateMode = mutableStateOf(prefs.getString("update_mode", "full") ?: "full")
 
     // ── AI 助手（OpenAI 兼容接口，见 core/ai/AiModels.kt）──
-    // 默认预填 DeepSeek 官方地址与模型；换任何 OpenAI 兼容端点只需改这三项。
+    // 默认预填 DeepSeek 官方地址与两个模型；换任何 OpenAI 兼容端点只需改这几项。
+    // 「思考强度」在 DeepSeek 上的实现就是模型切换：标准 = deepseek-chat，深度思考 = deepseek-reasoner；
+    // 两个模型名都开放编辑，玩家可自行适配其他服务商。
     // API Key 只存应用私有的 SharedPreferences（别的应用读不到），绝不入库、绝不写日志。
     val aiBaseUrl = mutableStateOf(
         prefs.getString("ai_base_url", AiConfig.DEFAULT_BASE_URL) ?: AiConfig.DEFAULT_BASE_URL
     )
-    val aiModel = mutableStateOf(
-        prefs.getString("ai_model", AiConfig.DEFAULT_MODEL) ?: AiConfig.DEFAULT_MODEL
+    val aiModelStandard = mutableStateOf(
+        prefs.getString("ai_model_standard", AiConfig.DEFAULT_MODEL) ?: AiConfig.DEFAULT_MODEL
+    )
+    val aiModelThinking = mutableStateOf(
+        prefs.getString("ai_model_thinking", AiConfig.DEFAULT_THINKING_MODEL) ?: AiConfig.DEFAULT_THINKING_MODEL
     )
     val aiApiKey = mutableStateOf(prefs.getString("ai_api_key", "") ?: "")
+
+    /** 思考强度：false = 标准（快），true = 深度思考（更聪明也更慢） */
+    val aiThinking = mutableStateOf(prefs.getBoolean("ai_thinking", false))
+
+    init {
+        // 旧键迁移：P0 时只有一个 ai_model 字段，拆成标准/思考两个模型名时把旧值接过来
+        // （必须放在上面 aiModelStandard 初始化**之前**：属性按声明顺序初始化）
+        if (prefs.contains("ai_model") && !prefs.contains("ai_model_standard")) {
+            val legacy = prefs.getString("ai_model", null)
+            prefs.edit()
+                .putString("ai_model_standard", legacy ?: AiConfig.DEFAULT_MODEL)
+                .remove("ai_model")
+                .apply()
+            aiModelStandard.value = legacy ?: AiConfig.DEFAULT_MODEL
+        }
+    }
 
     fun setAutoUpdate(v: Boolean) {
         autoUpdate.value = v
@@ -141,23 +162,46 @@ emember(path) 缓存位图的话，
         prefs.edit().putString("update_channel", v).apply()
     }
 
-    /** 保存 AI 接口配置（三项都 trim：端点/模型里的空白只会造成莫名的 404） */
-    fun setAiConfig(baseUrl: String, model: String, apiKey: String) {
+    /** 保存 AI 接口配置（各项都 trim：端点/模型名里的空白只会造成莫名的 404） */
+    fun setAiConfig(
+        baseUrl: String,
+        modelStandard: String,
+        modelThinking: String,
+        apiKey: String,
+        thinking: Boolean,
+    ) {
         val b = baseUrl.trim()
-        val m = model.trim()
+        val ms = modelStandard.trim()
+        val mt = modelThinking.trim()
         val k = apiKey.trim()
         aiBaseUrl.value = b
-        aiModel.value = m
+        aiModelStandard.value = ms
+        aiModelThinking.value = mt
         aiApiKey.value = k
+        aiThinking.value = thinking
         prefs.edit()
             .putString("ai_base_url", b)
-            .putString("ai_model", m)
+            .putString("ai_model_standard", ms)
+            .putString("ai_model_thinking", mt)
             .putString("ai_api_key", k)
+            .putBoolean("ai_thinking", thinking)
             .apply()
     }
 
+    /** 思考强度开关（面板头部可随时切换，独立于配置表单的保存） */
+    fun setAiThinking(v: Boolean) {
+        aiThinking.value = v
+        prefs.edit().putBoolean("ai_thinking", v).apply()
+    }
+
     /** 供 AI 客户端使用的当前配置快照 */
-    fun aiConfig(): AiConfig = AiConfig(aiBaseUrl.value, aiModel.value, aiApiKey.value)
+    fun aiConfig(): AiConfig = AiConfig(
+        baseUrl = aiBaseUrl.value,
+        model = aiModelStandard.value,
+        thinkingModel = aiModelThinking.value,
+        apiKey = aiApiKey.value,
+        thinking = aiThinking.value,
+    )
 
     fun setFgColorMode(v: String) {
         fgColorMode.value = v

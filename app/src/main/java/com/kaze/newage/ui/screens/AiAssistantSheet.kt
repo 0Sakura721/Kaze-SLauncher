@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -24,12 +25,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -91,6 +94,7 @@ fun AiAssistantSheet(
     val busy by viewModel.aiBusy.collectAsStateWithLifecycle()
     val prefs = viewModel.uiPrefs
     // SettingsPrefs 里是 Compose State：读取即观察，保存后"保存并开始"立即生效
+    val thinking = prefs.aiThinking.value
     var showConfig by remember { mutableStateOf(prefs.aiApiKey.value.isBlank()) }
 
     ModalBottomSheet(
@@ -107,7 +111,7 @@ fun AiAssistantSheet(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Icon(
                     Icons.Filled.SmartToy,
@@ -121,6 +125,24 @@ fun AiAssistantSheet(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
+                    )
+                }
+                // 思考强度开关：聊天中随时可切（DeepSeek = chat/reasoner 模型切换；
+                // 模型名在配置表单里可自行编辑以适配其他服务商）
+                TextButton(onClick = { viewModel.setAiThinking(!thinking) }) {
+                    Icon(
+                        Icons.Filled.Psychology,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = if (thinking) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        "深度思考",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (thinking) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 IconButton(onClick = { showConfig = !showConfig }) {
@@ -141,21 +163,23 @@ fun AiAssistantSheet(
                     messages = messages,
                     busy = busy,
                     serverRunning = serverRunning,
+                    thinking = thinking,
                 )
             }
         }
     }
 }
 
-/** 对话区：消息列表 + 快捷提问 + 输入行 */
+/** 对话区：消息列表 + 快捷提问 + 输入行（输入草稿存在 ViewModel，切页面/关面板不丢） */
 @Composable
 private fun AiChatArea(
     viewModel: AppViewModel,
     messages: List<AppViewModel.AiChatMessage>,
     busy: Boolean,
     serverRunning: Boolean,
+    thinking: Boolean,
 ) {
-    var input by remember { mutableStateOf("") }
+    val input by viewModel.aiDraft.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
 
     // 新消息（含错误提示）自动滚到最新一条
@@ -203,7 +227,8 @@ private fun AiChatArea(
             ) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                 Text(
-                    "正在思考…（首次响应可能要十几秒）",
+                    if (thinking) "深度思考中…（先出推理再出答案，可能要一两分钟）"
+                    else "正在思考…（首次响应可能要十几秒）",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -217,7 +242,7 @@ private fun AiChatArea(
         ) {
             OutlinedTextField(
                 value = input,
-                onValueChange = { input = it },
+                onValueChange = { viewModel.setAiDraft(it) },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("问问 AI：现在什么情况？") },
                 singleLine = true,
@@ -227,7 +252,7 @@ private fun AiChatArea(
                 keyboardActions = KeyboardActions(onSend = {
                     if (!busy && input.isNotBlank()) {
                         viewModel.askAi(input)
-                        input = ""
+                        viewModel.setAiDraft("")
                     }
                 }),
             )
@@ -241,7 +266,7 @@ private fun AiChatArea(
                 enabled = !busy && input.isNotBlank(),
                 onClick = {
                     viewModel.askAi(input)
-                    input = ""
+                    viewModel.setAiDraft("")
                 },
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -379,13 +404,21 @@ private fun AiSuggestionCard(
     }
 }
 
-/** AI 接口配置表单：OpenAI 兼容端点的三项（服务地址 / 模型 / Key） */
+/**
+ * AI 接口配置表单：OpenAI 兼容端点（服务地址 / 标准与思考模型名 / Key / 思考强度）。
+ *
+ * 「思考强度」的适配逻辑**以 DeepSeek 优先**：深度思考就是换 reasoner 模型，
+ * 默认值就是 DeepSeek 的两个官方模型名；其他 OpenAI 兼容服务由玩家自行编辑
+ * 两个模型名（或只填标准名、留空思考名 = 永远回退标准模型）。
+ */
 @Composable
 private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
     val prefs = viewModel.uiPrefs
     var baseUrl by remember { mutableStateOf(prefs.aiBaseUrl.value) }
-    var model by remember { mutableStateOf(prefs.aiModel.value) }
+    var modelStandard by remember { mutableStateOf(prefs.aiModelStandard.value) }
+    var modelThinking by remember { mutableStateOf(prefs.aiModelThinking.value) }
     var key by remember { mutableStateOf(prefs.aiApiKey.value) }
+    var thinking by remember { mutableStateOf(prefs.aiThinking.value) }
 
     Column(
         Modifier
@@ -396,7 +429,8 @@ private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
     ) {
         Text("AI 接口配置（OpenAI 兼容）", style = MaterialTheme.typography.titleSmall)
         Text(
-            "默认 DeepSeek，可换成任何 OpenAI 兼容端点（硅基流动 / OpenRouter / 本地推理等）。" +
+            "默认适配 DeepSeek：标准 = deepseek-chat，深度思考 = deepseek-reasoner（更聪明也更慢）。" +
+                "换其他 OpenAI 兼容服务（硅基流动 / OpenRouter / 本地推理等）时，两个模型名可自行编辑。" +
                 "API Key 只保存在应用私有目录，不上传、不进日志。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -409,9 +443,16 @@ private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
-            value = model,
-            onValueChange = { model = it },
-            label = { Text("模型名") },
+            value = modelStandard,
+            onValueChange = { modelStandard = it },
+            label = { Text("标准模式模型名") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = modelThinking,
+            onValueChange = { modelThinking = it },
+            label = { Text("深度思考模式模型名") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -423,9 +464,30 @@ private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
+        // 思考强度：面板头部也能随时切，这里是同一份状态的另一个入口
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "思考强度",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            FilterChip(
+                selected = !thinking,
+                onClick = { thinking = false },
+                label = { Text("标准") },
+            )
+            FilterChip(
+                selected = thinking,
+                onClick = { thinking = true },
+                label = { Text("深度思考") },
+            )
+        }
         Row {
             Button(onClick = {
-                viewModel.saveAiConfig(baseUrl, model, key)
+                viewModel.saveAiConfig(baseUrl, modelStandard, modelThinking, key, thinking)
                 onDone()
             }) {
                 Text(if (key.isBlank()) "保存" else "保存并开始")

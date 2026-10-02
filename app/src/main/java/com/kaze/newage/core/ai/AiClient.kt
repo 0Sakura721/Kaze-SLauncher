@@ -29,8 +29,10 @@ internal data class MessageDto(val role: String = "", val content: String? = nul
 object AiClient {
 
     private const val CONNECT_TIMEOUT_MS = 15_000
-    // 模型生成本来就可能要几十秒：readTimeout 必须给足，否则长回答永远超时
+    // 模型生成本来就可能要几十秒：readTimeout 必须给足，否则长回答永远超时。
+    // 深度思考（如 deepseek-reasoner）先出推理再出答案，时间翻倍是常态，给到 4 分钟。
     private const val READ_TIMEOUT_MS = 120_000
+    private const val THINKING_READ_TIMEOUT_MS = 240_000
     private const val USER_AGENT = "KazeSLauncher/0.4 (com.kaze.newage; ai assistant)"
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -72,14 +74,14 @@ object AiClient {
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = CONNECT_TIMEOUT_MS
-            conn.readTimeout = READ_TIMEOUT_MS
+            conn.readTimeout = if (config.thinking) THINKING_READ_TIMEOUT_MS else READ_TIMEOUT_MS
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("Accept", "application/json")
             conn.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             conn.setRequestProperty("User-Agent", USER_AGENT)
             conn.outputStream.use {
-                it.write(buildRequestBody(config.model, messages).toByteArray(Charsets.UTF_8))
+                it.write(buildRequestBody(config.requestModel, messages).toByteArray(Charsets.UTF_8))
             }
             val code = conn.responseCode
             if (code != 200) {

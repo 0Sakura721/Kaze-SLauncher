@@ -53,6 +53,37 @@ class AiSuggestionTest {
     }
 
     @Test
+    fun `think 推理段被剥离后正常解析`() {
+        val p = AiSuggestion.parse(
+            "<think>先看日志，内存充足，玩家在线正常。</think>\n{\"analysis\":\"A\",\"command\":\"list\"}"
+        )
+        assertEquals("A", p.analysis)
+        assertEquals("list", p.command)
+    }
+
+    @Test
+    fun `多个 think 段全部剥离`() {
+        val p = AiSuggestion.parse(
+            "<think>第一段</think>中间不该出现<think>第二段</think>{\"analysis\":\"B\",\"command\":\"\"}"
+        )
+        assertEquals("B", p.analysis)
+        assertFalse(p.analysis.contains("中间不该出现"))
+    }
+
+    @Test
+    fun `只有未闭合 think 时视为无答案`() {
+        val p = AiSuggestion.parse("<think>推理了一半没有结论")
+        assertEquals("", p.analysis)
+        assertEquals("", p.command)
+    }
+
+    @Test
+    fun `正文含 think 字样但非标签时不受影响`() {
+        val p = AiSuggestion.parse("""{"analysis":"abc think def","command":""}""")
+        assertEquals("abc think def", p.analysis)
+    }
+
+    @Test
     fun `命令里的换行被拒绝`() {
         // JSON 字符串解码后 \n 是真实的换行符：一条变多条是最必须堵的口子
         val p = AiSuggestion.parse("""{"analysis":"a","command":"say hi\nstop"}""")

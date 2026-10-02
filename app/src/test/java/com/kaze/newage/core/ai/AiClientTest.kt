@@ -25,17 +25,37 @@ class AiClientTest {
     fun `端点拼接不重复`() {
         val c = AiConfig(baseUrl = "https://api.x.com/v1/", model = "m", apiKey = "k")
         assertEquals("https://api.x.com/v1/chat/completions", c.endpoint)
-        val full = AiConfig("https://api.x.com/v1/chat/completions", "m", "k")
+        val full = AiConfig(baseUrl = "https://api.x.com/v1/chat/completions", model = "m", apiKey = "k")
         assertEquals("https://api.x.com/v1/chat/completions", full.endpoint)
-        assertEquals("", AiConfig("api.x.com", "m", "k").endpoint)
+        assertEquals("", AiConfig(baseUrl = "api.x.com", model = "m", apiKey = "k").endpoint)
     }
 
     @Test
     fun `配置完整性要求三项齐全`() {
-        assertFalse(AiConfig("https://api.x.com", "m", "").isConfigured)
-        assertFalse(AiConfig("", "m", "k").isConfigured)
-        assertFalse(AiConfig("https://api.x.com", " ", "k").isConfigured)
-        assertTrue(AiConfig("https://api.x.com", "m", "k").isConfigured)
+        assertFalse(AiConfig(baseUrl = "https://api.x.com", model = "m", apiKey = "").isConfigured)
+        assertFalse(AiConfig(baseUrl = "", model = "m", apiKey = "k").isConfigured)
+        assertFalse(AiConfig(baseUrl = "https://api.x.com", model = " ", apiKey = "k").isConfigured)
+        assertTrue(AiConfig(baseUrl = "https://api.x.com", model = "m", apiKey = "k").isConfigured)
+    }
+
+    @Test
+    fun `思考强度在 DeepSeek 上映射为模型切换`() {
+        val std = AiConfig(
+            baseUrl = "https://api.deepseek.com/v1",
+            model = "deepseek-chat",
+            thinkingModel = "deepseek-reasoner",
+            apiKey = "k",
+        )
+        assertEquals("deepseek-chat", std.requestModel)
+        assertEquals("deepseek-reasoner", std.copy(thinking = true).requestModel)
+        // 思考模型名被清空/空白时回退标准模型，绝不发空模型名
+        assertEquals("deepseek-chat", std.copy(thinking = true, thinkingModel = " ").requestModel)
+        // 请求体用的就是 requestModel
+        val body = AiClient.buildRequestBody(
+            std.copy(thinking = true).requestModel,
+            listOf(AiMessage(AiMessage.ROLE_USER, "q")),
+        )
+        assertTrue(body.contains("\"model\":\"deepseek-reasoner\""))
     }
 
     @Test

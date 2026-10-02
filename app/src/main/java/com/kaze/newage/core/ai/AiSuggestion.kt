@@ -23,6 +23,10 @@ object AiSuggestion {
     /** 代码围栏 ```json {…}``` 里的 JSON（DOT_MATCHES_ALL 让 . 跨行） */
     private val FENCED = Regex("""```(?:json)?\s*(\{.*?\})\s*```""", RegexOption.DOT_MATCHES_ALL)
 
+    /** 思考类模型（DeepSeek 之外的部分服务商）会把推理以 <think> 段混进 content */
+    private val THINK_BLOCK = Regex("""<think>.*?</think>""", RegexOption.DOT_MATCHES_ALL)
+    private val UNCLOSED_THINK = Regex("""^\s*<think>(?!.*?</think>).*""", RegexOption.DOT_MATCHES_ALL)
+
     /**
      * 命令最大长度。MC 命令上限 32500，这里远小于它 —— 超过 200 字符的
      * "控制台命令"几乎必然是模型编造的（真正的命令都极短）。
@@ -32,8 +36,19 @@ object AiSuggestion {
     /** 分析文本上限： UI 直接展示，防模型跑飞把气泡撑成几千行 */
     private const val MAX_ANALYSIS_LEN = 2000
 
+    /**
+     * 剥离思考类模型混在正文里的 <think> 推理段。
+     * DeepSeek 官方把推理放在独立的 reasoning_content 字段（content 本来就干净），
+     * 这里主要兜住把推理直接写进 content 的其他 OpenAI 兼容服务。
+     */
+    fun stripThinking(raw: String): String {
+        val stripped = THINK_BLOCK.replace(raw, " ")
+        // 开头就是未闭合的 <think>（整段只有推理、没有结论）：没有可用的答案
+        return UNCLOSED_THINK.replace(stripped, "").trim()
+    }
+
     fun parse(raw: String): Parsed {
-        val text = raw.trim()
+        val text = stripThinking(raw)
         if (text.isEmpty()) return Parsed("", "")
         val fenced = FENCED.find(text)?.groupValues?.get(1)
         val payload = fenced ?: run {

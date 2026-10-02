@@ -535,14 +535,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
     val aiMessages: StateFlow<List<AiChatMessage>> = _aiMessages.asStateFlow()
 
+    /**
+     * AI 输入框草稿：存在 ViewModel 里，切页面 / 关掉面板 / 转屏都不丢 ——
+     * 打了一半没发出去的字是最不该丢的东西。
+     */
+    private val _aiDraft = MutableStateFlow("")
+    val aiDraft: StateFlow<String> = _aiDraft.asStateFlow()
+
+    fun setAiDraft(text: String) {
+        _aiDraft.value = text
+    }
+
     private val _aiBusy = MutableStateFlow(false)
     val aiBusy: StateFlow<Boolean> = _aiBusy.asStateFlow()
 
     private val aiIdCounter = java.util.concurrent.atomic.AtomicLong(0)
 
     /** 保存 AI 接口配置（面板内的配置表单调用；key 只进应用私有 SharedPreferences） */
-    fun saveAiConfig(baseUrl: String, model: String, apiKey: String) {
-        uiPrefs.setAiConfig(baseUrl, model, apiKey)
+    fun saveAiConfig(
+        baseUrl: String,
+        modelStandard: String,
+        modelThinking: String,
+        apiKey: String,
+        thinking: Boolean,
+    ) {
+        uiPrefs.setAiConfig(baseUrl, modelStandard, modelThinking, apiKey, thinking)
+    }
+
+    /** 思考强度开关（面板头部随时可切；DeepSeek = chat/reasoner 模型切换） */
+    fun setAiThinking(v: Boolean) {
+        uiPrefs.setAiThinking(v)
     }
 
     /** 清空 AI 对话：忙时不允许（正在生成的回复会找不到落点） */
@@ -587,15 +609,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     config,
                     listOf(AiMessage(AiMessage.ROLE_SYSTEM, system)) + history +
                         AiMessage(AiMessage.ROLE_USER, q),
+                    // 深度思考先出推理再出答案，界面可见超时也放宽一倍
+                    if (config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS,
                 )
-                val parsed = AiSuggestion.parse(reply)
+                // 剥掉混在正文里的 <think> 推理段（DeepSeek 官方推理在独立字段，这里兜其他服务），
+                // 历史回喂与展示都用干净文本，省 token
+                val cleaned = AiSuggestion.stripThinking(reply)
+                val parsed = AiSuggestion.parse(cleaned)
                 appendAiMessage(
                     AiChatMessage(
                         id = nextAiId(),
                         isUser = false,
                         text = parsed.analysis.ifBlank { "（模型没有给出分析文本）" },
                         command = parsed.command.takeIf { it.isNotEmpty() },
-                        rawReply = reply,
+                        rawReply = cleaned,
                     )
                 )
             } catch (e: Exception) {
@@ -648,7 +675,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * HttpURLConnection 的 DNS 解析不受 readTimeout 约束，离线时可能长时间不返回；
      * 与 [blockingWithTimeout] 同一套做法：超时后界面先恢复，线程自己跑完自行丢弃。
      */
-    private suspend fun callAiWithTimeout(config: AiConfig, messages: List<AiMessage>): String {
+    private suspend fun callAiWithTimeout(
+        config: AiConfig,
+        messages: List<AiMessage>,
+        timeoutMs: Long,
+    ): String {
         val deferred = kotlinx.coroutines.CompletableDeferred<String>()
         kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai") {
             try {
@@ -657,8 +688,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 deferred.completeExceptionally(t)
             }
         }
-        return withTimeoutOrNull(AI_REPLY_TIMEOUT_MS) { deferred.await() }
-            ?: throw RuntimeException("AI 在 ${AI_REPLY_TIMEOUT_MS / 1000} 秒内没有响应：请检查网络后重试")
+        return withTimeoutOrNull(timeoutMs) { deferred.await() }
+            ?: throw RuntimeException("AI 在 ${timeoutMs / 1000} 秒内没有响应：请检查网络后重试")
     }
 
     private fun appendAiMessage(message: AiChatMessage) {
@@ -1433,6 +1464,8 @@ private const val AI_HISTORY_MESSAGES = 8
 
 /**
  * AI 回复的**界面可见超时**：AiClient 的 readTimeout 是 120s，加上连接与模型排队余量。
+ * 深度思考（reasoner 类模型）先出推理再出答案，放宽一倍。
  * 超时后界面立即恢复，底层线程跑完自行丢弃（与 [VERSION_FETCH_TIMEOUT_MS] 同一套思路）。
  */
 private const val AI_REPLY_TIMEOUT_MS = 150_000L
+private const val AI_THINKING_REPLY_TIMEOUT_MS = 300_000L
