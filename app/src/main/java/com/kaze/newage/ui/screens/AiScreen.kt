@@ -9,16 +9,19 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -117,7 +120,13 @@ fun AiScreen(
     val prefs = viewModel.uiPrefs
     val thinking = prefs.aiThinking.value
     val searchOn = prefs.aiSearchOn.value
-    val serverRunning = serverState == com.kaze.newage.core.server.ServerState.Running
+    val serverStates by viewModel.serverStates.collectAsStateWithLifecycle()
+
+    // 消息按生成它的实例判定运行状态（用户可能已切到别的实例）
+    fun runningFor(msg: AppViewModel.AiChatMessage): Boolean {
+        val id = msg.instanceId ?: currentId
+        return id != null && serverStates[id] == com.kaze.newage.core.server.ServerState.Running
+    }
 
     val palette = statusPalette()
     val stateColor = when (serverState.toTone()) {
@@ -127,10 +136,12 @@ fun AiScreen(
         StatusTone.Error -> palette.error
     }
 
+    // 底部 insets 用 safeDrawing 的 bottom 分量：键盘弹出 = 键盘顶，收起 = 底栏高，
+    // 一处搞定（root 的 imePadding + dock 的 navigationBarsPadding 会把底栏高度算两次）
     Column(
         Modifier
             .fillMaxSize()
-            .imePadding()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
     ) {
         M3EScreenHeader(
             title = "AI 助手",
@@ -186,14 +197,14 @@ fun AiScreen(
                     )
                     else -> ChatMessageRow(
                         msg = msg,
-                        serverRunning = serverRunning,
+                        serverRunning = runningFor(msg),
                         onExecute = { viewModel.executeAiSuggestion(msg.id) },
                     )
                 }
             }
         }
 
-        // ── 思考中指示 ──
+        // ── 思考中指示 + 取消 ──
         if (busy) {
             Row(
                 Modifier
@@ -211,7 +222,11 @@ fun AiScreen(
                     else "正在思考…（首次响应可能要十几秒）",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
                 )
+                TextButton(onClick = { viewModel.cancelAiTurn() }) {
+                    Text("取消")
+                }
             }
         }
 
@@ -482,8 +497,14 @@ private fun WriteRequestRow(
                             .heightIn(max = 200.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
+                        // 只预览前 4000 字符：内容可达 256KB，全量组合会把重组卡死
+                        val preview = if (req.content.length > 4000) {
+                            req.content.take(4000) + "\n…（预览已截断，共 ${req.content.length} 字符）"
+                        } else {
+                            req.content
+                        }
                         Text(
-                            req.content,
+                            preview,
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -636,9 +657,7 @@ private fun InputDock(
         ?.name?.ifBlank { null } ?: prefs.aiProfiles.value.firstOrNull()?.name?.ifBlank { null }
 
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding(),
+        modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surfaceContainer,
         shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp),
         tonalElevation = 2.dp,

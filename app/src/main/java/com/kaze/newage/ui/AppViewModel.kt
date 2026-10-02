@@ -549,6 +549,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val writeRequest: AiWriteRequest? = null,
         /** 写入请求状态：0=待确认 1=已允许 2=已拒绝 */
         val writeState: Int = 0,
+        /**
+         * 本条消息对应的实例。命令执行与文件写入都按这里记录的实例走，
+         * 而不是"当前选中的实例" —— 用户在 AI 回答后切换实例再点按钮，
+         * 不能把命令/写入落到另一个实例上。
+         */
+        val instanceId: String? = null,
     )
 
     private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
@@ -581,10 +587,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val searchQuery: String?,
         val searchCount: Int,
         val searchError: String?,
+        /** 本轮提问发起时的实例：命令/写入绑定到它（见 [AiChatMessage.instanceId]） */
+        val instanceId: String?,
     )
 
     @Volatile
     private var aiSession: AiTurnSession? = null
+
+    /** 用户请求取消本轮 AI 提问：在工具循环的每个轮次边界生效（进行中的 HTTP 调用会自然超时结束） */
+    @Volatile
+    private var aiCancelRequested = false
+
+    /** 取消当前 AI 提问（正在思考/工具循环中时有效） */
+    fun cancelAiTurn() {
+        if (_aiBusy.value) aiCancelRequested = true
+    }
 
     // ── 模型配置档案 + 联网搜索（存取在 SettingsPrefs，这里只做转发）──
 
@@ -629,6 +646,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         appendAiMessage(AiChatMessage(nextAiId(), isUser = true, text = q))
         _aiBusy.value = true
+        // 新提问作废可能挂起的旧会话与取消标志
+        aiSession = null
+        aiCancelRequested = false
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // ── 联网搜索（开启才走；API 源需已配 Key，本机浏览器源零 Key）──
@@ -696,6 +716,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     searchQuery = searchQuery,
                     searchCount = searchCount,
                     searchError = searchError,
+                    instanceId = _currentInstanceId.value,
                 )
                 // 工具多轮循环：读/列自动执行回喂，写挂起等用户确认（见 runTurn）
                 runTurn(session)
@@ -718,6 +739,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun runTurn(session: AiTurnSession) {
         var lastAnalysis = ""
         while (session.roundsLeft > 0) {
+            // 取消在轮次边界生效：进行中的 HTTP 调用让它自然结束（线程有超时兜底）
+            if (aiCancelRequested) {
+                aiCancelRequested = false
+                aiSession = null
+                appendAiMessage(
+                    AiChatMessage(nextAiId(), isUser = false, text = "已取消本轮提问。", toolNote = "已取消")
+                )
+                return
+            }
             session.roundsLeft--
             val reply = callAiWithTimeout(
                 session.config,
@@ -774,6 +804,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 content = tool.content,
                                 bytes = tool.content.toByteArray(Charsets.UTF_8).size,
                             ),
+                            instanceId = session.instanceId,
                         )
                     )
                     return
@@ -807,6 +838,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 searchQuery = session.searchQuery,
                 searchCount = session.searchCount,
                 searchError = session.searchError,
+                instanceId = session.instanceId,
             )
         )
     }
@@ -839,8 +871,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _aiBusy.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val dir = _currentInstanceId.value?.let { instanceStore.get(it) }?.dir
-                val result = if (dir == null) "失败：当前未选择实例"
+                // 写入绑定到请求发起时的实例（消息里记录的），不是当前选中的实例
+                val dir = (msg.instanceId?.let { instanceStore.get(it) }
+                    ?: _currentInstanceId.value?.let { instanceStore.get(it) })?.dir
+                val result = if (dir == null) "失败：实例不存在或已被删除"
                 else runCatching { AiFileTools.writeFile(dir, req.path, req.content) }
                     .getOrElse { "失败：${it.message}" }
                 appendAiMessage(
@@ -869,7 +903,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val req = msg.writeRequest ?: return
         if (msg.writeState != 0) return
         setAiWriteState(messageId, 2)
-        val session = aiSession ?: return
+        val session = aiSession
+        if (session == null) {
+            appendAiMessage(
+                AiChatMessage(
+                    nextAiId(), isUser = false,
+                    text = "本轮会话已结束，已拒绝本次写入。",
+                    toolNote = "拒绝写入 ${req.path}",
+                )
+            )
+            return
+        }
         _aiBusy.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -904,9 +948,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun executeAiSuggestion(messageId: Long) {
         val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
         val cmd = AiSuggestion.sanitizeCommand(msg.command) ?: return
-        val id = _currentInstanceId.value ?: return
-        if (serverManager.states.value[id] != ServerState.Running) return
-        sendCommand(cmd)
+        // 命令属于生成它的那个实例，不是"当前选中的实例"（用户可能已切换）
+        val targetId = msg.instanceId ?: _currentInstanceId.value ?: return
+        val inst = instanceStore.get(targetId) ?: return
+        if (serverManager.states.value[targetId] != ServerState.Running) return
+        serverManager.sendCommand(inst, cmd)
         _aiMessages.value = _aiMessages.value.map {
             if (it.id == messageId) it.copy(commandSent = true) else it
         }

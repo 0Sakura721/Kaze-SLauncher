@@ -67,21 +67,22 @@ object AiSuggestion {
     fun parse(raw: String): Parsed {
         val text = stripThinking(raw)
         if (text.isEmpty()) return Parsed("", "")
+        // 两条提取路：代码围栏内的候选 + 首个大括号到末尾大括号的候选。
+        // 任一解码成功即用 —— 围栏正则遇到 content 里带 ``` 的 write_file 会被截短，
+        // 双路保证这种输出仍能解析出完整对象。
         val fenced = FENCED.find(text)?.groupValues?.get(1)
-        val payload = fenced ?: run {
-            val start = text.indexOf('{')
-            val end = text.lastIndexOf('}')
-            if (start >= 0 && end > start) text.substring(start, end + 1) else null
+        val start = text.indexOf('{')
+        val end = text.lastIndexOf('}')
+        val span = if (start >= 0 && end > start) text.substring(start, end + 1) else null
+        val reply = listOfNotNull(fenced, span).distinct().firstNotNullOfOrNull { candidate ->
+            runCatching { json.decodeFromString<RawReply>(candidate) }.getOrNull()
         }
-        if (payload != null) {
-            val reply = runCatching { json.decodeFromString<RawReply>(payload) }.getOrNull()
-            if (reply != null) {
-                val cmd = sanitizeCommand(reply.command) ?: ""
-                val tool = reply.tool
-                    ?.takeIf { it.name.trim().lowercase() in KNOWN_TOOLS && it.path.isNotBlank() }
-                    ?.let { AiToolCall(it.name.trim().lowercase(), it.path.trim(), it.content) }
-                return Parsed(reply.analysis.trim().take(MAX_ANALYSIS_LEN), cmd, tool)
-            }
+        if (reply != null) {
+            val cmd = sanitizeCommand(reply.command) ?: ""
+            val tool = reply.tool
+                ?.takeIf { it.name.trim().lowercase() in KNOWN_TOOLS && it.path.isNotBlank() }
+                ?.let { AiToolCall(it.name.trim().lowercase(), it.path.trim(), it.content) }
+            return Parsed(reply.analysis.trim().take(MAX_ANALYSIS_LEN), cmd, tool)
         }
         return Parsed(text.take(MAX_ANALYSIS_LEN), "")
     }

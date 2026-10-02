@@ -317,8 +317,9 @@ private fun SearchSection(viewModel: AppViewModel) {
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             onClick = {
                 providerId = prov.id
-                // 换源立即生效（Key 沿用已保存的值）
+                // 换源立即生效（Key 沿用已保存的值），并把本地编辑框回读成已保存值
                 viewModel.setAiSearch(prov.id, prefs.aiSearchKey.value)
+                searchKey = prefs.aiSearchKey.value
                 keySaved = false
             },
         ) {

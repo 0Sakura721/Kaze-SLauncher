@@ -100,12 +100,17 @@ object AiFileTools {
         guardTextType(f, forWrite = false)
         val total = f.length()
         if (total <= 0L) return "（空文件）"
-        val bytes = f.inputStream().use { ins ->
-            val buf = ByteArray(MAX_READ_BYTES)
-            val n = ins.read(buf)
-            if (n < 0) ByteArray(0) else buf.copyOf(n)
+        // read(buf) 不保证读满（尤其网络/管道语义下），必须循环读够或到 EOF
+        val buf = ByteArray(MAX_READ_BYTES)
+        var n = 0
+        f.inputStream().use { ins ->
+            while (n < buf.size) {
+                val r = ins.read(buf, n, buf.size - n)
+                if (r < 0) break
+                n += r
+            }
         }
-        val text = String(bytes, Charsets.UTF_8)
+        val text = String(buf, 0, n, Charsets.UTF_8)
         return if (total > MAX_READ_BYTES) {
             "$text\n…（已截断：文件共 $total 字节，只读取了前 $MAX_READ_BYTES 字节）"
         } else {
@@ -152,7 +157,7 @@ object AiFileTools {
         var bakNote = ""
         if (f.exists()) {
             if (!f.isFile) throw IllegalArgumentException("${f.path} 不是普通文件")
-            f.copyTo(File(parent, f.name + ".bak"), overwrite = true)
+            f.copyTo(f.resolveSibling(f.name + ".bak"), overwrite = true)
             bakNote = "，原文件已备份为 ${f.name}.bak"
         }
         f.writeText(content, Charsets.UTF_8)
