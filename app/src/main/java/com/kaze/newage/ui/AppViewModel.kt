@@ -12,6 +12,8 @@ import com.kaze.newage.core.addons.AddonManager
 import com.kaze.newage.core.addons.ModrinthApi
 import com.kaze.newage.core.addons.ModrinthSearchHit
 import com.kaze.newage.core.ai.AiClient
+import com.kaze.newage.core.ai.AiCommandPolicy
+import com.kaze.newage.core.ai.AiAudit
 import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiContext
 import com.kaze.newage.core.ai.AiFileTools
@@ -634,7 +636,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val searchError: String?,
         /** 本轮提问发起时的实例：命令/写入绑定到它（见 [AiChatMessage.instanceId]） */
         val instanceId: String?,
-    )
+    ) {
+        // 循环卫生（借鉴 Harness 的 repeat-tool-reminder）：同一工具+同参连续重复时提醒模型改道
+        var lastReadSig: String? = null
+        var repeatCount: Int = 0
+    }
 
     @Volatile
     private var aiSession: AiTurnSession? = null
@@ -724,6 +730,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun setAiThinking(v: Boolean) {
         uiPrefs.setAiThinking(v)
     }
+
+    /** 控制台命令执行档位（仅建议 / 白名单自动 / 全部自动） */
+    fun setAiCommandMode(modeId: String) = uiPrefs.setAiCommandMode(modeId)
 
     /** 是否已授予悬浮窗权限（本机浏览器搜索走真实窗口的前提） */
     fun canDrawOverlays(): Boolean = android.provider.Settings.canDrawOverlays(container.appContext)
@@ -878,6 +887,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             session.roundsLeft--
             val deadline = System.currentTimeMillis() +
                 if (session.config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS
+            // 命令执行档位（借鉴 Harness 的权限分层）：仅建议 / 白名单自动 / 全部自动
+            val commandMode = AiCommandPolicy.modeById(uiPrefs.aiCommandMode.value)
+            val executeToolEnabled = commandMode != AiCommandPolicy.Mode.SUGGEST
             // 实况流：思考/正文逐 token 回调进 [_aiLiveStream]，完成后以正式气泡落榜
             val live = AiLiveStream(nextAiId(), thinking = session.config.thinking)
             val aiReply = try {
@@ -892,6 +904,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     thinkingEnabled = session.config.thinking,
                     includeNativeThinkingParam = includeNativeThinking(session.config),
                     includeTools = includeNativeThinking(session.config),
+                    includeExecuteCommand = executeToolEnabled,
                     shouldStop = { aiCancelRequested || System.currentTimeMillis() > deadline },
                     onDelta = { r, c -> updateLiveStream(live.id, r, c) },
                 )
@@ -955,6 +968,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         "list_dir" -> "列出 ${tool.path}"
                         else -> "抓取网页 ${AiSanitize.displayOneLine(tool.path)}"
                     }
+                    val advisory = repeatGuard(session, "${tool.name}|${tool.path}")
                     val result = runCatching { executeAiReadTool(tool.name, tool.path) }
                         .getOrElse { "工具执行失败：${it.message}" }
                     appendAiMessage(
@@ -967,7 +981,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     session.apiMessages += AiMessage(
                         AiMessage.ROLE_USER,
-                        "【工具结果】${tool.name} \"${tool.path}\"\n$result",
+                        advisory + "【工具结果】${tool.name} \"${tool.path}\"\n$result",
+                    )
+                }
+                "execute_command" -> {
+                    val feed = execCommandTool(session, tool.content.ifBlank { tool.path })
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_USER,
+                        "【工具结果】execute_command → $feed",
+                    )
+                }
+                "read_memory", "write_memory" -> {
+                    val result = execMemoryTool(tool.name, session.instanceId, tool.content)
+                    appendAiMessage(
+                        AiChatMessage(
+                            id = nextAiId(),
+                            isUser = false,
+                            text = parsed.analysis.ifBlank { if (tool.name == "read_memory") "已读取记忆" else "已保存记忆" },
+                            toolNote = "记忆",
+                        )
+                    )
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_USER,
+                        "【工具结果】${tool.name} → $result",
                     )
                 }
                 "write_file" -> {
@@ -1101,12 +1137,31 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 return true
             }
+            // 命令执行与记忆：与 JSON 协议共用同一套实现（分档判定在 execCommandTool 内）
+            if (name == "execute_command") {
+                val feed = execCommandTool(session, args.command)
+                session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, feed, toolCallId = tc.id)
+                continue
+            }
+            if (name == "read_memory" || name == "write_memory") {
+                val result = execMemoryTool(name, session.instanceId, args.content)
+                appendAiMessage(
+                    AiChatMessage(
+                        nextAiId(), isUser = false,
+                        text = if (name == "read_memory") "已读取记忆" else "已保存记忆",
+                        toolNote = "记忆",
+                    )
+                )
+                session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, result, toolCallId = tc.id)
+                continue
+            }
             if (name !in setOf("read_file", "list_dir", "fetch_page")) {
                 session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, "未知工具：$name", toolCallId = tc.id)
                 continue
             }
             // fetch_page 的参数名是 url，其余是 path
             val targetPath = if (name == "fetch_page") args.url.ifBlank { args.path } else args.path
+            val advisory = repeatGuard(session, "$name|$targetPath")
             val note = when (name) {
                 "read_file" -> "读取 $targetPath"
                 "list_dir" -> "列出 $targetPath"
@@ -1117,7 +1172,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             appendAiMessage(
                 AiChatMessage(nextAiId(), isUser = false, text = note, toolNote = note)
             )
-            session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, result, toolCallId = tc.id)
+            session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, advisory + result, toolCallId = tc.id)
         }
         return false
     }
@@ -1159,6 +1214,83 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             AiFileTools.readFile(dir, container.appContext.filesDir, path)
         } else {
             AiFileTools.listDir(dir, container.appContext.filesDir, path)
+        }
+    }
+
+    // ── 借鉴 Harness 的三个机制：循环卫生 guard / 权限分档 / 会话记忆 ──
+
+    /**
+     * 循环卫生 guard（借鉴 Harness 的 repeat-tool-reminder，建议性不阻断）：
+     * 模型以相同参数重复同一只读工具时，在回喂结果前附上提醒，
+     * 促使其检查上次结果、改变方法或直接给出最终回答。
+     */
+    private fun repeatGuard(session: AiTurnSession, signature: String): String {
+        if (session.lastReadSig == signature) {
+            session.repeatCount++
+        } else {
+            session.lastReadSig = signature
+            session.repeatCount = 1
+        }
+        return if (session.repeatCount >= 2) {
+            "⚠ 循环提示：这是第 ${session.repeatCount + 1} 次以完全相同的参数调用同一工具。" +
+                "请先检查上一次返回的内容，改变方法，或直接输出最终回答。\n"
+        } else {
+            ""
+        }
+    }
+
+    /** execute_command 工具：按档位决定直接执行还是升级为建议卡片 */
+    private fun execCommandTool(session: AiTurnSession, rawCommand: String): String {
+        val cmd = AiSuggestion.sanitizeCommand(rawCommand)
+            ?: return "失败：命令为空或含非法字符"
+        val mode = AiCommandPolicy.modeById(uiPrefs.aiCommandMode.value)
+        if (!AiCommandPolicy.canAuto(mode, cmd)) {
+            // 当前档位不允许自动执行：升级为建议卡片，用户点「执行」才发送
+            appendAiMessage(
+                AiChatMessage(
+                    nextAiId(), isUser = false,
+                    text = "这条命令需要你确认（当前为「${mode.label}」档位）：",
+                    command = cmd,
+                    instanceId = session.instanceId,
+                )
+            )
+            return "已向用户展示命令建议卡片，等待用户确认执行。"
+        }
+        val inst = session.instanceId?.let { instanceStore.get(it) }
+            ?: return "失败：实例不存在或已被删除"
+        serverManager.sendCommand(inst, cmd)
+        AiAudit.log(container.appContext, "ai-command（自动）[${inst.name}] $cmd")
+        appendAiMessage(
+            AiChatMessage(
+                nextAiId(), isUser = false,
+                text = "已执行：$cmd（结果见控制台）",
+                toolNote = "执行了 $cmd",
+                instanceId = session.instanceId,
+            )
+        )
+        return "已执行：$cmd —— 结果写在控制台，可用 read_file 查看最新日志确认效果"
+    }
+
+    // ── 会话记忆（借鉴 Harness 的 session memory）：每实例一份长期笔记 ──
+
+    private fun aiMemoryFile(instanceId: String?): File? =
+        (instanceId ?: _currentInstanceId.value)
+            ?.let { id -> File(container.appContext.filesDir, "ai_memory_$id.md") }
+
+    private fun execMemoryTool(name: String, instanceId: String?, content: String): String {
+        val f = aiMemoryFile(instanceId) ?: return "失败：未选择实例"
+        return if (name == "read_memory") {
+            if (!f.isFile) "（暂无记忆）"
+            else runCatching { f.readText() }
+                .getOrElse { "读取失败：${it.message}" }
+                .take(4096)
+                .ifBlank { "（暂无记忆）" }
+        } else {
+            if (content.isBlank()) return "失败：记忆内容为空"
+            runCatching { f.writeText(content.take(4096)) }
+                .getOrElse { "写入失败：${it.message}" }
+            AiAudit.log(container.appContext, "ai-memory 更新（${content.length} 字符）")
+            "已保存记忆（${content.length} 字符）"
         }
     }
 
@@ -1271,15 +1403,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val inst = instanceStore.get(targetId) ?: return
         if (serverManager.states.value[targetId] != ServerState.Running) return
         serverManager.sendCommand(inst, cmd)
+        AiAudit.log(container.appContext, "ai-command（确认执行）[${inst.name}] $cmd")
         _aiMessages.value = _aiMessages.value.map {
             if (it.id == messageId) it.copy(commandSent = true) else it
         }
+        persistAiChat()
     }
 
-    /** 组装 AI 上下文快照（当前实例的状态 / 玩家 / 占用 / 控制台日志窗口） */
+    /** 组装 AI 上下文快照（当前实例的状态 / 玩家 / 占用 / 控制台日志窗口 / 长期记忆） */
     private fun buildAiContext(): String {
         val inst = _currentInstanceId.value?.let { instanceStore.get(it) }
-        return AiContext.build(
+        val base = AiContext.build(
             instanceName = inst?.name ?: "（未选择实例）",
             mcVersion = inst?.mcVersion ?: "",
             coreType = inst?.coreType?.displayName ?: "未知",
@@ -1291,6 +1425,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             stats = _procStats.value,
             lines = _consoleLines.value,
         )
+        // 会话记忆（借鉴 Harness 的 session memory）：每实例一份长期笔记，随快照每轮注入
+        val memory = aiMemoryFile(_currentInstanceId.value)
+            ?.takeIf { it.isFile }
+            ?.let { runCatching { it.readText() }.getOrNull() }
+            ?.take(1024)
+            ?.takeIf { it.isNotBlank() }
+        return if (memory == null) base else "$base\n\n【AI 记忆（你用 write_memory 维护的长期笔记）】\n$memory"
     }
 
     /**
@@ -2103,7 +2244,7 @@ private const val AI_QUERY_TIMEOUT_MS = 60_000L
  * 单轮提问允许的模型调用次数上限（含最终回答那一次）。
  * 文件工具是多轮循环，设上限防止模型无限读文件烧 token；正常诊断 2~3 轮足够。
  */
-private const val AI_MAX_TOOL_ROUNDS = 4
+private const val AI_MAX_TOOL_ROUNDS = 6
 
 /** 保存的思考过程上限（reasoner 的推理可能非常长，展示端有滚动条，但不能无限占内存） */
 private const val AI_MAX_REASONING_CHARS = 20_000

@@ -171,6 +171,7 @@ object AiClient {
         thinkingEnabled: Boolean = false,
         includeNativeThinkingParam: Boolean = false,
         includeTools: Boolean = false,
+        includeExecuteCommand: Boolean = false,
         shouldStop: () -> Boolean = { false },
         onDelta: (reasoningDelta: String?, contentDelta: String?) -> Unit = { _, _ -> },
     ): AiReply {
@@ -181,7 +182,8 @@ object AiClient {
         if (config.apiKey.isBlank()) throw RuntimeException("尚未配置 API Key")
         val requestBody = buildRequestBody(
             config.requestModel, messages, maxTokens, extraJson,
-            thinkingEnabled, includeNativeThinkingParam, stream = true, includeTools = includeTools,
+            thinkingEnabled, includeNativeThinkingParam, stream = true,
+            includeTools = includeTools, includeExecuteCommand = includeExecuteCommand,
         )
         val conn = URL(endpoint).openConnection() as HttpURLConnection
         val reasoning = StringBuilder()
@@ -295,6 +297,7 @@ object AiClient {
         includeNativeThinkingParam: Boolean = false,
         stream: Boolean = false,
         includeTools: Boolean = false,
+        includeExecuteCommand: Boolean = false,
     ): String = buildJsonObject {
         put("model", model)
         put("stream", stream)
@@ -307,7 +310,16 @@ object AiClient {
         // 原生 function calling（仅官方 DeepSeek 场景；第三方走 JSON 夹带协议）。
         // 官方约束：思考模式下 tool_choice 不支持 required/named —— 我们用默认 auto，合规。
         if (includeTools) {
-            runCatching { put("tools", json.parseToJsonElement(FILE_TOOLS_SPEC)) }
+            runCatching {
+                val tools = buildJsonArray {
+                    (json.parseToJsonElement(FILE_TOOLS_SPEC) as kotlinx.serialization.json.JsonArray)
+                        .forEach { add(it) }
+                    if (includeExecuteCommand) {
+                        add(json.parseToJsonElement(EXECUTE_TOOL_SPEC))
+                    }
+                }
+                put("tools", tools)
+            }
         }
         putJsonArray("messages") {
             messages.forEach { m ->
@@ -367,6 +379,10 @@ object AiClient {
         "deepseek-v4-flash-vision-exp",
     )
 
+    /** execute_command 工具：仅当用户开启命令自动执行档位时才并入工具列表 */
+    internal const val EXECUTE_TOOL_SPEC =
+        """{"type":"function","function":{"name":"execute_command","description":"直接执行一条 Minecraft 服务端控制台命令（结果会写进控制台，下一轮返回执行摘要）。仅在工具列表提供它时才可调用。","parameters":{"type":"object","properties":{"command":{"type":"string","description":"完整命令，不带 /"}},"required":["command"]}}}"""
+
     /**
      * 原生 function calling 的工具清单（OpenAI function 格式）。
      * 只覆盖只读工具 + write_file；写文件仍走"用户确认卡片"的同一套审批，
@@ -377,7 +393,9 @@ object AiClient {
 {"type":"function","function":{"name":"read_file","description":"读取服务端实例目录下的文本文件（配置/日志/脚本）。app: 前缀 = 启动器应用目录，只读。二进制与大文件会被拒绝。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"}},"required":["path"]}}},
 {"type":"function","function":{"name":"list_dir","description":"列出实例目录（或 app: 应用目录）下的条目，目录在前。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对路径，. 表示根目录"}},"required":["path"]}}},
 {"type":"function","function":{"name":"write_file","description":"写入/覆盖实例目录下的文本文件（需用户在界面上确认；覆盖已有文件自动留 .bak）。.jar 等二进制与授权类文件（ops.json/eula.txt/whitelist.json 等）被禁止。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"},"content":{"type":"string","description":"完整的新文件内容"}},"required":["path","content"]}}},
-{"type":"function","function":{"name":"fetch_page","description":"抓取搜索结果里出现的网页正文（http/https），用于把攻略或文档读全。","parameters":{"type":"object","properties":{"url":{"type":"string","description":"完整网页地址"}},"required":["url"]}}}
+{"type":"function","function":{"name":"fetch_page","description":"抓取搜索结果里出现的网页正文（http/https），用于把攻略或文档读全。","parameters":{"type":"object","properties":{"url":{"type":"string","description":"完整网页地址"}},"required":["url"]}}},
+{"type":"function","function":{"name":"read_memory","description":"读取你对这台服务器的长期记忆笔记（端口、玩家习惯、已解决的问题等）。","parameters":{"type":"object","properties":{}}}},
+{"type":"function","function":{"name":"write_memory","description":"以覆盖方式更新长期记忆笔记（保持精炼，只记长期有用的事实）。","parameters":{"type":"object","properties":{"content":{"type":"string","description":"完整的新笔记内容"}},"required":["content"]}}}
 ]"""
 
     /**

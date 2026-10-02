@@ -23,14 +23,22 @@ object AiSuggestion {
     @Serializable
     internal data class ToolCallDto(val name: String = "", val path: String = "", val content: String = "")
 
-    /** 一次工具调用（扁平结构，抗模型输出变形）；name 只认 read_file / list_dir / write_file / fetch_page */
+    /** 一次工具调用（扁平结构，抗模型输出变形）；name 只认 read_file / list_dir / write_file / fetch_page / execute_command / read_memory / write_memory */
     data class AiToolCall(val name: String, val path: String, val content: String)
 
-    private val KNOWN_TOOLS = setOf("read_file", "list_dir", "write_file", "fetch_page")
+    private val KNOWN_TOOLS = setOf(
+        "read_file", "list_dir", "write_file", "fetch_page",
+        "execute_command", "read_memory", "write_memory",
+    )
 
-    /** 原生工具调用 arguments 的解析结果（fetch_page 用 url，其余用 path） */
+    /** 原生工具调用 arguments 的解析结果（fetch_page 用 url，execute_command 用 command，其余用 path/content） */
     @Serializable
-    data class NativeArgs(val path: String = "", val content: String = "", val url: String = "")
+    data class NativeArgs(
+        val path: String = "",
+        val content: String = "",
+        val url: String = "",
+        val command: String = "",
+    )
 
     data class Parsed(
         val analysis: String,

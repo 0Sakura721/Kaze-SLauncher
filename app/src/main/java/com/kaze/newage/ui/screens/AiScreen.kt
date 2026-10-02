@@ -1,5 +1,8 @@
 package com.kaze.newage.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +39,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -50,6 +55,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,9 +67,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,6 +101,7 @@ import com.kaze.newage.ui.theme.consoleLineColor
 import com.kaze.newage.ui.theme.statusPalette
 import com.kaze.newage.ui.toLabel
 import com.kaze.newage.ui.toTone
+import kotlinx.coroutines.launch
 
 /** 首次进入的快捷提问（一键发送，省得打字） */
 private val QUICK_QUESTIONS = listOf(
@@ -170,6 +179,31 @@ fun AiScreen(
             },
             trailing = {
                 M3EStatusChip(text = serverState.toLabel(), color = stateColor)
+                // 删除会话历史：清空当前对话（本地记录一并清除，不可恢复所以给确认）
+                if (messages.isNotEmpty()) {
+                    var confirmClear by remember { mutableStateOf(false) }
+                    IconButton(onClick = { confirmClear = true }, enabled = !busy) {
+                        Icon(Icons.Filled.Delete, contentDescription = "清空对话")
+                    }
+                    if (confirmClear) {
+                        AlertDialog(
+                            onDismissRequest = { confirmClear = false },
+                            title = { Text("删除会话历史？") },
+                            text = { Text("将清空 AI 助手的全部对话记录（${messages.size} 条），且不可恢复。") },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    viewModel.clearAiChat()
+                                    confirmClear = false
+                                }) {
+                                    Text("删除", color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+                            },
+                        )
+                    }
+                }
                 IconButton(onClick = onOpenSettings) {
                     Icon(Icons.Filled.Tune, contentDescription = "AI 设置")
                 }
@@ -178,14 +212,37 @@ fun AiScreen(
 
         // ── 消息流 ──
         val listState = rememberLazyListState()
-        LaunchedEffect(messages.size, busy) {
-            if (messages.isNotEmpty()) listState.animateScrollToItem(messages.size - 1)
+        val scope = rememberCoroutineScope()
+        // 底部跟随：用户往上翻时不再抢滚动（距离 > 3 条就不自动跟），只浮出「回到底部」
+        val liveFocusLen = (live?.content?.length ?: 0) + (live?.reasoning?.length ?: 0)
+        suspend fun scrollToBottom(animated: Boolean) {
+            val total = listState.layoutInfo.totalItemsCount
+            if (total <= 0) return
+            if (animated) listState.animateScrollToItem(total - 1)
+            else listState.scrollToItem(total - 1)
         }
+        LaunchedEffect(messages.size, busy, liveFocusLen) {
+            if (messages.isEmpty() && live == null) return@LaunchedEffect
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: return@LaunchedEffect
+            val total = info.totalItemsCount
+            if (total <= 0) return@LaunchedEffect
+            // 差得少（3 条以内）自动跟随；差得多说明用户在翻历史，不打断（点「回到底部」恢复）
+            val distance = total - 1 - last
+            if (distance in 0..3) scrollToBottom(animated = distance <= 1)
+        }
+        val showJumpToBottom by remember {
+            derivedStateOf { listState.canScrollForward && (messages.size > 3 || live != null) }
+        }
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+        ) {
         LazyColumn(
             state = listState,
             modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(
                 horizontal = M3Spacing.screenMargin,
@@ -221,6 +278,36 @@ fun AiScreen(
             // 流式实况：当前正在生成的回复（思考/正文逐 token 更新）
             live?.let { stream ->
                 item(key = "live-stream") { LiveStreamRow(stream) }
+            }
+        }
+
+            // 「回到底部」：用户翻历史或流式输出追不上时浮出，一键滑到最新
+            AnimatedVisibility(
+                visible = showJumpToBottom,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+            ) {
+                Surface(
+                    modifier = Modifier.clip(M3Shape.groupSingle(36f)),
+                    shape = M3Shape.groupSingle(36f),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    onClick = { scope.launch { scrollToBottom(animated = true) } },
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.ArrowDownward,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text("回到底部", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
             }
         }
 

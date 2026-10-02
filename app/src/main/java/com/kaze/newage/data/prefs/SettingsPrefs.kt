@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import com.kaze.newage.core.ai.AiCommandPolicy
 import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
@@ -134,6 +135,19 @@ emember(path) 缓存位图的话，
 
     /** 思考强度：false = 标准（快），true = 深度思考（更聪明也更慢） */
     val aiThinking = mutableStateOf(prefs.getBoolean("ai_thinking", false))
+
+    /**
+     * 控制台命令执行档位（借鉴 Harness 的权限分层）：
+     * suggest = 仅建议（默认）/ safe = 白名单自动 / all = 全部自动。
+     */
+    val aiCommandMode = mutableStateOf(
+        prefs.getString("ai_command_mode", AiCommandPolicy.Mode.SUGGEST.id) ?: AiCommandPolicy.Mode.SUGGEST.id
+    )
+
+    fun setAiCommandMode(v: String) {
+        aiCommandMode.value = v
+        prefs.edit().putString("ai_command_mode", v).apply()
+    }
 
     // ── 联网搜索 ──
     val aiSearchOn = mutableStateOf(prefs.getBoolean("ai_search_on", false))

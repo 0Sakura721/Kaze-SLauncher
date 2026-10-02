@@ -42,6 +42,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import com.kaze.newage.core.ai.AiCommandPolicy
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiSearch
@@ -97,6 +98,8 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             )
         } else {
             ProfileSection(viewModel, onEdit = { editing = it })
+            Spacer(Modifier.height(8.dp))
+            CommandModeSection(viewModel)
             Spacer(Modifier.height(8.dp))
             SearchSection(viewModel)
         }
@@ -307,6 +310,64 @@ private fun AiProfileEditForm(
             Text("取消")
         }
     }
+}
+
+// ── 命令执行档位（借鉴 Harness 的权限分层）──
+
+@Composable
+private fun CommandModeSection(viewModel: AppViewModel) {
+    val prefs = viewModel.uiPrefs
+    val current = AiCommandPolicy.modeById(prefs.aiCommandMode.value)
+
+    SectionTitle("控制台命令执行")
+    SectionNote("决定 AI 能在多大范围内直接执行服务端命令。无论哪档，执行记录都会写入审计日志（filesDir/ai_audit.log）。")
+    Spacer(Modifier.height(8.dp))
+
+    AiCommandPolicy.Mode.entries.forEach { mode ->
+        val selected = mode.id == current.id
+        val danger = mode == AiCommandPolicy.Mode.ALL
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+            shape = M3Shape.largeIncreased,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            onClick = { viewModel.setAiCommandMode(mode.id) },
+        ) {
+            Row(
+                Modifier.padding(start = 4.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = selected, onClick = null)
+                Column(Modifier.weight(1f).padding(vertical = 2.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(mode.label, style = MaterialTheme.typography.titleSmall)
+                        if (selected) {
+                            M3EStatusChip(text = "当前", color = MaterialTheme.colorScheme.primary)
+                        }
+                        if (danger) {
+                            M3EStatusChip(text = "慎用", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                    Text(
+                        mode.desc,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+    if (current == AiCommandPolicy.Mode.ALL) {
+        SectionNote(
+            "已放开全部命令：AI 可能自行执行 stop 等影响服务端的命令（仍会先说明意图）。" +
+                "随时可切回「仅建议」。"
+        )
+    }
+    Spacer(Modifier.height(4.dp))
 }
 
 // ── 联网搜索 ──
