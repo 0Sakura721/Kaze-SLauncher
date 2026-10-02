@@ -8,6 +8,12 @@ import com.kaze.newage.core.addons.AddonKind
 import com.kaze.newage.core.addons.AddonManager
 import com.kaze.newage.core.addons.ModrinthApi
 import com.kaze.newage.core.addons.ModrinthSearchHit
+import com.kaze.newage.core.ai.AiClient
+import com.kaze.newage.core.ai.AiConfig
+import com.kaze.newage.core.ai.AiContext
+import com.kaze.newage.core.ai.AiMessage
+import com.kaze.newage.core.ai.AiPrompt
+import com.kaze.newage.core.ai.AiSuggestion
 import com.kaze.newage.core.console.ConsoleLine
 import com.kaze.newage.core.console.CONSOLE_MAX_LINES
 import com.kaze.newage.core.console.ConsoleParser
@@ -509,6 +515,157 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshPlayers() {
         sendCommand("list")
     }
+
+    // ── AI 助手（P0：只读诊断 + 建议命令；命令必须用户点「执行」才真正发送）──
+
+    /** 一条对话气泡。assistant 消息额外携带建议命令与原始回复（原始回复用于多轮历史的保真） */
+    data class AiChatMessage(
+        val id: Long,
+        val isUser: Boolean,
+        val text: String,
+        /** 建议命令（仅助手消息、且模型给出了可用命令时非空；已经过 AiSuggestion 清洗） */
+        val command: String? = null,
+        /** 该建议是否已执行（防重复发送） */
+        val commandSent: Boolean = false,
+        val isError: Boolean = false,
+        /** 模型的原始回复（多轮历史回喂用；错误消息为 null） */
+        val rawReply: String? = null,
+    )
+
+    private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
+    val aiMessages: StateFlow<List<AiChatMessage>> = _aiMessages.asStateFlow()
+
+    private val _aiBusy = MutableStateFlow(false)
+    val aiBusy: StateFlow<Boolean> = _aiBusy.asStateFlow()
+
+    private val aiIdCounter = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** 保存 AI 接口配置（面板内的配置表单调用；key 只进应用私有 SharedPreferences） */
+    fun saveAiConfig(baseUrl: String, model: String, apiKey: String) {
+        uiPrefs.setAiConfig(baseUrl, model, apiKey)
+    }
+
+    /** 清空 AI 对话：忙时不允许（正在生成的回复会找不到落点） */
+    fun clearAiChat() {
+        if (_aiBusy.value) return
+        _aiMessages.value = emptyList()
+    }
+
+    /**
+     * 提问 → 重新采集现场快照 → 调 OpenAI 兼容接口 → 解析出分析与建议命令。
+     *
+     * 每轮都重新采集上下文（玩家、日志、占用都是新的），历史只保留最近几轮文本 ——
+     * 这样长会话不会把上下文撑爆，模型看到的也永远是最新的现场。
+     */
+    fun askAi(question: String) {
+        val q = question.trim()
+        if (q.isEmpty() || _aiBusy.value) return
+        val config = uiPrefs.aiConfig()
+        if (!config.isConfigured) {
+            appendAiMessage(
+                AiChatMessage(nextAiId(), isUser = false, text = "尚未配置 AI 接口：请先填写 API Key。", isError = true)
+            )
+            return
+        }
+        appendAiMessage(AiChatMessage(nextAiId(), isUser = true, text = q))
+        _aiBusy.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val system = AiPrompt.system(buildAiContext())
+                val history = _aiMessages.value
+                    .dropLast(1) // 刚追加的本轮提问，最后单独加
+                    .filter { !it.isError }
+                    .mapNotNull { m ->
+                        when {
+                            m.isUser -> AiMessage(AiMessage.ROLE_USER, m.text)
+                            m.rawReply != null -> AiMessage(AiMessage.ROLE_ASSISTANT, m.rawReply)
+                            else -> null
+                        }
+                    }
+                    .takeLast(AI_HISTORY_MESSAGES)
+                val reply = callAiWithTimeout(
+                    config,
+                    listOf(AiMessage(AiMessage.ROLE_SYSTEM, system)) + history +
+                        AiMessage(AiMessage.ROLE_USER, q),
+                )
+                val parsed = AiSuggestion.parse(reply)
+                appendAiMessage(
+                    AiChatMessage(
+                        id = nextAiId(),
+                        isUser = false,
+                        text = parsed.analysis.ifBlank { "（模型没有给出分析文本）" },
+                        command = parsed.command.takeIf { it.isNotEmpty() },
+                        rawReply = reply,
+                    )
+                )
+            } catch (e: Exception) {
+                appendAiMessage(
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "AI 请求失败", isError = true)
+                )
+            } finally {
+                _aiBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * 执行 AI 建议的命令：与用户手输命令完全同一条路（[sendCommand] → 服务端 stdin）。
+     *
+     * P0 的安全边界：命令在解析时已清洗（单条、无换行），这里**再清洗一次**防绕过；
+     * 服务端未运行时直接拒绝（stdin 不存在，发了也没人收，界面上按钮同样禁用）。
+     */
+    fun executeAiSuggestion(messageId: Long) {
+        val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
+        val cmd = AiSuggestion.sanitizeCommand(msg.command) ?: return
+        val id = _currentInstanceId.value ?: return
+        if (serverManager.states.value[id] != ServerState.Running) return
+        sendCommand(cmd)
+        _aiMessages.value = _aiMessages.value.map {
+            if (it.id == messageId) it.copy(commandSent = true) else it
+        }
+    }
+
+    /** 组装 AI 上下文快照（当前实例的状态 / 玩家 / 占用 / 控制台日志窗口） */
+    private fun buildAiContext(): String {
+        val inst = _currentInstanceId.value?.let { instanceStore.get(it) }
+        return AiContext.build(
+            instanceName = inst?.name ?: "（未选择实例）",
+            mcVersion = inst?.mcVersion ?: "",
+            coreType = inst?.coreType?.displayName ?: "未知",
+            javaMajor = inst?.javaMajor ?: 0,
+            memoryMb = inst?.memoryMb ?: 0,
+            stateLabel = serverState.value.toLabel(),
+            uptimeSec = uptimeSec.value,
+            players = _onlinePlayers.value,
+            stats = _procStats.value,
+            lines = _consoleLines.value,
+        )
+    }
+
+    /**
+     * 在独立守护线程上跑阻塞的 HTTP 调用，并给出**界面可见的超时**。
+     *
+     * HttpURLConnection 的 DNS 解析不受 readTimeout 约束，离线时可能长时间不返回；
+     * 与 [blockingWithTimeout] 同一套做法：超时后界面先恢复，线程自己跑完自行丢弃。
+     */
+    private suspend fun callAiWithTimeout(config: AiConfig, messages: List<AiMessage>): String {
+        val deferred = kotlinx.coroutines.CompletableDeferred<String>()
+        kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai") {
+            try {
+                deferred.complete(AiClient.chat(config, messages))
+            } catch (t: Throwable) {
+                deferred.completeExceptionally(t)
+            }
+        }
+        return withTimeoutOrNull(AI_REPLY_TIMEOUT_MS) { deferred.await() }
+            ?: throw RuntimeException("AI 在 ${AI_REPLY_TIMEOUT_MS / 1000} 秒内没有响应：请检查网络后重试")
+    }
+
+    private fun appendAiMessage(message: AiChatMessage) {
+        _aiMessages.value = _aiMessages.value + message
+    }
+
+    private fun nextAiId(): Long = aiIdCounter.incrementAndGet()
 
     // ── 服务端进程的 CPU / 内存占用 ──
     private val _procStats = MutableStateFlow<ProcessStats.Reading?>(null)
@@ -1270,3 +1427,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
  * 让用户看到"加载失败 + 重试"，而不是一个永远转的进度条。
  */
 private const val VERSION_FETCH_TIMEOUT_MS = 45_000L
+
+/** AI 历史携带的最大消息数（约 4 轮问答；更早的上下文由每轮重新采集的系统消息承担） */
+private const val AI_HISTORY_MESSAGES = 8
+
+/**
+ * AI 回复的**界面可见超时**：AiClient 的 readTimeout 是 120s，加上连接与模型排队余量。
+ * 超时后界面立即恢复，底层线程跑完自行丢弃（与 [VERSION_FETCH_TIMEOUT_MS] 同一套思路）。
+ */
+private const val AI_REPLY_TIMEOUT_MS = 150_000L

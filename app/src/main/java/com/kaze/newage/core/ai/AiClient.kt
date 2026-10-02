@@ -1,0 +1,124 @@
+package com.kaze.newage.core.ai
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+
+@Serializable
+internal data class ChatResponseDto(val choices: List<ChoiceDto> = emptyList())
+
+@Serializable
+internal data class ChoiceDto(val message: MessageDto = MessageDto())
+
+@Serializable
+internal data class MessageDto(val role: String = "", val content: String? = null)
+
+/**
+ * OpenAI 兼容对话客户端（/chat/completions，非流式）。
+ *
+ * 与 ModrinthApi 同一套做法：同步 HttpURLConnection + kotlinx-serialization，
+ * 无新增依赖。所有失败都以 RuntimeException 抛出、消息面向用户 ——
+ * 特别注意错误信息里**绝不回显请求头**（那里面有 API Key）。
+ */
+object AiClient {
+
+    private const val CONNECT_TIMEOUT_MS = 15_000
+    // 模型生成本来就可能要几十秒：readTimeout 必须给足，否则长回答永远超时
+    private const val READ_TIMEOUT_MS = 120_000
+    private const val USER_AGENT = "KazeSLauncher/0.4 (com.kaze.newage; ai assistant)"
+
+    private val json = Json { ignoreUnknownKeys = true }
+
+    /**
+     * 请求体构建（独立出来便于单测：不发起真实网络请求就能锁住请求格式）。
+     * temperature 压低（0.3）：诊断要的是准确，不是发散；stream 显式 false。
+     */
+    internal fun buildRequestBody(
+        model: String,
+        messages: List<AiMessage>,
+        maxTokens: Int = 1024,
+    ): String = buildJsonObject {
+        put("model", model)
+        put("stream", false)
+        put("temperature", 0.3)
+        put("max_tokens", maxTokens)
+        putJsonArray("messages") {
+            messages.forEach { m ->
+                add(buildJsonObject {
+                    put("role", m.role)
+                    put("content", m.content)
+                })
+            }
+        }
+    }.toString()
+
+    /**
+     * 同步发起一轮对话，返回 assistant 文本。**阻塞调用**：必须在 IO 线程跑
+     * （调用方负责放独立线程 + 界面可见超时，见 AppViewModel.askAi）。
+     */
+    fun chat(config: AiConfig, messages: List<AiMessage>): String {
+        val endpoint = config.endpoint
+        if (endpoint.isEmpty()) {
+            throw RuntimeException("AI 服务地址无效：${config.baseUrl.trim()}（需以 http(s):// 开头）")
+        }
+        if (config.apiKey.isBlank()) throw RuntimeException("尚未配置 API Key")
+        val conn = URL(endpoint).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "POST"
+            conn.connectTimeout = CONNECT_TIMEOUT_MS
+            conn.readTimeout = READ_TIMEOUT_MS
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("Accept", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
+            conn.setRequestProperty("User-Agent", USER_AGENT)
+            conn.outputStream.use {
+                it.write(buildRequestBody(config.model, messages).toByteArray(Charsets.UTF_8))
+            }
+            val code = conn.responseCode
+            if (code != 200) {
+                val errBody = runCatching {
+                    conn.errorStream?.bufferedReader()?.use { reader -> reader.readText() }
+                }.getOrDefault("")
+                throw RuntimeException(describeHttpError(code, errBody))
+            }
+            val body = conn.inputStream.bufferedReader().use { it.readText() }
+            return parseReply(body)
+        } catch (e: IOException) {
+            // DNS 失败 / 连不上 / 超时都到这里；底层 message 很晦涩（如 "Unable to resolve host"），补一句人话
+            throw RuntimeException("无法连接 AI 服务（${e.message ?: "网络错误"}）：请检查网络与 API 地址", e)
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    internal fun parseReply(body: String): String {
+        val resp = runCatching { json.decodeFromString<ChatResponseDto>(body) }.getOrElse {
+            throw RuntimeException("AI 返回了无法解析的内容（HTTP 200 但不是预期的 JSON）")
+        }
+        return resp.choices.firstOrNull()?.message?.content
+            ?: throw RuntimeException("AI 返回为空（choices 为空）")
+    }
+
+    /**
+     * 常见错误码 → 人话；响应体第一行（官方通常写明原因，如 402 余额不足）截 160 字符附上。
+     */
+    internal fun describeHttpError(code: Int, body: String): String {
+        val hint = body.lineSequence().firstOrNull { it.isNotBlank() }?.take(160) ?: ""
+        val base = when (code) {
+            401 -> "API Key 无效或未授权（HTTP 401）"
+            402 -> "账户余额不足（HTTP 402）"
+            404 -> "接口地址不存在（HTTP 404）：检查服务地址是否需要以 /v1 结尾"
+            429 -> "请求过于频繁或额度受限（HTTP 429）"
+            in 500..599 -> "AI 服务端错误（HTTP $code）：稍后再试"
+            else -> "AI 服务返回 HTTP $code"
+        }
+        return if (hint.isBlank()) base else "$base：$hint"
+    }
+}

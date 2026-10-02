@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import com.kaze.newage.core.ai.AiConfig
 import java.io.File
 
 /**
@@ -114,6 +115,17 @@ emember(path) 缓存位图的话，
      */
     val updateMode = mutableStateOf(prefs.getString("update_mode", "full") ?: "full")
 
+    // ── AI 助手（OpenAI 兼容接口，见 core/ai/AiModels.kt）──
+    // 默认预填 DeepSeek 官方地址与模型；换任何 OpenAI 兼容端点只需改这三项。
+    // API Key 只存应用私有的 SharedPreferences（别的应用读不到），绝不入库、绝不写日志。
+    val aiBaseUrl = mutableStateOf(
+        prefs.getString("ai_base_url", AiConfig.DEFAULT_BASE_URL) ?: AiConfig.DEFAULT_BASE_URL
+    )
+    val aiModel = mutableStateOf(
+        prefs.getString("ai_model", AiConfig.DEFAULT_MODEL) ?: AiConfig.DEFAULT_MODEL
+    )
+    val aiApiKey = mutableStateOf(prefs.getString("ai_api_key", "") ?: "")
+
     fun setAutoUpdate(v: Boolean) {
         autoUpdate.value = v
         prefs.edit().putBoolean("auto_update", v).apply()
@@ -128,6 +140,24 @@ emember(path) 缓存位图的话，
         updateChannel.value = v
         prefs.edit().putString("update_channel", v).apply()
     }
+
+    /** 保存 AI 接口配置（三项都 trim：端点/模型里的空白只会造成莫名的 404） */
+    fun setAiConfig(baseUrl: String, model: String, apiKey: String) {
+        val b = baseUrl.trim()
+        val m = model.trim()
+        val k = apiKey.trim()
+        aiBaseUrl.value = b
+        aiModel.value = m
+        aiApiKey.value = k
+        prefs.edit()
+            .putString("ai_base_url", b)
+            .putString("ai_model", m)
+            .putString("ai_api_key", k)
+            .apply()
+    }
+
+    /** 供 AI 客户端使用的当前配置快照 */
+    fun aiConfig(): AiConfig = AiConfig(aiBaseUrl.value, aiModel.value, aiApiKey.value)
 
     fun setFgColorMode(v: String) {
         fgColorMode.value = v

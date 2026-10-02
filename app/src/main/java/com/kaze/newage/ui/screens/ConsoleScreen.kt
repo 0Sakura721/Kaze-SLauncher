@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -141,6 +142,8 @@ fun ConsoleScreen(viewModel: AppViewModel) {
     val current = instances.firstOrNull { it.id == currentInstanceId }
     val states by viewModel.serverStates.collectAsStateWithLifecycle()
     var showSwitcher by remember { mutableStateOf(false) }
+    // AI 助手面板（只读诊断 + 建议命令；命令要用户点「执行」才发送）
+    var showAi by remember { mutableStateOf(false) }
 
     // 保存日志：SAF 选择目标位置，一次性导出当前实例完整日志。
     // MIME 用 application/octet-stream：vivo 对 text/plain 会把 .log 自动改名 .log.txt
@@ -563,6 +566,11 @@ fun ConsoleScreen(viewModel: AppViewModel) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
+            // AI 助手入口：与运行状态无关 —— 起不来/出错时恰恰最需要问"为什么"，
+            // 所以只要选了实例就能点（不跟随输入框的 Running 守卫）
+            ConsoleAction(Icons.Filled.SmartToy, "AI 助手", enabled = current != null) { showAi = true }
+            Spacer(Modifier.width(6.dp))
+
             // 只有运行中才可发送：与按钮的可用性同源，键盘上的发送键也走同一守卫
             val sendEnabled = serverState == ServerState.Running && input.isNotBlank()
             fun submit() {
@@ -608,6 +616,16 @@ fun ConsoleScreen(viewModel: AppViewModel) {
                     )
                 }
             }
+        }
+
+        // AI 助手面板：对话 + 建议命令卡片（命令要用户点「执行」才会真正发送）
+        if (showAi) {
+            AiAssistantSheet(
+                viewModel = viewModel,
+                instanceName = current?.name ?: "",
+                serverRunning = serverState == ServerState.Running,
+                onDismiss = { showAi = false },
+            )
         }
     }
 }
