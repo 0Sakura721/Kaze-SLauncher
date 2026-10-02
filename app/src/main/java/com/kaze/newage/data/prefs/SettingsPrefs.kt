@@ -256,37 +256,6 @@ emember(path) 缓存位图的话，
         prefs.edit().putString("update_channel", v).apply()
     }
 
-    /** 保存联网搜索配置（源 + Key） */
-    fun setAiSearch(providerId: String, key: String) {
-        val p = providerId.trim()
-        val k = key.trim()
-        aiSearchProviderId.value = p
-        aiSearchKey.value = k
-        prefs.edit().putString("ai_search_provider", p).putString("ai_search_key", k).apply()
-    }
-
-    /** 联网搜索开关（聊天面板随时可切） */
-    fun setAiSearchOn(v: Boolean) {
-        aiSearchOn.value = v
-        prefs.edit().putBoolean("ai_search_on", v).apply()
-    }
-
-    /**
-     * 当前对话配置快照：解析分配到的档案 → [AiConfig]。
-     * 没有任何档案时返回 DeepSeek 默认值（Key 为空 → isConfigured=false，界面会引导配置）。
-     */
-    fun aiConfig(): AiConfig {
-        val p = aiProfiles.value.firstOrNull { it.id == aiChatProfileId.value }
-            ?: aiProfiles.value.firstOrNull()
-        return AiConfig(
-            baseUrl = p?.baseUrl?.trim()?.ifBlank { AiConfig.DEFAULT_BASE_URL } ?: AiConfig.DEFAULT_BASE_URL,
-            model = p?.models?.firstOrNull()?.trim()?.ifBlank { null } ?: AiConfig.DEFAULT_MODEL,
-            thinkingModel = p?.models?.getOrNull(1)?.trim().orEmpty(),
-            apiKey = p?.apiKey?.trim().orEmpty(),
-            thinking = aiThinking.value,
-        )
-    }
-
     fun setFgColorMode(v: String) {
         fgColorMode.value = v
         prefs.edit().putString("fg_color_mode", v).apply()
