@@ -62,6 +62,7 @@ object AiFileTools {
         "ops.json" to "该文件直接决定谁是服务器管理员（op）",
         "banned-ips.json" to "封禁名单：写入等于让 AI 自行解封或封禁他人",
         "banned-players.json" to "封禁名单：写入等于让 AI 自行解封或封禁他人",
+        "whitelist.json" to "白名单直接决定谁能进服：写入等于让 AI 自行放行或拒绝玩家",
         "eula.txt" to "EULA 同意状态必须由你本人决定，不能代填",
     )
 

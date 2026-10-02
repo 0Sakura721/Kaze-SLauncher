@@ -23,10 +23,14 @@ object AiSuggestion {
     @Serializable
     internal data class ToolCallDto(val name: String = "", val path: String = "", val content: String = "")
 
-    /** 一次工具调用（扁平结构，抗模型输出变形）；name 只认 read_file / list_dir / write_file */
+    /** 一次工具调用（扁平结构，抗模型输出变形）；name 只认 read_file / list_dir / write_file / fetch_page */
     data class AiToolCall(val name: String, val path: String, val content: String)
 
-    private val KNOWN_TOOLS = setOf("read_file", "list_dir", "write_file")
+    private val KNOWN_TOOLS = setOf("read_file", "list_dir", "write_file", "fetch_page")
+
+    /** 原生工具调用 arguments 的解析结果（fetch_page 用 url，其余用 path） */
+    @Serializable
+    data class NativeArgs(val path: String = "", val content: String = "", val url: String = "")
 
     data class Parsed(
         val analysis: String,
@@ -116,13 +120,24 @@ object AiSuggestion {
 
     /**
      * 危险命令分级（P0 已经是"建议 + 人工确认"，但卡片上仍要给醒目提示）。
-     * 这些命令直接影响玩家 / 存档 / 权限 / 服务端生命。
+     * 两档语义：
+     *  - [DANGEROUS_FIRST_WORDS]：直接动玩家 / 权限 / 服务端生命 —— 红字"影响玩家或服务端"；
+     *  - [DESTRUCTIVE_FIRST_WORDS]：能批量改世界或触发重载执行 —— 红字"会改动世界数据"。
+     * 模组/插件自定义命令（LuckPerms 之类）无法枚举 —— 最终防线始终是人工确认这一层，
+     * 警示名单只覆盖原版可枚举的部分。
      */
     private val DANGEROUS_FIRST_WORDS = setOf(
         "stop", "op", "deop", "ban", "ban-ip", "pardon", "pardon-ip",
         "kick", "kill", "whitelist", "save-off", "save-on",
     )
 
-    fun isDangerous(command: String): Boolean =
-        command.trim().lowercase().substringBefore(' ') in DANGEROUS_FIRST_WORDS
+    private val DESTRUCTIVE_FIRST_WORDS = setOf(
+        "data", "execute", "fill", "clone", "setblock", "forceload",
+        "summon", "reload", "tick", "worldborder", "debug", "jfr",
+    )
+
+    fun isDangerous(command: String): Boolean {
+        val first = command.trim().lowercase().substringBefore(' ')
+        return first in DANGEROUS_FIRST_WORDS || first in DESTRUCTIVE_FIRST_WORDS
+    }
 }

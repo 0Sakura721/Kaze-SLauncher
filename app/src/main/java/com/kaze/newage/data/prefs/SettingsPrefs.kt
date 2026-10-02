@@ -125,8 +125,9 @@ emember(path) 缓存位图的话，
     //   分配 = 「对话」这一个功能用哪个档案（以后加功能只需再加一个分配键）；
     //   思考强度 = DeepSeek V4 起由请求参数 thinking 控制（不再是两个模型名）；
     //   其它服务商若思考=换模型名，可把第二个模型名填进档案。
-    // API Key / 搜索 Key 只存应用私有的 SharedPreferences（别的应用读不到），绝不入库、绝不写日志。
-    val aiProfiles = mutableStateOf(AiProfileStore.decode(prefs.getString("ai_profiles", "") ?: ""))
+    // API Key / 搜索 Key 用 Keystore AES-GCM 加密后存（AiKeyCipher），Keystore 不可用回退明文；
+    // 绝不入库、绝不写日志。内存中的 State 持有**解密后**的值，加解密只发生在持久化边界。
+    val aiProfiles = mutableStateOf(decProfiles(prefs.getString("ai_profiles", "") ?: ""))
 
     /** 「对话」功能分配到的档案 id */
     val aiChatProfileId = mutableStateOf(prefs.getString("ai_chat_profile_id", "") ?: "")
@@ -139,7 +140,7 @@ emember(path) 缓存位图的话，
     val aiSearchProviderId = mutableStateOf(
         prefs.getString("ai_search_provider", AiSearch.Provider.TAVILY.id) ?: AiSearch.Provider.TAVILY.id
     )
-    val aiSearchKey = mutableStateOf(prefs.getString("ai_search_key", "") ?: "")
+    val aiSearchKey = mutableStateOf(AiKeyCipher.decrypt(prefs.getString("ai_search_key", "") ?: "").orEmpty())
 
     init {
         // 旧单配置 → 档案：P0/P1 存的是散键（ai_api_key + ai_base_url + ai_model_standard/thinking，
@@ -169,9 +170,14 @@ emember(path) 缓存位图的话，
                 aiProfiles.value = listOf(legacy)
                 aiChatProfileId.value = legacy.id
                 prefs.edit()
-                    .putString("ai_profiles", AiProfileStore.encode(listOf(legacy)))
+                    .putString("ai_profiles", AiProfileStore.encode(encProfiles(listOf(legacy))))
                     .putString("ai_chat_profile_id", legacy.id)
-                    .apply()
+                        .remove("ai_api_key")
+                        .remove("ai_base_url")
+                        .remove("ai_model")
+                        .remove("ai_model_standard")
+                        .remove("ai_model_thinking")
+                        .apply()
             }
         }
         // 存量档案里的旧模型名归一：deepseek-chat / deepseek-reasoner 在官方端点已停用
@@ -183,7 +189,7 @@ emember(path) 缓存位图的话，
         }
         if (normalized != aiProfiles.value) {
             aiProfiles.value = normalized
-            prefs.edit().putString("ai_profiles", AiProfileStore.encode(normalized)).apply()
+            prefs.edit().putString("ai_profiles", AiProfileStore.encode(encProfiles(normalized))).apply()
         }
         // 分配指向的档案被删/损坏时回退到第一个（或空 = 未配置，界面会引导新增）
         if (aiChatProfileId.value.isNotBlank() &&
@@ -200,6 +206,24 @@ emember(path) 缓存位图的话，
             .distinct()
             .ifEmpty { listOf(AiConfig.DEFAULT_MODEL) }
 
+    /** 持久化边界：档案 Key 加密后写入 JSON（Keystore 不可用回退明文） */
+    private fun encProfiles(profiles: List<AiProfile>): List<AiProfile> =
+        profiles.map { p ->
+            if (p.apiKey.isBlank()) p
+            else p.copy(apiKey = AiKeyCipher.encrypt(p.apiKey) ?: p.apiKey)
+        }
+
+    /** 读取边界：历史明文原样透传（AiKeyCipher.decrypt 的约定） */
+    private fun decProfiles(raw: String): List<AiProfile> =
+        AiProfileStore.decode(raw).map { p ->
+            if (p.apiKey.isBlank()) p
+            else p.copy(apiKey = AiKeyCipher.decrypt(p.apiKey).orEmpty())
+        }
+
+    private fun persistProfiles(profiles: List<AiProfile>) {
+        prefs.edit().putString("ai_profiles", AiProfileStore.encode(encProfiles(profiles))).apply()
+    }
+
     /** 新增或更新档案（按 id 覆盖，编辑保持原位置）；首个档案自动成为对话配置 */
     fun saveAiProfile(profile: AiProfile) {
         val list = if (aiProfiles.value.any { it.id == profile.id }) {
@@ -208,7 +232,7 @@ emember(path) 缓存位图的话，
             aiProfiles.value + profile
         }
         aiProfiles.value = list
-        prefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+        persistProfiles(list)
         if (aiChatProfileId.value.isBlank() || aiProfiles.value.none { it.id == aiChatProfileId.value }) {
             setChatAiProfile(profile.id)
         }
@@ -218,7 +242,7 @@ emember(path) 缓存位图的话，
     fun deleteAiProfile(id: String) {
         val list = aiProfiles.value.filterNot { it.id == id }
         aiProfiles.value = list
-        prefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+        persistProfiles(list)
         if (aiChatProfileId.value == id) setChatAiProfile(list.firstOrNull()?.id.orEmpty())
     }
 
@@ -240,7 +264,10 @@ emember(path) 缓存位图的话，
         val k = key.trim()
         aiSearchProviderId.value = p
         aiSearchKey.value = k
-        prefs.edit().putString("ai_search_provider", p).putString("ai_search_key", k).apply()
+        prefs.edit()
+            .putString("ai_search_provider", p)
+            .putString("ai_search_key", AiKeyCipher.encrypt(k) ?: k)
+            .apply()
     }
 
     /** 联网搜索开关（聊天面板随时可切） */

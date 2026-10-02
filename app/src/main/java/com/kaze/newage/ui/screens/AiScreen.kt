@@ -129,6 +129,7 @@ fun AiScreen(
     val thinking = prefs.aiThinking.value
     val searchOn = prefs.aiSearchOn.value
     val serverStates by viewModel.serverStates.collectAsStateWithLifecycle()
+    val live by viewModel.aiLiveStream.collectAsStateWithLifecycle()
 
     // 消息按生成它的实例判定运行状态（用户可能已切到别的实例）
     fun runningFor(msg: AppViewModel.AiChatMessage): Boolean {
@@ -217,6 +218,10 @@ fun AiScreen(
                     )
                 }
             }
+            // 流式实况：当前正在生成的回复（思考/正文逐 token 更新）
+            live?.let { stream ->
+                item(key = "live-stream") { LiveStreamRow(stream) }
+            }
         }
 
         // ── 思考中指示 + 取消 ──
@@ -251,12 +256,13 @@ fun AiScreen(
             thinking = thinking,
             searchOn = searchOn,
             busy = busy,
-            onToggleSearch = {
-                // API 源需要 Key（没配就带去设置页）；本机浏览器源零 Key，直接开
-                val prov = com.kaze.newage.core.ai.AiSearch.Provider.byId(prefs.aiSearchProviderId.value)
-                if (prov.needsKey && prefs.aiSearchKey.value.isBlank()) onOpenSettings()
-                else viewModel.setAiSearchOn(!prefs.aiSearchOn.value)
-            },
+                    onToggleSearch = {
+                        // API 源需要 Key、SearXNG 需要实例地址 —— 没配就带去设置页；本机浏览器零配置直接开
+                        val prov = com.kaze.newage.core.ai.AiSearch.Provider.byId(prefs.aiSearchProviderId.value)
+                        val needsSetup = (prov.needsKey || prov.needsUrl) && prefs.aiSearchKey.value.isBlank()
+                        if (needsSetup) onOpenSettings()
+                        else viewModel.setAiSearchOn(!prefs.aiSearchOn.value)
+                    },
         )
     }
 }
@@ -434,6 +440,13 @@ private fun ChatMessageRow(
                     }
                 }
                 Text(msg.text, style = MaterialTheme.typography.bodyMedium)
+                msg.usageSummary?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
                 msg.command?.let { cmd ->
                     AiSuggestionCard(
                         command = cmd,
@@ -450,6 +463,62 @@ private fun ChatMessageRow(
 /** 用户气泡：右下角收口；助手气泡：左下角收口 */
 private val USER_BUBBLE_SHAPE = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
 private val AI_BUBBLE_SHAPE = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
+
+/**
+ * 流式实况气泡：思考与正文逐 token 增长（思考自动展开，完成后正式气泡默认折叠）。
+ * 完成/取消/超时后 [_aiLiveStream 置空]，此行随 key 消失。
+ */
+@Composable
+private fun LiveStreamRow(stream: AppViewModel.AiLiveStream) {
+    val scheme = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Box(
+            Modifier
+                .size(30.dp)
+                .clip(CircleShape)
+                .background(scheme.primary.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.SmartToy,
+                contentDescription = null,
+                tint = scheme.primary,
+                modifier = Modifier.size(17.dp),
+            )
+        }
+        Spacer(Modifier.width(8.dp))
+        Surface(
+            shape = AI_BUBBLE_SHAPE,
+            color = scheme.surfaceContainerHigh,
+            contentColor = scheme.onSurface,
+            modifier = Modifier.fillMaxWidth(0.85f),
+        ) {
+            Column(
+                Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (stream.reasoning.isNotEmpty()) {
+                    Text(
+                        if (stream.thinking) "思考中（${stream.reasoning.length} 字）…"
+                        else "推理中（${stream.reasoning.length} 字）…",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = scheme.onSurfaceVariant,
+                    )
+                    Text(
+                        stream.reasoning.takeLast(600),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = scheme.onSurfaceVariant,
+                        modifier = Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState()),
+                    )
+                }
+                if (stream.content.isNotEmpty()) {
+                    Text(stream.content, style = MaterialTheme.typography.bodyMedium)
+                }
+                Text("▍", color = scheme.primary, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+    }
+}
 
 /**
  * 思考过程面板：默认折叠的一块"草稿纸"（Operit 式）。

@@ -105,12 +105,20 @@ data class AiConfig(
     }
 }
 
-/** 对话消息（OpenAI 兼容格式：system / user / assistant） */
-data class AiMessage(val role: String, val content: String) {
+/** 对话消息（OpenAI 兼容格式；原生工具协议扩展见 [toolCallId] / [toolCallsRaw]） */
+data class AiMessage(
+    val role: String,
+    val content: String,
+    /** role=tool 时的调用 id（对应 assistant 消息里的 tool_calls[].id） */
+    val toolCallId: String? = null,
+    /** role=assistant 带原生工具调用时的原始 JSON 数组（回喂保真，不再二次建模） */
+    val toolCallsRaw: String? = null,
+) {
     companion object {
         const val ROLE_SYSTEM = "system"
         const val ROLE_USER = "user"
         const val ROLE_ASSISTANT = "assistant"
+        const val ROLE_TOOL = "tool"
     }
 }
 

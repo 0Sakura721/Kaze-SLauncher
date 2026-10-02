@@ -5,6 +5,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaze.newage.container
 import com.kaze.newage.core.addons.AddonKind
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import com.kaze.newage.core.addons.AddonManager
 import com.kaze.newage.core.addons.ModrinthApi
 import com.kaze.newage.core.addons.ModrinthSearchHit
@@ -16,9 +19,14 @@ import com.kaze.newage.core.ai.AiMessage
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiPrompt
 import com.kaze.newage.core.ai.AiReply
+import com.kaze.newage.core.ai.AiSanitize
 import com.kaze.newage.core.ai.AiSearch
 import com.kaze.newage.core.ai.AiSuggestion
+import com.kaze.newage.core.ai.AiUsage
+import com.kaze.newage.core.ai.AiWebPage
 import com.kaze.newage.core.ai.BrowserSearch
+import com.kaze.newage.core.ai.NativeArgs
+import com.kaze.newage.core.ai.NativeToolCall
 import com.kaze.newage.core.console.ConsoleLine
 import com.kaze.newage.core.console.CONSOLE_MAX_LINES
 import com.kaze.newage.core.console.ConsoleParser
@@ -530,6 +538,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * 同名文件（每个实例都有一份 server.properties）在用户眼里是完全一样的，
      * 而 AI 的上下文又可能被玩家聊天/网页结果污染 —— 所以要带上实例名与解析后的绝对路径。
      */
+    @Serializable
     data class AiWriteRequest(
         val path: String,
         val content: String,
@@ -543,6 +552,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     /** 一条对话气泡。assistant 消息额外携带建议命令、原始回复、工具动作与写入请求 */
+    @Serializable
     data class AiChatMessage(
         val id: Long,
         val isUser: Boolean,
@@ -576,6 +586,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val reasoning: String? = null,
         /** 开了深度思考但没拿到思考内容的诊断提示（模型不支持/服务商未开启） */
         val thinkingNote: String? = null,
+        /** token 用量摘要（如 "输入 1.2K（缓存命中 800）· 输出 3.4K（思考 2.1K）"） */
+        val usageSummary: String? = null,
     )
 
     private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
@@ -590,7 +602,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setAiDraft(text: String) {
         _aiDraft.value = text
+        // 草稿防丢持久化：逐键落盘太浪费，800ms 防抖
+        if (!draftSavePending) {
+            draftSavePending = true
+            container.appScope.launch {
+                delay(800)
+                draftSavePending = false
+                persistAiChat()
+            }
+        }
     }
+
+    @Volatile
+    private var draftSavePending = false
 
     private val _aiBusy = MutableStateFlow(false)
     val aiBusy: StateFlow<Boolean> = _aiBusy.asStateFlow()
@@ -622,6 +646,65 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 取消当前 AI 提问（正在思考/工具循环中时有效） */
     fun cancelAiTurn() {
         if (_aiBusy.value) aiCancelRequested = true
+    }
+
+    // ── 流式实况（思考/正文逐 token 更新；null = 没有进行中的流）──
+
+    data class AiLiveStream(
+        val id: Long,
+        val thinking: Boolean,
+        val reasoning: String = "",
+        val content: String = "",
+    )
+
+    private val _aiLiveStream = MutableStateFlow<AiLiveStream?>(null)
+    val aiLiveStream: StateFlow<AiLiveStream?> = _aiLiveStream.asStateFlow()
+
+    private fun updateLiveStream(id: Long, reasoningDelta: String?, contentDelta: String?) {
+        val cur = _aiLiveStream.value ?: return
+        if (cur.id != id) return
+        _aiLiveStream.value = cur.copy(
+            reasoning = if (reasoningDelta != null) (cur.reasoning + reasoningDelta).take(AI_MAX_REASONING_CHARS) else cur.reasoning,
+            content = if (contentDelta != null) (cur.content + contentDelta).take(120_000) else cur.content,
+        )
+    }
+
+    /** 是否对当前配置发送 DeepSeek 原生参数/工具（官方端点 + 官方模型名才发） */
+    private fun includeNativeThinking(config: AiConfig): Boolean =
+        AiClient.supportsNativeThinkingParam(config.requestModel, config.baseUrl)
+
+    private val aiJson = Json { ignoreUnknownKeys = true }
+
+    // ── 对话持久化：进程被杀后恢复最近一次会话与草稿 ──
+
+    private val aiChatFile by lazy { File(container.appContext.filesDir, "ai_chat.json") }
+
+    @Serializable
+    private data class AiChatSnapshot(
+        val messages: List<AiChatMessage> = emptyList(),
+        val draft: String = "",
+    )
+
+    private fun persistAiChat() {
+        runCatching {
+            aiChatFile.writeText(
+                aiJson.encodeToString(
+                    AiChatSnapshot(messages = _aiMessages.value.takeLast(200), draft = _aiDraft.value)
+                )
+            )
+        }
+    }
+
+    init {
+        // 进程被杀后的恢复：对话与草稿回来；挂起中的写入卡片没有会话了，
+        // 但「重试」仍会执行写入本身（写入不依赖会话，见 approveAiWrite）
+        runCatching {
+            if (aiChatFile.isFile) {
+                val snap = aiJson.decodeFromString<AiChatSnapshot>(aiChatFile.readText())
+                if (snap.messages.isNotEmpty()) _aiMessages.value = snap.messages
+                if (snap.draft.isNotEmpty() && _aiDraft.value.isEmpty()) _aiDraft.value = snap.draft
+            }
+        }
     }
 
     // ── 模型配置档案 + 联网搜索（存取在 SettingsPrefs，这里只做转发）──
@@ -662,6 +745,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_aiBusy.value) return
         aiSession = null
         _aiMessages.value = emptyList()
+        persistAiChat()
     }
 
     /**
@@ -713,7 +797,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 // 本机浏览器：WebView 在主线程自起自收，结果解析是纯函数
                                 AiSearch.Provider.BING_LOCAL ->
                                     BrowserSearch.searchBing(container.appContext, query)
-                                else -> AiSearch.search(provider, searchKey, query)
+                                else -> AiSearch.searchCached(provider, searchKey, query)
                             }
                             if (results.isNotEmpty()) {
                                 searchQuery = query
@@ -728,9 +812,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
-                val system = AiPrompt.system(
-                    buildAiContext() + if (searchBlock.isNotEmpty()) "\n\n" + searchBlock else ""
-                )
+                // 前缀缓存优化：system 只放不变规则，每轮变化的现场快照走独立用户消息，
+                // 多轮对话的稳定前缀才能命中 DeepSeek 的自动上下文缓存
+                val snapshot = buildString {
+                    append("【现场快照（启动器采集，可信）】\n")
+                    append(buildAiContext())
+                    if (searchBlock.isNotEmpty()) append("\n\n").append(searchBlock)
+                    append("\n\n【问题】").append(q)
+                }
                 val history = _aiMessages.value
                     .dropLast(1) // 刚追加的本轮提问，最后单独加
                     .filter { !it.isError }
@@ -744,9 +833,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     .takeLast(AI_HISTORY_MESSAGES)
                 val session = AiTurnSession(
                     config = config,
-                    apiMessages = mutableListOf(AiMessage(AiMessage.ROLE_SYSTEM, system)).also {
+                    apiMessages = mutableListOf(AiMessage(AiMessage.ROLE_SYSTEM, AiPrompt.rules())).also {
                         it += history
-                        it += AiMessage(AiMessage.ROLE_USER, q)
+                        it += AiMessage(AiMessage.ROLE_USER, snapshot)
                     },
                     roundsLeft = AI_MAX_TOOL_ROUNDS,
                     searchQuery = searchQuery,
@@ -767,9 +856,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 工具多轮循环：模型每轮要么返回最终回答（无 tool 字段），要么调用一个工具。
-     * read_file / list_dir 自动执行、结果以【工具结果】回喂继续下一轮；
-     * write_file 挂起等用户确认（会话存入 [aiSession]，批准/拒绝后从断点继续）。
+     * 工具多轮循环：模型每轮要么返回最终回答，要么调用一个工具。
+     * 双协议：官方 DeepSeek 走**原生 function calling**（tools 参数 + role=tool 回喂），
+     * 其它服务商走 JSON 夹带协议（tool 字段 + 【工具结果】用户消息回喂）——
+     * 两者共用同一套执行与审批逻辑，只是回喂格式不同。
+     * read/list/fetch 自动执行；write_file 挂起等用户确认（会话存入 [aiSession]）。
      * [AI_MAX_TOOL_ROUNDS] 轮内没收敛就按已有分析收尾 —— 防止失控循环烧 token。
      */
     private suspend fun runTurn(session: AiTurnSession) {
@@ -785,16 +876,59 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 return
             }
             session.roundsLeft--
-            val aiReply = callAiWithTimeout(
-                session.config,
-                session.apiMessages,
-                // 深度思考先出推理再出答案，界面可见超时也放宽一倍
-                if (session.config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS,
-                // write_file 可能携带整个配置文件，输出预算放宽；
-                // 思考模式下推理 Token 也计入 max_tokens（官方: 思考模式默认输出 64K），
-                // 给足预算，避免推理还没写完就被截断
-                maxTokens = if (session.config.thinking) 16_384 else 4_096,
-            )
+            val deadline = System.currentTimeMillis() +
+                if (session.config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS
+            // 实况流：思考/正文逐 token 回调进 [_aiLiveStream]，完成后以正式气泡落榜
+            val live = AiLiveStream(nextAiId(), thinking = session.config.thinking)
+            val aiReply = try {
+                _aiLiveStream.value = live
+                AiClient.chatStream(
+                    session.config,
+                    session.apiMessages,
+                    // write_file 可能携带整个配置文件；思考模式推理 Token 计入 max_tokens
+                    //（官方：思考模式默认输出 64K），给足预算防截断
+                    maxTokens = if (session.config.thinking) 16_384 else 4_096,
+                    extraJson = session.config.extraBody,
+                    thinkingEnabled = session.config.thinking,
+                    includeNativeThinkingParam = includeNativeThinking(session.config),
+                    includeTools = includeNativeThinking(session.config),
+                    includeTools = includeNativeThinking(session.config),
+                    shouldStop = { aiCancelRequested || System.currentTimeMillis() > deadline },
+                    onDelta = { r, c -> updateLiveStream(live.id, r, c) },
+                )
+            } finally {
+                _aiLiveStream.value = null
+            }
+            if (aiReply.aborted) {
+                val userCancelled = aiCancelRequested
+                aiCancelRequested = false
+                aiSession = null
+                val partial = aiReply.content.trim()
+                appendAiMessage(
+                    AiChatMessage(
+                        nextAiId(),
+                        isUser = false,
+                        text = when {
+                            partial.isNotEmpty() -> "（已中止）${partial.take(1000)}…"
+                            userCancelled -> "已取消本轮提问。"
+                            else -> "AI 响应超时，已停止本轮。可重试或换个问法。"
+                        },
+                        toolNote = if (userCancelled) "已取消" else "响应超时",
+                    )
+                )
+                return
+            }
+            // ── 原生工具调用（官方 DeepSeek）──
+            if (aiReply.toolCalls.isNotEmpty()) {
+                session.apiMessages += AiMessage(
+                    AiMessage.ROLE_ASSISTANT,
+                    aiReply.content,
+                    toolCallsRaw = aiReply.rawToolCallsJson,
+                )
+                if (execNativeToolCalls(session, aiReply.toolCalls)) return // 挂起等写入确认
+                continue
+            }
+            // ── JSON 夹带协议（其它服务商）──
             // 剥掉混在正文里的 <think> 推理段；历史回喂与展示都用干净文本，
             // 推理过程（reasoning_content 或 <think> 段）单独保存供 UI 折叠展示
             val (cleaned, inlineThink) = AiSuggestion.splitThinking(aiReply.content)
@@ -812,12 +946,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             lastAnalysis = parsed.analysis
             val tool = parsed.tool
             if (tool == null) {
-                appendFinalAiMessage(session, parsed, cleaned, reasoning, thinkingNote)
+                appendFinalAiMessage(session, parsed, cleaned, reasoning, thinkingNote, aiReply.usage)
                 return
             }
             when (tool.name) {
-                "read_file", "list_dir" -> {
-                    val note = (if (tool.name == "read_file") "读取 " else "列出 ") + tool.path
+                "read_file", "list_dir", "fetch_page" -> {
+                    val note = when (tool.name) {
+                        "read_file" -> "读取 ${tool.path}"
+                        "list_dir" -> "列出 ${tool.path}"
+                        else -> "抓取网页 ${AiSanitize.displayOneLine(tool.path)}"
+                    }
                     val result = runCatching { executeAiReadTool(tool.name, tool.path) }
                         .getOrElse { "工具执行失败：${it.message}" }
                     appendAiMessage(
@@ -886,7 +1024,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
                 else -> {
-                    appendFinalAiMessage(session, parsed, cleaned, reasoning, thinkingNote)
+                    appendFinalAiMessage(session, parsed, cleaned, reasoning, thinkingNote, aiReply.usage)
                     return
                 }
             }
@@ -902,12 +1040,96 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    /**
+     * 执行原生工具调用批次。返回 true = 已挂起等写入确认（本轮暂停）。
+     * 结果以 role=tool 回喂（OpenAI 工具协议），与 JSON 协议共用同一套执行/审批逻辑。
+     */
+    private suspend fun execNativeToolCalls(session: AiTurnSession, calls: List<NativeToolCall>): Boolean {
+        for (tc in calls) {
+            val args = runCatching { aiJson.decodeFromString<NativeArgs>(tc.arguments) }.getOrNull()
+            if (args == null) {
+                session.apiMessages += AiMessage(
+                    AiMessage.ROLE_TOOL,
+                    "工具参数解析失败（arguments 不是合法 JSON）：${tc.arguments.take(200)}",
+                    toolCallId = tc.id,
+                )
+                continue
+            }
+            val name = tc.name.trim().lowercase()
+            if (name == "write_file") {
+                if (args.content.isEmpty()) {
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_TOOL,
+                        "失败：content 为空，请给出完整新文件内容",
+                        toolCallId = tc.id,
+                    )
+                    continue
+                }
+                val target = session.instanceId?.let { instanceStore.get(it) }
+                val policy = AiFileTools.writePolicyFor(target?.dir, args.path)
+                if (policy.forbidden != null) {
+                    appendAiMessage(
+                        AiChatMessage(
+                            id = nextAiId(), isUser = false,
+                            text = "已阻止一次文件写入\n${args.path}\n原因：${policy.forbidden}",
+                            toolNote = "已阻止写入 ${args.path}",
+                            isError = true,
+                            instanceId = session.instanceId,
+                        )
+                    )
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_TOOL,
+                        "被启动器策略拒绝：${policy.forbidden}。该文件不允许通过 AI 修改，请改用其它方案，或直接告诉用户应该怎么改。",
+                        toolCallId = tc.id,
+                    )
+                    continue
+                }
+                aiSession = session
+                appendAiMessage(
+                    AiChatMessage(
+                        id = nextAiId(), isUser = false,
+                        text = "我准备写入文件。",
+                        writeRequest = AiWriteRequest(
+                            path = args.path,
+                            content = args.content,
+                            bytes = args.content.toByteArray(Charsets.UTF_8).size,
+                            absPath = policy.resolvedPath,
+                            instanceName = target?.name.orEmpty(),
+                            warning = policy.warning,
+                        ),
+                        instanceId = session.instanceId,
+                    )
+                )
+                return true
+            }
+            if (name !in setOf("read_file", "list_dir", "fetch_page")) {
+                session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, "未知工具：$name", toolCallId = tc.id)
+                continue
+            }
+            // fetch_page 的参数名是 url，其余是 path
+            val targetPath = if (name == "fetch_page") args.url.ifBlank { args.path } else args.path
+            val note = when (name) {
+                "read_file" -> "读取 $targetPath"
+                "list_dir" -> "列出 $targetPath"
+                else -> "抓取网页 ${AiSanitize.displayOneLine(targetPath)}"
+            }
+            val result = runCatching { executeAiReadTool(name, targetPath) }
+                .getOrElse { "工具执行失败：${it.message}" }
+            appendAiMessage(
+                AiChatMessage(nextAiId(), isUser = false, text = note, toolNote = note)
+            )
+            session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, result, toolCallId = tc.id)
+        }
+        return false
+    }
+
     private fun appendFinalAiMessage(
         session: AiTurnSession,
         parsed: AiSuggestion.Parsed,
         cleaned: String,
         reasoning: String?,
         thinkingNote: String? = null,
+        usage: AiUsage? = null,
     ) {
         aiSession = null
         appendAiMessage(
@@ -923,12 +1145,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 instanceId = session.instanceId,
                 reasoning = reasoning,
                 thinkingNote = thinkingNote,
+                usageSummary = usage?.summary(),
             )
         )
     }
 
-    /** 执行只读工具（读文件 / 列目录）：实例目录为主根，app: 前缀走应用私有目录 */
+    /** 执行只读工具（读文件 / 列目录 / 抓网页）：实例目录为主根，app: 前缀走应用私有目录 */
     private fun executeAiReadTool(name: String, path: String): String {
+        // 抓网页不需要实例目录
+        if (name == "fetch_page") return AiWebPage.fetch(path)
         val dir = _currentInstanceId.value?.let { instanceStore.get(it) }?.dir
             ?: return "当前未选择实例，无法访问文件"
         return if (name == "read_file") {
@@ -1030,6 +1255,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _aiMessages.value = _aiMessages.value.map {
             if (it.id == messageId) it.copy(writeState = state) else it
         }
+        persistAiChat()
     }
 
     /**
@@ -1094,6 +1320,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun appendAiMessage(message: AiChatMessage) {
         _aiMessages.value = _aiMessages.value + message
+        persistAiChat()
     }
 
     private fun nextAiId(): Long = aiIdCounter.incrementAndGet()

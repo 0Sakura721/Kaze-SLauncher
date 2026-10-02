@@ -378,7 +378,31 @@ private fun SearchSection(viewModel: AppViewModel) {
         }
     }
 
-    if (provider.needsKey) {
+    if (provider.id == AiSearch.Provider.SEARXNG.id) {
+        // SearXNG：Key 栏语义是实例地址（明文、http(s)），免凭据
+        OutlinedTextField(
+            value = searchKey,
+            onValueChange = {
+                searchKey = it
+                keySaved = false
+            },
+            label = { Text("SearXNG 实例地址") },
+            placeholder = { Text("https://searx.example.com") },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin),
+        )
+        Button(
+            onClick = {
+                viewModel.setAiSearch(providerId, searchKey)
+                keySaved = true
+            },
+            modifier = Modifier.padding(horizontal = M3Spacing.screenMargin),
+        ) {
+            Text("保存")
+        }
+    } else if (provider.needsKey) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -405,22 +429,23 @@ private fun SearchSection(viewModel: AppViewModel) {
                 Text("保存")
             }
         }
-        LaunchedEffect(keySaved) {
-            if (keySaved) {
-                delay(2000)
-                keySaved = false
-            }
-        }
-        if (keySaved) {
-            Text(
-                "已保存 ✓",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(horizontal = M3Spacing.screenMargin),
-            )
-        }
     } else {
         SectionNote("该搜索源无需 Key、不注册任何服务：由手机直接加载搜索结果页解析。")
+    }
+    LaunchedEffect(keySaved) {
+        if (keySaved) {
+            delay(2000)
+            keySaved = false
+        }
+    }
+    if (keySaved) {
+        Text(
+            "已保存 ✓",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(horizontal = M3Spacing.screenMargin),
+        )
+    }
     }
 
     // 本机浏览器源：引导授予悬浮窗权限，让 WebView 挂真窗口（渲染器全优先级、不被 ROM 冻结）

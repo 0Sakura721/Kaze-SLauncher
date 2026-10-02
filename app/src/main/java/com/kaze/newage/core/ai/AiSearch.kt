@@ -28,9 +28,15 @@ object AiSearch {
     private const val READ_TIMEOUT_MS = 20_000
     private val json = Json { ignoreUnknownKeys = true }
 
-    enum class Provider(val id: String, val displayName: String, val hint: String, val needsKey: Boolean) {
+    enum class Provider(val id: String, val displayName: String, val hint: String, val needsKey: Boolean, val needsUrl: Boolean = false) {
         TAVILY("tavily", "Tavily", "国际可用，每月 1000 次免费额度，在 tavily.com 申请 Key", true),
         BOCHA("bocha", "博查", "国内直连、按次付费，在 bochaai.com 申请 Key", true),
+
+        /**
+         * SearXNG：自建或公共元搜索实例，免 Key。实例需开启 JSON 输出格式
+         * （很多公共实例默认关闭）。「Key」栏填实例地址（如 https://searx.example.com）。
+         */
+        SEARXNG("searxng", "SearXNG", "免 Key：填 SearXNG 实例地址（自建或开启 JSON 格式的公共实例），搜索完全自主可控", false, needsUrl = true),
 
         /**
          * 本机浏览器（Operit 式）：无头 WebView 加载必应结果页、页内 JS 提取，
@@ -48,42 +54,61 @@ object AiSearch {
     data class Result(val title: String, val url: String, val snippet: String)
 
     fun search(provider: Provider, apiKey: String, query: String, maxResults: Int = 5): List<Result> {
-        if (apiKey.isBlank()) throw RuntimeException("尚未配置搜索 API Key")
         val q = query.trim()
         if (q.isEmpty()) return emptyList()
-        val endpoint = when (provider) {
-            Provider.TAVILY -> "https://api.tavily.com/search"
-            Provider.BOCHA -> "https://api.bochaai.com/v1/web-search"
+
+        // 三元组：请求地址 / 请求体（GET 为 null）/ 凭据头（无凭据源为 null）
+        val (endpoint, body, authHeader) = when (provider) {
+            Provider.TAVILY -> {
+                require(apiKey.isNotBlank()) { "尚未配置 Tavily API Key" }
+                Triple(
+                    "https://api.tavily.com/search",
+                    buildJsonObject {
+                        put("query", q)
+                        put("search_depth", "basic")
+                        put("max_results", maxResults)
+                    }.toString(),
+                    "Bearer ${apiKey.trim()}",
+                )
+            }
+            Provider.BOCHA -> {
+                require(apiKey.isNotBlank()) { "尚未配置博查 API Key" }
+                Triple(
+                    "https://api.bochaai.com/v1/web-search",
+                    buildJsonObject {
+                        put("query", q)
+                        put("summary", true)
+                        put("count", maxResults)
+                        put("freshness", "noLimit")
+                    }.toString(),
+                    "Bearer ${apiKey.trim()}",
+                )
+            }
+            Provider.SEARXNG -> {
+                // 「Key」栏存的是实例地址（免凭据），不能当 Bearer 发出去
+                val base = AiConfig.normalizeBaseUrl(apiKey)
+                require(base.isNotEmpty()) { "请填写 SearXNG 实例地址（http(s)://…）" }
+                Triple(
+                    "$base/search?q=${URLEncoder.encode(q, "UTF-8")}&format=json",
+                    null,
+                    null,
+                )
+            }
             Provider.BING_LOCAL ->
                 throw IllegalStateException("BING_LOCAL 应走 BrowserSearch.searchBing()，不经 HTTP API")
         }
-        val body = buildJsonObject {
-            when (provider) {
-                Provider.TAVILY -> {
-                    put("query", q)
-                    put("search_depth", "basic")
-                    put("max_results", maxResults)
-                }
-                Provider.BOCHA -> {
-                    put("query", q)
-                    put("summary", true)
-                    put("count", maxResults)
-                    put("freshness", "noLimit")
-                }
-                // 本机浏览器不走 HTTP API，调用方须路由到 BrowserSearch（WebView 必须主线程）
-                Provider.BING_LOCAL ->
-                    throw IllegalStateException("BING_LOCAL 应走 BrowserSearch.searchBing()，不经 HTTP API")
-            }
-        }.toString()
+
         val conn = URL(endpoint).openConnection() as HttpURLConnection
         try {
-            conn.requestMethod = "POST"
+            conn.requestMethod = if (body == null) "GET" else "POST"
             conn.connectTimeout = CONNECT_TIMEOUT_MS
             conn.readTimeout = READ_TIMEOUT_MS
-            conn.doOutput = true
-            conn.setRequestProperty("Content-Type", "application/json")
-            conn.setRequestProperty("Authorization", "Bearer ${apiKey.trim()}")
-            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            if (body != null) {
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
+            authHeader?.let { conn.setRequestProperty("Authorization", it) }
             val code = conn.responseCode
             if (code != 200) {
                 val err = runCatching {
@@ -95,6 +120,7 @@ object AiSearch {
             return when (provider) {
                 Provider.TAVILY -> parseTavily(respBody)
                 Provider.BOCHA -> parseBocha(respBody)
+                Provider.SEARXNG -> parseSearx(respBody)
                 Provider.BING_LOCAL ->
                     throw IllegalStateException("BING_LOCAL 应走 BrowserSearch.searchBing()，不经 HTTP API")
             }
@@ -140,6 +166,46 @@ object AiSearch {
         return resp.data?.webPages?.value.orEmpty()
             .map { Result(it.name.trim(), it.url.trim(), (it.summary ?: it.snippet).trim()) }
             .filter { it.url.isNotBlank() }
+    }
+
+    @Serializable
+    internal data class SearxResp(val results: List<SearxHit> = emptyList())
+
+    @Serializable
+    internal data class SearxHit(val title: String = "", val url: String = "", val content: String = "")
+
+    internal fun parseSearx(body: String): List<Result> {
+        val resp = json.decodeFromString<SearxResp>(body)
+        return resp.results.map { Result(it.title.trim(), it.url.trim(), it.content.trim()) }
+            .filter { it.url.startsWith("http") }
+    }
+
+    // ── 结果缓存：同一问题反复问时省配额（诊断场景下 5 分钟内的重复查询意义不大） ──
+
+    private const val CACHE_TTL_MS = 5 * 60_000L
+    private const val CACHE_MAX = 20
+
+    private val cache = LinkedHashMap<String, Pair<Long, List<Result>>>()
+
+    /** 带 5 分钟 TTL 的搜索入口：命中直接复用，未命中走 [search] 并写入缓存 */
+    fun searchCached(provider: Provider, apiKey: String, query: String, maxResults: Int = 5): List<Result> {
+        val key = "${provider.id}|${query.trim()}|$maxResults"
+        synchronized(cache) {
+            cache.remove(key)?.let { (at, hits) ->
+                if (System.currentTimeMillis() - at < CACHE_TTL_MS) {
+                    cache[key] = at to hits // 触碰一次，保持最新
+                    return hits
+                }
+            }
+        }
+        val hits = search(provider, apiKey, query, maxResults)
+        synchronized(cache) {
+            cache[key] = System.currentTimeMillis() to hits
+            while (cache.size > CACHE_MAX) {
+                cache.remove(cache.keys.first())
+            }
+        }
+        return hits
     }
 
     /**

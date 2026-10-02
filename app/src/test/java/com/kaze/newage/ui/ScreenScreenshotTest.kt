@@ -11,6 +11,8 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.kaze.newage.NewAgeApp
 import com.kaze.newage.data.model.CoreType
 import com.kaze.newage.data.model.ServerInstance
+import com.kaze.newage.ui.screens.AiScreen
+import com.kaze.newage.ui.screens.AiSettingsScreen
 import com.kaze.newage.ui.screens.ConsoleScreen
 import com.kaze.newage.ui.screens.HomeScreen
 import com.kaze.newage.ui.screens.NewServerScreen
@@ -121,6 +123,23 @@ class ScreenScreenshotTest {
     @Test
     fun screen_console_dark() = captureScreen("screen_console_dark", dark = true) {
         ConsoleScreen(vm())
+    }
+
+    // ── AI 助手（空态：能力一览 + 快捷提问）──
+    @Test
+    fun screen_ai() = captureScreen("screen_ai") {
+        AiScreen(vm(), onBack = {}, onOpenSettings = {})
+    }
+
+    @Test
+    fun screen_ai_dark() = captureScreen("screen_ai_dark", dark = true) {
+        AiScreen(vm(), onBack = {}, onOpenSettings = {})
+    }
+
+    // ── AI 设置（空档案引导 + 搜索源卡片）──
+    @Test
+    fun screen_ai_settings() = captureScreen("screen_ai_settings") {
+        AiSettingsScreen(vm(), onBack = {})
     }
 
     // ── 设置 ──
