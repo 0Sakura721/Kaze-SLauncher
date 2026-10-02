@@ -18,7 +18,8 @@ class AiFileToolsTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
-    private fun instanceDir(): File = tmp.newFolder("instance")
+    // 随机名：同一测试里可能创建多个实例根（如"先读后写拒绝"两步），固定名会重名
+    private fun instanceDir(): File = tmp.newFolder()
 
     // ── 路径解析 ──
 
