@@ -64,7 +64,7 @@ object AiClient {
      * 同步发起一轮对话，返回 assistant 文本。**阻塞调用**：必须在 IO 线程跑
      * （调用方负责放独立线程 + 界面可见超时，见 AppViewModel.askAi）。
      */
-    fun chat(config: AiConfig, messages: List<AiMessage>): String {
+    fun chat(config: AiConfig, messages: List<AiMessage>, maxTokens: Int = 1024): String {
         val endpoint = config.endpoint
         if (endpoint.isEmpty()) {
             throw RuntimeException("AI 服务地址无效：${config.baseUrl.trim()}（需以 http(s):// 开头）")
@@ -81,7 +81,7 @@ object AiClient {
             conn.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             conn.setRequestProperty("User-Agent", USER_AGENT)
             conn.outputStream.use {
-                it.write(buildRequestBody(config.requestModel, messages).toByteArray(Charsets.UTF_8))
+                it.write(buildRequestBody(config.requestModel, messages, maxTokens).toByteArray(Charsets.UTF_8))
             }
             val code = conn.responseCode
             if (code != 200) {

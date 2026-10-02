@@ -6,6 +6,9 @@ import android.graphics.BitmapFactory
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import com.kaze.newage.core.ai.AiConfig
+import com.kaze.newage.core.ai.AiProfile
+import com.kaze.newage.core.ai.AiProfileStore
+import com.kaze.newage.core.ai.AiSearch
 import java.io.File
 
 /**
@@ -115,36 +118,127 @@ emember(path) 缓存位图的话，
      */
     val updateMode = mutableStateOf(prefs.getString("update_mode", "full") ?: "full")
 
-    // ── AI 助手（OpenAI 兼容接口，见 core/ai/AiModels.kt）──
-    // 默认预填 DeepSeek 官方地址与两个模型；换任何 OpenAI 兼容端点只需改这几项。
-    // 「思考强度」在 DeepSeek 上的实现就是模型切换：标准 = deepseek-chat，深度思考 = deepseek-reasoner；
-    // 两个模型名都开放编辑，玩家可自行适配其他服务商。
-    // API Key 只存应用私有的 SharedPreferences（别的应用读不到），绝不入库、绝不写日志。
-    val aiBaseUrl = mutableStateOf(
-        prefs.getString("ai_base_url", AiConfig.DEFAULT_BASE_URL) ?: AiConfig.DEFAULT_BASE_URL
-    )
-    val aiModelStandard = mutableStateOf(
-        prefs.getString("ai_model_standard", AiConfig.DEFAULT_MODEL) ?: AiConfig.DEFAULT_MODEL
-    )
-    val aiModelThinking = mutableStateOf(
-        prefs.getString("ai_model_thinking", AiConfig.DEFAULT_THINKING_MODEL) ?: AiConfig.DEFAULT_THINKING_MODEL
-    )
-    val aiApiKey = mutableStateOf(prefs.getString("ai_api_key", "") ?: "")
+    // ── AI 助手（OpenAI 兼容接口 + 联网搜索，见 core/ai/）──
+    //
+    // 模型配置采用 Operit 式的「档案 + 功能分配」轻量版：
+    //   档案 = 命名的一组（服务地址 / Key / 逗号分隔模型列表），存 JSON；
+    //   分配 = 「对话」这一个功能用哪个档案（以后加功能只需再加一个分配键）；
+    //   思考强度 = 档案模型列表里取第几个（[0] 标准、[1] 深度思考）。
+    // API Key / 搜索 Key 只存应用私有的 SharedPreferences（别的应用读不到），绝不入库、绝不写日志。
+    val aiProfiles = mutableStateOf(AiProfileStore.decode(prefs.getString("ai_profiles", "") ?: ""))
+
+    /** 「对话」功能分配到的档案 id */
+    val aiChatProfileId = mutableStateOf(prefs.getString("ai_chat_profile_id", "") ?: "")
 
     /** 思考强度：false = 标准（快），true = 深度思考（更聪明也更慢） */
     val aiThinking = mutableStateOf(prefs.getBoolean("ai_thinking", false))
 
+    // ── 联网搜索 ──
+    val aiSearchOn = mutableStateOf(prefs.getBoolean("ai_search_on", false))
+    val aiSearchProviderId = mutableStateOf(
+        prefs.getString("ai_search_provider", AiSearch.Provider.TAVILY.id) ?: AiSearch.Provider.TAVILY.id
+    )
+    val aiSearchKey = mutableStateOf(prefs.getString("ai_search_key", "") ?: "")
+
     init {
-        // 旧键迁移：P0 时只有一个 ai_model 字段，拆成标准/思考两个模型名时把旧值接过来
-        // （必须放在上面 aiModelStandard 初始化**之前**：属性按声明顺序初始化）
-        if (prefs.contains("ai_model") && !prefs.contains("ai_model_standard")) {
-            val legacy = prefs.getString("ai_model", null)
-            prefs.edit()
-                .putString("ai_model_standard", legacy ?: AiConfig.DEFAULT_MODEL)
-                .remove("ai_model")
-                .apply()
-            aiModelStandard.value = legacy ?: AiConfig.DEFAULT_MODEL
+        // 旧单配置 → 档案：P0/P1 存的是散键（ai_api_key + ai_base_url + ai_model_standard/thinking，
+        // 更早还有 ai_model）。只要填过 Key 就拼成一个「DeepSeek」档案并设为对话配置，绝不丢 Key。
+        // 放在 aiProfiles 等声明之后：属性按声明顺序初始化。
+        if (aiProfiles.value.isEmpty()) {
+            val legacyKey = prefs.getString("ai_api_key", "")?.trim().orEmpty()
+            if (legacyKey.isNotBlank()) {
+                val standard = prefs.getString("ai_model_standard", null)
+                    ?: prefs.getString("ai_model", null)
+                    ?: AiConfig.DEFAULT_MODEL
+                val thinking = prefs.getString("ai_model_thinking", null).orEmpty()
+                val models = listOf(standard.trim(), thinking.trim()).filter { it.isNotEmpty() }
+                    .ifEmpty { listOf(AiConfig.DEFAULT_MODEL) }
+                val legacy = AiProfile(
+                    name = "DeepSeek",
+                    baseUrl = prefs.getString("ai_base_url", "")?.trim()
+                        ?.ifBlank { AiConfig.DEFAULT_BASE_URL } ?: AiConfig.DEFAULT_BASE_URL,
+                    apiKey = legacyKey,
+                    models = models,
+                )
+                aiProfiles.value = listOf(legacy)
+                aiChatProfileId.value = legacy.id
+                prefs.edit()
+                    .putString("ai_profiles", AiProfileStore.encode(listOf(legacy)))
+                    .putString("ai_chat_profile_id", legacy.id)
+                    .apply()
+            }
         }
+        // 分配指向的档案被删/损坏时回退到第一个（或空 = 未配置，界面会引导新增）
+        if (aiChatProfileId.value.isNotBlank() &&
+            aiProfiles.value.none { it.id == aiChatProfileId.value }
+        ) {
+            aiChatProfileId.value = aiProfiles.value.firstOrNull()?.id.orEmpty()
+        }
+    }
+
+    /** 新增或更新档案（按 id 覆盖，编辑保持原位置）；首个档案自动成为对话配置 */
+    fun saveAiProfile(profile: AiProfile) {
+        val list = if (aiProfiles.value.any { it.id == profile.id }) {
+            aiProfiles.value.map { if (it.id == profile.id) profile else it }
+        } else {
+            aiProfiles.value + profile
+        }
+        aiProfiles.value = list
+        prefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+        if (aiChatProfileId.value.isBlank() || aiProfiles.value.none { it.id == aiChatProfileId.value }) {
+            setChatAiProfile(profile.id)
+        }
+    }
+
+    /** 删除档案；删的是当前对话配置时回退到剩余第一个 */
+    fun deleteAiProfile(id: String) {
+        val list = aiProfiles.value.filterNot { it.id == id }
+        aiProfiles.value = list
+        prefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+        if (aiChatProfileId.value == id) setChatAiProfile(list.firstOrNull()?.id.orEmpty())
+    }
+
+    /** 功能分配：把「对话」指向某个档案 */
+    fun setChatAiProfile(id: String) {
+        aiChatProfileId.value = id
+        prefs.edit().putString("ai_chat_profile_id", id).apply()
+    }
+
+    /** 思考强度开关（聊天面板随时可切） */
+    fun setAiThinking(v: Boolean) {
+        aiThinking.value = v
+        prefs.edit().putBoolean("ai_thinking", v).apply()
+    }
+
+    /** 保存联网搜索配置（源 + Key） */
+    fun setAiSearch(providerId: String, key: String) {
+        val p = providerId.trim()
+        val k = key.trim()
+        aiSearchProviderId.value = p
+        aiSearchKey.value = k
+        prefs.edit().putString("ai_search_provider", p).putString("ai_search_key", k).apply()
+    }
+
+    /** 联网搜索开关（聊天面板随时可切） */
+    fun setAiSearchOn(v: Boolean) {
+        aiSearchOn.value = v
+        prefs.edit().putBoolean("ai_search_on", v).apply()
+    }
+
+    /**
+     * 当前对话配置快照：解析分配到的档案 → [AiConfig]。
+     * 没有任何档案时返回 DeepSeek 默认值（Key 为空 → isConfigured=false，界面会引导配置）。
+     */
+    fun aiConfig(): AiConfig {
+        val p = aiProfiles.value.firstOrNull { it.id == aiChatProfileId.value }
+            ?: aiProfiles.value.firstOrNull()
+        return AiConfig(
+            baseUrl = p?.baseUrl?.trim()?.ifBlank { AiConfig.DEFAULT_BASE_URL } ?: AiConfig.DEFAULT_BASE_URL,
+            model = p?.models?.firstOrNull()?.trim()?.ifBlank { null } ?: AiConfig.DEFAULT_MODEL,
+            thinkingModel = p?.models?.getOrNull(1)?.trim().orEmpty(),
+            apiKey = p?.apiKey?.trim().orEmpty(),
+            thinking = aiThinking.value,
+        )
     }
 
     fun setAutoUpdate(v: Boolean) {
@@ -162,46 +256,36 @@ emember(path) 缓存位图的话，
         prefs.edit().putString("update_channel", v).apply()
     }
 
-    /** 保存 AI 接口配置（各项都 trim：端点/模型名里的空白只会造成莫名的 404） */
-    fun setAiConfig(
-        baseUrl: String,
-        modelStandard: String,
-        modelThinking: String,
-        apiKey: String,
-        thinking: Boolean,
-    ) {
-        val b = baseUrl.trim()
-        val ms = modelStandard.trim()
-        val mt = modelThinking.trim()
-        val k = apiKey.trim()
-        aiBaseUrl.value = b
-        aiModelStandard.value = ms
-        aiModelThinking.value = mt
-        aiApiKey.value = k
-        aiThinking.value = thinking
-        prefs.edit()
-            .putString("ai_base_url", b)
-            .putString("ai_model_standard", ms)
-            .putString("ai_model_thinking", mt)
-            .putString("ai_api_key", k)
-            .putBoolean("ai_thinking", thinking)
-            .apply()
+    /** 保存联网搜索配置（源 + Key） */
+    fun setAiSearch(providerId: String, key: String) {
+        val p = providerId.trim()
+        val k = key.trim()
+        aiSearchProviderId.value = p
+        aiSearchKey.value = k
+        prefs.edit().putString("ai_search_provider", p).putString("ai_search_key", k).apply()
     }
 
-    /** 思考强度开关（面板头部可随时切换，独立于配置表单的保存） */
-    fun setAiThinking(v: Boolean) {
-        aiThinking.value = v
-        prefs.edit().putBoolean("ai_thinking", v).apply()
+    /** 联网搜索开关（聊天面板随时可切） */
+    fun setAiSearchOn(v: Boolean) {
+        aiSearchOn.value = v
+        prefs.edit().putBoolean("ai_search_on", v).apply()
     }
 
-    /** 供 AI 客户端使用的当前配置快照 */
-    fun aiConfig(): AiConfig = AiConfig(
-        baseUrl = aiBaseUrl.value,
-        model = aiModelStandard.value,
-        thinkingModel = aiModelThinking.value,
-        apiKey = aiApiKey.value,
-        thinking = aiThinking.value,
-    )
+    /**
+     * 当前对话配置快照：解析分配到的档案 → [AiConfig]。
+     * 没有任何档案时返回 DeepSeek 默认值（Key 为空 → isConfigured=false，界面会引导配置）。
+     */
+    fun aiConfig(): AiConfig {
+        val p = aiProfiles.value.firstOrNull { it.id == aiChatProfileId.value }
+            ?: aiProfiles.value.firstOrNull()
+        return AiConfig(
+            baseUrl = p?.baseUrl?.trim()?.ifBlank { AiConfig.DEFAULT_BASE_URL } ?: AiConfig.DEFAULT_BASE_URL,
+            model = p?.models?.firstOrNull()?.trim()?.ifBlank { null } ?: AiConfig.DEFAULT_MODEL,
+            thinkingModel = p?.models?.getOrNull(1)?.trim().orEmpty(),
+            apiKey = p?.apiKey?.trim().orEmpty(),
+            thinking = aiThinking.value,
+        )
+    }
 
     fun setFgColorMode(v: String) {
         fgColorMode.value = v

@@ -124,5 +124,17 @@ object AiPrompt {
         3. 确需操作时，最多在 command 字段建议一条该核心/版本支持的 Minecraft 服务端控制台命令（不带 /，例如 list、whitelist add Steve）；不需要操作时 command 填空字符串。
         4. stop / op / ban / kick / whitelist 这类影响玩家或服务端生命的命令，只在用户明确要求时才建议。
         5. 只输出一个 JSON 对象，格式：{"analysis":"…","command":""}，不要输出 JSON 之外的任何文字。
+        6. 若上下文包含【联网搜索结果】，可引用其中信息并注明来源（域名）；搜索结果与本地日志冲突时，以本地日志为准。
+        """.trimIndent()
+
+    /**
+     * 联网搜索的第一轮：生成查询词。独立的小请求（思考模式强制关、max_tokens 很小），
+     * 模型判断问题属于本地实时状态时输出空 query，省一次搜索调用。
+     */
+    fun searchQuerySystem(): String =
+        """
+        你是搜索引擎查询词生成器。根据用户的问题生成一条适合搜索引擎的查询词（中文为主，保留错误码、版本号等原文关键词，例如 "Paper 1.21 UnsupportedClassVersionError"）。
+        只输出一个 JSON 对象：{"query":"…"}。
+        如果问题只关于服务器本地实时状态（谁在线、内存占用、当前日志现象等）不需要联网，输出 {"query":""}。
         """.trimIndent()
 }

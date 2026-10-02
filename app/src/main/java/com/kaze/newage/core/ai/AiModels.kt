@@ -1,5 +1,7 @@
 package com.kaze.newage.core.ai
 
+import kotlinx.serialization.Serializable
+
 /**
  * AI 助手接口配置：OpenAI 兼容的 `/chat/completions` 端点。
  *
@@ -63,3 +65,34 @@ data class AiMessage(val role: String, val content: String) {
         const val ROLE_ASSISTANT = "assistant"
     }
 }
+
+/**
+ * 模型配置档案（参照 Operit 的「模型自定义选择分配系统」做的轻量版）。
+ *
+ * Operit 的做法：多个命名档案（端点 + Key + **逗号分隔的模型列表**），
+ * 每个功能（FunctionType）分配一个档案与模型序号。我们只有一个功能「对话」，
+ * 分配 = 选中哪个档案；「思考强度」= 模型列表里取第几个：
+ * 第 1 个 = 标准，第 2 个 = 深度思考（缺第 2 个时思考模式回退第 1 个）。
+ * 档案保存在应用私有 SharedPreferences（JSON），Key 不出应用。
+ */
+@Serializable
+data class AiProfile(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    /** 显示名，如「DeepSeek 官方」「硅基流动」 */
+    val name: String = "",
+    val baseUrl: String = AiConfig.DEFAULT_BASE_URL,
+    val apiKey: String = "",
+    /** 模型名列表（UI 里逗号分隔编辑）：[0]=标准，[1]=深度思考 */
+    val models: List<String> = listOf(AiConfig.DEFAULT_MODEL, AiConfig.DEFAULT_THINKING_MODEL),
+) {
+    /** 列表行的摘要：端点主机 + 模型名 */
+    val summary: String
+        get() = buildString {
+            append(baseUrl.trim().trimEnd('/').substringAfter("//").ifBlank { "未填服务地址" })
+            if (models.isNotEmpty()) {
+                append(" · ")
+                append(models.joinToString(" / "))
+            }
+        }
+}
+

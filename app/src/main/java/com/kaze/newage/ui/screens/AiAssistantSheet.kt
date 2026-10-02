@@ -25,7 +25,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
@@ -37,7 +36,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -60,6 +61,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kaze.newage.core.ai.AiProfile
+import com.kaze.newage.core.ai.AiProfileStore
+import com.kaze.newage.core.ai.AiSearch
 import com.kaze.newage.core.ai.AiSuggestion
 import com.kaze.newage.core.console.LineType
 import com.kaze.newage.ui.AppViewModel
@@ -93,9 +97,10 @@ fun AiAssistantSheet(
     val messages by viewModel.aiMessages.collectAsStateWithLifecycle()
     val busy by viewModel.aiBusy.collectAsStateWithLifecycle()
     val prefs = viewModel.uiPrefs
-    // SettingsPrefs 里是 Compose State：读取即观察，保存后"保存并开始"立即生效
+    // SettingsPrefs 里是 Compose State：读取即观察，保存后立即生效
     val thinking = prefs.aiThinking.value
-    var showConfig by remember { mutableStateOf(prefs.aiApiKey.value.isBlank()) }
+    val searchOn = prefs.aiSearchOn.value
+    var showConfig by remember { mutableStateOf(!prefs.aiConfig().isConfigured) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -111,7 +116,7 @@ fun AiAssistantSheet(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(
                     Icons.Filled.SmartToy,
@@ -125,24 +130,6 @@ fun AiAssistantSheet(
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
-                    )
-                }
-                // 思考强度开关：聊天中随时可切（DeepSeek = chat/reasoner 模型切换；
-                // 模型名在配置表单里可自行编辑以适配其他服务商）
-                TextButton(onClick = { viewModel.setAiThinking(!thinking) }) {
-                    Icon(
-                        Icons.Filled.Psychology,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = if (thinking) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        "深度思考",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = if (thinking) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 IconButton(onClick = { showConfig = !showConfig }) {
@@ -164,13 +151,19 @@ fun AiAssistantSheet(
                     busy = busy,
                     serverRunning = serverRunning,
                     thinking = thinking,
+                    searchOn = searchOn,
+                    onToggleSearch = {
+                        // 没配搜索 Key 时直接带去配置页，而不是空开一个开关
+                        if (prefs.aiSearchKey.value.isBlank()) showConfig = true
+                        else viewModel.setAiSearchOn(!prefs.aiSearchOn.value)
+                    },
                 )
             }
         }
     }
 }
 
-/** 对话区：消息列表 + 快捷提问 + 输入行（输入草稿存在 ViewModel，切页面/关面板不丢） */
+/** 对话区：开关行（思考强度 / 联网）+ 消息列表 + 快捷提问 + 输入行（草稿存 ViewModel 不丢） */
 @Composable
 private fun AiChatArea(
     viewModel: AppViewModel,
@@ -178,6 +171,8 @@ private fun AiChatArea(
     busy: Boolean,
     serverRunning: Boolean,
     thinking: Boolean,
+    searchOn: Boolean,
+    onToggleSearch: () -> Unit,
 ) {
     val input by viewModel.aiDraft.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -188,6 +183,24 @@ private fun AiChatArea(
     }
 
     Column(Modifier.fillMaxWidth()) {
+        // 思考强度 / 联网开关：聊天中随时可切；联网未配 Key 时点击会带去配置页
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = thinking,
+                onClick = { viewModel.setAiThinking(!thinking) },
+                label = { Text("深度思考") },
+            )
+            FilterChip(
+                selected = searchOn,
+                onClick = onToggleSearch,
+                label = { Text("联网") },
+            )
+        }
+
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -311,6 +324,20 @@ private fun AiMessageRow(
                 Modifier.padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                // 联网搜索的情况先交代：搜到了什么词 / 为什么没搜成
+                if (msg.searchError != null) {
+                    Text(
+                        "联网搜索失败：${msg.searchError}（按本地信息回答）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else if (msg.searchQuery != null) {
+                    Text(
+                        "已搜索：${msg.searchQuery}（${msg.searchCount} 条结果）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 Text(msg.text, style = MaterialTheme.typography.bodyMedium)
                 msg.command?.let { cmd ->
                     AiSuggestionCard(
@@ -405,20 +432,37 @@ private fun AiSuggestionCard(
 }
 
 /**
- * AI 接口配置表单：OpenAI 兼容端点（服务地址 / 标准与思考模型名 / Key / 思考强度）。
+ * AI 配置页：模型配置档案（Operit 式「多配置 + 功能分配」轻量版）+ 联网搜索源。
  *
- * 「思考强度」的适配逻辑**以 DeepSeek 优先**：深度思考就是换 reasoner 模型，
- * 默认值就是 DeepSeek 的两个官方模型名；其他 OpenAI 兼容服务由玩家自行编辑
- * 两个模型名（或只填标准名、留空思考名 = 永远回退标准模型）。
+ * 档案 = 命名的一组（服务地址 / Key / 逗号分隔模型列表），可建多份，单选一份供对话；
+ * 「思考强度」就是取档案模型列表的第几个（[0] 标准 / [1] 深度思考）。
+ * 搜索源独立于模型档案：Tavily（国际免费额度）/ 博查（国内直连付费），二选一填 Key。
+ * 所有 Key 只存应用私有目录，不上传、不进日志。
  */
 @Composable
 private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
     val prefs = viewModel.uiPrefs
-    var baseUrl by remember { mutableStateOf(prefs.aiBaseUrl.value) }
-    var modelStandard by remember { mutableStateOf(prefs.aiModelStandard.value) }
-    var modelThinking by remember { mutableStateOf(prefs.aiModelThinking.value) }
-    var key by remember { mutableStateOf(prefs.aiApiKey.value) }
-    var thinking by remember { mutableStateOf(prefs.aiThinking.value) }
+    val profiles = prefs.aiProfiles.value
+    // null = 档案列表 + 搜索配置；非 null = 正在编辑/新增该档案
+    var editing by remember { mutableStateOf<AiProfile?>(null) }
+
+    val editingProfile = editing
+    if (editingProfile != null) {
+        AiProfileEditForm(
+            initial = editingProfile,
+            isNew = profiles.none { it.id == editingProfile.id },
+            onSave = { p ->
+                viewModel.saveAiProfile(p)
+                editing = null
+            },
+            onDelete = { id ->
+                viewModel.deleteAiProfile(id)
+                editing = null
+            },
+            onCancel = { editing = null },
+        )
+        return
+    }
 
     Column(
         Modifier
@@ -427,13 +471,124 @@ private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
             .padding(top = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text("AI 接口配置（OpenAI 兼容）", style = MaterialTheme.typography.titleSmall)
+        // ── 模型配置档案 ──
+        Text("模型配置", style = MaterialTheme.typography.titleSmall)
         Text(
-            "默认适配 DeepSeek：标准 = deepseek-chat，深度思考 = deepseek-reasoner（更聪明也更慢）。" +
-                "换其他 OpenAI 兼容服务（硅基流动 / OpenRouter / 本地推理等）时，两个模型名可自行编辑。" +
+            "可建多份配置（不同服务商 / Key），单选一份供对话使用。" +
+                "配置里的模型名可填多个（逗号分隔）：第 1 个 = 标准，第 2 个 = 深度思考。" +
                 "API Key 只保存在应用私有目录，不上传、不进日志。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        profiles.forEach { p ->
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 单选 = 功能分配：对话使用这份配置
+                RadioButton(
+                    selected = p.id == prefs.aiChatProfileId.value,
+                    onClick = { viewModel.setChatAiProfile(p.id) },
+                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        p.name.ifBlank { "未命名" },
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        p.summary,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                TextButton(onClick = { editing = p }) { Text("编辑") }
+            }
+        }
+        if (profiles.isEmpty()) {
+            Text(
+                "还没有配置。点「新增配置」——已预填 DeepSeek 默认值，填上你的 Key 即可用。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(onClick = { editing = AiProfile(name = "DeepSeek") }) {
+            Text("＋ 新增配置")
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // ── 联网搜索 ──
+        Text("联网搜索", style = MaterialTheme.typography.titleSmall)
+        var providerId by remember { mutableStateOf(prefs.aiSearchProviderId.value) }
+        var searchKey by remember { mutableStateOf(prefs.aiSearchKey.value) }
+        val provider = AiSearch.Provider.byId(providerId)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AiSearch.Provider.entries.forEach { prov ->
+                FilterChip(
+                    selected = prov.id == providerId,
+                    onClick = { providerId = prov.id },
+                    label = { Text(prov.displayName) },
+                )
+            }
+        }
+        OutlinedTextField(
+            value = searchKey,
+            onValueChange = { searchKey = it },
+            label = { Text("搜索 API Key") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Text(
+            provider.hint + "。开启「联网」后，AI 会先生成搜索词、把结果带入回答；搜索失败不影响回答。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Row {
+            Button(onClick = {
+                viewModel.setAiSearch(providerId, searchKey)
+                onDone()
+            }) {
+                Text(if (prefs.aiConfig().isConfigured) "保存" else "保存并开始")
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+/** 单个档案的编辑表单（新增与编辑共用） */
+@Composable
+private fun AiProfileEditForm(
+    initial: AiProfile,
+    isNew: Boolean,
+    onSave: (AiProfile) -> Unit,
+    onDelete: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    var name by remember(initial.id) { mutableStateOf(initial.name) }
+    var baseUrl by remember(initial.id) { mutableStateOf(initial.baseUrl) }
+    var models by remember(initial.id) { mutableStateOf(initial.models.joinToString(", ")) }
+    var key by remember(initial.id) { mutableStateOf(initial.apiKey) }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(top = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(if (isNew) "新增模型配置" else "编辑模型配置", style = MaterialTheme.typography.titleSmall)
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = { Text("配置名称") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
             value = baseUrl,
@@ -443,16 +598,9 @@ private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedTextField(
-            value = modelStandard,
-            onValueChange = { modelStandard = it },
-            label = { Text("标准模式模型名") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = modelThinking,
-            onValueChange = { modelThinking = it },
-            label = { Text("深度思考模式模型名") },
+            value = models,
+            onValueChange = { models = it },
+            label = { Text("模型名（逗号分隔：第 1 个标准，第 2 个深度思考）") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -464,35 +612,33 @@ private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
         )
-        // 思考强度：面板头部也能随时切，这里是同一份状态的另一个入口
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                "思考强度",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            FilterChip(
-                selected = !thinking,
-                onClick = { thinking = false },
-                label = { Text("标准") },
-            )
-            FilterChip(
-                selected = thinking,
-                onClick = { thinking = true },
-                label = { Text("深度思考") },
-            )
-        }
-        Row {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
-                viewModel.saveAiConfig(baseUrl, modelStandard, modelThinking, key, thinking)
-                onDone()
+                onSave(
+                    initial.copy(
+                        name = name.trim().ifBlank { "未命名" },
+                        baseUrl = baseUrl.trim(),
+                        models = AiProfileStore.parseModelList(models),
+                        apiKey = key.trim(),
+                    )
+                )
             }) {
-                Text(if (key.isBlank()) "保存" else "保存并开始")
+                Text("保存")
+            }
+            if (!isNew) {
+                TextButton(onClick = { onDelete(initial.id) }) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            TextButton(onClick = onCancel) {
+                Text("取消")
             }
         }
+        Text(
+            "提示：模型名全留空时回退 DeepSeek 默认（deepseek-chat）；只填 1 个时「深度思考」也走这同一个模型。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         Spacer(Modifier.height(8.dp))
     }
 }

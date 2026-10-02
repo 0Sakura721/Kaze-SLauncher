@@ -12,7 +12,9 @@ import com.kaze.newage.core.ai.AiClient
 import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiContext
 import com.kaze.newage.core.ai.AiMessage
+import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiPrompt
+import com.kaze.newage.core.ai.AiSearch
 import com.kaze.newage.core.ai.AiSuggestion
 import com.kaze.newage.core.console.ConsoleLine
 import com.kaze.newage.core.console.CONSOLE_MAX_LINES
@@ -518,7 +520,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── AI 助手（P0：只读诊断 + 建议命令；命令必须用户点「执行」才真正发送）──
 
-    /** 一条对话气泡。assistant 消息额外携带建议命令与原始回复（原始回复用于多轮历史的保真） */
+    /** 一条对话气泡。assistant 消息额外携带建议命令、原始回复与联网搜索信息 */
     data class AiChatMessage(
         val id: Long,
         val isUser: Boolean,
@@ -530,6 +532,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val isError: Boolean = false,
         /** 模型的原始回复（多轮历史回喂用；错误消息为 null） */
         val rawReply: String? = null,
+        /** 联网搜索用的查询词（null = 本轮未搜索） */
+        val searchQuery: String? = null,
+        /** 搜索拿到的结果条数 */
+        val searchCount: Int = 0,
+        /** 搜索失败原因（有它时按本地信息回答，UI 明示） */
+        val searchError: String? = null,
     )
 
     private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
@@ -551,16 +559,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val aiIdCounter = java.util.concurrent.atomic.AtomicLong(0)
 
-    /** 保存 AI 接口配置（面板内的配置表单调用；key 只进应用私有 SharedPreferences） */
-    fun saveAiConfig(
-        baseUrl: String,
-        modelStandard: String,
-        modelThinking: String,
-        apiKey: String,
-        thinking: Boolean,
-    ) {
-        uiPrefs.setAiConfig(baseUrl, modelStandard, modelThinking, apiKey, thinking)
-    }
+    // ── 模型配置档案 + 联网搜索（存取在 SettingsPrefs，这里只做转发）──
+
+    fun saveAiProfile(profile: AiProfile) = uiPrefs.saveAiProfile(profile)
+
+    fun deleteAiProfile(id: String) = uiPrefs.deleteAiProfile(id)
+
+    /** 功能分配：把「对话」指向某个档案 */
+    fun setChatAiProfile(id: String) = uiPrefs.setChatAiProfile(id)
+
+    fun setAiSearch(providerId: String, key: String) = uiPrefs.setAiSearch(providerId, key)
+
+    fun setAiSearchOn(v: Boolean) = uiPrefs.setAiSearchOn(v)
 
     /** 思考强度开关（面板头部随时可切；DeepSeek = chat/reasoner 模型切换） */
     fun setAiThinking(v: Boolean) {
@@ -593,7 +603,43 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _aiBusy.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val system = AiPrompt.system(buildAiContext())
+                // ── 联网搜索（开启且配了 Key 才走）：生成查询词 → 搜索 → 结果进上下文 ──
+                // 失败只降级不阻塞：搜不到就按本地信息回答，气泡上注明原因
+                var searchQuery: String? = null
+                var searchCount = 0
+                var searchError: String? = null
+                var searchBlock = ""
+                val searchKey = uiPrefs.aiSearchKey.value
+                if (uiPrefs.aiSearchOn.value && searchKey.isNotBlank()) {
+                    try {
+                        val provider = AiSearch.Provider.byId(uiPrefs.aiSearchProviderId.value)
+                        // 生成查询词是小事：强制用标准模型（省掉思考模式的等待），小 max_tokens
+                        val queryRaw = callAiWithTimeout(
+                            config.copy(thinking = false),
+                            listOf(
+                                AiMessage(AiMessage.ROLE_SYSTEM, AiPrompt.searchQuerySystem()),
+                                AiMessage(AiMessage.ROLE_USER, q),
+                            ),
+                            AI_QUERY_TIMEOUT_MS,
+                            maxTokens = 128,
+                        )
+                        val query = AiSearch.extractQuery(queryRaw)
+                        if (query.isNotEmpty()) {
+                            val results = AiSearch.search(provider, searchKey, query)
+                            if (results.isNotEmpty()) {
+                                searchQuery = query
+                                searchCount = results.size
+                                searchBlock = AiSearch.formatResults(query, results)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        searchError = e.message ?: "未知错误"
+                    }
+                }
+
+                val system = AiPrompt.system(
+                    buildAiContext() + if (searchBlock.isNotEmpty()) "\n\n" + searchBlock else ""
+                )
                 val history = _aiMessages.value
                     .dropLast(1) // 刚追加的本轮提问，最后单独加
                     .filter { !it.isError }
@@ -623,6 +669,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         text = parsed.analysis.ifBlank { "（模型没有给出分析文本）" },
                         command = parsed.command.takeIf { it.isNotEmpty() },
                         rawReply = cleaned,
+                        searchQuery = searchQuery,
+                        searchCount = searchCount,
+                        searchError = searchError,
                     )
                 )
             } catch (e: Exception) {
@@ -679,11 +728,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         config: AiConfig,
         messages: List<AiMessage>,
         timeoutMs: Long,
+        maxTokens: Int = 1024,
     ): String {
         val deferred = kotlinx.coroutines.CompletableDeferred<String>()
         kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai") {
             try {
-                deferred.complete(AiClient.chat(config, messages))
+                deferred.complete(AiClient.chat(config, messages, maxTokens))
             } catch (t: Throwable) {
                 deferred.completeExceptionally(t)
             }
@@ -1469,3 +1519,6 @@ private const val AI_HISTORY_MESSAGES = 8
  */
 private const val AI_REPLY_TIMEOUT_MS = 150_000L
 private const val AI_THINKING_REPLY_TIMEOUT_MS = 300_000L
+
+/** 搜索查询词生成（小请求）的界面可见超时 */
+private const val AI_QUERY_TIMEOUT_MS = 60_000L
