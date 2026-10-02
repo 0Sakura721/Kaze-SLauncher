@@ -446,7 +446,6 @@ private fun SearchSection(viewModel: AppViewModel) {
             modifier = Modifier.padding(horizontal = M3Spacing.screenMargin),
         )
     }
-    }
 
     // 本机浏览器源：引导授予悬浮窗权限，让 WebView 挂真窗口（渲染器全优先级、不被 ROM 冻结）
     if (provider.id == AiSearch.Provider.BING_LOCAL.id && !viewModel.canDrawOverlays()) {
