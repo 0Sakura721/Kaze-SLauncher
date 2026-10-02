@@ -20,8 +20,12 @@ internal data class ChoiceDto(val message: MessageDto = MessageDto())
 internal data class MessageDto(
     val role: String = "",
     val content: String? = null,
-    /** 思考类模型（deepseek-reasoner 等）的推理过程，与正文分开返回 */
-    val reasoning_content: String? = null,
+    /** 思考内容存在多种形态，统一用 JsonElement 接再规范化（见 [normalizeReasoning]） */
+    val reasoning_content: kotlinx.serialization.json.JsonElement? = null,
+    /** OpenRouter 风格的推理字段（字符串 / 数组 / 对象都可能） */
+    val reasoning: kotlinx.serialization.json.JsonElement? = null,
+    /** OpenRouter 新版的部分供应商走 reasoning_details */
+    val reasoning_details: kotlinx.serialization.json.JsonElement? = null,
 )
 
 /** 一轮对话的完整回复：正文 + 可选的思考过程 */
@@ -58,6 +62,7 @@ object AiClient {
         model: String,
         messages: List<AiMessage>,
         maxTokens: Int = 1024,
+        extraJson: String? = null,
     ): String = buildJsonObject {
         put("model", model)
         put("stream", false)
@@ -69,6 +74,17 @@ object AiClient {
                     put("role", m.role)
                     put("content", m.content)
                 })
+            }
+        }
+        // 档案的附加参数最后合入：部分服务商要显式开启思考输出（如 Qwen 的
+        // {"enable_thinking":true}），也允许覆盖 temperature 等采样参数；
+        // model 与 messages 不允许被覆盖，非法 JSON 整体忽略
+        val extra = extraJson?.trim().takeUnless { it.isNullOrEmpty() }?.let {
+            runCatching { kotlinx.serialization.json.Json.parseToJsonElement(it) }.getOrNull()
+        }
+        if (extra is kotlinx.serialization.json.JsonObject) {
+            extra.forEach { (key, value) ->
+                if (key != "model" && key != "messages") put(key, value)
             }
         }
     }.toString()
@@ -94,7 +110,7 @@ object AiClient {
             conn.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             conn.setRequestProperty("User-Agent", USER_AGENT)
             conn.outputStream.use {
-                it.write(buildRequestBody(config.requestModel, messages, maxTokens).toByteArray(Charsets.UTF_8))
+                it.write(buildRequestBody(config.requestModel, messages, maxTokens, config.extraBody).toByteArray(Charsets.UTF_8))
             }
             val code = conn.responseCode
             if (code != 200) {
@@ -119,9 +135,30 @@ object AiClient {
         }
         val message = resp.choices.firstOrNull()?.message
             ?: throw RuntimeException("AI 返回为空（choices 为空）")
+        val reasoning = normalizeReasoning(message.reasoning_content)
+            ?: normalizeReasoning(message.reasoning)
+            ?: normalizeReasoning(message.reasoning_details)
         return AiReply(
-            reasoning = message.reasoning_content?.takeIf { it.isNotBlank() },
+            reasoning = reasoning?.takeIf { it.isNotBlank() },
             content = message.content ?: "",
+        )
+    }
+
+    /**
+     * 各家推理字段的形态兼容：
+     *  - 字符串（DeepSeek / 硅基流动 / 智谱等绝大多数）
+     *  - 数组（分段推理：元素是字符串或 {text|summary|content} 对象）
+     *  - 对象（单个 {text|summary|content}）
+     * 都归一成一段文本；没有任何文本则返回 null。
+     */
+    private fun normalizeReasoning(el: kotlinx.serialization.json.JsonElement?): String? = when (el) {
+        null -> null
+        is kotlinx.serialization.json.JsonNull -> null
+        is kotlinx.serialization.json.JsonPrimitive -> el.content.takeIf { it.isNotBlank() }
+        is kotlinx.serialization.json.JsonArray -> el.mapNotNull { normalizeReasoning(it) }
+            .joinToString("\n").takeIf { it.isNotBlank() }
+        is kotlinx.serialization.json.JsonObject -> normalizeReasoning(
+            el["text"] ?: el["summary"] ?: el["content"]
         )
     }
 

@@ -391,6 +391,13 @@ private fun ChatMessageRow(
                 msg.reasoning?.let { reasoning ->
                     ThinkingPanel(reasoning)
                 }
+                msg.thinkingNote?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
                 // 联网搜索的情况先交代：搜到了什么词 / 为什么没搜成
                 if (msg.searchError != null) {
                     Text(

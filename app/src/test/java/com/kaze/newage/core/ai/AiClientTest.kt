@@ -48,14 +48,36 @@ class AiClientTest {
         )
         assertEquals("deepseek-chat", std.requestModel)
         assertEquals("deepseek-reasoner", std.copy(thinking = true).requestModel)
-        // 思考模型名被清空/空白时回退标准模型，绝不发空模型名
-        assertEquals("deepseek-chat", std.copy(thinking = true, thinkingModel = " ").requestModel)
+        // 只迁移来一个模型的档案：DeepSeek 官方模型名可智能回退，开关不再等于没按
+        assertEquals("deepseek-reasoner", std.copy(thinking = true, thinkingModel = " ").requestModel)
+        // 非 DeepSeek 模型名无法猜测，回退标准模型
+        assertEquals("my-model", std.copy(thinking = true, thinkingModel = "", model = "my-model").requestModel)
         // 请求体用的就是 requestModel
         val body = AiClient.buildRequestBody(
             std.copy(thinking = true).requestModel,
             listOf(AiMessage(AiMessage.ROLE_USER, "q")),
         )
         assertTrue(body.contains("\"model\":\"deepseek-reasoner\""))
+    }
+
+    @Test
+    fun `附加请求参数合入请求体且不覆盖模型与消息`() {
+        val body = AiClient.buildRequestBody(
+            "m1",
+            listOf(AiMessage(AiMessage.ROLE_USER, "q")),
+            extraJson = """{"enable_thinking":true,"model":"hack","messages":[],"temperature":0.9}""",
+        )
+        assertTrue(body.contains("\"enable_thinking\":true"))
+        assertTrue(body.contains("\"temperature\":0.9"))
+        assertTrue(body.contains("\"model\":\"m1\""))
+    }
+
+    @Test
+    fun `附加参数为空或非法 JSON 时被忽略`() {
+        val normal = AiClient.buildRequestBody("m1", emptyList())
+        assertEquals(normal, AiClient.buildRequestBody("m1", emptyList(), extraJson = null))
+        assertEquals(normal, AiClient.buildRequestBody("m1", emptyList(), extraJson = "   "))
+        assertEquals(normal, AiClient.buildRequestBody("m1", emptyList(), extraJson = "{bad json"))
     }
 
     @Test
@@ -86,6 +108,36 @@ class AiClientTest {
         val parsed = AiClient.parseReply(reply)
         assertEquals("答案", parsed.content)
         assertEquals("我是推理过程", parsed.reasoning)
+    }
+
+    @Test
+    fun `推理字段的多形态兼容`() {
+        // OpenRouter 风格：reasoning 字符串
+        assertEquals(
+            "think1",
+            AiClient.parseReply("""{"choices":[{"message":{"content":"a","reasoning":"think1"}}]}""").reasoning,
+        )
+        // reasoning_content 数组分段
+        assertEquals(
+            "段1\n段2",
+            AiClient.parseReply(
+                """{"choices":[{"message":{"content":"a","reasoning_content":["段1","段2"]}}]}"""
+            ).reasoning,
+        )
+        // reasoning_details 对象数组（取 summary）
+        assertEquals(
+            "d1",
+            AiClient.parseReply(
+                """{"choices":[{"message":{"content":"a","reasoning_details":[{"type":"reasoning","summary":"d1"}]}}]}"""
+            ).reasoning,
+        )
+        // 优先级：reasoning_content > reasoning > reasoning_details
+        assertEquals(
+            "优先",
+            AiClient.parseReply(
+                """{"choices":[{"message":{"content":"a","reasoning_content":"优先","reasoning":"其次"}}]}"""
+            ).reasoning,
+        )
     }
 
     @Test

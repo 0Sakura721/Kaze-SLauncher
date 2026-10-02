@@ -216,6 +216,7 @@ private fun AiProfileEditForm(
     var baseUrl by remember(initial.id) { mutableStateOf(initial.baseUrl) }
     var models by remember(initial.id) { mutableStateOf(initial.models.joinToString(", ")) }
     var key by remember(initial.id) { mutableStateOf(initial.apiKey) }
+    var extraBody by remember(initial.id) { mutableStateOf(initial.extraBody) }
 
     SectionTitle(if (isNew) "新增配置" else "编辑配置")
     OutlinedTextField(
@@ -258,10 +259,23 @@ private fun AiProfileEditForm(
             .padding(horizontal = M3Spacing.screenMargin),
         visualTransformation = PasswordVisualTransformation(),
     )
+    Spacer(Modifier.height(10.dp))
+    OutlinedTextField(
+        value = extraBody,
+        onValueChange = { extraBody = it },
+        label = { Text("附加请求参数（JSON，可选）") },
+        placeholder = { Text("""{"enable_thinking":true}""") },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = M3Spacing.screenMargin),
+        minLines = 2,
+    )
     Spacer(Modifier.height(6.dp))
     SectionNote(
-        "提示：模型名全留空回退 DeepSeek 默认（deepseek-chat）；只填 1 个时「深度思考」" +
-            "也走这同一个模型。删除当前使用的配置会自动回退到剩余第一个。"
+        "提示：模型名全留空回退 DeepSeek 默认；只填 1 个且它是 deepseek-chat 时，" +
+            "「深度思考」会自动切到 deepseek-reasoner（其它模型名则仍走同一个模型）。\n" +
+            "部分服务商要显式参数才返回思考内容（如 Qwen 的 {\"enable_thinking\":true}），" +
+            "写进附加参数即可；非法 JSON 会被忽略。删除当前使用的配置会自动回退到剩余第一个。"
     )
     Spacer(Modifier.height(12.dp))
     Row(
@@ -275,6 +289,7 @@ private fun AiProfileEditForm(
                     baseUrl = baseUrl.trim(),
                     models = AiProfileStore.parseModelList(models),
                     apiKey = key.trim(),
+                    extraBody = extraBody.trim(),
                 )
             )
         }) {

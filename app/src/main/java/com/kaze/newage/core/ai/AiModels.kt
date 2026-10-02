@@ -20,14 +20,27 @@ data class AiConfig(
     val apiKey: String = "",
     /** 思考强度：false = 标准（快），true = 深度思考（更聪明也更慢） */
     val thinking: Boolean = false,
+    /**
+     * 附加请求参数（JSON 对象字符串，随请求体合入，可覆盖 temperature 等采样参数；
+     * model / messages 不允许覆盖，非法 JSON 整体忽略）。
+     * 部分服务商需要显式参数才返回思考过程（如 Qwen 的 {"enable_thinking":true}）。
+     */
+    val extraBody: String = "",
 ) {
     /** 三项齐全才算配置完成（密钥是硬前提；思考模型名缺失时回退标准模型） */
     val isConfigured: Boolean
         get() = apiKey.isNotBlank() && model.isNotBlank() && normalizeBaseUrl(baseUrl).isNotEmpty()
 
-    /** 本轮请求实际使用的模型：深度思考 → [thinkingModel]（为空则回退 [model]，绝不发空模型名） */
+    /** 本轮请求实际使用的模型：深度思考 → [thinkingModel]（为空时 DeepSeek 智能回退，见下） */
     val requestModel: String
-        get() = if (thinking) thinkingModel.ifBlank { model } else model
+        get() = when {
+            !thinking -> model
+            thinkingModel.isNotBlank() -> thinkingModel
+            // 档案只填了一个 deepseek-chat：深度思考自动切 reasoner，
+            // 否则开关等于没按、用户永远看不到思考过程（迁移场景的常见坑）
+            model.equals("deepseek-chat", ignoreCase = true) -> DEFAULT_THINKING_MODEL
+            else -> model
+        }
 
     /** 完整请求端点：base 规范化后拼 /chat/completions（用户已填全路径时不重复拼） */
     val endpoint: String
@@ -84,6 +97,8 @@ data class AiProfile(
     val apiKey: String = "",
     /** 模型名列表（UI 里逗号分隔编辑）：[0]=标准，[1]=深度思考 */
     val models: List<String> = listOf(AiConfig.DEFAULT_MODEL, AiConfig.DEFAULT_THINKING_MODEL),
+    /** 附加请求参数 JSON（透传给 AiConfig.extraBody，供需要显式开启思考的服务商使用） */
+    val extraBody: String = "",
 ) {
     /** 列表行的摘要：端点主机 + 模型名 */
     val summary: String

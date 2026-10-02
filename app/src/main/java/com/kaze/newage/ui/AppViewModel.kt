@@ -558,6 +558,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val instanceId: String? = null,
         /** 模型的思考过程（reasoning_content 或正文 <think> 段）；null = 无 */
         val reasoning: String? = null,
+        /** 开了深度思考但没拿到思考内容的诊断提示（模型不支持/服务商未开启） */
+        val thinkingNote: String? = null,
     )
 
     private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
@@ -780,11 +782,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             val (cleaned, inlineThink) = AiSuggestion.splitThinking(aiReply.content)
             val reasoning = (aiReply.reasoning ?: inlineThink)
                 ?.take(AI_MAX_REASONING_CHARS)
+            // 开了深度思考却没拿到思考内容：给可见诊断，而不是无声无息让用户以为坏了
+            val thinkingNote = if (session.config.thinking && reasoning == null) {
+                "已开启深度思考，但该模型没有返回思考过程：可能当前模型不是思考类模型，" +
+                    "或服务商未开启思考输出（部分服务商需要在 AI 设置的「附加请求参数」里加开关，" +
+                    "如 Qwen 的 {\"enable_thinking\":true}；Qwen 官方接口仅在流式输出下返回思考内容）"
+            } else {
+                null
+            }
             val parsed = AiSuggestion.parse(cleaned)
             lastAnalysis = parsed.analysis
             val tool = parsed.tool
             if (tool == null) {
-                appendFinalAiMessage(session, parsed, cleaned, reasoning)
+                appendFinalAiMessage(session, parsed, cleaned, reasoning, thinkingNote)
                 return
             }
             when (tool.name) {
@@ -831,7 +841,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     return
                 }
                 else -> {
-                    appendFinalAiMessage(session, parsed, cleaned, reasoning)
+                    appendFinalAiMessage(session, parsed, cleaned, reasoning, thinkingNote)
                     return
                 }
             }
@@ -852,6 +862,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         parsed: AiSuggestion.Parsed,
         cleaned: String,
         reasoning: String?,
+        thinkingNote: String? = null,
     ) {
         aiSession = null
         appendAiMessage(
@@ -866,6 +877,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 searchError = session.searchError,
                 instanceId = session.instanceId,
                 reasoning = reasoning,
+                thinkingNote = thinkingNote,
             )
         )
     }

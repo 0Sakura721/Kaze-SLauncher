@@ -238,6 +238,7 @@ emember(path) 缓存位图的话，
             thinkingModel = p?.models?.getOrNull(1)?.trim().orEmpty(),
             apiKey = p?.apiKey?.trim().orEmpty(),
             thinking = aiThinking.value,
+            extraBody = p?.extraBody.orEmpty(),
         )
     }
 
