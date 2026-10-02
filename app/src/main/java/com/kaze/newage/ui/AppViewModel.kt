@@ -11,6 +11,7 @@ import com.kaze.newage.core.addons.ModrinthSearchHit
 import com.kaze.newage.core.ai.AiClient
 import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiContext
+import com.kaze.newage.core.ai.AiFileTools
 import com.kaze.newage.core.ai.AiMessage
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiPrompt
@@ -521,7 +522,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── AI 助手（P0：只读诊断 + 建议命令；命令必须用户点「执行」才真正发送）──
 
-    /** 一条对话气泡。assistant 消息额外携带建议命令、原始回复与联网搜索信息 */
+    /** 待用户确认的 AI 文件写入请求（内容全文随卡片展示，确认后才落盘） */
+    data class AiWriteRequest(val path: String, val content: String, val bytes: Int)
+
+    /** 一条对话气泡。assistant 消息额外携带建议命令、原始回复、工具动作与写入请求 */
     data class AiChatMessage(
         val id: Long,
         val isUser: Boolean,
@@ -539,6 +543,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val searchCount: Int = 0,
         /** 搜索失败原因（有它时按本地信息回答，UI 明示） */
         val searchError: String? = null,
+        /** 工具动作提示（读取/列出/写入了哪个文件），轻量展示行 */
+        val toolNote: String? = null,
+        /** 待确认的文件写入请求（确认/拒绝后卡片保留供回看，状态见 [writeState]） */
+        val writeRequest: AiWriteRequest? = null,
+        /** 写入请求状态：0=待确认 1=已允许 2=已拒绝 */
+        val writeState: Int = 0,
     )
 
     private val _aiMessages = MutableStateFlow<List<AiChatMessage>>(emptyList())
@@ -560,6 +570,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val aiIdCounter = java.util.concurrent.atomic.AtomicLong(0)
 
+    /**
+     * 一轮提问的工具会话：多轮循环期间（含挂起等待写入确认）持有 API 消息序列。
+     * 写入确认/拒绝后从断点继续；新提问或清空对话时作废。
+     */
+    private class AiTurnSession(
+        val config: AiConfig,
+        val apiMessages: MutableList<AiMessage>,
+        var roundsLeft: Int,
+        val searchQuery: String?,
+        val searchCount: Int,
+        val searchError: String?,
+    )
+
+    @Volatile
+    private var aiSession: AiTurnSession? = null
+
     // ── 模型配置档案 + 联网搜索（存取在 SettingsPrefs，这里只做转发）──
 
     fun saveAiProfile(profile: AiProfile) = uiPrefs.saveAiProfile(profile)
@@ -578,9 +604,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         uiPrefs.setAiThinking(v)
     }
 
-    /** 清空 AI 对话：忙时不允许（正在生成的回复会找不到落点） */
+    /** 清空 AI 对话：忙时不允许（正在生成的回复会找不到落点）；挂起中的写入会话一并作废 */
     fun clearAiChat() {
         if (_aiBusy.value) return
+        aiSession = null
         _aiMessages.value = emptyList()
     }
 
@@ -659,29 +686,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     .takeLast(AI_HISTORY_MESSAGES)
-                val reply = callAiWithTimeout(
-                    config,
-                    listOf(AiMessage(AiMessage.ROLE_SYSTEM, system)) + history +
-                        AiMessage(AiMessage.ROLE_USER, q),
-                    // 深度思考先出推理再出答案，界面可见超时也放宽一倍
-                    if (config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS,
+                val session = AiTurnSession(
+                    config = config,
+                    apiMessages = mutableListOf(AiMessage(AiMessage.ROLE_SYSTEM, system)).also {
+                        it += history
+                        it += AiMessage(AiMessage.ROLE_USER, q)
+                    },
+                    roundsLeft = AI_MAX_TOOL_ROUNDS,
+                    searchQuery = searchQuery,
+                    searchCount = searchCount,
+                    searchError = searchError,
                 )
-                // 剥掉混在正文里的 <think> 推理段（DeepSeek 官方推理在独立字段，这里兜其他服务），
-                // 历史回喂与展示都用干净文本，省 token
-                val cleaned = AiSuggestion.stripThinking(reply)
-                val parsed = AiSuggestion.parse(cleaned)
-                appendAiMessage(
-                    AiChatMessage(
-                        id = nextAiId(),
-                        isUser = false,
-                        text = parsed.analysis.ifBlank { "（模型没有给出分析文本）" },
-                        command = parsed.command.takeIf { it.isNotEmpty() },
-                        rawReply = cleaned,
-                        searchQuery = searchQuery,
-                        searchCount = searchCount,
-                        searchError = searchError,
-                    )
-                )
+                // 工具多轮循环：读/列自动执行回喂，写挂起等用户确认（见 runTurn）
+                runTurn(session)
             } catch (e: Exception) {
                 appendAiMessage(
                     AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "AI 请求失败", isError = true)
@@ -689,6 +706,192 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _aiBusy.value = false
             }
+        }
+    }
+
+    /**
+     * 工具多轮循环：模型每轮要么返回最终回答（无 tool 字段），要么调用一个工具。
+     * read_file / list_dir 自动执行、结果以【工具结果】回喂继续下一轮；
+     * write_file 挂起等用户确认（会话存入 [aiSession]，批准/拒绝后从断点继续）。
+     * [AI_MAX_TOOL_ROUNDS] 轮内没收敛就按已有分析收尾 —— 防止失控循环烧 token。
+     */
+    private suspend fun runTurn(session: AiTurnSession) {
+        var lastAnalysis = ""
+        while (session.roundsLeft > 0) {
+            session.roundsLeft--
+            val reply = callAiWithTimeout(
+                session.config,
+                session.apiMessages,
+                // 深度思考先出推理再出答案，界面可见超时也放宽一倍
+                if (session.config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS,
+                // write_file 可能携带整个配置文件，输出预算放宽
+                maxTokens = 2048,
+            )
+            // 剥掉混在正文里的 <think> 推理段；历史回喂与展示都用干净文本
+            val cleaned = AiSuggestion.stripThinking(reply)
+            val parsed = AiSuggestion.parse(cleaned)
+            lastAnalysis = parsed.analysis
+            val tool = parsed.tool
+            if (tool == null) {
+                appendFinalAiMessage(session, parsed, cleaned)
+                return
+            }
+            when (tool.name) {
+                "read_file", "list_dir" -> {
+                    val note = (if (tool.name == "read_file") "读取 " else "列出 ") + tool.path
+                    val result = runCatching { executeAiReadTool(tool.name, tool.path) }
+                        .getOrElse { "工具执行失败：${it.message}" }
+                    appendAiMessage(
+                        AiChatMessage(
+                            id = nextAiId(),
+                            isUser = false,
+                            text = parsed.analysis.ifBlank { note },
+                            toolNote = note,
+                        )
+                    )
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_USER,
+                        "【工具结果】${tool.name} \"${tool.path}\"\n$result",
+                    )
+                }
+                "write_file" -> {
+                    if (tool.content.isEmpty()) {
+                        session.apiMessages += AiMessage(
+                            AiMessage.ROLE_USER,
+                            "【工具结果】write_file \"${tool.path}\" → 失败：content 为空，请给出完整新文件内容",
+                        )
+                        continue
+                    }
+                    // 挂起等用户确认：卡片上展示完整内容，批准/拒绝后从这轮继续
+                    aiSession = session
+                    appendAiMessage(
+                        AiChatMessage(
+                            id = nextAiId(),
+                            isUser = false,
+                            text = parsed.analysis.ifBlank { "我准备写入文件。" },
+                            writeRequest = AiWriteRequest(
+                                path = tool.path,
+                                content = tool.content,
+                                bytes = tool.content.toByteArray(Charsets.UTF_8).size,
+                            ),
+                        )
+                    )
+                    return
+                }
+                else -> {
+                    appendFinalAiMessage(session, parsed, cleaned)
+                    return
+                }
+            }
+        }
+        aiSession = null
+        appendAiMessage(
+            AiChatMessage(
+                id = nextAiId(),
+                isUser = false,
+                text = "本轮工具调用已达上限（$AI_MAX_TOOL_ROUNDS 次）。基于已获得的信息：\n" +
+                    lastAnalysis.ifBlank { "（模型没有给出更多分析，请换个问法继续）" },
+            )
+        )
+    }
+
+    private fun appendFinalAiMessage(session: AiTurnSession, parsed: AiSuggestion.Parsed, cleaned: String) {
+        aiSession = null
+        appendAiMessage(
+            AiChatMessage(
+                id = nextAiId(),
+                isUser = false,
+                text = parsed.analysis.ifBlank { "（模型没有给出分析文本）" },
+                command = parsed.command.takeIf { it.isNotEmpty() },
+                rawReply = cleaned,
+                searchQuery = session.searchQuery,
+                searchCount = session.searchCount,
+                searchError = session.searchError,
+            )
+        )
+    }
+
+    /** 执行只读工具（读文件 / 列目录）：实例目录为主根，app: 前缀走应用私有目录 */
+    private fun executeAiReadTool(name: String, path: String): String {
+        val dir = _currentInstanceId.value?.let { instanceStore.get(it) }?.dir
+            ?: return "当前未选择实例，无法访问文件"
+        return if (name == "read_file") {
+            AiFileTools.readFile(dir, container.appContext.filesDir, path)
+        } else {
+            AiFileTools.listDir(dir, container.appContext.filesDir, path)
+        }
+    }
+
+    /** 用户允许 AI 写入：执行写入（内部已有 .bak 备份），结果回喂并继续本轮 */
+    fun approveAiWrite(messageId: Long) {
+        if (_aiBusy.value) return
+        val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
+        val req = msg.writeRequest ?: return
+        if (msg.writeState != 0) return
+        setAiWriteState(messageId, 1)
+        val session = aiSession
+        if (session == null) {
+            appendAiMessage(
+                AiChatMessage(nextAiId(), isUser = false, text = "本轮会话已结束，本次写入未执行。", isError = true)
+            )
+            return
+        }
+        _aiBusy.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val dir = _currentInstanceId.value?.let { instanceStore.get(it) }?.dir
+                val result = if (dir == null) "失败：当前未选择实例"
+                else runCatching { AiFileTools.writeFile(dir, req.path, req.content) }
+                    .getOrElse { "失败：${it.message}" }
+                appendAiMessage(
+                    AiChatMessage(nextAiId(), isUser = false, text = "写入了 ${req.path}", toolNote = "写入 ${req.path}")
+                )
+                session.apiMessages += AiMessage(
+                    AiMessage.ROLE_USER,
+                    "【工具结果】write_file \"${req.path}\" → $result",
+                )
+                runTurn(session)
+            } catch (e: Exception) {
+                aiSession = null
+                appendAiMessage(
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "写入流程失败", isError = true)
+                )
+            } finally {
+                _aiBusy.value = false
+            }
+        }
+    }
+
+    /** 用户拒绝写入：不执行任何落盘，把拒绝结果回喂让 AI 收尾 */
+    fun denyAiWrite(messageId: Long) {
+        if (_aiBusy.value) return
+        val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
+        val req = msg.writeRequest ?: return
+        if (msg.writeState != 0) return
+        setAiWriteState(messageId, 2)
+        val session = aiSession ?: return
+        _aiBusy.value = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                session.apiMessages += AiMessage(
+                    AiMessage.ROLE_USER,
+                    "【工具结果】write_file \"${req.path}\" → 用户拒绝了本次写入。请不要重试，直接基于已有信息给出建议或改用其它方案",
+                )
+                runTurn(session)
+            } catch (e: Exception) {
+                aiSession = null
+                appendAiMessage(
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "流程失败", isError = true)
+                )
+            } finally {
+                _aiBusy.value = false
+            }
+        }
+    }
+
+    private fun setAiWriteState(messageId: Long, state: Int) {
+        _aiMessages.value = _aiMessages.value.map {
+            if (it.id == messageId) it.copy(writeState = state) else it
         }
     }
 
@@ -1530,3 +1733,9 @@ private const val AI_THINKING_REPLY_TIMEOUT_MS = 300_000L
 
 /** 搜索查询词生成（小请求）的界面可见超时 */
 private const val AI_QUERY_TIMEOUT_MS = 60_000L
+
+/**
+ * 单轮提问允许的模型调用次数上限（含最终回答那一次）。
+ * 文件工具是多轮循环，设上限防止模型无限读文件烧 token；正常诊断 2~3 轮足够。
+ */
+private const val AI_MAX_TOOL_ROUNDS = 4

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -21,15 +22,17 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.SmartToy
@@ -37,6 +40,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -172,11 +176,20 @@ fun AiScreen(
                 item(key = "onboarding") { OnboardingContent(viewModel) }
             }
             items(messages, key = { it.id }) { msg ->
-                ChatMessageRow(
-                    msg = msg,
-                    serverRunning = serverRunning,
-                    onExecute = { viewModel.executeAiSuggestion(msg.id) },
-                )
+                when {
+                    msg.toolNote != null -> ToolNoteRow(msg)
+                    msg.writeRequest != null -> WriteRequestRow(
+                        msg = msg,
+                        busy = busy,
+                        onApprove = { viewModel.approveAiWrite(msg.id) },
+                        onDeny = { viewModel.denyAiWrite(msg.id) },
+                    )
+                    else -> ChatMessageRow(
+                        msg = msg,
+                        serverRunning = serverRunning,
+                        onExecute = { viewModel.executeAiSuggestion(msg.id) },
+                    )
+                }
             }
         }
 
@@ -246,7 +259,7 @@ private fun OnboardingContent(viewModel: AppViewModel) {
         Text("问问你的服务器", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
         Text(
-            "AI 能看状态、读日志、查资料。\n它只给建议 —— 命令要点「执行」才会真正发送。",
+            "AI 能看状态、读日志、改配置（写入需你确认）、查资料。\n命令与文件写入都必须经你确认才会执行。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -396,6 +409,117 @@ private fun ChatMessageRow(
 /** 用户气泡：右下角收口；助手气泡：左下角收口 */
 private val USER_BUBBLE_SHAPE = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
 private val AI_BUBBLE_SHAPE = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
+
+/** 工具动作行：轻量居中提示（读取/列出/写入了哪个文件），不占气泡 */
+@Composable
+private fun ToolNoteRow(msg: AppViewModel.AiChatMessage) {
+    Text(
+        "· ${msg.toolNote} ·",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * 文件写入确认卡片：完整新内容预览（终端深底、可滚动）+ 允许/拒绝。
+ * 安全底线：AI 永远不能直接落盘 —— 每次写入都必须人工批准；
+ * 批准后由 AiFileTools 执行（自动留 .bak 备份），结果回喂给模型继续回答。
+ */
+@Composable
+private fun WriteRequestRow(
+    msg: AppViewModel.AiChatMessage,
+    busy: Boolean,
+    onApprove: () -> Unit,
+    onDeny: () -> Unit,
+) {
+    val req = msg.writeRequest ?: return
+    val scheme = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Surface(
+            shape = AI_BUBBLE_SHAPE,
+            color = scheme.surfaceContainerHigh,
+            contentColor = scheme.onSurface,
+            modifier = Modifier.fillMaxWidth(0.9f),
+        ) {
+            Column(
+                Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = scheme.primary,
+                    )
+                    Text("AI 请求写入文件", style = MaterialTheme.typography.titleSmall)
+                }
+                Text(
+                    req.path,
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = consoleLineColor(LineType.Command),
+                )
+                Text(
+                    "${req.bytes} 字节 · 共 ${req.content.lines().size} 行 · 覆盖已有文件时会自动留 .bak 备份",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                Surface(
+                    shape = M3Shape.medium,
+                    color = consoleBackgroundColor(),
+                    contentColor = consoleLineColor(LineType.Info),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(
+                        Modifier
+                            .padding(10.dp)
+                            .heightIn(max = 200.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            req.content,
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                when (msg.writeState) {
+                    1 -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = scheme.primary,
+                        )
+                        Text("已写入", style = MaterialTheme.typography.labelLarge, color = scheme.primary)
+                    }
+                    2 -> Text(
+                        "已拒绝（未写入任何内容）",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = scheme.onSurfaceVariant,
+                    )
+                    else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onApprove, enabled = !busy) {
+                            Text("允许写入")
+                        }
+                        OutlinedButton(onClick = onDeny, enabled = !busy) {
+                            Text("拒绝")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 /**
  * 建议命令卡片：用控制台同款终端深底 —— AI 的话最终要落回终端执行，视觉上也接回去。

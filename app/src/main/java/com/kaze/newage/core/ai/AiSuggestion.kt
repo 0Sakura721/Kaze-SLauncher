@@ -14,9 +14,26 @@ import kotlinx.serialization.json.Json
 object AiSuggestion {
 
     @Serializable
-    internal data class RawReply(val analysis: String = "", val command: String = "")
+    internal data class RawReply(
+        val analysis: String = "",
+        val command: String = "",
+        val tool: ToolCallDto? = null,
+    )
 
-    data class Parsed(val analysis: String, val command: String)
+    @Serializable
+    internal data class ToolCallDto(val name: String = "", val path: String = "", val content: String = "")
+
+    /** 一次工具调用（扁平结构，抗模型输出变形）；name 只认 read_file / list_dir / write_file */
+    data class AiToolCall(val name: String, val path: String, val content: String)
+
+    private val KNOWN_TOOLS = setOf("read_file", "list_dir", "write_file")
+
+    data class Parsed(
+        val analysis: String,
+        val command: String,
+        /** 需要执行的工具；null = 本轮是最终回答 */
+        val tool: AiToolCall? = null,
+    )
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -60,7 +77,10 @@ object AiSuggestion {
             val reply = runCatching { json.decodeFromString<RawReply>(payload) }.getOrNull()
             if (reply != null) {
                 val cmd = sanitizeCommand(reply.command) ?: ""
-                return Parsed(reply.analysis.trim().take(MAX_ANALYSIS_LEN), cmd)
+                val tool = reply.tool
+                    ?.takeIf { it.name.trim().lowercase() in KNOWN_TOOLS && it.path.isNotBlank() }
+                    ?.let { AiToolCall(it.name.trim().lowercase(), it.path.trim(), it.content) }
+                return Parsed(reply.analysis.trim().take(MAX_ANALYSIS_LEN), cmd, tool)
             }
         }
         return Parsed(text.take(MAX_ANALYSIS_LEN), "")

@@ -125,6 +125,12 @@ object AiPrompt {
         4. stop / op / ban / kick / whitelist 这类影响玩家或服务端生命的命令，只在用户明确要求时才建议。
         5. 只输出一个 JSON 对象，格式：{"analysis":"…","command":""}，不要输出 JSON 之外的任何文字。
         6. 若上下文包含【联网搜索结果】，可引用其中信息并注明来源（域名）；搜索结果与本地日志冲突时，以本地日志为准。
+        7. 你可以使用文件工具查看和修改服务器文件。路径是相对服务端实例根目录的相对路径（server.properties 所在目录）；"app:" 前缀 = 启动器应用目录，只读。调用工具时在 JSON 里加 tool 字段，一次只调一个：
+           读文件：{"analysis":"我看一下启动日志","command":"","tool":{"name":"read_file","path":"logs/latest.log"}}
+           列目录：{"analysis":"我看看配置目录","command":"","tool":{"name":"list_dir","path":"config"}}
+           写文件：{"analysis":"我准备修改内存行","command":"","tool":{"name":"write_file","path":"server.properties","content":"完整的新文件内容"}}
+           read_file / list_dir 的结果会在下一轮以【工具结果】返回（可能被截断，属正常）；write_file 必须经用户确认后才会写入，结果同样返回。拿到足够信息后，输出不带 tool 字段的最终 JSON。
+        8. 禁止读二进制或超大文件（world 地图、.jar、图片等会被拒绝）；写文件仅限文本配置类，且必须先向用户说明你要改什么、为什么改。
         """.trimIndent()
 
     /**

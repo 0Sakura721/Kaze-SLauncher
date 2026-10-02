@@ -127,4 +127,39 @@ class AiSuggestionTest {
         listOf("list", "say hi", "time set day", "weather clear", "stopwatch")
             .forEach { assertFalse("不应判为危险：$it", AiSuggestion.isDangerous(it)) }
     }
+
+    // ── 文件工具调用解析 ──
+
+    @Test
+    fun `工具调用解析 read_file`() {
+        val p = AiSuggestion.parse(
+            """{"analysis":"我看一下启动日志","command":"","tool":{"name":"read_file","path":"logs/latest.log"}}"""
+        )
+        assertEquals("read_file", p.tool?.name)
+        assertEquals("logs/latest.log", p.tool?.path)
+        assertEquals("我看一下启动日志", p.analysis)
+    }
+
+    @Test
+    fun `write_file 内容保留换行且不影响命令清洗`() {
+        val p = AiSuggestion.parse(
+            """{"analysis":"a","command":"","tool":{"name":"write_file","path":"server.properties","content":"a=1\nb=2"}}"""
+        )
+        assertEquals("write_file", p.tool?.name)
+        assertTrue(p.tool!!.content.contains("\n"))
+        assertEquals("", p.command)
+    }
+
+    @Test
+    fun `未知工具名与空路径视作无工具`() {
+        assertTrue(AiSuggestion.parse("""{"analysis":"a","tool":{"name":"rm_rf","path":"x"}}""").tool == null)
+        assertTrue(AiSuggestion.parse("""{"analysis":"a","tool":{"name":"read_file","path":"  "}}""").tool == null)
+    }
+
+    @Test
+    fun `无 tool 字段仍是最终回答`() {
+        val p = AiSuggestion.parse("""{"analysis":"完成","command":"list"}""")
+        assertEquals(null, p.tool)
+        assertEquals("list", p.command)
+    }
 }
