@@ -27,7 +27,7 @@ class AiProfileStoreTest {
     @Test
     fun `档案 JSON 往返一致`() {
         val profiles = listOf(
-            AiProfile(name = "DeepSeek", models = listOf("deepseek-chat", "deepseek-reasoner")),
+            AiProfile(name = "DeepSeek", models = listOf("deepseek-flash")),
             AiProfile(name = "本地", baseUrl = "http://127.0.0.1:8080", models = listOf("qwen3"), apiKey = "k"),
         )
         val decoded = AiProfileStore.decode(AiProfileStore.encode(profiles))
@@ -45,12 +45,11 @@ class AiProfileStoreTest {
     fun `档案摘要含主机与模型名`() {
         val p = AiProfile(
             name = "DS",
-            baseUrl = "https://api.deepseek.com/v1/",
-            models = listOf("deepseek-chat", "deepseek-reasoner"),
+            baseUrl = "https://api.deepseek.com/",
+            models = listOf("deepseek-flash"),
         )
         val summary = p.summary
         assertTrue(summary.contains("api.deepseek.com"))
-        assertTrue(summary.contains("deepseek-chat"))
-        assertTrue(summary.contains("deepseek-reasoner"))
+        assertTrue(summary.contains("deepseek-flash"))
     }
 }

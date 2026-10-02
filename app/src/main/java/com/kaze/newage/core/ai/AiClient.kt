@@ -47,7 +47,7 @@ object AiClient {
 
     private const val CONNECT_TIMEOUT_MS = 15_000
     // 模型生成本来就可能要几十秒：readTimeout 必须给足，否则长回答永远超时。
-    // 深度思考（如 deepseek-reasoner）先出推理再出答案，时间翻倍是常态，给到 4 分钟。
+    // 深度思考先出推理再出答案，时间翻倍是常态，给到 4 分钟。
     private const val READ_TIMEOUT_MS = 120_000
     private const val THINKING_READ_TIMEOUT_MS = 240_000
     private const val USER_AGENT = "KazeSLauncher/0.4 (com.kaze.newage; ai assistant)"
@@ -63,6 +63,8 @@ object AiClient {
         messages: List<AiMessage>,
         maxTokens: Int = 1024,
         extraJson: String? = null,
+        thinkingEnabled: Boolean = false,
+        includeNativeThinkingParam: Boolean = false,
     ): String = buildJsonObject {
         put("model", model)
         put("stream", false)
@@ -76,7 +78,15 @@ object AiClient {
                 })
             }
         }
-        // 档案的附加参数最后合入：部分服务商要显式开启思考输出（如 Qwen 的
+        // DeepSeek V4 机制：思考模式由 thinking 参数控制（enabled/disabled，官方默认 enabled）。
+        // 显式发送保证与「深度思考」开关的确定性对应。只在官方 DeepSeek 场景发送 ——
+        // 第三方网关（模型名同为 deepseek-* 但走别家协议）对未知参数可能直接 400。
+        if (includeNativeThinkingParam) {
+            put("thinking", buildJsonObject {
+                put("type", if (thinkingEnabled) "enabled" else "disabled")
+            })
+        }
+        // 档案的附加参数最后合入：其它服务商要显式开启思考输出（如 Qwen 的
         // {"enable_thinking":true}），也允许覆盖 temperature 等采样参数；
         // model 与 messages 不允许被覆盖，非法 JSON 整体忽略
         val extra = extraJson?.trim().takeUnless { it.isNullOrEmpty() }?.let {
@@ -88,6 +98,24 @@ object AiClient {
             }
         }
     }.toString()
+
+    /**
+     * 是否发送 DeepSeek 原生 `thinking` 参数：官方 V4 模型名，或端点就是 DeepSeek 官方域。
+     * 第三方网关一律不发，避免未知参数被严格校验拒绝（要用就走「附加请求参数」显式指定）。
+     */
+    internal fun supportsNativeThinkingParam(model: String, baseUrl: String): Boolean {
+        val m = model.trim().lowercase()
+        if (m in DEEPSEEK_V4_MODELS) return true
+        return baseUrl.contains("deepseek.com", ignoreCase = true) && m.startsWith("deepseek")
+    }
+
+    /** 官方现行模型名（V4 家族；thinking 参数由它们支持） */
+    private val DEEPSEEK_V4_MODELS = setOf(
+        "deepseek-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
+        "deepseek-v4-flash-vision-exp",
+    )
 
     /**
      * 同步发起一轮对话，返回 assistant 文本。**阻塞调用**：必须在 IO 线程跑
@@ -110,7 +138,18 @@ object AiClient {
             conn.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             conn.setRequestProperty("User-Agent", USER_AGENT)
             conn.outputStream.use {
-                it.write(buildRequestBody(config.requestModel, messages, maxTokens, config.extraBody).toByteArray(Charsets.UTF_8))
+                it.write(
+                    buildRequestBody(
+                        config.requestModel,
+                        messages,
+                        maxTokens,
+                        config.extraBody,
+                        thinkingEnabled = config.thinking,
+                        includeNativeThinkingParam = supportsNativeThinkingParam(
+                            config.requestModel, config.baseUrl,
+                        ),
+                    ).toByteArray(Charsets.UTF_8)
+                )
             }
             val code = conn.responseCode
             if (code != 200) {

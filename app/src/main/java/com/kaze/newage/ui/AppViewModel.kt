@@ -774,8 +774,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 session.apiMessages,
                 // 深度思考先出推理再出答案，界面可见超时也放宽一倍
                 if (session.config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS,
-                // write_file 可能携带整个配置文件，输出预算放宽
-                maxTokens = 2048,
+                // write_file 可能携带整个配置文件，输出预算放宽；
+                // 思考模式下推理 Token 也计入 max_tokens（官方: 思考模式默认输出 64K），
+                // 给足预算，避免推理还没写完就被截断
+                maxTokens = if (session.config.thinking) 16_384 else 4_096,
             )
             // 剥掉混在正文里的 <think> 推理段；历史回喂与展示都用干净文本，
             // 推理过程（reasoning_content 或 <think> 段）单独保存供 UI 折叠展示
@@ -784,9 +786,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ?.take(AI_MAX_REASONING_CHARS)
             // 开了深度思考却没拿到思考内容：给可见诊断，而不是无声无息让用户以为坏了
             val thinkingNote = if (session.config.thinking && reasoning == null) {
-                "已开启深度思考，但该模型没有返回思考过程：可能当前模型不是思考类模型，" +
-                    "或服务商未开启思考输出（部分服务商需要在 AI 设置的「附加请求参数」里加开关，" +
-                    "如 Qwen 的 {\"enable_thinking\":true}；Qwen 官方接口仅在流式输出下返回思考内容）"
+                "已开启深度思考，但该模型没有返回思考过程：DeepSeek 官方 deepseek-flash " +
+                    "会自动返回；其它服务商可能不支持思考输出，或需要显式参数" +
+                    "（在 AI 设置「附加请求参数」里填写，如 Qwen 的 {\"enable_thinking\":true}）"
             } else {
                 null
             }

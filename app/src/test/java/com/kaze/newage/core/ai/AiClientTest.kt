@@ -39,25 +39,67 @@ class AiClientTest {
     }
 
     @Test
-    fun `思考强度在 DeepSeek 上映射为模型切换`() {
-        val std = AiConfig(
-            baseUrl = "https://api.deepseek.com/v1",
-            model = "deepseek-chat",
-            thinkingModel = "deepseek-reasoner",
-            apiKey = "k",
+    fun `旧模型名只在官方端点归一到 deepseek-flash`() {
+        val official = "https://api.deepseek.com"
+        assertEquals("deepseek-flash", AiConfig.normalizeLegacyModel("deepseek-chat", official))
+        assertEquals("deepseek-flash", AiConfig.normalizeLegacyModel("deepseek-reasoner", official))
+        assertEquals("deepseek-flash", AiConfig.normalizeLegacyModel(" DeepSeek-Chat ", official))
+        // 官方现行名与第三方模型名原样保留
+        assertEquals("deepseek-flash", AiConfig.normalizeLegacyModel("deepseek-flash", official))
+        assertEquals("deepseek-v4-pro", AiConfig.normalizeLegacyModel("deepseek-v4-pro", official))
+        assertEquals("qwen3-max", AiConfig.normalizeLegacyModel("qwen3-max", official))
+        // 第三方网关不改写：那里 deepseek-chat 可能仍是有效模型名
+        val thirdParty = "https://api.siliconflow.cn/v1"
+        assertEquals("deepseek-chat", AiConfig.normalizeLegacyModel("deepseek-chat", thirdParty))
+    }
+
+    @Test
+    fun `深度思考在 DeepSeek 上由 thinking 参数控制而非模型名`() {
+        // 思考/非思考都用同一个现行模型名
+        val cfg = AiConfig(baseUrl = "https://api.deepseek.com", model = "deepseek-flash", apiKey = "k")
+        assertEquals("deepseek-flash", cfg.requestModel)
+        assertEquals("deepseek-flash", cfg.copy(thinking = true).requestModel)
+        // 迁移遗留的旧名档案：官方端点请求侧仍归一到现行名
+        val legacy = cfg.copy(model = "deepseek-chat", thinkingModel = "deepseek-reasoner")
+        assertEquals("deepseek-flash", legacy.requestModel)
+        assertEquals("deepseek-flash", legacy.copy(thinking = true).requestModel)
+        // 第三方服务商：模型名不被改写；「思考=换模型名」仍可用第二个模型名
+        val third = AiConfig(
+            baseUrl = "https://api.siliconflow.cn/v1",
+            model = "deepseek-chat", thinkingModel = "deepseek-reasoner", apiKey = "k",
         )
-        assertEquals("deepseek-chat", std.requestModel)
-        assertEquals("deepseek-reasoner", std.copy(thinking = true).requestModel)
-        // 只迁移来一个模型的档案：DeepSeek 官方模型名可智能回退，开关不再等于没按
-        assertEquals("deepseek-reasoner", std.copy(thinking = true, thinkingModel = " ").requestModel)
-        // 非 DeepSeek 模型名无法猜测，回退标准模型
-        assertEquals("my-model", std.copy(thinking = true, thinkingModel = "", model = "my-model").requestModel)
-        // 请求体用的就是 requestModel
-        val body = AiClient.buildRequestBody(
-            std.copy(thinking = true).requestModel,
-            listOf(AiMessage(AiMessage.ROLE_USER, "q")),
+        assertEquals("deepseek-chat", third.requestModel)
+        assertEquals("deepseek-reasoner", third.copy(thinking = true).requestModel)
+    }
+
+    @Test
+    fun `DeepSeek 原生 thinking 参数随开关发送`() {
+        val msgs = listOf(AiMessage(AiMessage.ROLE_USER, "q"))
+        val off = AiClient.buildRequestBody(
+            "deepseek-flash", msgs, thinkingEnabled = false, includeNativeThinkingParam = true,
         )
-        assertTrue(body.contains("\"model\":\"deepseek-reasoner\""))
+        assertTrue(off.contains("\"thinking\":{\"type\":\"disabled\"}"))
+        val on = AiClient.buildRequestBody(
+            "deepseek-flash", msgs, thinkingEnabled = true, includeNativeThinkingParam = true,
+        )
+        assertTrue(on.contains("\"thinking\":{\"type\":\"enabled\"}"))
+        // 非官方场景不发该参数（避免第三方网关对未知参数 400）
+        val third = AiClient.buildRequestBody(
+            "qwen3", msgs, thinkingEnabled = true, includeNativeThinkingParam = false,
+        )
+        assertFalse(third.contains("\"thinking\""))
+    }
+
+    @Test
+    fun `原生 thinking 参数只对官方 DeepSeek 发送`() {
+        assertTrue(AiClient.supportsNativeThinkingParam("deepseek-flash", "https://api.deepseek.com"))
+        assertTrue(AiClient.supportsNativeThinkingParam("deepseek-v4-pro", "https://api.deepseek.com/v1"))
+        assertTrue(AiClient.supportsNativeThinkingParam("deepseek-flash", "https://proxy.example.com"))
+        // 第三方网关上的 deepseek 模型不发；非 deepseek 模型不发
+        assertFalse(
+            AiClient.supportsNativeThinkingParam("deepseek-chat", "https://api.siliconflow.cn/v1")
+        )
+        assertFalse(AiClient.supportsNativeThinkingParam("gpt-4o", "https://api.openai.com/v1"))
     }
 
     @Test

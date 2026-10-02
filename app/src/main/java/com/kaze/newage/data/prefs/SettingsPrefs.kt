@@ -121,9 +121,10 @@ emember(path) 缓存位图的话，
     // ── AI 助手（OpenAI 兼容接口 + 联网搜索，见 core/ai/）──
     //
     // 模型配置采用 Operit 式的「档案 + 功能分配」轻量版：
-    //   档案 = 命名的一组（服务地址 / Key / 逗号分隔模型列表），存 JSON；
+    //   档案 = 命名的一组（服务地址 / Key / 模型名列表），存 JSON；
     //   分配 = 「对话」这一个功能用哪个档案（以后加功能只需再加一个分配键）；
-    //   思考强度 = 档案模型列表里取第几个（[0] 标准、[1] 深度思考）。
+    //   思考强度 = DeepSeek V4 起由请求参数 thinking 控制（不再是两个模型名）；
+    //   其它服务商若思考=换模型名，可把第二个模型名填进档案。
     // API Key / 搜索 Key 只存应用私有的 SharedPreferences（别的应用读不到），绝不入库、绝不写日志。
     val aiProfiles = mutableStateOf(AiProfileStore.decode(prefs.getString("ai_profiles", "") ?: ""))
 
@@ -151,12 +152,17 @@ emember(path) 缓存位图的话，
                     ?: prefs.getString("ai_model", null)
                     ?: AiConfig.DEFAULT_MODEL
                 val thinking = prefs.getString("ai_model_thinking", null).orEmpty()
-                val models = listOf(standard.trim(), thinking.trim()).filter { it.isNotEmpty() }
-                    .ifEmpty { listOf(AiConfig.DEFAULT_MODEL) }
+                // base 先算出来：模型名归一只对官方端点生效，这里必须与档案实际写入的地址一致
+                val baseUrl = prefs.getString("ai_base_url", "")?.trim().orEmpty()
+                    .ifBlank { AiConfig.DEFAULT_BASE_URL }
+                val models = normalizeProfileModels(
+                    listOf(standard.trim(), thinking.trim()).filter { it.isNotEmpty() }
+                        .ifEmpty { listOf(AiConfig.DEFAULT_MODEL) },
+                    baseUrl,
+                )
                 val legacy = AiProfile(
                     name = "DeepSeek",
-                    baseUrl = prefs.getString("ai_base_url", "")?.trim()
-                        ?.ifBlank { AiConfig.DEFAULT_BASE_URL } ?: AiConfig.DEFAULT_BASE_URL,
+                    baseUrl = baseUrl,
                     apiKey = legacyKey,
                     models = models,
                 )
@@ -168,6 +174,17 @@ emember(path) 缓存位图的话，
                     .apply()
             }
         }
+        // 存量档案里的旧模型名归一：deepseek-chat / deepseek-reasoner 在官方端点已停用
+        // （2026-07-24），deepseek.com 的档案统一为 deepseek-flash，避免界面继续显示旧名
+        // 让人误以为配置没问题（请求侧还有一层 requestModel 归一兜底）。
+        // 第三方端点不改写（那里 deepseek-chat 可能仍是有效模型名）。
+        val normalized = aiProfiles.value.map {
+            it.copy(models = normalizeProfileModels(it.models, it.baseUrl))
+        }
+        if (normalized != aiProfiles.value) {
+            aiProfiles.value = normalized
+            prefs.edit().putString("ai_profiles", AiProfileStore.encode(normalized)).apply()
+        }
         // 分配指向的档案被删/损坏时回退到第一个（或空 = 未配置，界面会引导新增）
         if (aiChatProfileId.value.isNotBlank() &&
             aiProfiles.value.none { it.id == aiChatProfileId.value }
@@ -175,6 +192,13 @@ emember(path) 缓存位图的话，
             aiChatProfileId.value = aiProfiles.value.firstOrNull()?.id.orEmpty()
         }
     }
+
+    /** 模型名列表归一：官方端点上旧名映射到现行名，去重去空（归一后 chat/reasoner 会合并为一条） */
+    private fun normalizeProfileModels(models: List<String>, baseUrl: String): List<String> =
+        models.map { AiConfig.normalizeLegacyModel(it, baseUrl) }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .ifEmpty { listOf(AiConfig.DEFAULT_MODEL) }
 
     /** 新增或更新档案（按 id 覆盖，编辑保持原位置）；首个档案自动成为对话配置 */
     fun saveAiProfile(profile: AiProfile) {
