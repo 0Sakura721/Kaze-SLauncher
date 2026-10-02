@@ -25,7 +25,7 @@ import com.kaze.newage.core.ai.AiSuggestion
 import com.kaze.newage.core.ai.AiUsage
 import com.kaze.newage.core.ai.AiWebPage
 import com.kaze.newage.core.ai.BrowserSearch
-import com.kaze.newage.core.ai.NativeArgs
+import com.kaze.newage.core.ai.AiSuggestion.NativeArgs
 import com.kaze.newage.core.ai.NativeToolCall
 import com.kaze.newage.core.console.ConsoleLine
 import com.kaze.newage.core.console.CONSOLE_MAX_LINES
@@ -891,7 +891,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     extraJson = session.config.extraBody,
                     thinkingEnabled = session.config.thinking,
                     includeNativeThinkingParam = includeNativeThinking(session.config),
-                    includeTools = includeNativeThinking(session.config),
                     includeTools = includeNativeThinking(session.config),
                     shouldStop = { aiCancelRequested || System.currentTimeMillis() > deadline },
                     onDelta = { r, c -> updateLiveStream(live.id, r, c) },
