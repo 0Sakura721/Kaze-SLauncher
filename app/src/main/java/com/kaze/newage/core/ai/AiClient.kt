@@ -84,7 +84,7 @@ object AiClient {
             val code = conn.responseCode
             if (code != 200) {
                 val errBody = runCatching {
-                    conn.errorStream?.bufferedReader()?.use { reader -> reader.readText() }
+                    conn.errorStream?.bufferedReader()?.use { reader -> reader.readText() } ?: ""
                 }.getOrDefault("")
                 throw RuntimeException(describeHttpError(code, errBody))
             }
