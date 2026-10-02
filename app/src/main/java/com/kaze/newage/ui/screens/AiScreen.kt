@@ -78,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.kaze.newage.core.ai.AiSanitize
 import com.kaze.newage.core.ai.AiSuggestion
 import com.kaze.newage.core.console.LineType
 import com.kaze.newage.ui.AppViewModel
@@ -511,9 +512,13 @@ private fun ToolNoteRow(msg: AppViewModel.AiChatMessage) {
 }
 
 /**
- * 文件写入确认卡片：完整新内容预览（终端深底、可滚动）+ 允许/拒绝。
+ * 文件写入确认卡片：目标实例 + 绝对路径 + 完整新内容预览（终端深底、可滚动）+ 允许/拒绝。
  * 安全底线：AI 永远不能直接落盘 —— 每次写入都必须人工批准；
- * 批准后由 AiFileTools 执行（自动留 .bak 备份），结果回喂给模型继续回答。
+ * 批准后由 AiFileTools 执行（自动留备份），结果回喂给模型继续回答。
+ *
+ * 卡片要对"同名文件"这件事负责：每个实例都有一份 server.properties，
+ * 只给相对路径的话，用户根本分不清这次要改的是哪个实例的哪份文件，
+ * 所以实例名与解析后的绝对路径必须上卡；脚本类文件另加红字警示。
  */
 @Composable
 private fun WriteRequestRow(
@@ -524,6 +529,12 @@ private fun WriteRequestRow(
 ) {
     val req = msg.writeRequest ?: return
     val scheme = MaterialTheme.colorScheme
+    // 查看全文：内容上限 256KB，全量组合会把重组卡死，所以默认只预览一段；
+    // 但"看不到的部分"不能让用户靠猜 —— 给入口，点了才渲染全文。
+    var showFull by remember(req) { mutableStateOf(false) }
+    val previewLimit = 4000
+    val truncated = req.content.length > previewLimit
+    val shown = if (showFull || !truncated) req.content else req.content.take(previewLimit)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Surface(
             shape = AI_BUBBLE_SHAPE,
@@ -547,14 +558,45 @@ private fun WriteRequestRow(
                     )
                     Text("AI 请求写入文件", style = MaterialTheme.typography.titleSmall)
                 }
+                // 目标实例 + 解析后的绝对路径：路径里可能带模型/网页给的控制符，
+                // 上屏前统一过滤（终端转义与 bidi 反转都能伪造出"看起来是另一个文件"）
                 Text(
-                    req.path,
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = consoleLineColor(LineType.Command),
+                    "实例：${AiSanitize.displayOneLine(req.instanceName.ifBlank { msg.instanceId ?: "（未知）" })}",
+                    style = MaterialTheme.typography.labelMedium,
                 )
                 Text(
-                    "${req.bytes} 字节 · 共 ${req.content.lines().size} 行 · 覆盖已有文件时会自动留 .bak 备份",
+                    AiSanitize.displayOneLine(req.absPath.ifBlank { req.path }),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                if (req.absPath.isNotBlank() && req.absPath != req.path) {
+                    Text(
+                        "（相对路径：${AiSanitize.displayOneLine(req.path)}）",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                req.warning?.let { warning ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(15.dp),
+                            tint = scheme.error,
+                        )
+                        Text(
+                            AiSanitize.display(warning),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = scheme.error,
+                        )
+                    }
+                }
+                Text(
+                    "${req.bytes} 字节 · 共 ${req.content.lines().size} 行 · 覆盖已有文件时会自动留备份",
                     style = MaterialTheme.typography.labelSmall,
                     color = scheme.onSurfaceVariant,
                 )
@@ -567,20 +609,31 @@ private fun WriteRequestRow(
                     Column(
                         Modifier
                             .padding(10.dp)
-                            .heightIn(max = 200.dp)
+                            .heightIn(max = if (showFull) 320.dp else 200.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
-                        // 只预览前 4000 字符：内容可达 256KB，全量组合会把重组卡死
-                        val preview = if (req.content.length > 4000) {
-                            req.content.take(4000) + "\n…（预览已截断，共 ${req.content.length} 字符）"
-                        } else {
-                            req.content
-                        }
                         Text(
-                            preview,
+                            AiSanitize.display(shown),
                             fontFamily = FontFamily.Monospace,
                             style = MaterialTheme.typography.bodySmall,
                         )
+                    }
+                }
+                if (truncated) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            if (showFull) "已显示全文（${req.content.length} 字符）"
+                            else "预览已截断：仅显示前 $previewLimit 字符，共 ${req.content.length} 字符",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = consoleLineColor(LineType.Warn),
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { showFull = !showFull }) {
+                            Text(if (showFull) "只看预览" else "查看全文")
+                        }
                     }
                 }
                 when (msg.writeState) {
@@ -601,6 +654,19 @@ private fun WriteRequestRow(
                         style = MaterialTheme.typography.labelLarge,
                         color = scheme.onSurfaceVariant,
                     )
+                    3 -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // 成功才置 1：失败必须如实显示，并且允许重试（否则用户被卡死在"待确认"）
+                        Text(
+                            "写入失败，未改动文件",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = scheme.error,
+                        )
+                        Button(onClick = onApprove, enabled = !busy) { Text("重试") }
+                        OutlinedButton(onClick = onDeny, enabled = !busy) { Text("放弃") }
+                    }
                     else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onApprove, enabled = !busy) {
                             Text("允许写入")

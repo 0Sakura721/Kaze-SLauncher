@@ -50,6 +50,85 @@ object AiFileTools {
     )
 
     /**
+     * **禁止写入**的文件名（精确匹配，小写）。
+     *
+     * 威胁模型很具体：确认卡上的内容对用户只是"一段文本"，但下面这些文件一旦落盘就会被
+     * 别的程序当**代码或权限**使用 —— 而注入源是现成的（控制台日志里的玩家聊天、
+     * 联网搜索结果都会进模型上下文），所以不能靠"用户看仔细点"兜底。
+     */
+    private val FORBIDDEN_WRITE_NAMES = mapOf(
+        "user_jvm_args.txt" to
+            "Forge 启动脚本会把它当 JVM 参数（@argfile）传给 java，等于让 AI 决定 JVM 启动参数（可加载任意代码）",
+        "ops.json" to "该文件直接决定谁是服务器管理员（op）",
+        "banned-ips.json" to "封禁名单：写入等于让 AI 自行解封或封禁他人",
+        "banned-players.json" to "封禁名单：写入等于让 AI 自行解封或封禁他人",
+        "eula.txt" to "EULA 同意状态必须由你本人决定，不能代填",
+    )
+
+    /**
+     * **高风险可写**后缀：允许写，但确认卡必须红字说明"此文件会被执行或授权"。
+     * 这些脚本本身常常是服主自己放的运维脚本，一刀切禁掉会误伤，所以留人工判断。
+     */
+    private val HIGH_RISK_WRITE_EXTS = setOf("sh", "bat", "ps1", "py", "js")
+
+    /**
+     * 一次写入请求的策略判定结果。
+     *
+     * [forbidden] 与 [warning] 是互斥的两组结论：前者结构性禁止（任何确认都不放行），
+     * 后者允许写、但确认卡必须红字警示。判定放在 core 而不是界面里 —— 界面与真正落盘
+     * 共用同一个判定，"卡上没警示、底下照样写"这种错位就不可能发生。
+     */
+    data class WritePolicy(
+        /** 非 null = 禁止写入的原因 */
+        val forbidden: String? = null,
+        /** 非 null = 允许写入但必须醒目警示的原因 */
+        val warning: String? = null,
+        /** 解析后的绝对路径（确认卡要显示给用户的就是它）；解析失败时回退为原始相对路径 */
+        val resolvedPath: String = "",
+    )
+
+    /** 判定一次写入请求的策略（只看路径，不看内容） */
+    fun writePolicyFor(instanceDir: File?, rawPath: String): WritePolicy {
+        val rel = normalizeRel(rawPath)
+        val forbidden = forbiddenReasonFor(rel)
+        val warning = if (forbidden == null) highRiskWarningFor(rel) else null
+        return WritePolicy(forbidden, warning, absPathOrNull(instanceDir, rawPath) ?: rel)
+    }
+
+    private fun forbiddenReasonFor(rel: String): String? {
+        val name = rel.substringAfterLast('/')
+        val ext = name.substringAfterLast('.', "")
+        FORBIDDEN_WRITE_NAMES[name]?.let { return it }
+        if (ext == "mcfunction") {
+            return "数据包函数（*.mcfunction）以服务端权限执行，等于让 AI 把代码放进服务端"
+        }
+        // 数据包的 load.json / tick.json 会自动触发同名函数：任何 tags/ 下的 json 都按代码看待
+        if (ext == "json" && rel.split('/').any { it == "tags" }) {
+            return "数据包 tags/*.json 会被服务端自动加载并触发函数执行（load/tick）"
+        }
+        return null
+    }
+
+    private fun highRiskWarningFor(rel: String): String? {
+        val ext = rel.substringAfterLast('/').substringAfterLast('.', "")
+        return if (ext in HIGH_RISK_WRITE_EXTS) {
+            "这是可执行脚本（.$ext）：写入后会被系统或服务端执行，等同于允许 AI 放置可执行代码"
+        } else {
+            null
+        }
+    }
+
+    /** 判定用的相对路径归一：反斜杠转正斜杠、去首尾空白与开头斜杠、小写（不用于落盘） */
+    private fun normalizeRel(rawPath: String): String =
+        rawPath.trim().replace('\\', '/').trimStart('/').lowercase()
+
+    /** 解析后的绝对路径；越界 / app: / 解析失败都返回 null（调用方回退） */
+    private fun absPathOrNull(instanceDir: File?, rawPath: String): String? =
+        instanceDir?.let {
+            runCatching { resolve(it, null, rawPath, forWrite = true).path }.getOrNull()
+        }
+
+    /**
      * 解析相对路径 → 根目录内的规范文件。
      *
      * `app:` 前缀走应用私有目录（只读），其余相对实例目录；规范化后必须在
@@ -149,6 +228,13 @@ object AiFileTools {
             throw IllegalArgumentException("内容过大：${content.length} 字符 > 上限 $MAX_WRITE_BYTES")
         }
         val f = resolve(instanceDir, null, path, forWrite = true)
+        // 结构性禁止的文件在这一层**也要**拦：界面已经不再给"允许写入"按钮，
+        // 但写盘这一层必须自己成立 —— 换个入口（未来的批量操作、脚本调用）就绕不过去了。
+        // 用规范路径判定：`a/../ops.json` 这类写法会落到同一个文件名上。
+        val rel = runCatching { f.relativeTo(instanceDir.canonicalFile).path }.getOrDefault(f.name)
+        forbiddenReasonFor(normalizeRel(rel))?.let {
+            throw IllegalArgumentException("该文件禁止通过 AI 写入：$it")
+        }
         guardTextType(f, forWrite = true)
         val parent = f.parentFile
         if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.isDirectory) {

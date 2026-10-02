@@ -198,4 +198,72 @@ class AiFileToolsTest {
         assertEquals("2 KB", AiFileTools.formatSize(2048))
         assertFalse(AiFileTools.formatSize(1500) == "1 KB")
     }
+
+    // ── 写入策略：禁止组 / 高风险组 ──
+
+    @Test
+    fun `结构性禁止写入的文件全部被判定`() {
+        val root = instanceDir()
+        listOf(
+            "user_jvm_args.txt",                       // java @argfile → JVM 参数
+            "ops.json",                                // 直接给 op
+            "banned-ips.json",
+            "banned-players.json",
+            "eula.txt",                                // EULA 同意状态
+            "world/datapacks/x/data/minecraft/functions/boom.mcfunction", // 以服务端权限执行
+            "world/datapacks/x/data/minecraft/tags/functions/load.json",  // 自动触发函数
+        ).forEach { p ->
+            val policy = AiFileTools.writePolicyFor(root, p)
+            assertTrue("应禁止写入：$p", policy.forbidden != null)
+            assertTrue("禁止组不应同时给出高风险警示：$p", policy.warning == null)
+        }
+        // 大小写与绕行写法同样落到同一个文件名上
+        assertTrue(AiFileTools.writePolicyFor(root, "USER_JVM_ARGS.TXT").forbidden != null)
+        assertTrue(AiFileTools.writePolicyFor(root, "config/../ops.json").forbidden != null)
+        assertTrue(AiFileTools.writePolicyFor(root, "ops.json").forbidden != null)
+    }
+
+    @Test
+    fun `脚本类文件允许写但必须红字警示`() {
+        val root = instanceDir()
+        listOf("start.sh", "backup.ps1", "tools/restart.bat", "kubejs/server_scripts/x.js", "a/b.py")
+            .forEach { p ->
+                val policy = AiFileTools.writePolicyFor(root, p)
+                assertTrue("脚本类应允许写入：$p", policy.forbidden == null)
+                assertTrue("脚本类必须警示：$p", policy.warning != null)
+            }
+        // 普通配置文件既不禁止也不警示
+        listOf("server.properties", "plugins/EssentialsX/config.yml", "logs/latest.log")
+            .forEach { p ->
+                val policy = AiFileTools.writePolicyFor(root, p)
+                assertTrue("普通文件不应被禁止：$p", policy.forbidden == null)
+                assertTrue("普通文件不应被警示：$p", policy.warning == null)
+            }
+    }
+
+    @Test
+    fun `策略判定给出解析后的绝对路径`() {
+        val root = instanceDir()
+        val policy = AiFileTools.writePolicyFor(root, "config/new.toml")
+        assertEquals(
+            root.canonicalFile.path + File.separator + "config" + File.separator + "new.toml",
+            policy.resolvedPath,
+        )
+        // 越界路径解析不出来：回退成原始相对路径，不能让确认卡空着
+        assertEquals("../evil.txt", AiFileTools.writePolicyFor(root, "../evil.txt").resolvedPath)
+    }
+
+    @Test
+    fun `禁止写入的文件在写盘层也被拒绝`() {
+        val root = instanceDir()
+        listOf("user_jvm_args.txt", "ops.json", "eula.txt", "x/y/boom.mcfunction").forEach { p ->
+            try {
+                AiFileTools.writeFile(root, p, "hacked")
+                fail("应当拒绝写入：$p")
+            } catch (e: IllegalArgumentException) {
+                assertTrue("错误信息应说明禁止原因：${e.message}", e.message!!.contains("禁止"))
+            }
+            assertFalse("被拒绝的文件不应落盘：$p", File(root, p).exists())
+        }
+    }
 }

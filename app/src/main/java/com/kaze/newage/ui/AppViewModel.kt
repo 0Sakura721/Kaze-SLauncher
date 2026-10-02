@@ -523,8 +523,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // ── AI 助手（P0：只读诊断 + 建议命令；命令必须用户点「执行」才真正发送）──
 
-    /** 待用户确认的 AI 文件写入请求（内容全文随卡片展示，确认后才落盘） */
-    data class AiWriteRequest(val path: String, val content: String, val bytes: Int)
+    /**
+     * 待用户确认的 AI 文件写入请求（内容全文随卡片展示，确认后才落盘）。
+     *
+     * 确认卡必须让用户看清"写到哪个实例的哪个文件"：只显示模型给的相对路径时，
+     * 同名文件（每个实例都有一份 server.properties）在用户眼里是完全一样的，
+     * 而 AI 的上下文又可能被玩家聊天/网页结果污染 —— 所以要带上实例名与解析后的绝对路径。
+     */
+    data class AiWriteRequest(
+        val path: String,
+        val content: String,
+        val bytes: Int,
+        /** 解析后的绝对路径（显示用；解析失败时为原始相对路径） */
+        val absPath: String = "",
+        /** 目标实例名（显示用） */
+        val instanceName: String = "",
+        /** 高风险文件的红字警示（脚本类；null = 普通文本文件） */
+        val warning: String? = null,
+    )
 
     /** 一条对话气泡。assistant 消息额外携带建议命令、原始回复、工具动作与写入请求 */
     data class AiChatMessage(
@@ -825,6 +841,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         continue
                     }
+                    // 结构性禁止的文件（JVM 参数 / op 名单 / 数据包函数 / EULA…）：
+                    // 直接拒绝并回喂，**不给**"允许写入"按钮 —— 这类文件的写入等于把代码执行
+                    // 或权限授予交出去，任何一次点击确认都不该放行（用户想看的是"AI 想干什么"，
+                    // 而不是被迫在"允许"和"放弃"之间二选一）。
+                    val target = session.instanceId?.let { instanceStore.get(it) }
+                    val policy = AiFileTools.writePolicyFor(target?.dir, tool.path)
+                    if (policy.forbidden != null) {
+                        appendAiMessage(
+                            AiChatMessage(
+                                id = nextAiId(),
+                                isUser = false,
+                                text = "已阻止一次文件写入\n${tool.path}\n原因：${policy.forbidden}",
+                                toolNote = "已阻止写入 ${tool.path}",
+                                isError = true,
+                                instanceId = session.instanceId,
+                            )
+                        )
+                        session.apiMessages += AiMessage(
+                            AiMessage.ROLE_USER,
+                            "【工具结果】write_file \"${tool.path}\" → 被启动器策略拒绝：${policy.forbidden}。" +
+                                "该文件不允许通过 AI 修改，请改用其它方案，或直接告诉用户应该怎么改。",
+                        )
+                        continue
+                    }
                     // 挂起等用户确认：卡片上展示完整内容，批准/拒绝后从这轮继续
                     aiSession = session
                     appendAiMessage(
@@ -836,6 +876,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 path = tool.path,
                                 content = tool.content,
                                 bytes = tool.content.toByteArray(Charsets.UTF_8).size,
+                                absPath = policy.resolvedPath,
+                                instanceName = target?.name.orEmpty(),
+                                warning = policy.warning,
                             ),
                             instanceId = session.instanceId,
                         )
