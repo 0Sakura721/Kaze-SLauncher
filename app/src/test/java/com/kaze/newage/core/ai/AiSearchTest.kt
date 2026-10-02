@@ -1,15 +1,20 @@
 package com.kaze.newage.core.ai
 
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 联网搜索的纯逻辑测试：Tavily / 博查响应解析、查询词提取、结果格式化。
- * 真实网络调用不在单测范围（真机验证）。
+ * 联网搜索的纯逻辑测试：Tavily / 博查响应解析、查询词提取、结果格式化、
+ * 本机浏览器（Bing）提取结果的解析。真实网络调用与 WebView 不在单测范围（真机验证）。
  */
 class AiSearchTest {
+
+    /** 模拟 evaluateJavascript 的返回形式：把 JS 的返回字符串再 JSON 编码一层 */
+    private fun encodeAsEvalString(payload: String): String = Json.encodeToString(payload)
 
     @Test
     fun `解析 Tavily 响应`() {
@@ -82,5 +87,52 @@ class AiSearchTest {
         assertEquals(AiSearch.Provider.BOCHA, AiSearch.Provider.byId("bocha"))
         assertEquals(AiSearch.Provider.TAVILY, AiSearch.Provider.byId("tavily"))
         assertEquals(AiSearch.Provider.TAVILY, AiSearch.Provider.byId("unknown"))
+        // 本机浏览器源不需要 Key，API 源需要
+        assertTrue(!AiSearch.Provider.BING_LOCAL.needsKey)
+        assertTrue(AiSearch.Provider.TAVILY.needsKey)
+        assertTrue(AiSearch.Provider.BOCHA.needsKey)
+    }
+
+    // ── 本机浏览器源（Bing）的纯解析部分 ──
+
+    @Test
+    fun `必应提取结果双层解码并还原重定向链接`() {
+        val hits = """[
+            {"title":"Paper 优化","url":"https://docs.papermc.io/paper/optimization","snippet":"内存与视距"},
+            {"title":"被包了跳转的","url":"https://www.bing.com/ck/a?!&p=x&uddg=https%3a%2f%2fzh.minecraft.wiki%2fw%2fServer&a=1","snippet":"wiki"}
+        ]"""
+        val results = AiSearch.parseBingExtraction(encodeAsEvalString(hits))
+        assertEquals(2, results.size)
+        assertEquals("Paper 优化", results[0].title)
+        assertEquals("https://docs.papermc.io/paper/optimization", results[0].url)
+        // bing.com/ck/ 重定向被解出真实地址
+        assertEquals("https://zh.minecraft.wiki/w/Server", results[1].url)
+    }
+
+    @Test
+    fun `必应提取的空值与坏数据都按没有结果处理`() {
+        assertTrue(AiSearch.parseBingExtraction("null").isEmpty())
+        assertTrue(AiSearch.parseBingExtraction(encodeAsEvalString("[]")).isEmpty())
+        assertTrue(AiSearch.parseBingExtraction("<html>不是 JSON</html>").isEmpty())
+        // 只留 http 链接：javascript: 之类一律丢弃
+        val rawEval = encodeAsEvalString("""[{"title":"t","url":"javascript:void(0)","snippet":"s"}]""")
+        assertTrue(AiSearch.parseBingExtraction(rawEval).isEmpty())
+    }
+
+    @Test
+    fun `非重定向链接原样返回`() {
+        val direct = "https://docs.papermc.io/paper/optimization"
+        assertEquals(direct, AiSearch.unwrapBingRedirect(direct))
+        val other = "https://cn.bing.com/search?q=x"
+        assertEquals(other, AiSearch.unwrapBingRedirect(other))
+    }
+
+    @Test
+    fun `必应搜索地址对中文查询做 URL 编码`() {
+        val url = AiSearch.buildBingSearchUrl("Paper 内存 优化")
+        assertTrue(url.startsWith("https://www.bing.com/search?q="))
+        assertTrue(url.contains("Paper+"))
+        assertTrue(url.contains("%E5%86%85%E5%AD%98"))  // 内存
+        assertTrue(url.endsWith("&count=10"))
     }
 }

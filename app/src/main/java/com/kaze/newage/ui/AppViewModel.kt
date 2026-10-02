@@ -16,6 +16,7 @@ import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiPrompt
 import com.kaze.newage.core.ai.AiSearch
 import com.kaze.newage.core.ai.AiSuggestion
+import com.kaze.newage.core.ai.BrowserSearch
 import com.kaze.newage.core.console.ConsoleLine
 import com.kaze.newage.core.console.CONSOLE_MAX_LINES
 import com.kaze.newage.core.console.ConsoleParser
@@ -603,16 +604,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _aiBusy.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // ── 联网搜索（开启且配了 Key 才走）：生成查询词 → 搜索 → 结果进上下文 ──
+                // ── 联网搜索（开启才走；API 源需已配 Key，本机浏览器源零 Key）──
                 // 失败只降级不阻塞：搜不到就按本地信息回答，气泡上注明原因
                 var searchQuery: String? = null
                 var searchCount = 0
                 var searchError: String? = null
                 var searchBlock = ""
+                val provider = AiSearch.Provider.byId(uiPrefs.aiSearchProviderId.value)
                 val searchKey = uiPrefs.aiSearchKey.value
-                if (uiPrefs.aiSearchOn.value && searchKey.isNotBlank()) {
+                if (uiPrefs.aiSearchOn.value && (!provider.needsKey || searchKey.isNotBlank())) {
                     try {
-                        val provider = AiSearch.Provider.byId(uiPrefs.aiSearchProviderId.value)
                         // 生成查询词是小事：强制用标准模型（省掉思考模式的等待），小 max_tokens
                         val queryRaw = callAiWithTimeout(
                             config.copy(thinking = false),
@@ -625,11 +626,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         val query = AiSearch.extractQuery(queryRaw)
                         if (query.isNotEmpty()) {
-                            val results = AiSearch.search(provider, searchKey, query)
+                            val results = when (provider) {
+                                // 本机浏览器：WebView 在主线程自起自收，结果解析是纯函数
+                                AiSearch.Provider.BING_LOCAL ->
+                                    BrowserSearch.searchBing(container.appContext, query)
+                                else -> AiSearch.search(provider, searchKey, query)
+                            }
                             if (results.isNotEmpty()) {
                                 searchQuery = query
                                 searchCount = results.size
                                 searchBlock = AiSearch.formatResults(query, results)
+                            } else {
+                                searchError = "搜索没有返回结果"
                             }
                         }
                     } catch (e: Exception) {

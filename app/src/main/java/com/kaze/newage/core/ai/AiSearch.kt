@@ -8,6 +8,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.net.URLDecoder
+import java.net.URLEncoder
 
 /**
  * 联网搜索（可插拔搜索源）。
@@ -26,9 +28,15 @@ object AiSearch {
     private const val READ_TIMEOUT_MS = 20_000
     private val json = Json { ignoreUnknownKeys = true }
 
-    enum class Provider(val id: String, val displayName: String, val hint: String) {
-        TAVILY("tavily", "Tavily", "国际可用，每月 1000 次免费额度，在 tavily.com 申请 Key"),
-        BOCHA("bocha", "博查", "国内直连、按次付费，在 bochaai.com 申请 Key");
+    enum class Provider(val id: String, val displayName: String, val hint: String, val needsKey: Boolean) {
+        TAVILY("tavily", "Tavily", "国际可用，每月 1000 次免费额度，在 tavily.com 申请 Key", true),
+        BOCHA("bocha", "博查", "国内直连、按次付费，在 bochaai.com 申请 Key", true),
+
+        /**
+         * 本机浏览器（Operit 式）：无头 WebView 加载必应结果页、页内 JS 提取，
+         * 零 Key 零注册。代价是依赖必应页面结构（改版需跟进），见 [BrowserSearch]。
+         */
+        BING_LOCAL("bing_local", "本机浏览器", "零 Key 零注册：手机直接加载必应搜索页解析结果，不依赖任何搜索服务商；页面改版可能解析失败", false);
 
         companion object {
             fun byId(id: String): Provider = entries.firstOrNull { it.id == id } ?: TAVILY
@@ -60,6 +68,9 @@ object AiSearch {
                     put("count", maxResults)
                     put("freshness", "noLimit")
                 }
+                // 本机浏览器不走 HTTP API，调用方须路由到 BrowserSearch（WebView 必须主线程）
+                Provider.BING_LOCAL ->
+                    throw IllegalStateException("BING_LOCAL 应走 BrowserSearch.searchBing()，不经 HTTP API")
             }
         }.toString()
         val conn = URL(endpoint).openConnection() as HttpURLConnection
@@ -82,6 +93,8 @@ object AiSearch {
             return when (provider) {
                 Provider.TAVILY -> parseTavily(respBody)
                 Provider.BOCHA -> parseBocha(respBody)
+                Provider.BING_LOCAL ->
+                    throw IllegalStateException("BING_LOCAL 应走 BrowserSearch.searchBing()，不经 HTTP API")
             }
         } catch (e: IOException) {
             throw RuntimeException("无法连接搜索服务（${e.message ?: "网络错误"}）", e)
@@ -160,4 +173,63 @@ object AiSearch {
 
     internal fun hostOf(url: String): String =
         runCatching { URI(url).host ?: url }.getOrDefault(url).take(60)
+
+    // ── 本机浏览器源（Bing）：纯解析部分，WebView 侧在 BrowserSearch ──
+
+    /**
+     * 在必应结果页里执行的提取脚本：桌面版 DOM 的 `li.b_algo` 结构多年稳定。
+     * 由 WebView.evaluateJavascript 执行，返回 JSON 字符串（Kotlin 侧解两层）。
+     */
+    internal const val EXTRACT_BING_JS = """(function(){
+var out=[];
+var items=document.querySelectorAll('li.b_algo');
+for(var i=0;i<items.length&&out.length<12;i++){
+var el=items[i];
+var a=el.querySelector('h2 a');
+if(!a)continue;
+var sn=el.querySelector('.b_caption p')||el.querySelector('.b_caption')||el.querySelector('p');
+var t=(a.textContent||'').trim();
+var u=a.href||'';
+var s=((sn&&sn.textContent)||el.textContent||'').trim();
+if(t&&u){out.push({title:t,url:u,snippet:s});}
+}
+return JSON.stringify(out);
+})()"""
+
+    @Serializable
+    internal data class ExtractedHit(val title: String = "", val url: String = "", val snippet: String = "")
+
+    /**
+     * 解析 evaluateJavascript 的返回值：它把 JS 的返回字符串再 JSON 编码了一层
+     * （形如 "\"[{...}]\""），所以先解一层字符串、再解结果数组；任何一层失败都按
+     * "没解析到结果" 处理而不是抛错 —— 搜索降级由调用方统一表达。
+     */
+    internal fun parseBingExtraction(rawEval: String): List<Result> {
+        val inner = runCatching { json.decodeFromString<String>(rawEval) }.getOrElse { rawEval }
+        if (inner.isBlank() || inner == "null") return emptyList()
+        return runCatching { json.decodeFromString<List<ExtractedHit>>(inner) }
+            .getOrElse { emptyList() }
+            .map { Result(it.title.trim(), unwrapBingRedirect(it.url.trim()), it.snippet.trim()) }
+            .filter { it.url.startsWith("http") }
+    }
+
+    /**
+     * 必应把外链包成 `https://www.bing.com/ck/a?...&uddg=<url编码的真实地址>&...`，
+     * 直接给模型会多一跳且泄露引用语义，这里解出真实地址；非重定向链接原样返回。
+     */
+    internal fun unwrapBingRedirect(url: String): String {
+        if (!url.contains("bing.com/ck/")) return url
+        return runCatching {
+            val rawQuery = URI(url).rawQuery.orEmpty()
+            rawQuery.split('&')
+                .firstOrNull { it.startsWith("uddg=") }
+                ?.let { URLDecoder.decode(it.removePrefix("uddg="), "UTF-8") }
+                ?.takeIf { it.startsWith("http") }
+                ?: url
+        }.getOrDefault(url)
+    }
+
+    /** 必应搜索页地址（桌面版结果页；大陆内自动落到 cn.bing.com，WebView 会跟随） */
+    internal fun buildBingSearchUrl(query: String): String =
+        "https://www.bing.com/search?q=" + URLEncoder.encode(query.trim(), "UTF-8") + "&count=10"
 }

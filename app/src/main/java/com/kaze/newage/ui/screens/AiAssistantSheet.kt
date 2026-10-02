@@ -153,8 +153,9 @@ fun AiAssistantSheet(
                     thinking = thinking,
                     searchOn = searchOn,
                     onToggleSearch = {
-                        // 没配搜索 Key 时直接带去配置页，而不是空开一个开关
-                        if (prefs.aiSearchKey.value.isBlank()) showConfig = true
+                        // API 源需要 Key（没配就带去配置页）；本机浏览器源零 Key，直接开
+                        val prov = AiSearch.Provider.byId(prefs.aiSearchProviderId.value)
+                        if (prov.needsKey && prefs.aiSearchKey.value.isBlank()) showConfig = true
                         else viewModel.setAiSearchOn(!prefs.aiSearchOn.value)
                     },
                 )
@@ -535,14 +536,22 @@ private fun AiConfigForm(viewModel: AppViewModel, onDone: () -> Unit) {
                 )
             }
         }
-        OutlinedTextField(
-            value = searchKey,
-            onValueChange = { searchKey = it },
-            label = { Text("搜索 API Key") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            visualTransformation = PasswordVisualTransformation(),
-        )
+        if (provider.needsKey) {
+            OutlinedTextField(
+                value = searchKey,
+                onValueChange = { searchKey = it },
+                label = { Text("搜索 API Key") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = PasswordVisualTransformation(),
+            )
+        } else {
+            Text(
+                "该搜索源无需 Key、不注册任何服务：由手机直接加载搜索结果页解析。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Text(
             provider.hint + "。开启「联网」后，AI 会先生成搜索词、把结果带入回答；搜索失败不影响回答。",
             style = MaterialTheme.typography.bodySmall,
