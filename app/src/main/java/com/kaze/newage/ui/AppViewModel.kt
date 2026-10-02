@@ -943,15 +943,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_aiBusy.value) return
         val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
         val req = msg.writeRequest ?: return
-        if (msg.writeState != 0) return
-        setAiWriteState(messageId, 1)
+        // 「已拒绝」是终态；失败(3)允许重试，成功(1)不重复执行。
+        // 状态在写入结果出来后才置位 —— 乐观置"已写入"会把失败伪装成成功。
+        if (msg.writeState != 0 && msg.writeState != 3) return
         val session = aiSession
-        if (session == null) {
-            appendAiMessage(
-                AiChatMessage(nextAiId(), isUser = false, text = "本轮会话已结束，本次写入未执行。", isError = true)
-            )
-            return
-        }
         _aiBusy.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -961,16 +956,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val result = if (dir == null) "失败：实例不存在或已被删除"
                 else runCatching { AiFileTools.writeFile(dir, req.path, req.content) }
                     .getOrElse { "失败：${it.message}" }
+                // 失败路径的 result 一律以"失败"开头（writeFile 与上方 dir 判空共同约定）
+                val success = !result.startsWith("失败")
+                setAiWriteState(messageId, if (success) 1 else 3)
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = "写入了 ${req.path}", toolNote = "写入 ${req.path}")
+                    AiChatMessage(
+                        nextAiId(),
+                        isUser = false,
+                        text = if (success) "写入了 ${req.path}" else "写入 ${req.path} 失败",
+                        toolNote = if (success) "写入 ${req.path}" else "写入 ${req.path} 失败",
+                    )
                 )
-                session.apiMessages += AiMessage(
-                    AiMessage.ROLE_USER,
-                    "【工具结果】write_file \"${req.path}\" → $result",
-                )
-                runTurn(session)
+                // 会话还在（挂起写入的正常路径）：结果回喂，模型继续收尾；
+                // 会话已结束（对旧卡片点重试）：只执行写入本身，不再回喂
+                if (session != null) {
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_USER,
+                        "【工具结果】write_file \"${req.path}\" → $result",
+                    )
+                    runTurn(session)
+                }
             } catch (e: Exception) {
                 aiSession = null
+                setAiWriteState(messageId, 3)
                 appendAiMessage(
                     AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "写入流程失败", isError = true)
                 )
@@ -985,7 +993,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_aiBusy.value) return
         val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
         val req = msg.writeRequest ?: return
-        if (msg.writeState != 0) return
+        // 失败(3)的卡片上也有「放弃」：语义是放弃这次写入请求
+        if (msg.writeState != 0 && msg.writeState != 3) return
         setAiWriteState(messageId, 2)
         val session = aiSession
         if (session == null) {

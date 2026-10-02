@@ -196,6 +196,13 @@ fun AiScreen(
             }
             items(messages, key = { it.id }) { msg ->
                 when {
+                    // 错误消息（含写入被策略拦截的原因）永远是完整气泡：
+                    // toolNote 行只有一行小字，会把"为什么被拦"这种关键信息吞掉
+                    msg.isError -> ChatMessageRow(
+                        msg = msg,
+                        serverRunning = runningFor(msg),
+                        onExecute = { viewModel.executeAiSuggestion(msg.id) },
+                    )
                     msg.toolNote != null -> ToolNoteRow(msg)
                     msg.writeRequest != null -> WriteRequestRow(
                         msg = msg,
