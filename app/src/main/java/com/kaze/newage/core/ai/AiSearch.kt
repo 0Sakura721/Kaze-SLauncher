@@ -54,6 +54,8 @@ object AiSearch {
         val endpoint = when (provider) {
             Provider.TAVILY -> "https://api.tavily.com/search"
             Provider.BOCHA -> "https://api.bochaai.com/v1/web-search"
+            Provider.BING_LOCAL ->
+                throw IllegalStateException("BING_LOCAL 应走 BrowserSearch.searchBing()，不经 HTTP API")
         }
         val body = buildJsonObject {
             when (provider) {
