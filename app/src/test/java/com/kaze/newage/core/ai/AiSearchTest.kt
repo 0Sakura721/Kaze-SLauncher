@@ -80,6 +80,8 @@ class AiSearchTest {
         assertTrue(block.contains("docs.example.com"))
         assertFalse(block.contains("s".repeat(400)))
         assertFalse(block.contains("t".repeat(100)))
+        // 网页摘要属不可信数据：这行标注是提示词层的第一道缓解（P2-4）
+        assertTrue("应标注为不可信数据：$block", block.contains("不可信数据"))
     }
 
     @Test

@@ -281,6 +281,12 @@ fun AiScreen(
                         onApprove = { viewModel.approveAiWrite(msg.id) },
                         onDeny = { viewModel.denyAiWrite(msg.id) },
                     )
+                    msg.readRequest != null -> ReadRequestRow(
+                        msg = msg,
+                        busy = busy,
+                        onApprove = { viewModel.approveAiRead(msg.id) },
+                        onDeny = { viewModel.denyAiRead(msg.id) },
+                    )
                     else -> ChatMessageRow(
                         msg = msg,
                         serverRunning = runningFor(msg),
@@ -832,6 +838,89 @@ private fun WriteRequestRow(
                         OutlinedButton(onClick = onDeny, enabled = !busy) {
                             Text("拒绝")
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 敏感文件读取确认卡（P2-4）。
+ *
+ * 与写入卡的区别必须说清楚：读取**不改磁盘**，但内容会跟着提问一起发到模型服务商那边
+ * （见 docs/使用说明.md 的"会把什么发出去"）。卡片要显示目标实例、解析后的绝对路径与
+ * **判定为敏感的原因** —— 不给原因的话，"允许"就变成了盲签。
+ * 同样没有"本次会话全部允许"：逐次确认是这条防线的全部意义。
+ */
+@Composable
+private fun ReadRequestRow(
+    msg: AppViewModel.AiChatMessage,
+    busy: Boolean,
+    onApprove: () -> Unit,
+    onDeny: () -> Unit,
+) {
+    val req = msg.readRequest ?: return
+    val scheme = MaterialTheme.colorScheme
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
+        Surface(
+            shape = AI_BUBBLE_SHAPE,
+            color = scheme.surfaceContainerHigh,
+            contentColor = scheme.onSurface,
+            modifier = Modifier.fillMaxWidth(0.9f),
+        ) {
+            Column(
+                Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp),
+                        tint = scheme.error,
+                    )
+                    Text("AI 想读取一个可能有敏感内容的文件", style = MaterialTheme.typography.titleSmall)
+                }
+                // 路径可能带模型/网页给的控制符：上屏前统一过滤（bidi 反转能伪造出"另一个文件"）
+                Text(
+                    "实例：${AiSanitize.displayOneLine(req.instanceName.ifBlank { msg.instanceId ?: "（未知）" })}",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    AiSanitize.displayOneLine(req.absPath.ifBlank { req.path }),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                Text(
+                    "原因：${AiSanitize.display(req.reason)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = scheme.error,
+                )
+                Text(
+                    "读取不会改动文件，但内容会随本轮提问发给你配置的 AI 服务地址。" +
+                        "只在你确实需要 AI 看这个文件时允许。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                when (msg.readState) {
+                    1 -> Text(
+                        "已允许读取",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = scheme.primary,
+                    )
+                    2 -> Text(
+                        "已拒绝（文件没有被读取，也没有发出任何内容）",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = scheme.onSurfaceVariant,
+                    )
+                    else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = onApprove, enabled = !busy) { Text("允许读取") }
+                        OutlinedButton(onClick = onDeny, enabled = !busy) { Text("拒绝") }
                     }
                 }
             }

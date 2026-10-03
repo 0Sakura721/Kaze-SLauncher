@@ -347,4 +347,82 @@ class AiFileToolsTest {
             assertFalse("被拒绝的文件不应落盘：$p", File(root, p).exists())
         }
     }
+
+    // ── 敏感读取判定（P2-4：读了也会把内容发出去，所以要确认） ──
+
+    @Test
+    fun `凭据类文件名与 ops 名单被判为敏感`() {
+        val root = instanceDir()
+        listOf(
+            "plugins/Dynmap/config.yml",       // 普通插件配置：不敏感
+            "server.properties",               // 没开 rcon：不敏感
+            "logs/latest.log",
+        ).forEach { p ->
+            assertTrue("不该判为敏感：$p", AiFileTools.readPolicyFor(root, p).sensitive == null)
+        }
+        listOf(
+            "ops.json",
+            "plugins/AuthMe/credentials.yml",
+            "config/database_password.txt",
+            "secrets.yml",
+            "plugins/x/api_key.conf",
+            "auth/token.json",
+        ).forEach { p ->
+            val policy = AiFileTools.readPolicyFor(root, p)
+            assertTrue("应判为敏感：$p", policy.sensitive != null)
+            assertTrue("解析后的绝对路径要能上卡：$p", policy.resolvedPath.contains("$p".substringAfterLast('/')))
+        }
+    }
+
+    @Test
+    fun `只有真开着 rcon 的 server properties 才敏感`() {
+        val plain = instanceDir()
+        File(plain, "server.properties").writeText("enable-rcon=false\nrcon.password=abc\n")
+        assertTrue(AiFileTools.readPolicyFor(plain, "server.properties").sensitive == null)
+
+        val noPass = instanceDir()
+        File(noPass, "server.properties").writeText("enable-rcon=true\nrcon.password=\n")
+        assertTrue(AiFileTools.readPolicyFor(noPass, "server.properties").sensitive == null)
+
+        val rcon = instanceDir()
+        File(rcon, "server.properties").writeText("enable-rcon=true\nrcon.password=hunter2\n")
+        val policy = AiFileTools.readPolicyFor(rcon, "server.properties")
+        assertTrue(policy.sensitive != null)
+        assertTrue(policy.sensitive!!.contains("RCON"))
+    }
+
+    // ── 报错不泄绝对路径（P3） ──
+
+    @Test
+    fun `报错用相对路径而不是绝对路径`() {
+        val root = instanceDir()
+        val noFile = runCatching { AiFileTools.readFile(root, null, "logs/latest.log") }
+            .exceptionOrNull()?.message.orEmpty()
+        assertTrue("应报相对路径：$noFile", noFile.startsWith("logs/latest.log"))
+        assertFalse("不该把设备目录结构带出去：$noFile", noFile.contains(root.canonicalFile.path))
+        val noDir = runCatching { AiFileTools.listDir(root, null, "config") }
+            .exceptionOrNull()?.message.orEmpty()
+        assertFalse("不该把设备目录结构带出去：$noDir", noDir.contains(root.canonicalFile.path))
+    }
+
+    // ── 列目录流式扫描（P3） ──
+
+    @Test
+    fun `列目录超过上限只统计剩余条数`() {
+        val root = instanceDir()
+        repeat(205) { File(root, "file-${it.toString().padStart(3, '0')}.txt").writeText("x") }
+        val out = AiFileTools.listDir(root, null, ".")
+        assertEquals("最多列出 200 项", 200, out.lines().count { it.contains(".txt") })
+        assertTrue("剩余条数要准确：$out", out.contains("…还有 5 项未列出"))
+    }
+
+    @Test
+    fun `大目录里目录不会被文件挤掉`() {
+        val root = instanceDir()
+        repeat(300) { File(root, "a-file-$it.txt").writeText("x") }
+        File(root, "config").mkdir()
+        val out = AiFileTools.listDir(root, null, ".")
+        // 两趟扫描的理由：一趟"先到先得"会让排在前面的 200 个文件把子目录挤出去
+        assertTrue("目录必须仍然在列：${out.lineSequence().first()}", out.lineSequence().first() == "config/")
+    }
 }

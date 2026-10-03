@@ -120,6 +120,57 @@ object AiFileTools {
         return WritePolicy(forbidden, warning, absPathOrNull(instanceDir, rawPath) ?: rel)
     }
 
+    /**
+     * 一次读取请求的策略判定结果。
+     *
+     * [sensitive] 非 null = 这个文件里可能有凭据，**读之前要用户点头**：读取的后果和写入不同，
+     * 它不改变磁盘，但会把内容发到模型服务商那边，而注入源是现成的（控制台里的玩家聊天、
+     * 联网搜索到的网页都能诱导模型去读 `plugins/*/config.yml` 里的数据库口令、
+     * `server.properties` 里的 RCON 密码）。
+     */
+    data class ReadPolicy(
+        /** 非 null = 敏感内容，读取前必须确认（原因要上卡） */
+        val sensitive: String? = null,
+        /** 解析后的绝对路径（确认卡显示用）；解析失败回退原始相对路径 */
+        val resolvedPath: String = "",
+    )
+
+    /** 判定一次读取请求（只看文件名与 server.properties 的 rcon 开关，不看其它内容） */
+    fun readPolicyFor(instanceDir: File?, rawPath: String): ReadPolicy {
+        val rel = normalizeRel(rawPath)
+        return ReadPolicy(sensitiveReasonFor(instanceDir, rel), absPathOrNull(instanceDir, rawPath) ?: rel)
+    }
+
+    /** 敏感文件名里的关键词（小写匹配）：名字本身就是"这里有凭据"的信号 */
+    private val SENSITIVE_NAME_HINTS = listOf(
+        "password", "passwd", "secret", "token", "credential", "apikey", "api_key", "密钥", "凭据",
+    )
+
+    private fun sensitiveReasonFor(instanceDir: File?, rel: String): String? {
+        if (rel.isEmpty()) return null
+        val name = rel.substringAfterLast('/')
+        if (name == "ops.json") return "ops.json 是管理员名单：它决定谁能拿到全服权限"
+        SENSITIVE_NAME_HINTS.firstOrNull { name.contains(it) }?.let {
+            return "$name 的文件名表明它可能含密钥或口令（关键词：$it）"
+        }
+        // 只有"确实开了 RCON 且设了密码"的 server.properties 才拦：没开的读了也没秘密，
+        // 每读一次 server.properties 都弹卡会把确认变成走过场
+        if (name == "server.properties" && rconEnabled(instanceDir, rel)) {
+            return "这份 server.properties 启用了 RCON，文件里有 RCON 密码"
+        }
+        return null
+    }
+
+    /** 本地判定：enable-rcon=true 且 rcon.password 非空 */
+    private fun rconEnabled(instanceDir: File?, rel: String): Boolean = runCatching {
+        val dir = instanceDir ?: return false
+        val f = resolve(dir, null, rel, forWrite = false)
+        if (!f.isFile) return false
+        val text = f.readText().take(64 * 1024)
+        Regex("(?m)^\\s*enable-rcon\\s*=\\s*true\\s*$").containsMatchIn(text) &&
+            Regex("(?m)^\\s*rcon\\.password\\s*=\\s*\\S+").containsMatchIn(text)
+    }.getOrDefault(false)
+
     private fun forbiddenReasonFor(rel: String): String? {
         val name = rel.substringAfterLast('/')
         val ext = name.substringAfterLast('.', "")
@@ -225,10 +276,16 @@ object AiFileTools {
         }
     }
 
-    /** 读文本文件；超长截断并注明。路径相对实例目录，`app:` 前缀读应用目录。 */
+    /**
+     * 读文本文件；超长截断并注明。路径相对实例目录，`app:` 前缀读应用目录。
+     *
+     * 报错一律用**相对路径**：这些字符串会随工具结果回喂给模型（也就发往第三方端点），
+     * 绝对路径会把设备目录结构一并带出去，而相对路径对定位问题已经足够。
+     * （确认卡上的绝对路径是给**用户**看的，那是有意显示，见 [WritePolicy.resolvedPath]。）
+     */
     fun readFile(instanceDir: File, appFilesDir: File?, path: String): String {
         val f = resolve(instanceDir, appFilesDir, path, forWrite = false)
-        if (!f.exists()) throw FileNotFoundException("${f.path}（文件不存在，可先用 list_dir 确认位置）")
+        if (!f.exists()) throw FileNotFoundException("$path（文件不存在，可先用 list_dir 确认位置）")
         if (f.isDirectory) throw IllegalArgumentException("${f.name} 是目录，请用 list_dir 列出")
         guardTextType(f, forWrite = false)
         val total = f.length()
@@ -251,28 +308,70 @@ object AiFileTools {
         }
     }
 
-    /** 列目录：目录在前、按名排序，带大小；超过 [MAX_LIST] 条注明剩余。 */
+    /**
+     * 列目录：目录在前、按名排序，带大小；超过 [MAX_LIST] 条注明剩余。
+     *
+     * **流式扫描**（见 [scanListing]）：mods/ 或世界目录动辄上万项，`listFiles()` 会把整个
+     * 目录一次性读成数组，而这里只需要"要显示的那几百项 + 一个总数"。
+     */
     fun listDir(instanceDir: File, appFilesDir: File?, path: String): String {
         val d = resolve(instanceDir, appFilesDir, path, forWrite = false)
-        if (!d.exists()) throw FileNotFoundException("${d.path}（目录不存在）")
+        if (!d.exists()) throw FileNotFoundException("$path（目录不存在）")
         if (!d.isDirectory) throw IllegalArgumentException("${d.name} 是文件，请用 read_file 读取")
         // 应用目录根：只列出白名单内的项（instances.json 之类的名字都没必要给模型看）
         val inAppRoot = appFilesDir != null && d.canonicalFile == appFilesDir.canonicalFile
-        val entries = d.listFiles()
-            ?.filter { !inAppRoot || isAppPathAllowed(it.name) }
-            ?.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() })
-            ?: throw IOException("无法列出 ${d.path}")
-        if (entries.isEmpty()) return "（空目录）"
+        val listing = scanListing(d) { !inAppRoot || isAppPathAllowed(it) }
+        val total = listing.dirsTotal + listing.filesTotal
+        if (total == 0) return "（空目录）"
         val sb = StringBuilder()
-        entries.take(MAX_LIST).forEach { e ->
-            if (e.isDirectory) {
-                sb.append(e.name).append("/\n")
-            } else {
-                sb.append(e.name).append("  (").append(formatSize(e.length())).append(")\n")
+        listing.dirs.sortedBy { it.lowercase() }.forEach { sb.append(it).append("/\n") }
+        listing.files.sortedBy { it.first.lowercase() }.forEach { (name, size) ->
+            sb.append(name).append("  (").append(formatSize(size)).append(")\n")
+        }
+        val shown = listing.dirs.size + listing.files.size
+        if (total > shown) sb.append("…还有 ${total - shown} 项未列出\n")
+        return sb.toString().trimEnd()
+    }
+
+    /** 目录扫描的中间结果：只收前 [MAX_LIST] 项，其余只计数 */
+    private class Listing {
+        val dirs = ArrayList<String>()
+        val files = ArrayList<Pair<String, Long>>()
+        var dirsTotal = 0
+        var filesTotal = 0
+    }
+
+    /**
+     * 两趟扫描：第一趟收目录名（最多 [MAX_LIST] 个）并数总数，第二趟按余量收文件名与大小。
+     *
+     * 为什么要两趟：版式是"目录在前"，而一趟遍历只能先到先得 —— 一个前 200 项全是文件的
+     * 目录会把后面的子目录挤掉，看上去像"目录不见了"。两趟的代价只是多一次目录遍历。
+     */
+    private fun scanListing(dir: File, filter: (String) -> Boolean): Listing {
+        val out = Listing()
+        java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
+            for (p in stream) {
+                val name = p.fileName?.toString() ?: continue
+                if (!filter(name)) continue
+                if (java.nio.file.Files.isDirectory(p)) {
+                    out.dirsTotal++
+                    if (out.dirs.size < MAX_LIST) out.dirs += name
+                } else {
+                    out.filesTotal++
+                }
             }
         }
-        if (entries.size > MAX_LIST) sb.append("…还有 ${entries.size - MAX_LIST} 项未列出\n")
-        return sb.toString().trimEnd()
+        if (out.dirs.size >= MAX_LIST) return out
+        java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
+            for (p in stream) {
+                val name = p.fileName?.toString() ?: continue
+                if (!filter(name)) continue
+                if (java.nio.file.Files.isDirectory(p)) continue
+                if (out.dirs.size + out.files.size >= MAX_LIST) break
+                out.files += name to runCatching { java.nio.file.Files.size(p) }.getOrDefault(0L)
+            }
+        }
+        return out
     }
 
     /**
@@ -295,11 +394,11 @@ object AiFileTools {
         guardTextType(f, forWrite = true)
         val parent = f.parentFile
         if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.isDirectory) {
-            throw IOException("无法创建目录：${parent.path}")
+            throw IOException("无法创建目录：$path")
         }
         var bakNote = ""
         if (f.exists()) {
-            if (!f.isFile) throw IllegalArgumentException("${f.path} 不是普通文件")
+            if (!f.isFile) throw IllegalArgumentException("$path 不是普通文件")
             val name = backupNameFor(f)
             f.copyTo(f.resolveSibling(name), overwrite = false)
             bakNote = "，原文件已备份为 $name"
