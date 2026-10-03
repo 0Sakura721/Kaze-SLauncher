@@ -29,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -36,11 +37,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
@@ -425,15 +429,28 @@ private fun SearchSection(viewModel: AppViewModel) {
         SectionNote("该搜索源无需 Key、不注册任何服务：由手机直接加载搜索结果页解析。")
     }
 
-    // 本机浏览器源：引导授予悬浮窗权限，让 WebView 挂真窗口（渲染器全优先级、不被 ROM 冻结）
-    if (provider.id == AiSearch.Provider.BING_LOCAL.id && !viewModel.canDrawOverlays()) {
+    // 本机浏览器源：引导授予悬浮窗权限，让 WebView 挂真窗口（渲染器全优先级、不被 ROM 冻结）。
+    //
+    // 授权状态存在系统侧，不是 Compose 状态：从系统设置页返回时必须重新读一次，
+    // 否则用户授权完回来卡片还写着"建议授予" —— 看起来就是没生效（这正是它以前的样子）。
+    var overlayGranted by remember { mutableStateOf(viewModel.canDrawOverlays()) }
+    var overlayError by remember { mutableStateOf<String?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) overlayGranted = viewModel.canDrawOverlays()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    if (provider.id == AiSearch.Provider.BING_LOCAL.id && !overlayGranted) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
             shape = M3Shape.largeIncreased,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            onClick = { viewModel.requestOverlayPermission() },
+            onClick = { overlayError = viewModel.requestOverlayPermission() },
         ) {
             Row(
                 Modifier.padding(12.dp),
@@ -449,11 +466,22 @@ private fun SearchSection(viewModel: AppViewModel) {
                 Column(Modifier.weight(1f)) {
                     Text("建议授予悬浮窗权限", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "授予「显示在其他应用上层」后，本机搜索在真实窗口中加载，成功率更高；" +
-                            "不授予也能用（无头模式）。点此前往系统设置。",
+                        "「显示在其他应用上层」只用于本机搜索：搜索结果页由一个 1 像素、不可触摸、" +
+                            "不可聚焦的隐藏窗口加载，拿到真窗口后系统才不会把它的渲染限流（否则页面加载不出来）。" +
+                            "窗口看不见也点不到，也不加载任何本应用之外的可执行内容；" +
+                            "不授予也能用（自动回退无头模式），只是成功率低一些。点此前往系统设置。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // 拉不起系统设置页时给出可照做的说明，而不是点了毫无反应
+                    overlayError?.let { msg ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            msg,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             }
         }

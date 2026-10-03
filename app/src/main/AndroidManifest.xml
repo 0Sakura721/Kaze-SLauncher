@@ -23,6 +23,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- 自定义实例目录：把游戏存到用户任意目录并直接运行（Android 11+ 分区存储下 File API 前提） -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!--
+      悬浮窗（「显示在其他应用上层」）：**只**用于 AI 联网搜索的「本机浏览器」源。
+
+      为什么要它：那条路径用一个隐藏 WebView 加载必应结果页。挂成真窗口（1px、透明、
+      FLAG_NOT_TOUCHABLE + FLAG_NOT_FOCUSABLE，用户看不到也摸不到）后渲染器按前台优先级
+      调度，不会被 ROM 当后台冻结；不挂窗口的"无头模式"在激进后台管理的机器上会被限流，
+      页面加载不出来（搜索直接失败）。
+
+      安全面：窗口 1px、不可触摸、不可聚焦，没有 addJavascriptInterface、不允许外跳，
+      三条结束路径都 destroy WebView（见 core/ai/BrowserSearch.kt）。
+      这是**可选权限**：不授予也能用（自动回退无头模式），运行时才在设置页引导。
+      不声明它则 Settings.canDrawOverlays() 永远 false —— 整条真窗口分支是死代码，
+      设置页那张引导卡也永远点不动。
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".NewAgeApp"

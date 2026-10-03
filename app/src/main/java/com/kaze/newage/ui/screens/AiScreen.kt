@@ -668,6 +668,13 @@ private fun WriteRequestRow(
                         Button(onClick = onApprove, enabled = !busy) { Text("重试") }
                         OutlinedButton(onClick = onDeny, enabled = !busy) { Text("放弃") }
                     }
+                    4 -> Text(
+                        // 本轮会话已结束：写入请求**没有执行**（也没有可继续的会话可重试）。
+                        // 这一档不能借用状态 3 的"重试"按钮 —— 点了也无处可去，只能是假动作。
+                        "未执行：本轮 AI 会话已结束，文件未改动。如需写入请重新提问。",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = scheme.error,
+                    )
                     else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onApprove, enabled = !busy) {
                             Text("允许写入")

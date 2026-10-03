@@ -564,7 +564,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val toolNote: String? = null,
         /** 待确认的文件写入请求（确认/拒绝后卡片保留供回看，状态见 [writeState]） */
         val writeRequest: AiWriteRequest? = null,
-        /** 写入请求状态：0=待确认 1=已允许 2=已拒绝 */
+        /** 写入请求状态，取值见文件末尾 `AI_WRITE_*` 常量（0=待确认 1=已写入 2=已拒绝 3=失败可重试 4=未执行） */
         val writeState: Int = 0,
         /**
          * 本条消息对应的实例。命令执行与文件写入都按这里记录的实例走，
@@ -642,18 +642,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         uiPrefs.setAiThinking(v)
     }
 
-    /** 是否已授予悬浮窗权限（本机浏览器搜索走真实窗口的前提） */
+    /** 是否已授予悬浮窗权限（本机浏览器搜索走真实窗口的前提，见 [BrowserSearch]） */
     fun canDrawOverlays(): Boolean = android.provider.Settings.canDrawOverlays(container.appContext)
 
-    /** 引导去系统设置授予悬浮窗权限（一次性手动操作，与电池白名单同一套做法） */
-    fun requestOverlayPermission() {
-        try {
+    /**
+     * 引导去系统设置授予悬浮窗权限（一次性手动操作，与电池白名单同一套做法）。
+     *
+     * 返回 null = 已成功拉起系统设置页；非 null = 拉不起来的原因（给用户**可见**的说明）。
+     * 原来这里是个空 catch：个别 ROM（或权限被策略禁用）根本没有这个设置页，
+     * 异常被吞掉后点一下毫无反应，用户只会以为"按钮坏了"，永远授权不上，
+     * 于是设置页那张引导卡成了死端。
+     */
+    fun requestOverlayPermission(): String? {
+        val ctx = container.appContext
+        return try {
             val intent = android.content.Intent(
                 android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                android.net.Uri.parse("package:${container.appContext.packageName}"),
+                android.net.Uri.parse("package:${ctx.packageName}"),
             ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            container.appContext.startActivity(intent)
-        } catch (_: Exception) {
+            ctx.startActivity(intent)
+            null
+        } catch (e: Exception) {
+            "无法打开系统设置页（${e.javaClass.simpleName}）：请在系统设置 → 应用 → " +
+                "本应用 → 显示在其他应用上层 里手动开启；不开启也能用，只是本机搜索会走无头模式。"
         }
     }
 
@@ -819,7 +830,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             when (tool.name) {
                 "read_file", "list_dir" -> {
                     val note = (if (tool.name == "read_file") "读取 " else "列出 ") + tool.path
-                    val result = runCatching { executeAiReadTool(tool.name, tool.path) }
+                    val result = runCatching { executeAiReadTool(tool.name, tool.path, session.instanceId) }
                         .getOrElse { "工具执行失败：${it.message}" }
                     appendAiMessage(
                         AiChatMessage(
@@ -928,10 +939,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** 执行只读工具（读文件 / 列目录）：实例目录为主根，app: 前缀走应用私有目录 */
-    private fun executeAiReadTool(name: String, path: String): String {
-        val dir = _currentInstanceId.value?.let { instanceStore.get(it) }?.dir
-            ?: return "当前未选择实例，无法访问文件"
+    /**
+     * 执行只读工具（读文件 / 列目录）：实例目录为主根，`app:` 前缀走应用私有目录。
+     *
+     * 实例取自**本轮提问发起时记录的会话实例**，与写入路径同源。这里曾经读
+     * `_currentInstanceId`（"当前选中的实例"）：提问针对实例 A、用户中途切到 B 之后，
+     * 读/列就会去读 **B 的文件并回喂模型** —— 诊断串台，且等于把 B 的文件内容发给第三方端点。
+     * 取不到会话实例时如实报错、不猜一个实例出来。
+     */
+    private fun executeAiReadTool(name: String, path: String, instanceId: String?): String {
+        val dir = instanceId?.let { instanceStore.get(it) }?.dir
+            ?: return "本轮提问没有绑定实例（提问时未选择实例，或该实例已被删除），无法访问文件"
         return if (name == "read_file") {
             AiFileTools.readFile(dir, container.appContext.filesDir, path)
         } else {
@@ -939,17 +957,32 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 用户允许 AI 写入：执行写入（内部已有 .bak 备份），结果回喂并继续本轮 */
+    /**
+     * 用户允许 AI 写入：执行写入（内部已有 .bak 备份），结果回喂并继续本轮。
+     *
+     * 状态与提示行一律按**实际结果**分支：成功才置"已写入"并说"写入了 X"，
+     * 失败置"失败（可重试）"并如实说没写进去。曾经这里是"先置成功、再执行、无条件
+     * 追加『写入了 X』" —— 写入抛错时卡片显示已写入、气泡也报成功，用户据此以为文件
+     * 已经改好（最坏情况：以为 RCON 密码已换而其实没换），是纯粹的假信息。
+     */
     fun approveAiWrite(messageId: Long) {
         if (_aiBusy.value) return
         val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
         val req = msg.writeRequest ?: return
-        if (msg.writeState != 0) return
-        setAiWriteState(messageId, 1)
+        // 待确认与"失败可重试"两种状态允许点允许；已写入 / 已拒绝不可再改
+        if (msg.writeState != AI_WRITE_PENDING && msg.writeState != AI_WRITE_FAILED) return
         val session = aiSession
         if (session == null) {
+            // 会话已结束 = 这次写入**根本没执行**。以前这条路径先置了"已允许"，卡片显示成功，
+            // 而文件一个字节都没动 —— 必须如实标注"未执行"。
+            setAiWriteState(messageId, AI_WRITE_SKIPPED)
             appendAiMessage(
-                AiChatMessage(nextAiId(), isUser = false, text = "本轮会话已结束，本次写入未执行。", isError = true)
+                AiChatMessage(
+                    nextAiId(), isUser = false,
+                    text = "本轮会话已结束，本次写入未执行（文件未改动）。如需写入请重新提问。",
+                    toolNote = "未执行写入 ${req.path}",
+                    isError = true,
+                )
             )
             return
         }
@@ -957,20 +990,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // 写入绑定到请求发起时的实例（消息里记录的），不是当前选中的实例
-                val dir = (msg.instanceId?.let { instanceStore.get(it) }
-                    ?: _currentInstanceId.value?.let { instanceStore.get(it) })?.dir
-                val result = if (dir == null) "失败：实例不存在或已被删除"
-                else runCatching { AiFileTools.writeFile(dir, req.path, req.content) }
-                    .getOrElse { "失败：${it.message}" }
-                appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = "写入了 ${req.path}", toolNote = "写入 ${req.path}")
-                )
+                val dir = msg.instanceId?.let { instanceStore.get(it) }?.dir
+                val outcome: Result<String> = if (dir == null) {
+                    // 实例不在了：与"写盘抛错"走同一条失败路径，界面表现一致
+                    Result.failure(java.io.IOException("实例不存在或已被删除"))
+                } else {
+                    runCatching { AiFileTools.writeFile(dir, req.path, req.content) }
+                }
+                val result = outcome.fold({ it }, { "失败：${it.message}" })
+                if (outcome.isSuccess) {
+                    setAiWriteState(messageId, AI_WRITE_DONE)
+                    appendAiMessage(
+                        AiChatMessage(
+                            nextAiId(), isUser = false,
+                            text = "写入了 ${req.path}", toolNote = "写入 ${req.path}",
+                        )
+                    )
+                } else {
+                    // 失败既不装成功、也不静默：卡片转为"失败 + 重试"，气泡如实说明
+                    setAiWriteState(messageId, AI_WRITE_FAILED)
+                    appendAiMessage(
+                        AiChatMessage(
+                            nextAiId(), isUser = false,
+                            text = "写入未执行：${result.removePrefix("失败：")}",
+                            toolNote = "写入失败 ${req.path}",
+                            isError = true,
+                        )
+                    )
+                }
                 session.apiMessages += AiMessage(
                     AiMessage.ROLE_USER,
                     "【工具结果】write_file \"${req.path}\" → $result",
                 )
                 runTurn(session)
             } catch (e: Exception) {
+                // 循环本身炸了：写入状态同样要落地，不能把卡片留在"待确认"上骗用户再点一次
+                setAiWriteState(messageId, AI_WRITE_FAILED)
                 aiSession = null
                 appendAiMessage(
                     AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "写入流程失败", isError = true)
@@ -986,8 +1041,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_aiBusy.value) return
         val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
         val req = msg.writeRequest ?: return
-        if (msg.writeState != 0) return
-        setAiWriteState(messageId, 2)
+        // 与批准同一套白名单：失败后卡上的"放弃"也要能用（否则用户被卡死在可重试状态）
+        if (msg.writeState != AI_WRITE_PENDING && msg.writeState != AI_WRITE_FAILED) return
+        setAiWriteState(messageId, AI_WRITE_DENIED)
         val session = aiSession
         if (session == null) {
             appendAiMessage(
@@ -1873,3 +1929,17 @@ private const val AI_MAX_TOOL_ROUNDS = 4
 
 /** 保存的思考过程上限（reasoner 的推理可能非常长，展示端有滚动条，但不能无限占内存） */
 private const val AI_MAX_REASONING_CHARS = 20_000
+
+/**
+ * 文件写入确认卡的状态（[AppViewModel.AiChatMessage.writeState]）。
+ *
+ * 状态必须由**实际结果**决定：只有真的落盘成功才允许出现"已写入"。
+ * 失败给 [AI_WRITE_FAILED] 而不是留在 [AI_WRITE_PENDING] —— 前者卡上有"重试"按钮，
+ * 后者会让用户以为自己没点过；而 [AI_WRITE_SKIPPED] 是"会话已经结束、根本没执行"，
+ * 它**不能**复用 [AI_WRITE_FAILED]：那个状态带重试按钮，而这里重试也无处可去。
+ */
+private const val AI_WRITE_PENDING = 0
+private const val AI_WRITE_DONE = 1
+private const val AI_WRITE_DENIED = 2
+private const val AI_WRITE_FAILED = 3
+private const val AI_WRITE_SKIPPED = 4
