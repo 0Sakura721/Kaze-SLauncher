@@ -125,7 +125,7 @@ object AiFileTools {
      *
      * [sensitive] 非 null = 这个文件里可能有凭据，**读之前要用户点头**：读取的后果和写入不同，
      * 它不改变磁盘，但会把内容发到模型服务商那边，而注入源是现成的（控制台里的玩家聊天、
-     * 联网搜索到的网页都能诱导模型去读 `plugins/*/config.yml` 里的数据库口令、
+     * 联网搜索到的网页都能诱导模型去读插件目录里的数据库口令、
      * `server.properties` 里的 RCON 密码）。
      */
     data class ReadPolicy(
