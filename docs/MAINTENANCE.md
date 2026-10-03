@@ -129,6 +129,30 @@ signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else null
 4. **测试方法名里不能有 `.`**（Kotlin 反引号名字 → JVM 方法名限制），
    比如 `需要 -Dkaze.patch.dir` 这种名字会编译失败。
 
+5. **验证只认 workflow 的结论，本地 gradle 不算权威。**
+   本地 `gradle :app:testArm64DebugUnitTest :app:assembleArm64Release` 有两个问题：
+   - 慢且吃满机器（约 5 分钟、CPU 打满），而这台机器常常还要干别的活；
+   - **本地环境 ≠ CI 环境**（JDK / AGP / SDK 组件版本都不同），本地绿证明不了 CI 绿。
+     本仓库历史上就有「本地没发现、CI 33 秒抓到」的编译错误。
+
+   正确链路：改代码 → 提交 → 推工作分支 → dispatch 现成 workflow → 轮询结论，
+   用 `tools/ci_verify.py`（本机在 `D:\dsh\tools\ci_verify.py`）：
+
+   ```
+   python ci_verify.py tests <分支名>   # dispatch ci.yml（单元测试 + Roborazzi 截图）
+   python ci_verify.py apk   <分支名>   # dispatch apk-build.yml（只编译 + 校验签名，不发版）
+   ```
+
+   退出码 0/1 即结论（脚本自己读令牌、dispatch、轮询到出结论并按 step 打印）。
+   **只有 workflow 结论是 `success` 才算通过**，报告里要写出 run id；
+   `failure` 就按失败那一步去修，不要在本地反复跑 gradle 试图"跑绿"。
+   单测本身不能替代的两类东西（真机 UI / 真机权限流程）要单独标注"需真机验证"。
+
+6. **AI 模块的测试不要连真实端点。** 网络路径用手写 `ServerSocket` 的本地假端点
+   （`AiBodyLimitTest`，单测 bootclasspath 是 android.jar，没有 `com.sun.net.httpserver`）；
+   加解密走 Keystore 的路径在 Robolectric 上必然降级为明文兜底，只能验证槽位/迁移逻辑，
+   加密本身需真机验证。
+
 ---
 
 ## 四、APK 增量补丁（`kaze-apkraw-1`）

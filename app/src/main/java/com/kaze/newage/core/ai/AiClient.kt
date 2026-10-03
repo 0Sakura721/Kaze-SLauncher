@@ -155,6 +155,53 @@ object AiClient {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
+     * 当前在飞的连接。
+     *
+     * HttpURLConnection 是阻塞的：只置一个"取消"标志位的话，用户点了取消之后线程仍然卡在
+     * `responseCode` / `read` 上直到 readTimeout（思考模式最长 240 秒），界面看着像没反应。
+     * 这里登记连接，取消时把它关掉，让阻塞中的读尽早结束。
+     *
+     * **实测边界（别当成"立刻中断"）**：读已经卡在 socket 上时，JDK 的 `disconnect()`
+     * 自身会阻塞到 readTimeout 才返回（实测约 119 秒）—— 所以界面路径**必须**走
+     * [cancelActiveAsync]，同步调用会把 UI 线程卡住；已经发出去的请求，服务端该计费还是计费
+     * （那是服务端的账），我们能保证的是界面立刻停止等待、本轮结果丢弃、不再发起下一轮。
+     */
+    private val activeCall = java.util.concurrent.atomic.AtomicReference<HttpURLConnection?>(null)
+
+    /**
+     * 中断当前在飞的请求（没有请求时是空操作）。**会阻塞**（见 [activeCall]），
+     * 只允许在后台线程调用 —— 界面路径请用 [cancelActiveAsync]。
+     */
+    fun cancelActive() {
+        activeCall.getAndSet(null)?.let { conn ->
+            runCatching { conn.disconnect() }
+        }
+    }
+
+    /** 取消的界面入口：把可能阻塞的 [cancelActive] 丢到独立守护线程，绝不让 UI 线程等它 */
+    fun cancelActiveAsync() {
+        kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai-cancel") { cancelActive() }
+    }
+
+    /**
+     * 明文 http 的提前拦截。
+     *
+     * targetSdk 28 起平台默认禁止明文（`CLEARTEXT communication to … not permitted` 是底层文案，
+     * 用户看了不知道该改什么）。只有 `network_security_config.xml` 里放行的本机地址能用 http，
+     * 这里按同一份名单提前给出可读原因；名单在 [AiConfig.isCleartextHostAllowed]，
+     * 两处必须一致，否则会出现"提示说可以、实际连不上"。
+     */
+    private fun requireCleartextAllowed(endpoint: String) {
+        val uri = runCatching { java.net.URI(endpoint) }.getOrNull() ?: return
+        if (!uri.scheme.equals("http", ignoreCase = true)) return
+        if (AiConfig.isCleartextHostAllowed(uri.host)) return
+        throw RuntimeException(
+            "明文 http 只允许本机地址（localhost / 127.0.0.1 / ::1）：当前是 ${uri.host ?: endpoint}，" +
+                "请改用 https（局域网/公网端点必须加密，API Key 不能明文发出去）"
+        )
+    }
+
+    /**
      * 流式对话（SSE）：思考过程与正文**逐 token 回调**，取消/超时即时生效。
      *
      * 与 [chat] 的分工：chat 留给小请求（搜索查询词生成）；主对话一律走这里 ——
@@ -181,12 +228,16 @@ object AiClient {
             throw RuntimeException("AI 服务地址无效：${config.baseUrl.trim()}（需以 http(s):// 开头）")
         }
         if (config.apiKey.isBlank()) throw RuntimeException("尚未配置 API Key")
+        requireCleartextAllowed(endpoint)
         val requestBody = buildRequestBody(
             config.requestModel, messages, maxTokens, extraJson,
             thinkingEnabled, includeNativeThinkingParam, stream = true,
             includeTools = includeTools, includeExecuteCommand = includeExecuteCommand,
         )
         val conn = URL(endpoint).openConnection() as HttpURLConnection
+        // 登记在飞连接：取消/离开页面时才能真的把它掐断（见 [activeCall]）。
+        // 用 CAS 清理而不是 set(null)：两轮请求交错时，后结束的那个不该把新登记的那条抹掉。
+        activeCall.set(conn)
         val reasoning = StringBuilder()
         val content = StringBuilder()
         var usage: AiUsage? = null
@@ -205,13 +256,13 @@ object AiClient {
             conn.outputStream.use { it.write(requestBody.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
             if (code != 200) {
-                val errBody = runCatching {
-                    conn.errorStream?.bufferedReader()?.use { reader -> reader.readText() } ?: ""
-                }.getOrDefault("")
+                val errBody = runCatching { AiBodyLimit.readErrorText(conn.errorStream) }.getOrDefault("")
                 throw RuntimeException(describeHttpError(code, errBody))
             }
             var aborted = false
-            conn.inputStream.bufferedReader().use { reader ->
+            // 流式也要有总量上限：不结束的流能让循环永远跑下去，单行还可能无限长（见 CappedStream）
+            val stream = AiBodyLimit.CappedStream(conn.inputStream, AiBodyLimit.MAX_STREAM_BYTES)
+            stream.bufferedReader().use { reader ->
                 while (true) {
                     if (shouldStop()) {
                         aborted = true
@@ -246,6 +297,8 @@ object AiClient {
                     }
                 }
             }
+            // 触到流上限和用户取消同义：这轮拿到的是半成品，不能当完整回答用
+            if (stream.capped) aborted = true
             val toolCalls = toolCallNames.mapNotNull { (index, name) ->
                 if (name.isEmpty()) return@mapNotNull null
                 NativeToolCall(
@@ -273,8 +326,11 @@ object AiClient {
                     aborted = true,
                 )
             }
+            // 取消/超时导致的连接中断不是网络故障：报"无法连接"会误导用户去查网络
+            if (shouldStop()) return AiReply(reasoning = null, content = "", usage = usage, aborted = true)
             throw RuntimeException("无法连接 AI 服务（${e.message ?: "网络错误"}）：请检查网络与 API 地址", e)
         } finally {
+            activeCall.compareAndSet(conn, null)
             conn.disconnect()
         }
     }
@@ -391,9 +447,9 @@ object AiClient {
      * 调用方必须 runCatching 解析。
      */
     internal const val FILE_TOOLS_SPEC = """[
-{"type":"function","function":{"name":"read_file","description":"读取服务端实例目录下的文本文件（配置/日志/脚本）。app: 前缀 = 启动器应用目录，只读。二进制与大文件会被拒绝。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"}},"required":["path"]}}},
-{"type":"function","function":{"name":"list_dir","description":"列出实例目录（或 app: 应用目录）下的条目，目录在前。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对路径，. 表示根目录"}},"required":["path"]}}},
-{"type":"function","function":{"name":"write_file","description":"写入/覆盖实例目录下的文本文件（需用户在界面上确认；覆盖已有文件自动留 .bak）。.jar 等二进制与授权类文件（ops.json/eula.txt/whitelist.json 等）被禁止。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"},"content":{"type":"string","description":"完整的新文件内容"}},"required":["path","content"]}}},
+{"type":"function","function":{"name":"read_file","description":"读取服务端实例目录下的文本文件（配置/日志/脚本）。app: 前缀 = 启动器应用目录（**只读，且只开放 logs/、ai_audit.log、diagnostics.txt**）。二进制、备份文件与大文件会被拒绝。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"}},"required":["path"]}}},
+{"type":"function","function":{"name":"list_dir","description":"列出实例目录（或 app: 应用目录，只开放日志与诊断报告）下的条目，目录在前。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对路径，. 表示根目录"}},"required":["path"]}}},
+{"type":"function","function":{"name":"write_file","description":"写入/覆盖实例目录下的文本文件（需用户在界面上确认；覆盖已有文件自动留一份带时间戳的备份）。.jar 等二进制、.bak 备份与授权类文件（ops.json/eula.txt/whitelist.json 等）被禁止。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"},"content":{"type":"string","description":"完整的新文件内容"}},"required":["path","content"]}}},
 {"type":"function","function":{"name":"fetch_page","description":"抓取搜索结果里出现的网页正文（http/https），用于把攻略或文档读全。","parameters":{"type":"object","properties":{"url":{"type":"string","description":"完整网页地址"}},"required":["url"]}}},
 {"type":"function","function":{"name":"read_memory","description":"读取你对这台服务器的长期记忆笔记（端口、玩家习惯、已解决的问题等）。","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"write_memory","description":"以覆盖方式更新长期记忆笔记（保持精炼，只记长期有用的事实）。","parameters":{"type":"object","properties":{"content":{"type":"string","description":"完整的新笔记内容"}},"required":["content"]}}}
@@ -409,7 +465,9 @@ object AiClient {
             throw RuntimeException("AI 服务地址无效：${config.baseUrl.trim()}（需以 http(s):// 开头）")
         }
         if (config.apiKey.isBlank()) throw RuntimeException("尚未配置 API Key")
+        requireCleartextAllowed(endpoint)
         val conn = URL(endpoint).openConnection() as HttpURLConnection
+        activeCall.set(conn)
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = CONNECT_TIMEOUT_MS
@@ -435,17 +493,23 @@ object AiClient {
             }
             val code = conn.responseCode
             if (code != 200) {
-                val errBody = runCatching {
-                    conn.errorStream?.bufferedReader()?.use { reader -> reader.readText() } ?: ""
-                }.getOrDefault("")
+                val errBody = runCatching { AiBodyLimit.readErrorText(conn.errorStream) }.getOrDefault("")
                 throw RuntimeException(describeHttpError(code, errBody))
             }
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
-            return parseReply(body)
+            // 流式读取 + 上限：readText() 会让异常/恶意端点用一个大响应体把应用 OOM（见 AiBodyLimit）
+            val body = AiBodyLimit.read(conn.inputStream)
+            if (body.truncated) {
+                throw RuntimeException(
+                    "AI 返回的响应体超过 ${AiBodyLimit.MAX_BODY_BYTES / 1024 / 1024}MB，已中止读取：" +
+                        "该端点响应异常，请检查服务地址是否正确"
+                )
+            }
+            return parseReply(body.text)
         } catch (e: IOException) {
             // DNS 失败 / 连不上 / 超时都到这里；底层 message 很晦涩（如 "Unable to resolve host"），补一句人话
             throw RuntimeException("无法连接 AI 服务（${e.message ?: "网络错误"}）：请检查网络与 API 地址", e)
         } finally {
+            activeCall.compareAndSet(conn, null)
             conn.disconnect()
         }
     }

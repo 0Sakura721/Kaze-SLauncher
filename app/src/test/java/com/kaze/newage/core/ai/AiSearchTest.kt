@@ -80,6 +80,8 @@ class AiSearchTest {
         assertTrue(block.contains("docs.example.com"))
         assertFalse(block.contains("s".repeat(400)))
         assertFalse(block.contains("t".repeat(100)))
+        // 网页摘要属不可信数据：这行标注是提示词层的第一道缓解（P2-4）
+        assertTrue("应标注为不可信数据：$block", block.contains("不可信数据"))
     }
 
     @Test
@@ -91,6 +93,30 @@ class AiSearchTest {
         assertTrue(!AiSearch.Provider.BING_LOCAL.needsKey)
         assertTrue(AiSearch.Provider.TAVILY.needsKey)
         assertTrue(AiSearch.Provider.BOCHA.needsKey)
+    }
+
+    @Test
+    fun `搜索凭据按源分槽且不会跨源取用`() {
+        // 每个源一格，槽名互不相同
+        val slots = AiSearch.Provider.entries.map { AiSearch.Provider.keySlot(it.id) }
+        assertEquals(slots.size, slots.toSet().size)
+        assertTrue(AiSearch.Provider.keySlot("tavily").endsWith("tavily"))
+
+        val keys = mapOf(
+            "tavily" to "tvly-secret-A",
+            "bocha" to "sk-secret-B",
+            "searxng" to "https://searx.example.com",
+        )
+        // 切到哪家就只拿哪家的凭据：A 家的 Key 不会被发给 B 家
+        assertEquals("tvly-secret-A", AiSearch.keyFor("tavily", keys))
+        assertEquals("sk-secret-B", AiSearch.keyFor("bocha", keys))
+        // SearXNG 的"Key 栏"存的是实例地址（needsUrl），必须原样返回，否则该源直接不可用
+        assertEquals("https://searx.example.com", AiSearch.keyFor("searxng", keys))
+        // 未知 id 回退 Tavily：落到的也是 Tavily 自己那一格，读不到别家的
+        assertEquals("tvly-secret-A", AiSearch.keyFor("nope", keys))
+        // 免凭据源恒为空：界面上残留的旧值不该被顺手带出去
+        assertEquals("", AiSearch.keyFor("bing_local", keys))
+        assertEquals("", AiSearch.keyFor("tavily", emptyMap()))
     }
 
     // ── 本机浏览器源（Bing）的纯解析部分 ──

@@ -127,6 +127,46 @@ class AiFileToolsTest {
             "env ok",
             AiFileTools.readFile(instanceDir(), appDir, "app:diagnostics.txt"),
         )
+        // 应用日志与审计日志也在白名单内
+        File(appDir, "logs").mkdirs()
+        File(appDir, "logs/app.log").writeText("log line")
+        assertEquals("log line", AiFileTools.readFile(instanceDir(), appDir, "app:logs/app.log"))
+        File(appDir, "ai_audit.log").writeText("audit")
+        assertEquals("audit", AiFileTools.readFile(instanceDir(), appDir, "app:ai_audit.log"))
+    }
+
+    @Test
+    fun `app 前缀不再开放实例库与其它应用数据`() {
+        val appDir = tmp.newFolder("appfiles")
+        val root = instanceDir()
+        // 实例库里是所有实例的绝对路径与配置，对诊断没有价值，却会被一路发到第三方端点
+        File(appDir, "instances.json").writeText("""[{"name":"x","dir":"/sdcard/KazeS/x"}]""")
+        File(appDir, "instances.json.bak").writeText("[]")
+        File(appDir, "ai_chat.json").writeText("""{"messages":[]}""")
+        File(appDir, "ai_memory_abc.md").writeText("note")
+        File(appDir, "logs").mkdirs()
+        File(appDir, "logs/app.log").writeText("log line")
+        File(appDir, "ai_audit.log").writeText("audit")
+        listOf(
+            "app:instances.json",
+            "app:instances.json.bak",
+            "app:ai_chat.json",
+            "app:ai_memory_abc.md",
+            "app:logs/../instances.json",  // 归一化之后仍要落在白名单外
+        ).forEach { p ->
+            try {
+                AiFileTools.readFile(root, appDir, p)
+                fail("应当拒绝读取：$p")
+            } catch (e: IllegalArgumentException) {
+                assertTrue("错误信息应说明白名单：${e.message}", e.message!!.contains("logs/"))
+            }
+        }
+        // 列应用目录根：白名单之外的项连名字都不该出现
+        val listing = AiFileTools.listDir(root, appDir, "app:.")
+        assertTrue(listing.contains("logs/"))
+        assertTrue(listing.contains("ai_audit.log"))
+        assertFalse("实例库不该出现在列表里：$listing", listing.contains("instances.json"))
+        assertFalse("会话记录不该出现在列表里：$listing", listing.contains("ai_chat.json"))
     }
 
     // ── 列目录 ──
@@ -155,12 +195,53 @@ class AiFileToolsTest {
     }
 
     @Test
-    fun `覆盖已有文件留 bak 备份`() {
+    fun `覆盖已有文件留带时间戳的 bak 备份`() {
         val root = instanceDir()
         File(root, "server.properties").writeText("old=1")
-        AiFileTools.writeFile(root, "server.properties", "new=2")
+        val out = AiFileTools.writeFile(root, "server.properties", "new=2")
         assertEquals("new=2", File(root, "server.properties").readText())
-        assertEquals("old=1", File(root, "server.properties.bak").readText())
+        val baks = root.listFiles().orEmpty().filter { it.name.startsWith("server.properties.") && it.name.endsWith(".bak") }
+        assertEquals("应留下恰好一份备份", 1, baks.size)
+        assertEquals("old=1", baks.first().readText())
+        assertTrue("写入结果应说明备份名：$out", out.contains(baks.first().name))
+    }
+
+    @Test
+    fun `连续覆盖保留多代备份而不是顶掉上一代`() {
+        val root = instanceDir()
+        File(root, "server.properties").writeText("v1")
+        AiFileTools.writeFile(root, "server.properties", "v2")
+        AiFileTools.writeFile(root, "server.properties", "v3")
+        val baks = root.listFiles().orEmpty().filter { it.name.endsWith(".bak") }.map { it.readText() }.toSet()
+        // 只保留一代备份时这里会只剩 v2 —— 而"改坏了要回退"往往正是在第二次写入之后才发现的
+        assertEquals(setOf("v1", "v2"), baks)
+    }
+
+    @Test
+    fun `备份文件名同秒也不撞名`() {
+        val root = instanceDir()
+        val src = File(root, "a.txt").apply { writeText("x") }
+        val now = 1_700_000_000_000L
+        val first = AiFileTools.backupNameFor(src, now)
+        File(root, first).writeText("x")
+        val second = AiFileTools.backupNameFor(src, now)
+        assertFalse("同秒第二次备份必须换名", first == second)
+        assertTrue(first.endsWith(".bak"))
+    }
+
+    @Test
+    fun `bak 备份只读不可写`() {
+        val root = instanceDir()
+        File(root, "server.properties.20260927-101010.bak").writeText("v1")
+        // 能读：诊断时要回看上一版
+        assertEquals("v1", AiFileTools.readFile(root, null, "server.properties.20260927-101010.bak"))
+        // 不能写：否则 AI 可以伪造/顶掉用户唯一的回退版本
+        try {
+            AiFileTools.writeFile(root, "server.properties.20260927-101010.bak", "hacked")
+            fail("应当拒绝写入 .bak")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("只读"))
+        }
     }
 
     @Test
@@ -265,5 +346,83 @@ class AiFileToolsTest {
             }
             assertFalse("被拒绝的文件不应落盘：$p", File(root, p).exists())
         }
+    }
+
+    // ── 敏感读取判定（P2-4：读了也会把内容发出去，所以要确认） ──
+
+    @Test
+    fun `凭据类文件名与 ops 名单被判为敏感`() {
+        val root = instanceDir()
+        listOf(
+            "plugins/Dynmap/config.yml",       // 普通插件配置：不敏感
+            "server.properties",               // 没开 rcon：不敏感
+            "logs/latest.log",
+        ).forEach { p ->
+            assertTrue("不该判为敏感：$p", AiFileTools.readPolicyFor(root, p).sensitive == null)
+        }
+        listOf(
+            "ops.json",
+            "plugins/AuthMe/credentials.yml",
+            "config/database_password.txt",
+            "secrets.yml",
+            "plugins/x/api_key.conf",
+            "auth/token.json",
+        ).forEach { p ->
+            val policy = AiFileTools.readPolicyFor(root, p)
+            assertTrue("应判为敏感：$p", policy.sensitive != null)
+            assertTrue("解析后的绝对路径要能上卡：$p", policy.resolvedPath.contains("$p".substringAfterLast('/')))
+        }
+    }
+
+    @Test
+    fun `只有真开着 rcon 的 server properties 才敏感`() {
+        val plain = instanceDir()
+        File(plain, "server.properties").writeText("enable-rcon=false\nrcon.password=abc\n")
+        assertTrue(AiFileTools.readPolicyFor(plain, "server.properties").sensitive == null)
+
+        val noPass = instanceDir()
+        File(noPass, "server.properties").writeText("enable-rcon=true\nrcon.password=\n")
+        assertTrue(AiFileTools.readPolicyFor(noPass, "server.properties").sensitive == null)
+
+        val rcon = instanceDir()
+        File(rcon, "server.properties").writeText("enable-rcon=true\nrcon.password=hunter2\n")
+        val policy = AiFileTools.readPolicyFor(rcon, "server.properties")
+        assertTrue(policy.sensitive != null)
+        assertTrue(policy.sensitive!!.contains("RCON"))
+    }
+
+    // ── 报错不泄绝对路径（P3） ──
+
+    @Test
+    fun `报错用相对路径而不是绝对路径`() {
+        val root = instanceDir()
+        val noFile = runCatching { AiFileTools.readFile(root, null, "logs/latest.log") }
+            .exceptionOrNull()?.message.orEmpty()
+        assertTrue("应报相对路径：$noFile", noFile.startsWith("logs/latest.log"))
+        assertFalse("不该把设备目录结构带出去：$noFile", noFile.contains(root.canonicalFile.path))
+        val noDir = runCatching { AiFileTools.listDir(root, null, "config") }
+            .exceptionOrNull()?.message.orEmpty()
+        assertFalse("不该把设备目录结构带出去：$noDir", noDir.contains(root.canonicalFile.path))
+    }
+
+    // ── 列目录流式扫描（P3） ──
+
+    @Test
+    fun `列目录超过上限只统计剩余条数`() {
+        val root = instanceDir()
+        repeat(205) { File(root, "file-${it.toString().padStart(3, '0')}.txt").writeText("x") }
+        val out = AiFileTools.listDir(root, null, ".")
+        assertEquals("最多列出 200 项", 200, out.lines().count { it.contains(".txt") })
+        assertTrue("剩余条数要准确：$out", out.contains("…还有 5 项未列出"))
+    }
+
+    @Test
+    fun `大目录里目录不会被文件挤掉`() {
+        val root = instanceDir()
+        repeat(300) { File(root, "a-file-$it.txt").writeText("x") }
+        File(root, "config").mkdir()
+        val out = AiFileTools.listDir(root, null, ".")
+        // 两趟扫描的理由：一趟"先到先得"会让排在前面的 200 个文件把子目录挤出去
+        assertTrue("目录必须仍然在列：${out.lineSequence().first()}", out.lineSequence().first() == "config/")
     }
 }

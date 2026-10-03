@@ -42,6 +42,20 @@ class AiProfileStoreTest {
     }
 
     @Test
+    fun `损坏数据被标记为 corrupt 而不是当成没有配置`() {
+        // 空串 = 真的没配置过，不是损坏
+        assertEquals(false, AiProfileStore.decodeChecked("").corrupt)
+        assertEquals(false, AiProfileStore.decodeChecked("   ").corrupt)
+        // 非空但解析不了 = 配置坏了：上层要保留原文并提示用户，不能静默当成"没有档案"
+        listOf("not json at all", "{\"broken\":", "[{\"name\":\"x\"}").forEach { raw ->
+            val d = AiProfileStore.decodeChecked(raw)
+            assertTrue("应标记 corrupt：$raw", d.corrupt)
+            assertTrue(d.profiles.isEmpty())
+        }
+        assertEquals(false, AiProfileStore.decodeChecked(AiProfileStore.encode(emptyList())).corrupt)
+    }
+
+    @Test
     fun `档案摘要含主机与模型名`() {
         val p = AiProfile(
             name = "DS",

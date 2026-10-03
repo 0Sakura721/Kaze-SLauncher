@@ -106,7 +106,25 @@ object AiSuggestion {
                 ?.let { AiToolCall(it.name.trim().lowercase(), it.path.trim(), it.content) }
             return Parsed(reply.analysis.trim().take(MAX_ANALYSIS_LEN), cmd, tool)
         }
+        // 解析不出 JSON：整段当分析文本（模型可能只是没按格式输出，用户仍该看到它的话）。
+        // 但**残缺的工具调用 JSON** 例外：那是一坨 `{"analysis":"…","tool":{"name":"read_file",…`，
+        // 直接上屏会让人以为 AI 在胡言乱语，而真相是它的输出被截断了（max_tokens 用尽）。
+        // 这种情况给一句能读懂的解释，别把半截 JSON 当"分析"展示。
+        if (looksLikeTruncatedToolJson(text)) {
+            return Parsed(
+                "模型这一轮返回的工具调用 JSON 不完整（多半是输出被截断），已忽略、未执行任何工具。" +
+                    "可以把问题说得更具体，或换个问法重试。",
+                "",
+            )
+        }
         return Parsed(text.take(MAX_ANALYSIS_LEN), "")
+    }
+
+    /** 像"工具调用 JSON 但没解析成功"：整段以 { 开头且带 tool/name 字段 */
+    private fun looksLikeTruncatedToolJson(text: String): Boolean {
+        val t = text.trimStart()
+        if (!t.startsWith("{")) return false
+        return t.contains("\"tool\"") || t.contains("\"name\"")
     }
 
     /**
@@ -137,6 +155,8 @@ object AiSuggestion {
     private val DANGEROUS_FIRST_WORDS = setOf(
         "stop", "op", "deop", "ban", "ban-ip", "pardon", "pardon-ip",
         "kick", "kill", "whitelist", "save-off", "save-on",
+        // restart 不是原版命令，但 Paper/Spigot 与多数管理插件都提供它：效果等同重启服务端
+        "restart",
     )
 
     private val DESTRUCTIVE_FIRST_WORDS = setOf(

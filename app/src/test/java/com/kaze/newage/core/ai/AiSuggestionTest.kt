@@ -149,6 +149,27 @@ class AiSuggestionTest {
             .forEach { assertFalse("不应判为危险：$it", AiSuggestion.isDangerous(it)) }
     }
 
+    @Test
+    fun `重启与执行类命令同样按危险处理`() {
+        // restart 不是原版命令，但 Paper/Spigot 与多数管理插件都有：效果等同重启服务端
+        listOf("restart", "RESTART now", "execute as @a run say hi", "reload confirm")
+            .forEach { assertTrue("应判为危险：$it", AiSuggestion.isDangerous(it)) }
+    }
+
+    @Test
+    fun `残缺的工具调用 JSON 不被当成分析上屏`() {
+        // 输出被截断（max_tokens 用尽）时的典型形态：JSON 少了一半
+        val truncated = """{"analysis":"我准备读一下启动日志","command":"","tool":{"name":"read_file","path":"logs/lat"""
+        val p = AiSuggestion.parse(truncated)
+        assertFalse("不该把半截 JSON 当分析：${p.analysis}", p.analysis.contains("\"tool\""))
+        assertTrue("应说明发生了什么：${p.analysis}", p.analysis.contains("不完整"))
+        assertEquals("", p.command)
+        assertTrue("不完整的工具调用不能被执行", p.tool == null)
+        // 普通散文（不含工具 JSON 特征）仍然整段当分析，行为不变
+        val prose = "服务端看起来正常，没有发现异常。"
+        assertEquals(prose, AiSuggestion.parse(prose).analysis)
+    }
+
     // ── 文件工具调用解析 ──
 
     @Test
