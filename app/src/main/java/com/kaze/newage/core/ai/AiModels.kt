@@ -94,6 +94,7 @@ data class AiConfig(
          * 规范化 base URL：去首尾空白与结尾斜杠；必须 http(s) 开头，否则返回空串（视为未配置）。
          * 允许 http 是刻意的：本地推理端点（127.0.0.1 的 llama.cpp 等）只能是 http，
          * 风险由用户自己权衡（密钥与日志只会发给他自己填的地址）。
+         * 但明文只对 [isCleartextHostAllowed] 里的本机地址放行，见 network_security_config.xml。
          */
         fun normalizeBaseUrl(raw: String): String {
             val s = raw.trim().trimEnd('/')
@@ -102,6 +103,22 @@ data class AiConfig(
             if (afterScheme.isBlank()) return ""
             return s
         }
+
+        /**
+         * 允许明文 http 的本机主机名。
+         *
+         * **这份名单必须与 `res/xml/network_security_config.xml` 里放行的那几条一致**：
+         * 平台侧按 NSC 决定是否放行，这里只是提前给出可读的错误提示，两处不一致会出现
+         * "提示说可以、实际连不上"（或反之）。
+         *
+         * 局域网网段（192.168.x.x 等）无法在这里表达：Android 的 network security config
+         * **不支持 CIDR**，`<domain>` 只认精确主机名/IP。所以局域网端点一律要求 https，
+         * 不为了省事把 `cleartextTrafficPermitted` 全局打开（那等于对所有公网端点也放开明文）。
+         */
+        fun isCleartextHostAllowed(host: String?): Boolean =
+            host != null && host.trim().lowercase().removeSurrounding("[", "]") in CLEARTEXT_HOSTS
+
+        private val CLEARTEXT_HOSTS = setOf("localhost", "127.0.0.1", "::1")
     }
 }
 

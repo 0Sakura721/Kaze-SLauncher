@@ -46,6 +46,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -1075,8 +1076,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun setAiWriteState(messageId: Long, state: Int) {
-        _aiMessages.value = _aiMessages.value.map {
-            if (it.id == messageId) it.copy(writeState = state) else it
+        // update{} 而不是 `value = value.map{}`：写入执行在 IO 线程、追加消息在主线程，
+        // "读-改-写"之间存在窗口，两个线程各读一次旧列表就会丢掉其中一条更新
+        _aiMessages.update { list ->
+            list.map { if (it.id == messageId) it.copy(writeState = state) else it }
         }
     }
 
@@ -1094,8 +1097,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val inst = instanceStore.get(targetId) ?: return
         if (serverManager.states.value[targetId] != ServerState.Running) return
         serverManager.sendCommand(inst, cmd)
-        _aiMessages.value = _aiMessages.value.map {
-            if (it.id == messageId) it.copy(commandSent = true) else it
+        // 同上：非原子的"读-改-写"会与并发追加互相覆盖
+        _aiMessages.update { list ->
+            list.map { if (it.id == messageId) it.copy(commandSent = true) else it }
         }
     }
 
@@ -1141,7 +1145,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun appendAiMessage(message: AiChatMessage) {
-        _aiMessages.value = _aiMessages.value + message
+        // 追加来自多个线程（IO 线程的提问/工具循环 + 主线程的确认卡按钮）：
+        // `value = value + x` 是非原子的读-改-写，并发时后写的那次会抹掉前一次追加的消息
+        _aiMessages.update { it + message }
     }
 
     private fun nextAiId(): Long = aiIdCounter.incrementAndGet()

@@ -127,6 +127,18 @@ object AiClient {
             throw RuntimeException("AI 服务地址无效：${config.baseUrl.trim()}（需以 http(s):// 开头）")
         }
         if (config.apiKey.isBlank()) throw RuntimeException("尚未配置 API Key")
+        // 明文 http 只放行本机（与 res/xml/network_security_config.xml 的名单一致）。
+        // 平台在 targetSdk 28+ 直接禁明文，报的是"CLEARTEXT communication not permitted"这种
+        // 底层文案；这里提前拦下并说清规则，用户才知道该改什么（局域网/公网一律走 https）。
+        val schemeHost = runCatching { java.net.URI(endpoint) }.getOrNull()
+        if (schemeHost?.scheme.equals("http", ignoreCase = true) &&
+            !AiConfig.isCleartextHostAllowed(schemeHost?.host)
+        ) {
+            throw RuntimeException(
+                "明文 http 只允许本机地址（localhost / 127.0.0.1）：" +
+                    "当前地址 ${schemeHost?.host ?: "?"} 请改用 https"
+            )
+        }
         val conn = URL(endpoint).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
@@ -153,13 +165,20 @@ object AiClient {
             }
             val code = conn.responseCode
             if (code != 200) {
-                val errBody = runCatching {
-                    conn.errorStream?.bufferedReader()?.use { reader -> reader.readText() } ?: ""
-                }.getOrDefault("")
+                val errBody = runCatching { BodyLimit.readErrorText(conn.errorStream) }.getOrDefault("")
                 throw RuntimeException(describeHttpError(code, errBody))
             }
-            val body = conn.inputStream.bufferedReader().use { it.readText() }
-            return parseReply(body)
+            // 流式读取 + 上限：readText() 会让恶意/异常端点用一个大 body 把应用 OOM（见 BodyLimit）
+            val body = BodyLimit.read(conn.inputStream)
+            if (body.truncated) {
+                // 截断的 JSON 必然解析不出来，直接说清原因 —— 别让用户看到"返回了无法解析的内容"
+                // 这种误导性结论（他会去怀疑模型，而真正的问题是端点回了超大响应）
+                throw RuntimeException(
+                    "AI 返回的响应体超过 ${BodyLimit.MAX_BYTES / 1024 / 1024}MB，已中止读取：" +
+                        "该端点响应异常，请检查服务地址是否正确"
+                )
+            }
+            return parseReply(body.text)
         } catch (e: IOException) {
             // DNS 失败 / 连不上 / 超时都到这里；底层 message 很晦涩（如 "Unable to resolve host"），补一句人话
             throw RuntimeException("无法连接 AI 服务（${e.message ?: "网络错误"}）：请检查网络与 API 地址", e)
@@ -203,6 +222,10 @@ object AiClient {
 
     /**
      * 常见错误码 → 人话；响应体第一行（官方通常写明原因，如 402 余额不足）截 160 字符附上。
+     *
+     * 附上时必须标明这是**服务端返回的原文**：那一行可能是 HTML、JSON 片段或任意第三方文案，
+     * 不加标注就会和应用自己的话混成一句，看起来像启动器在说胡话（也容易被当成应用的提示照做）。
+     * 错误体在进入这里之前已由 [BodyLimit] 限制过体量。
      */
     internal fun describeHttpError(code: Int, body: String): String {
         val hint = body.lineSequence().firstOrNull { it.isNotBlank() }?.take(160) ?: ""
@@ -214,6 +237,6 @@ object AiClient {
             in 500..599 -> "AI 服务端错误（HTTP $code）：稍后再试"
             else -> "AI 服务返回 HTTP $code"
         }
-        return if (hint.isBlank()) base else "$base：$hint"
+        return if (hint.isBlank()) base else "$base（服务端返回：$hint）"
     }
 }

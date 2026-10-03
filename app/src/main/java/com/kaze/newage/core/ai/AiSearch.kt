@@ -106,12 +106,18 @@ object AiSearch {
             conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val code = conn.responseCode
             if (code != 200) {
-                val err = runCatching {
-                    conn.errorStream?.bufferedReader()?.use { it.readText() }
-                }.getOrDefault("") ?: ""
-                throw RuntimeException("搜索服务返回 HTTP $code${err.take(120).ifBlank { "" }}")
+                // 错误体同样限长：一个 500 错误页面可能是几 MB HTML（见 BodyLimit）
+                val err = runCatching { BodyLimit.readErrorText(conn.errorStream) }.getOrDefault("")
+                throw RuntimeException("搜索服务返回 HTTP $code（服务端返回：${err.take(120).ifBlank { "无内容" }}）")
             }
-            val respBody = conn.inputStream.bufferedReader().use { it.readText() }
+            // 流式读取 + 上限：搜索结果要解 JSON，截断的 JSON 解析不了，直接如实报错
+            val body = BodyLimit.read(conn.inputStream)
+            if (body.truncated) {
+                throw RuntimeException(
+                    "搜索服务返回的响应体超过 ${BodyLimit.MAX_BYTES / 1024 / 1024}MB，已中止读取"
+                )
+            }
+            val respBody = body.text
             return when (provider) {
                 Provider.TAVILY -> parseTavily(respBody)
                 Provider.BOCHA -> parseBocha(respBody)
