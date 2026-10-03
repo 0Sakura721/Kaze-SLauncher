@@ -55,6 +55,23 @@ object AiClient {
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
+     * 当前在飞的连接。
+     *
+     * 存在的理由：HttpURLConnection 是阻塞的，"取消"如果只置一个标志位，用户点了取消
+     * 之后线程仍然卡在 `responseCode` / `read` 上直到 readTimeout（思考模式最长 240 秒），
+     * 期间**额度照扣、界面看着像没反应**。[cancelActive] 从别的线程 `disconnect()`
+     * 让阻塞中的调用立刻以 IOException 结束，这才是真的中断。
+     */
+    private val activeCall = java.util.concurrent.atomic.AtomicReference<HttpURLConnection?>(null)
+
+    /** 中断当前在飞的请求（没有请求时是空操作）。线程安全，可从主线程调用。 */
+    fun cancelActive() {
+        activeCall.getAndSet(null)?.let { conn ->
+            runCatching { conn.disconnect() }
+        }
+    }
+
+    /**
      * 请求体构建（独立出来便于单测：不发起真实网络请求就能锁住请求格式）。
      * temperature 压低（0.3）：诊断要的是准确，不是发散；stream 显式 false。
      */
@@ -140,6 +157,10 @@ object AiClient {
             )
         }
         val conn = URL(endpoint).openConnection() as HttpURLConnection
+        // 登记在飞连接：取消/离开页面时才能真的把它掐断（见 activeCall 的说明）。
+        // 同一时刻只会有一轮请求（调用方有 _aiBusy 门闩），这里仍然用 CAS 清理，
+        // 避免"两轮请求交错"时后结束的那个把新的那个从登记表里抹掉。
+        activeCall.set(conn)
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = CONNECT_TIMEOUT_MS
@@ -183,6 +204,7 @@ object AiClient {
             // DNS 失败 / 连不上 / 超时都到这里；底层 message 很晦涩（如 "Unable to resolve host"），补一句人话
             throw RuntimeException("无法连接 AI 服务（${e.message ?: "网络错误"}）：请检查网络与 API 地址", e)
         } finally {
+            activeCall.compareAndSet(conn, null)
             conn.disconnect()
         }
     }

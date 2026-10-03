@@ -149,6 +149,65 @@ class AiSuggestionTest {
             .forEach { assertFalse("不应判为危险：$it", AiSuggestion.isDangerous(it)) }
     }
 
+    @Test
+    fun `execute reload restart 也算危险命令`() {
+        // execute 是 op 等级 2 的万能入口（可借服务端权限执行任意命令），
+        // reload / restart 会打断所有在线玩家 —— 危害不比 ban 小，卡片必须红字提示
+        listOf(
+            "execute as @a run say hi",
+            "EXECUTE run kill @e",
+            "reload",
+            "restart",
+            "  restart  ",
+        ).forEach { assertTrue("应判为危险：$it", AiSuggestion.isDangerous(it)) }
+        // 只是以这些词开头才有意义：别的词里出现不算
+        listOf("executor list", "restarting", "reloaded").forEach {
+            assertFalse("不应判为危险：$it", AiSuggestion.isDangerous(it))
+        }
+    }
+
+    // ── 解析不出 JSON 时的兜底（别把半截工具 JSON 当分析上屏）──
+
+    @Test
+    fun `残缺的工具 JSON 不会被当成分析文本`() {
+        // 模型被 max_tokens 截断的典型形态：JSON 从中间断掉，content 里还带着"半个文件内容"
+        val raw = """
+            {"analysis":"我准备修改配置","command":"","tool":{"name":"write_file","path":"server.properties","content":"rcon.password=SECRET
+        """.trimIndent()
+        val p = AiSuggestion.parse(raw)
+        assertFalse("不能把候选 JSON 结构当分析显示：${p.analysis}", p.analysis.contains("\"tool\""))
+        assertFalse("文件内容不能借兜底路径上屏", p.analysis.contains("SECRET"))
+        assertFalse(p.analysis.contains("rcon.password"))
+        assertEquals("", p.command)
+    }
+
+    @Test
+    fun `纯散文回复照旧整段作为分析`() {
+        val raw = "服务端看起来没问题，插件也都加载成功了。"
+        assertEquals(raw, AiSuggestion.parse(raw).analysis)
+    }
+
+    @Test
+    fun `兜底只滤掉结构行保留散文`() {
+        val raw = "我看了日志：\n{\"analysis\":\"x\",\n\"command\":\"list\"}\n另外 TPS 有点低。"
+        val kept = AiSuggestion.sanitizeFallbackText(raw)
+        assertTrue("散文要留下：$kept", kept.contains("我看了日志"))
+        assertTrue("散文要留下：$kept", kept.contains("另外 TPS 有点低"))
+        assertFalse("结构行要滤掉：$kept", kept.contains("\"analysis\""))
+        // 全被滤掉时给一句如实说明，而不是空白气泡
+        assertEquals(AiSuggestion.FALLBACK_NOTE, AiSuggestion.parse("{\"tool\":{\"name\":\"read_file\"}").analysis)
+    }
+
+    @Test
+    fun `代码围栏整块在兜底路径被去掉`() {
+        val raw = "结果如下：\n```json\n{\"a\":1\n```\n先这样。"
+        val kept = AiSuggestion.sanitizeFallbackText(raw)
+        assertFalse("围栏内容不该漏出来：$kept", kept.contains("```"))
+        assertFalse(kept.contains("\"a\""))
+        assertTrue(kept.contains("结果如下"))
+        assertTrue(kept.contains("先这样"))
+    }
+
     // ── 文件工具调用解析 ──
 
     @Test

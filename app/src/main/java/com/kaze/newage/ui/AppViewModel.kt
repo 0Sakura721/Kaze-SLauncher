@@ -624,13 +624,43 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile
     private var aiSession: AiTurnSession? = null
 
-    /** 用户请求取消本轮 AI 提问：在工具循环的每个轮次边界生效（进行中的 HTTP 调用会自然超时结束） */
-    @Volatile
-    private var aiCancelRequested = false
+    /** 当前提问协程（取消时要连它一起取消：WebView 搜索挂在协程取消上才会销毁，见 BrowserSearch） */
+    private var aiAskJob: kotlinx.coroutines.Job? = null
 
-    /** 取消当前 AI 提问（正在思考/工具循环中时有效） */
+    /**
+     * 本轮提问被停止的原因（null = 没被停止）。
+     *
+     * 两种停止语义不同：用户点「取消」是**硬中断**（掐断在飞请求 + 取消协程，立刻不再花钱）；
+     * 离开 AI 页面是**软停止**（在飞的这一次回答仍然落地并显示 —— 它已经计费了，
+     * 但不再发起下一轮工具调用，避免在用户看不见的地方继续读文件、继续调模型）。
+     */
+    @Volatile
+    private var aiStopReason: String? = null
+
+    /**
+     * 用户点「取消」：真的中断在飞的 HTTP 请求，而不是只置一个标志位等它自己超时
+     * （思考模式 readTimeout 最长 240 秒，等着等于继续扣额度）。
+     */
     fun cancelAiTurn() {
-        if (_aiBusy.value) aiCancelRequested = true
+        if (!_aiBusy.value) return
+        if (aiStopReason == null) aiStopReason = AI_STOP_CANCELLED
+        // 1) 掐断阻塞中的连接：线程立刻以 IOException 结束，不再等 readTimeout
+        AiClient.cancelActive()
+        // 2) 取消协程：本机搜索（隐藏 WebView）挂在协程取消上才会摘窗 + destroy
+        aiAskJob?.cancel()
+        appendAiMessage(AiChatMessage(nextAiId(), isUser = false, text = "已取消本轮提问。", toolNote = "已取消"))
+    }
+
+    /**
+     * 离开 AI 页面（Compose 侧 onDispose 调用）：停止本轮工具循环。
+     *
+     * 原来离开页面后循环照跑：模型继续读文件、继续多轮调用，用户完全看不到 ——
+     * 既费额度，也让"AI 在读我的配置文件"发生在没有任何界面提示的时候。
+     * 这里只做软停止（见 [aiStopReason]）：已经发出去的那次请求不浪费。
+     */
+    fun onAiPageLeft() {
+        if (!_aiBusy.value) return
+        if (aiStopReason == null) aiStopReason = AI_STOP_LEFT_PAGE
     }
 
     // ── 模型配置档案 + 联网搜索（存取在 SettingsPrefs，这里只做转发）──
@@ -708,10 +738,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         appendAiMessage(AiChatMessage(nextAiId(), isUser = true, text = q))
         _aiBusy.value = true
-        // 新提问作废可能挂起的旧会话与取消标志
+        // 新提问作废可能挂起的旧会话与上一轮的停止标志
         aiSession = null
-        aiCancelRequested = false
-        viewModelScope.launch(Dispatchers.IO) {
+        aiStopReason = null
+        aiAskJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 // ── 联网搜索（开启才走；API 源需已配 Key，本机浏览器源零 Key）──
                 // 失败只降级不阻塞：搜不到就按本地信息回答，气泡上注明原因
@@ -784,9 +814,25 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 // 工具多轮循环：读/列自动执行回喂，写挂起等用户确认（见 runTurn）
                 runTurn(session)
             } catch (e: Exception) {
-                appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "AI 请求失败", isError = true)
-                )
+                // 停止原因优先于异常文案：取消时底层抛的是 IOException("Socket closed")
+                // 这类噪音，直接甩给用户只会让人以为网络坏了。提示在取消/离开时就给过了，
+                // 这里不重复刷屏。
+                val stop = aiStopReason
+                aiStopReason = null
+                aiSession = null
+                when (stop) {
+                    AI_STOP_CANCELLED -> Unit
+                    AI_STOP_LEFT_PAGE -> appendAiMessage(
+                        AiChatMessage(
+                            nextAiId(), isUser = false,
+                            text = "已离开 AI 页面，本轮提问已停止。回到页面可以重新提问。",
+                            toolNote = "已离开页面，已停止",
+                        )
+                    )
+                    else -> appendAiMessage(
+                        AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "AI 请求失败", isError = true)
+                    )
+                }
             } finally {
                 _aiBusy.value = false
             }
@@ -802,12 +848,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun runTurn(session: AiTurnSession) {
         var lastAnalysis = ""
         while (session.roundsLeft > 0) {
-            // 取消在轮次边界生效：进行中的 HTTP 调用让它自然结束（线程有超时兜底）
-            if (aiCancelRequested) {
-                aiCancelRequested = false
+            // 停止在轮次边界生效：用户取消时在飞请求已被掐断，离开页面时刚回来的这一次
+            // 回答照常显示，但不再发起下一轮（不再读文件、不再调模型）
+            aiStopReason?.let { reason ->
+                aiStopReason = null
                 aiSession = null
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = "已取消本轮提问。", toolNote = "已取消")
+                    AiChatMessage(
+                        nextAiId(), isUser = false,
+                        text = if (reason == AI_STOP_CANCELLED) {
+                            "已取消本轮提问。"
+                        } else {
+                            "已离开 AI 页面，本轮提问已停止（避免在后台继续读文件、继续消耗额度）。" +
+                                "回到页面可以重新提问。"
+                        },
+                        toolNote = if (reason == AI_STOP_CANCELLED) "已取消" else "已离开页面，已停止",
+                    )
                 )
                 return
             }
@@ -2028,3 +2084,14 @@ private const val AI_WRITE_DONE = 1
 private const val AI_WRITE_DENIED = 2
 private const val AI_WRITE_FAILED = 3
 private const val AI_WRITE_SKIPPED = 4
+
+/**
+ * 本轮提问被停止的原因（[AppViewModel] 的 `aiStopReason`）。
+ *
+ * - [AI_STOP_CANCELLED]：用户点了「取消」→ 硬中断（disconnect 在飞请求 + 取消协程），
+ *   底层会抛 IOException("Socket closed")，这类噪音**不能**当网络故障报给用户；
+ * - [AI_STOP_LEFT_PAGE]：用户离开了 AI 页面 → 软停止。已经发出去的那一次回答不浪费
+ *   （额度已经扣了），但不再发起下一轮：不在用户看不见的地方继续读文件、继续调模型。
+ */
+private const val AI_STOP_CANCELLED = "cancelled"
+private const val AI_STOP_LEFT_PAGE = "left_page"

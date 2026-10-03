@@ -61,6 +61,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -143,6 +144,13 @@ fun AiScreen(
         StatusTone.Busy -> palette.busy
         StatusTone.Idle -> palette.idle
         StatusTone.Error -> palette.error
+    }
+
+    // 离开 AI 页面（返回、切标签页、进 AI 设置）时停止本轮工具循环：循环会继续读文件、
+    // 继续调模型，用户完全看不到也停不了 —— 既费额度，也等于"AI 在无人看管时读配置"。
+    // 只做软停止：已经发出去的那次回答仍然落地显示（它已经计费了）。
+    DisposableEffect(Unit) {
+        onDispose { viewModel.onAiPageLeft() }
     }
 
     // 底部 insets 用 safeDrawing 的 bottom 分量：键盘弹出 = 键盘顶，收起 = 底栏高，

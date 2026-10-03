@@ -291,10 +291,16 @@ object AiFileTools {
         }
     }
 
-    /** 读文本文件；超长截断并注明。路径相对实例目录，`app:` 前缀读应用目录。 */
+    /**
+     * 读文本文件；超长截断并注明。路径相对实例目录，`app:` 前缀读应用目录。
+     *
+     * 错误信息里只用**用户给的那个相对路径**，不回显解析后的绝对路径：这些文字会回喂给模型，
+     * 而绝对路径会把设备的目录结构（用户名、存储布局、实例根位置）一并交出去 ——
+     * 对诊断没有价值，对探测这台设备有用。需要看绝对路径的是用户，确认卡上已经给了。
+     */
     fun readFile(instanceDir: File, appFilesDir: File?, path: String): String {
         val f = resolve(instanceDir, appFilesDir, path, forWrite = false)
-        if (!f.exists()) throw FileNotFoundException("${f.path}（文件不存在，可先用 list_dir 确认位置）")
+        if (!f.exists()) throw FileNotFoundException("${displayPath(path)}（文件不存在，可先用 list_dir 确认位置）")
         if (f.isDirectory) throw IllegalArgumentException("${f.name} 是目录，请用 list_dir 列出")
         guardTextType(f, forWrite = false)
         val total = f.length()
@@ -317,24 +323,48 @@ object AiFileTools {
         }
     }
 
-    /** 列目录：目录在前、按名排序，带大小；超过 [MAX_LIST] 条注明剩余。 */
+    /** 上屏/回喂用的路径显示：只保留用户给过的相对写法，去掉绝对路径前缀 */
+    private fun displayPath(path: String): String = path.trim().trimStart('/')
+
+    /**
+     * 列目录：目录在前、按名排序，带大小；超过 [MAX_LIST] 条注明剩余。
+     *
+     * 用 [java.nio.file.Files.newDirectoryStream] **流式**遍历，而不是 `listFiles()`：
+     * 后者会把整个目录的 File 对象一次性建出来，遇到几万项的目录（插件的数据目录、
+     * 日志轮转目录很常见）光是列一下就吃掉大量内存 —— 而我们最多只用前 [MAX_LIST] 条。
+     * 边遍历边停（达到上限后只数剩余的条数，不再建对象）。
+     */
     fun listDir(instanceDir: File, appFilesDir: File?, path: String): String {
         val d = resolve(instanceDir, appFilesDir, path, forWrite = false)
-        if (!d.exists()) throw FileNotFoundException("${d.path}（目录不存在）")
+        if (!d.exists()) throw FileNotFoundException("${displayPath(path)}（目录不存在）")
         if (!d.isDirectory) throw IllegalArgumentException("${d.name} 是文件，请用 read_file 读取")
-        val entries = d.listFiles()
-            ?.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() })
-            ?: throw IOException("无法列出 ${d.path}")
-        if (entries.isEmpty()) return "（空目录）"
-        val sb = StringBuilder()
-        entries.take(MAX_LIST).forEach { e ->
-            if (e.isDirectory) {
-                sb.append(e.name).append("/\n")
-            } else {
-                sb.append(e.name).append("  (").append(formatSize(e.length())).append(")\n")
+        val dirs = ArrayList<String>()
+        val files = ArrayList<Pair<String, Long>>()
+        var extra = 0
+        try {
+            java.nio.file.Files.newDirectoryStream(d.toPath()).use { stream ->
+                for (entry in stream) {
+                    val e = entry.toFile()
+                    val isDir = runCatching { java.nio.file.Files.isDirectory(entry) }.getOrDefault(false)
+                    if (dirs.size + files.size >= MAX_LIST) {
+                        extra++
+                    } else if (isDir) {
+                        dirs += e.name
+                    } else {
+                        files += e.name to runCatching { java.nio.file.Files.size(entry) }.getOrDefault(0L)
+                    }
+                }
             }
+        } catch (e: IOException) {
+            throw IOException("无法列出 ${displayPath(path)}（${e.message ?: "IO 错误"}）")
         }
-        if (entries.size > MAX_LIST) sb.append("…还有 ${entries.size - MAX_LIST} 项未列出\n")
+        if (dirs.isEmpty() && files.isEmpty() && extra == 0) return "（空目录）"
+        dirs.sortBy { it.lowercase() }
+        files.sortBy { it.first.lowercase() }
+        val sb = StringBuilder()
+        dirs.forEach { sb.append(it).append("/\n") }
+        files.forEach { (name, size) -> sb.append(name).append("  (").append(formatSize(size)).append(")\n") }
+        if (extra > 0) sb.append("…还有 $extra 项未列出\n")
         return sb.toString().trimEnd()
     }
 
@@ -358,11 +388,12 @@ object AiFileTools {
         guardTextType(f, forWrite = true)
         val parent = f.parentFile
         if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.isDirectory) {
-            throw IOException("无法创建目录：${parent.path}")
+            // 同样只用相对路径回喂（绝对路径会把设备目录结构带给模型，见 readFile 的说明）
+            throw IOException("无法创建上级目录：${displayPath(path).substringBeforeLast('/', "")}")
         }
         var bakNote = ""
         if (f.exists()) {
-            if (!f.isFile) throw IllegalArgumentException("${f.path} 不是普通文件")
+            if (!f.isFile) throw IllegalArgumentException("${f.name} 不是普通文件")
             // 备份名带时间戳：原来的 `同名.bak` 只有**一代** —— 同一天让 AI 改两次，
             // 第二代就把第一代（也就是"改坏之前的原始状态"）覆盖掉了，回滚凭据当场消失。
             // 时间戳让每一代都留着，`latest` 不再是唯一可回滚的点。

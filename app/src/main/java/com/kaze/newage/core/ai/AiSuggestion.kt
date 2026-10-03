@@ -94,8 +94,43 @@ object AiSuggestion {
                 ?.let { AiToolCall(it.name.trim().lowercase(), it.path.trim(), it.content) }
             return Parsed(reply.analysis.trim().take(MAX_ANALYSIS_LEN), cmd, tool)
         }
-        return Parsed(text.take(MAX_ANALYSIS_LEN), "")
+        // 解析不出 JSON：**不能**把整段原文当分析上屏。模型跑到一半被截断时，原文里就是
+        // 半截工具调用（可能还有 content 字段里成篇的文件内容），直接显示等于把"残缺的
+        // 工具 JSON"当成 AI 的结论给用户看 —— 用户会以为 AI 已经读过/改过什么。
+        // 这里只保留像人话的部分，全被滤掉就给一句如实说明。
+        val fallback = sanitizeFallbackText(text).take(MAX_ANALYSIS_LEN)
+        return Parsed(fallback.ifBlank { FALLBACK_NOTE }, "")
     }
+
+    /** JSON 无法解析时的说明文案（不暴露半截 JSON） */
+    internal const val FALLBACK_NOTE =
+        "（模型这次的回复不是预期的 JSON 格式，已略去其中无法解析的结构化内容。可以再问一次或换个说法。）"
+
+    /**
+     * 兜底文本：去掉代码围栏整块与"看起来是 JSON 结构"的行。
+     * 保留散文（模型有时就只是想说话），滤掉 `{`、`"analysis": …` 这类结构化残片。
+     */
+    internal fun sanitizeFallbackText(raw: String): String {
+        val withoutFences = FENCED_BLOCK.replace(raw, " ")
+        val kept = withoutFences.lines().filterNot { looksLikeJsonLine(it) }
+        // 连续空行压成一个，避免滤掉 JSON 行之后留下大片空白
+        return kept.joinToString("\n").replace(Regex("\n{3,}"), "\n\n").trim()
+    }
+
+    private fun looksLikeJsonLine(line: String): Boolean {
+        val t = line.trim()
+        if (t.isEmpty()) return false
+        if (t.startsWith("{") || t.startsWith("}") || t.startsWith("[") || t.startsWith("]")) return true
+        if (t.startsWith("```")) return true
+        return JSON_KEY_LINE.containsMatchIn(t)
+    }
+
+    private val FENCED_BLOCK = Regex("```.*?```", RegexOption.DOT_MATCHES_ALL)
+
+    /** 形如 `"tool": {` / `"content": "…"` 的键值行（残缺 JSON 的典型形态） */
+    private val JSON_KEY_LINE = Regex(
+        """^"(analysis|command|tool|name|path|content|reasoning)"\s*:"""
+    )
 
     /**
      * 清洗模型给出的命令；不可用返回 null。
@@ -117,10 +152,15 @@ object AiSuggestion {
     /**
      * 危险命令分级（P0 已经是"建议 + 人工确认"，但卡片上仍要给醒目提示）。
      * 这些命令直接影响玩家 / 存档 / 权限 / 服务端生命。
+     *
+     * `execute` / `reload` / `restart` 是审计补进来的：它们不改玩家名单，但会让服务端
+     * **以服务端权限执行任意命令或整机重启**（execute 是 op 等级 2 的万能入口，
+     * reload/restart 会打断所有在线玩家）—— 危害不比 ban 小，提示不能漏。
      */
     private val DANGEROUS_FIRST_WORDS = setOf(
         "stop", "op", "deop", "ban", "ban-ip", "pardon", "pardon-ip",
         "kick", "kill", "whitelist", "save-off", "save-on",
+        "execute", "reload", "restart",
     )
 
     fun isDangerous(command: String): Boolean =

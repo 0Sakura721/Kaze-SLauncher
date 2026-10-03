@@ -184,4 +184,69 @@ class AiBodyLimitTest {
         // 没有错误体时不硬凑一句"服务端返回：（空）"
         assertFalse(AiClient.describeHttpError(503, "").contains("服务端返回"))
     }
+
+    /**
+     * 取消必须真的中断在飞请求。
+     *
+     * 假端点回了状态行但**永远不回正文**，于是客户端会卡在读正文上（readTimeout 最长 240 秒）。
+     * 此时调 [AiClient.cancelActive] 必须在几秒内让调用以异常结束 —— 只置一个标志位、
+     * 等它自己超时的实现会在这里卡到超时（等于用户点了取消还在继续扣额度）。
+     */
+    @Test
+    fun `取消会掐断在飞请求而不是等 readTimeout`() {
+        val serverSocket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+        thread(isDaemon = true) {
+            try {
+                while (true) {
+                    val socket = serverSocket.accept() ?: break
+                    thread(isDaemon = true) {
+                        runCatching {
+                            val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.ISO_8859_1))
+                            reader.readLine()
+                            while (true) {
+                                val line = reader.readLine() ?: break
+                                if (line.isEmpty()) break
+                            }
+                            // 声明 1MB 正文但一个字节都不发：客户端会阻塞在读取上
+                            socket.getOutputStream().apply {
+                                write(
+                                    ("HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\nConnection: close\r\n\r\n")
+                                        .toByteArray(Charsets.ISO_8859_1)
+                                )
+                                flush()
+                            }
+                            Thread.sleep(30_000)
+                        }
+                    }
+                }
+            } catch (_: IOException) {
+            }
+        }
+        val base = "http://127.0.0.1:${serverSocket.localPort}"
+        val pool = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "ai-cancel-test").apply { isDaemon = true }
+        }
+        try {
+            val future = pool.submit<Throwable?> {
+                try {
+                    AiClient.chat(configFor(base), listOf(AiMessage(AiMessage.ROLE_USER, "q")))
+                    null
+                } catch (t: Throwable) {
+                    t
+                }
+            }
+            // 等它真的进到"读正文"那一步（状态行已回，正文永远不来）
+            Thread.sleep(700)
+            assertFalse("请求不该在取消前就结束", future.isDone)
+            val t0 = System.currentTimeMillis()
+            AiClient.cancelActive()
+            val err = future.get(8, java.util.concurrent.TimeUnit.SECONDS)
+            val cost = System.currentTimeMillis() - t0
+            assertTrue("取消后应以异常结束（实际返回 null）", err != null)
+            assertTrue("应在数秒内结束（readTimeout 是 120 秒），实际 ${cost}ms", cost < 8_000)
+        } finally {
+            pool.shutdownNow()
+            runCatching { serverSocket.close() }
+        }
+    }
 }

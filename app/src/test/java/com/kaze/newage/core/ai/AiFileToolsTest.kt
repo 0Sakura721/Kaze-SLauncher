@@ -172,11 +172,37 @@ class AiFileToolsTest {
 
     @Test
     fun `读不存在的文件给可读错误`() {
+        val root = instanceDir()
         try {
-            AiFileTools.readFile(instanceDir(), null, "logs/latest.log")
+            AiFileTools.readFile(root, null, "logs/latest.log")
             fail("应当抛出")
         } catch (e: Exception) {
             assertTrue(e.message!!.contains("不存在"))
+            // 错误信息会回喂给模型：不能把设备的绝对路径（用户名、存储布局）一并交出去
+            assertFalse("错误信息不该回显绝对路径：${e.message}", e.message!!.contains(root.canonicalFile.path))
+        }
+    }
+
+    @Test
+    fun `列目录超过上限只统计剩余条数`() {
+        val root = instanceDir()
+        repeat(205) { File(root, "file-$it.txt").writeText("x") }
+        val out = AiFileTools.listDir(root, null, ".")
+        assertTrue("应注明还有多少项未列出：$out", out.contains("还有"))
+        // 上限是 200：多出来的 5 项只计数，不逐条列出
+        assertTrue(out.contains("…还有 5 项未列出"))
+        assertFalse(out.contains("file-204.txt"))
+    }
+
+    @Test
+    fun `列目录失败信息不回显绝对路径`() {
+        val root = instanceDir()
+        try {
+            AiFileTools.listDir(root, null, "nope")
+            fail("应当抛出")
+        } catch (e: Exception) {
+            assertTrue(e.message!!.contains("不存在"))
+            assertFalse("错误信息不该回显绝对路径：${e.message}", e.message!!.contains(root.canonicalFile.path))
         }
     }
 
