@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TravelExplore
@@ -513,9 +514,11 @@ private fun ToolNoteRow(msg: AppViewModel.AiChatMessage) {
 }
 
 /**
- * 文件写入确认卡片：目标实例 + 绝对路径 + 完整新内容预览（终端深底、可滚动）+ 允许/拒绝。
+ * 工具确认卡片：目标实例 + 绝对路径 + 完整新内容预览（终端深底、可滚动）+ 允许/拒绝。
  * 安全底线：AI 永远不能直接落盘 —— 每次写入都必须人工批准；
  * 批准后由 AiFileTools 执行（自动留备份），结果回喂给模型继续回答。
+ * **敏感文件的读取**（凭据类名字 / ops.json / 带 rcon 的 server.properties）也走这张卡：
+ * 读取结果同样会进模型上下文并可能发往第三方端点，而触发它的可能只是玩家聊天里的一句话。
  *
  * 卡片要对"同名文件"这件事负责：每个实例都有一份 server.properties，
  * 只给相对路径的话，用户根本分不清这次要改的是哪个实例的哪份文件，
@@ -552,12 +555,15 @@ private fun WriteRequestRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
-                        Icons.Filled.Edit,
+                        if (req.isRead) Icons.Filled.Search else Icons.Filled.Edit,
                         contentDescription = null,
                         modifier = Modifier.size(15.dp),
                         tint = scheme.primary,
                     )
-                    Text("AI 请求写入文件", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        if (req.isRead) "AI 请求读取敏感文件" else "AI 请求写入文件",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
                 }
                 // 目标实例 + 解析后的绝对路径：路径里可能带模型/网页给的控制符，
                 // 上屏前统一过滤（终端转义与 bidi 反转都能伪造出"看起来是另一个文件"）
@@ -596,12 +602,28 @@ private fun WriteRequestRow(
                         )
                     }
                 }
-                Text(
-                    "${req.bytes} 字节 · 共 ${req.content.lines().size} 行 · 覆盖已有文件时会自动留备份",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = scheme.onSurfaceVariant,
-                )
-                Surface(
+                // 敏感读取：说清"为什么读它需要你点头"（凭据会被带进模型上下文与第三方端点）
+                req.sensitiveReason?.let { reason ->
+                    Text(
+                        AiSanitize.display(reason),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = scheme.error,
+                    )
+                }
+                if (req.isRead) {
+                    Text(
+                        "允许后文件内容会作为诊断资料发给你配置的 AI 服务；拒绝则完全不读取。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        "${req.bytes} 字节 · 共 ${req.content.lines().size} 行 · 覆盖已有文件时会自动留带时间戳的备份",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                if (!req.isRead) Surface(
                     shape = M3Shape.medium,
                     color = consoleBackgroundColor(),
                     contentColor = consoleLineColor(LineType.Info),
@@ -620,7 +642,7 @@ private fun WriteRequestRow(
                         )
                     }
                 }
-                if (truncated) {
+                if (truncated && !req.isRead) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -648,10 +670,14 @@ private fun WriteRequestRow(
                             modifier = Modifier.size(16.dp),
                             tint = scheme.primary,
                         )
-                        Text("已写入", style = MaterialTheme.typography.labelLarge, color = scheme.primary)
+                        Text(
+                            if (req.isRead) "已读取" else "已写入",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = scheme.primary,
+                        )
                     }
                     2 -> Text(
-                        "已拒绝（未写入任何内容）",
+                        if (req.isRead) "已拒绝（未读取该文件）" else "已拒绝（未写入任何内容）",
                         style = MaterialTheme.typography.labelLarge,
                         color = scheme.onSurfaceVariant,
                     )
@@ -661,7 +687,7 @@ private fun WriteRequestRow(
                     ) {
                         // 成功才置 1：失败必须如实显示，并且允许重试（否则用户被卡死在"待确认"）
                         Text(
-                            "写入失败，未改动文件",
+                            if (req.isRead) "读取失败，未拿到内容" else "写入失败，未改动文件",
                             style = MaterialTheme.typography.labelLarge,
                             color = scheme.error,
                         )
@@ -669,15 +695,16 @@ private fun WriteRequestRow(
                         OutlinedButton(onClick = onDeny, enabled = !busy) { Text("放弃") }
                     }
                     4 -> Text(
-                        // 本轮会话已结束：写入请求**没有执行**（也没有可继续的会话可重试）。
+                        // 本轮会话已结束：这次请求**没有执行**（也没有可继续的会话可重试）。
                         // 这一档不能借用状态 3 的"重试"按钮 —— 点了也无处可去，只能是假动作。
-                        "未执行：本轮 AI 会话已结束，文件未改动。如需写入请重新提问。",
+                        if (req.isRead) "未执行：本轮 AI 会话已结束，未读取该文件。如需继续请重新提问。"
+                        else "未执行：本轮 AI 会话已结束，文件未改动。如需写入请重新提问。",
                         style = MaterialTheme.typography.labelLarge,
                         color = scheme.error,
                     )
                     else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onApprove, enabled = !busy) {
-                            Text("允许写入")
+                            Text(if (req.isRead) "允许读取" else "允许写入")
                         }
                         OutlinedButton(onClick = onDeny, enabled = !busy) {
                             Text("拒绝")

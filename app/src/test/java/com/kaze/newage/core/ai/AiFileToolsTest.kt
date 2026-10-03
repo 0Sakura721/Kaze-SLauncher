@@ -66,6 +66,101 @@ class AiFileToolsTest {
         }
     }
 
+    /**
+     * `app:` 的可读范围被刻意收窄到"应用日志 + 诊断文件"。
+     *
+     * 原来整个 filesDir 都是可读根，里面有 `instances.json`（实例库：所有实例的名字、
+     * 路径、内存配置）、`background.png`、`linux/`（rootfs）。这些与诊断无关，
+     * 却是注入者最想要的东西（一次 read_file 就能把整份实例清单发往第三方端点）。
+     */
+    @Test
+    fun `app 前缀只开放日志与诊断文件`() {
+        val appDir = tmp.newFolder("appfiles")
+        File(appDir, "logs").mkdirs()
+        File(appDir, "logs/latest.log").writeText("log line")
+        File(appDir, "instances.json").writeText("""[{"name":"生存服"}]""")
+        File(appDir, "background.png").writeBytes(byteArrayOf(1))
+        File(appDir, "linux").mkdirs()
+
+        // 允许：日志目录下的文件、日志目录本身、诊断文件
+        assertEquals("log line", AiFileTools.readFile(instanceDir(), appDir, "app:logs/latest.log"))
+        assertTrue(AiFileTools.listDir(instanceDir(), appDir, "app:logs").contains("latest.log"))
+        File(appDir, "diagnostics.txt").writeText("env ok")
+        assertEquals("env ok", AiFileTools.readFile(instanceDir(), appDir, "app:diagnostics.txt"))
+
+        // 拒绝：实例库与其它任何文件
+        listOf(
+            "app:instances.json",
+            "app:background.png",
+            "app:linux",
+            "app:",                    // 连根目录列表都不给（否则等于列出整个私有目录）
+            "app:logs/../instances.json", // 绕行写法：按规范路径判定，仍然拦下
+        ).forEach { p ->
+            try {
+                AiFileTools.readFile(instanceDir(), appDir, p)
+                fail("应当拒绝读取：$p")
+            } catch (e: IllegalArgumentException) {
+                assertTrue("错误信息应说明只开放日志与诊断：${e.message}", e.message!!.contains("只允许读取应用日志"))
+            }
+        }
+    }
+
+    // ── 敏感读取策略（凭据类文件读之前要用户确认）──
+
+    @Test
+    fun `凭据类文件名与权限名单需要确认后才能读`() {
+        val root = instanceDir()
+        listOf(
+            "plugins/AuthMe/config.yml",             // 名字本身不含凭据片段
+            "plugins/MySQL/db_password.txt",
+            "config/apikey.json",
+            "config/access_token.yml",
+            "config/rcon.secret",
+            "config/serverkey.txt",
+            "ops.json",
+        ).forEach { p ->
+            val policy = AiFileTools.readPolicyFor(root, p)
+            if (p == "plugins/AuthMe/config.yml") {
+                // 名字不含凭据片段：不额外打扰（内容层面的判断做不到，也不该猜）
+                assertFalse("不该无端要求确认：$p", policy.needsConfirm)
+            } else {
+                assertTrue("应要求确认：$p", policy.needsConfirm)
+            }
+        }
+    }
+
+    @Test
+    fun `读策略给出解析后的绝对路径`() {
+        val root = instanceDir()
+        val policy = AiFileTools.readPolicyFor(root, "plugins/MySQL/db_password.txt")
+        assertEquals(
+            root.canonicalFile.path + File.separator + "plugins" + File.separator +
+                "MySQL" + File.separator + "db_password.txt",
+            policy.resolvedPath,
+        )
+    }
+
+    @Test
+    fun `server_properties 只在这真的带 rcon 时才要确认`() {
+        val root = instanceDir()
+        val props = File(root, "server.properties")
+        // 普通 server.properties：诊断最常用的文件，一律要求确认会平白拦住正常排查
+        props.writeText("server-port=25565\nmax-players=20\n")
+        assertFalse(AiFileTools.readPolicyFor(root, "server.properties").needsConfirm)
+        // 带 rcon 密码：读了等于把远程控制口令交给模型
+        props.writeText("server-port=25565\nrcon.password=S3cret\n")
+        assertTrue(AiFileTools.readPolicyFor(root, "server.properties").needsConfirm)
+        // 开了 rcon 但密码行为空/被注释掉：不算（没有口令可泄露）
+        props.writeText("enable-rcon=true\nrcon.password=\n# rcon.password=x\n")
+        assertTrue("enable-rcon=true 也算敏感", AiFileTools.readPolicyFor(root, "server.properties").needsConfirm)
+        props.writeText("enable-rcon=false\nrcon.password=\n")
+        assertFalse(AiFileTools.readPolicyFor(root, "server.properties").needsConfirm)
+        // 单独的 rcon 判定
+        assertTrue(AiFileTools.isRconSecretLine("rcon.password=abc"))
+        assertFalse(AiFileTools.isRconSecretLine("# rcon.password=abc"))
+        assertFalse(AiFileTools.isRconSecretLine("rcon.password="))
+    }
+
     // ── 读取 ──
 
     @Test
@@ -155,12 +250,52 @@ class AiFileToolsTest {
     }
 
     @Test
-    fun `覆盖已有文件留 bak 备份`() {
+    fun `覆盖已有文件留带时间戳的备份`() {
+        val root = instanceDir()
+        File(root, "server.properties").writeText("old=1")
+        val out = AiFileTools.writeFile(root, "server.properties", "new=2")
+        assertEquals("new=2", File(root, "server.properties").readText())
+        val baks = root.listFiles().orEmpty().filter { it.name.startsWith("server.properties.") && it.name.endsWith(".bak") }
+        assertEquals("应当恰好留一代备份：${baks.map { it.name }}", 1, baks.size)
+        assertEquals("old=1", baks[0].readText())
+        // 备份名必须带时间戳：`server.properties.bak` 这种固定名会在第二次写入时被覆盖，
+        // 而它正是"改坏之前的状态"，覆盖掉就等于没有回滚点
+        assertTrue("备份名应含时间戳：${baks[0].name}", baks[0].name != "server.properties.bak")
+        assertTrue("提示行应说明备份文件名：$out", out.contains(baks[0].name))
+        assertTrue("提示行应按字符口径给出上限相关内容：$out", out.contains("字符"))
+    }
+
+    @Test
+    fun `连续两次覆盖留下两代备份`() {
+        val root = instanceDir()
+        File(root, "server.properties").writeText("v1")
+        AiFileTools.writeFile(root, "server.properties", "v2")
+        AiFileTools.writeFile(root, "server.properties", "v3")
+        val contents = root.listFiles().orEmpty()
+            .filter { it.name.startsWith("server.properties.") && it.name.endsWith(".bak") }
+            .map { it.readText() }
+            .toSet()
+        assertEquals("原始内容与中间态都该留着：$contents", setOf("v1", "v2"), contents)
+    }
+
+    @Test
+    fun `备份文件本身不在 AI 可读写的类型名单里`() {
         val root = instanceDir()
         File(root, "server.properties").writeText("old=1")
         AiFileTools.writeFile(root, "server.properties", "new=2")
-        assertEquals("new=2", File(root, "server.properties").readText())
-        assertEquals("old=1", File(root, "server.properties.bak").readText())
+        val bak = root.listFiles()!!.first { it.name.endsWith(".bak") }
+        try {
+            AiFileTools.writeFile(root, bak.name, "hacked")
+            fail("AI 不应能写 .bak：备份是唯一的回滚凭据")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("不在可写类型名单"))
+        }
+        try {
+            AiFileTools.readFile(root, null, bak.name)
+            fail("AI 不应能读 .bak")
+        } catch (e: IllegalArgumentException) {
+            assertTrue(e.message!!.contains("不在可读类型名单"))
+        }
     }
 
     @Test
@@ -184,7 +319,7 @@ class AiFileToolsTest {
     fun `超大内容拒绝写入`() {
         val root = instanceDir()
         try {
-            AiFileTools.writeFile(root, "big.txt", "x".repeat(AiFileTools.MAX_WRITE_BYTES + 1))
+            AiFileTools.writeFile(root, "big.txt", "x".repeat(AiFileTools.MAX_WRITE_CHARS + 1))
             fail("应当拒绝")
         } catch (e: IllegalArgumentException) {
             assertTrue(e.message!!.contains("过大"))

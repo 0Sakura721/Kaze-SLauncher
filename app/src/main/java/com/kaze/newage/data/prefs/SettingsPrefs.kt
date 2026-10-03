@@ -143,7 +143,20 @@ emember(path) 缓存位图的话，
     //   其它服务商若思考=换模型名，可把第二个模型名填进档案。
     // API Key / 搜索 Key 只存应用私有的 [secretPrefs]（别的应用读不到，也不进云备份），
     // 绝不入库、绝不写日志。
-    val aiProfiles = mutableStateOf(AiProfileStore.decode(secretPrefs.getString("ai_profiles", "") ?: ""))
+    /** 档案 JSON 的**原始串**：损坏时靠它兜底（见 [aiProfilesCorrupt]） */
+    private val rawAiProfiles: String = secretPrefs.getString("ai_profiles", "") ?: ""
+    private val decodedAiProfiles = AiProfileStore.decodeResult(rawAiProfiles)
+
+    /**
+     * 档案 JSON 损坏（有内容但解析不了）。
+     *
+     * 界面必须提示，且**不允许被静默覆盖**：原实现 decode 失败只返回 emptyList()，
+     * 界面显示"还没有配置"，用户照着引导新建一份就把损坏的原串覆盖掉 —— 里面的 Key
+     * 全部无声消失。现在：损坏时保留原串、置位这个标志，用户显式清除或保存新配置时
+     * 才把原文另存到 [CORRUPT_PROFILES_BACKUP_KEY] 再覆盖。
+     */
+    val aiProfilesCorrupt = mutableStateOf(decodedAiProfiles.corrupt)
+    val aiProfiles = mutableStateOf(decodedAiProfiles.profiles)
 
     /** 「对话」功能分配到的档案 id */
     val aiChatProfileId = mutableStateOf(prefs.getString("ai_chat_profile_id", "") ?: "")
@@ -177,7 +190,10 @@ emember(path) 缓存位图的话，
         // 旧单配置 → 档案：P0/P1 存的是散键（ai_api_key + ai_base_url + ai_model_standard/thinking，
         // 更早还有 ai_model）。只要填过 Key 就拼成一个「DeepSeek」档案并设为对话配置，绝不丢 Key。
         // 放在 aiProfiles 等声明之后：属性按声明顺序初始化。
-        if (aiProfiles.value.isEmpty()) {
+        //
+        // 档案 JSON 损坏时**跳过迁移**：迁移会往 `ai_profiles` 写新内容，等于把损坏的原串
+        // （里面可能还有能救回来的 Key）当场覆盖掉。先让用户看到提示、由他决定怎么处理。
+        if (aiProfiles.value.isEmpty() && !aiProfilesCorrupt.value) {
             val legacyKey = prefs.getString("ai_api_key", "")?.trim().orEmpty()
             if (legacyKey.isNotBlank()) {
                 val standard = prefs.getString("ai_model_standard", null)
@@ -241,6 +257,34 @@ emember(path) 缓存位图的话，
             .distinct()
             .ifEmpty { listOf(AiConfig.DEFAULT_MODEL) }
 
+    /**
+     * 写档案列表（**唯一**写 `ai_profiles` 的入口）。
+     *
+     * 损坏状态下写入 = 用户显式覆盖：先把原串完整转存到 [CORRUPT_PROFILES_BACKUP_KEY]
+     * （独立键，永不解析、永不被后续写入碰到），再覆盖 —— 这样"配置损坏"这条路上
+     * 不会出现任何静默丢弃；想找回原文的人仍能在 prefs 里找到。
+     */
+    private fun persistAiProfiles(list: List<AiProfile>) {
+        if (aiProfilesCorrupt.value) {
+            secretPrefs.edit().putString(CORRUPT_PROFILES_BACKUP_KEY, rawAiProfiles).apply()
+            aiProfilesCorrupt.value = false
+        }
+        secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+    }
+
+    /**
+     * 用户显式清除损坏的档案数据（设置页那张提示卡上的按钮）。
+     * 同样先备份原串再删键：清除的是"启动器的可用配置"，不是用户的数据。
+     */
+    fun clearCorruptAiProfiles() {
+        if (rawAiProfiles.isNotEmpty()) {
+            secretPrefs.edit().putString(CORRUPT_PROFILES_BACKUP_KEY, rawAiProfiles).apply()
+        }
+        secretPrefs.edit().remove("ai_profiles").apply()
+        aiProfiles.value = emptyList()
+        aiProfilesCorrupt.value = false
+    }
+
     /** 新增或更新档案（按 id 覆盖，编辑保持原位置）；首个档案自动成为对话配置 */
     fun saveAiProfile(profile: AiProfile) {
         val list = if (aiProfiles.value.any { it.id == profile.id }) {
@@ -249,7 +293,7 @@ emember(path) 缓存位图的话，
             aiProfiles.value + profile
         }
         aiProfiles.value = list
-        secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+        persistAiProfiles(list)
         if (aiChatProfileId.value.isBlank() || aiProfiles.value.none { it.id == aiChatProfileId.value }) {
             setChatAiProfile(profile.id)
         }
@@ -259,7 +303,7 @@ emember(path) 缓存位图的话，
     fun deleteAiProfile(id: String) {
         val list = aiProfiles.value.filterNot { it.id == id }
         aiProfiles.value = list
-        secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(list)).apply()
+        persistAiProfiles(list)
         if (aiChatProfileId.value == id) setChatAiProfile(list.firstOrNull()?.id.orEmpty())
     }
 
@@ -468,6 +512,14 @@ emember(path) 缓存位图的话，
 
         /** 只装 AI 密钥的 prefs 文件名（备份规则按这个文件名排除，改它必须同步改两个 xml） */
         internal const val SECRET_PREFS_NAME = "kaze_ai_secrets"
+
+        /**
+         * 损坏档案原文的备份键。
+         *
+         * 用户明确覆盖/清除损坏数据时，原文先转存到这里：启动器不再解析它（也永远不会
+         * 被后续写入碰到），但内容仍然留在设备上，需要时能人工找回。
+         */
+        internal const val CORRUPT_PROFILES_BACKUP_KEY = "ai_profiles_corrupt_raw"
 
         /**
          * 把 AI 密钥从旧的 `kaze_ui_settings` 搬进独立文件（一次性，构造 SettingsPrefs 时执行）。

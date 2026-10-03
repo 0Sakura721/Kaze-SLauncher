@@ -141,6 +141,33 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
             "deepseek-flash（思考模式由「深度思考」开关控制，无需填两个模型名）；" +
             "其它服务商若“思考 = 换模型名”，可把两个名字都填进模型名（逗号分隔）。"
     )
+    // 损坏提示必须排在列表之前：这里的"看不到配置"和"从没配过"是两件事，
+    // 不加区分的话用户会照着下面的引导新建配置，把损坏的原串（含 Key）直接覆盖掉
+    if (prefs.aiProfilesCorrupt.value) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 6.dp),
+            shape = M3Shape.largeIncreased,
+            color = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ) {
+            Column(
+                Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text("模型配置数据损坏，未覆盖", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "已保存的模型配置无法解析（可能写入中断或被外部改动），启动器**没有动这份数据**，" +
+                        "所以暂时看不到那些配置。原文会在你保存新配置或点下面按钮时另存为损坏备份，不会丢掉。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { viewModel.clearCorruptAiProfiles() }) {
+                    Text("清除损坏数据并重新开始")
+                }
+            }
+        }
+    }
     Spacer(Modifier.height(8.dp))
 
     profiles.forEach { p ->
@@ -203,7 +230,7 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
         Spacer(Modifier.width(6.dp))
         Text("新增配置")
     }
-    if (profiles.isEmpty()) {
+    if (profiles.isEmpty() && !prefs.aiProfilesCorrupt.value) {
         SectionNote("还没有配置 —— 点「新增配置」已预填 DeepSeek 默认值，填上你的 Key 即可用。")
     }
 }

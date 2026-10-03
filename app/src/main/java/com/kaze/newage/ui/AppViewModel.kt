@@ -525,11 +525,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     // ── AI 助手（P0：只读诊断 + 建议命令；命令必须用户点「执行」才真正发送）──
 
     /**
-     * 待用户确认的 AI 文件写入请求（内容全文随卡片展示，确认后才落盘）。
+     * 待用户确认的 AI 工具请求（写入内容全文随卡片展示；**敏感文件的读取**也走这张卡）。
      *
-     * 确认卡必须让用户看清"写到哪个实例的哪个文件"：只显示模型给的相对路径时，
+     * 确认卡必须让用户看清"写到/读到哪个实例的哪个文件"：只显示模型给的相对路径时，
      * 同名文件（每个实例都有一份 server.properties）在用户眼里是完全一样的，
      * 而 AI 的上下文又可能被玩家聊天/网页结果污染 —— 所以要带上实例名与解析后的绝对路径。
+     *
+     * 读与写共用同一条确认链路（挂起会话 → 用户点确认 → 继续这一轮），是为了不给
+     * "确认"这件事留第二套实现：状态机、会话续跑、结果回喂全都只有一条路。[isRead]
+     * 区分两者，卡片文案与执行动作据此分支。
      */
     data class AiWriteRequest(
         val path: String,
@@ -541,6 +545,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val instanceName: String = "",
         /** 高风险文件的红字警示（脚本类；null = 普通文本文件） */
         val warning: String? = null,
+        /** true = 这是"敏感文件读取"确认（[content] 为空，不会落盘任何东西） */
+        val isRead: Boolean = false,
+        /** 敏感读取的原因（名字含凭据片段 / ops.json / 带 rcon 的 server.properties） */
+        val sensitiveReason: String? = null,
     )
 
     /** 一条对话气泡。assistant 消息额外携带建议命令、原始回复、工具动作与写入请求 */
@@ -563,9 +571,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val searchError: String? = null,
         /** 工具动作提示（读取/列出/写入了哪个文件），轻量展示行 */
         val toolNote: String? = null,
-        /** 待确认的文件写入请求（确认/拒绝后卡片保留供回看，状态见 [writeState]） */
+        /** 待确认的工具请求（写入 / 敏感读取；确认或拒绝后卡片保留供回看，状态见 [writeState]） */
         val writeRequest: AiWriteRequest? = null,
-        /** 写入请求状态，取值见文件末尾 `AI_WRITE_*` 常量（0=待确认 1=已写入 2=已拒绝 3=失败可重试 4=未执行） */
+        /** 确认状态，取值见文件末尾 `AI_WRITE_*` 常量（0=待确认 1=已完成 2=已拒绝 3=失败可重试 4=未执行） */
         val writeState: Int = 0,
         /**
          * 本条消息对应的实例。命令执行与文件写入都按这里记录的实例走，
@@ -630,6 +638,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun saveAiProfile(profile: AiProfile) = uiPrefs.saveAiProfile(profile)
 
     fun deleteAiProfile(id: String) = uiPrefs.deleteAiProfile(id)
+
+    /**
+     * 清除损坏的模型配置数据（设置页提示卡上的按钮）。
+     * 原文会先转存到损坏备份键，所以这一步不会让任何内容凭空消失。
+     */
+    fun clearCorruptAiProfiles() = uiPrefs.clearCorruptAiProfiles()
 
     /** 功能分配：把「对话」指向某个档案 */
     fun setChatAiProfile(id: String) = uiPrefs.setChatAiProfile(id)
@@ -831,26 +845,66 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             when (tool.name) {
                 "read_file", "list_dir" -> {
                     val note = (if (tool.name == "read_file") "读取 " else "列出 ") + tool.path
-                    val result = runCatching { executeAiReadTool(tool.name, tool.path, session.instanceId) }
-                        .getOrElse { "工具执行失败：${it.message}" }
+                    val target = session.instanceId?.let { instanceStore.get(it) }
+                    // 敏感文件（凭据 / 权限名单）读取先经用户确认：工具结果会进模型上下文、
+                    // 也可能随对话发往第三方端点，而**触发这次读取的可能是玩家聊天或网页里
+                    // 的一句"提示"** —— 读工具自动执行就等于把这条注入路径留成敞开的。
+                    val readPolicy = if (tool.name == "read_file") {
+                        AiFileTools.readPolicyFor(target?.dir, tool.path)
+                    } else {
+                        AiFileTools.ReadPolicy()
+                    }
+                    if (readPolicy.needsConfirm) {
+                        aiSession = session
+                        appendAiMessage(
+                            AiChatMessage(
+                                id = nextAiId(),
+                                isUser = false,
+                                text = parsed.analysis.ifBlank { "我准备读取一个敏感文件，需要你确认。" },
+                                writeRequest = AiWriteRequest(
+                                    path = tool.path,
+                                    content = "",
+                                    bytes = 0,
+                                    absPath = readPolicy.resolvedPath,
+                                    instanceName = target?.name.orEmpty(),
+                                    isRead = true,
+                                    sensitiveReason = readPolicy.sensitiveReason,
+                                ),
+                                instanceId = session.instanceId,
+                            )
+                        )
+                        return
+                    }
+                    val outcome = runCatching { executeAiReadTool(tool.name, tool.path, session.instanceId) }
+                    val ok = outcome.isSuccess
+                    val failure = outcome.exceptionOrNull()?.message ?: "未知错误"
+                    // 失败必须**在界面上也可见**：原来只把"工具执行失败"回喂给模型，
+                    // 用户看到的是一片正常的气泡，于是"AI 说日志里没有 X"其实是"文件根本没读到"，
+                    // 用户会照着错误的前提去改配置。失败同时进气泡与模型上下文。
                     appendAiMessage(
                         AiChatMessage(
                             id = nextAiId(),
                             isUser = false,
-                            text = parsed.analysis.ifBlank { note },
-                            toolNote = note,
+                            text = if (ok) parsed.analysis.ifBlank { note } else "$note 失败：$failure",
+                            toolNote = if (ok) note else "读取失败 ${tool.path}",
+                            isError = !ok,
+                            instanceId = session.instanceId,
                         )
                     )
                     session.apiMessages += AiMessage(
                         AiMessage.ROLE_USER,
-                        "【工具结果】${tool.name} \"${tool.path}\"\n$result",
+                        if (ok) {
+                            AiPrompt.toolResult(tool.name, tool.path, outcome.getOrThrow())
+                        } else {
+                            AiPrompt.toolFailure(tool.name, tool.path, failure)
+                        },
                     )
                 }
                 "write_file" -> {
                     if (tool.content.isEmpty()) {
                         session.apiMessages += AiMessage(
                             AiMessage.ROLE_USER,
-                            "【工具结果】write_file \"${tool.path}\" → 失败：content 为空，请给出完整新文件内容",
+                            AiPrompt.toolFailure("write_file", tool.path, "content 为空，请给出完整新文件内容"),
                         )
                         continue
                     }
@@ -873,8 +927,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         session.apiMessages += AiMessage(
                             AiMessage.ROLE_USER,
-                            "【工具结果】write_file \"${tool.path}\" → 被启动器策略拒绝：${policy.forbidden}。" +
-                                "该文件不允许通过 AI 修改，请改用其它方案，或直接告诉用户应该怎么改。",
+                            AiPrompt.toolFailure(
+                                "write_file", tool.path,
+                                "被启动器策略拒绝：${policy.forbidden}。" +
+                                    "该文件不允许通过 AI 修改，请改用其它方案，或直接告诉用户应该怎么改。",
+                            ),
                         )
                         continue
                     }
@@ -946,11 +1003,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      * 实例取自**本轮提问发起时记录的会话实例**，与写入路径同源。这里曾经读
      * `_currentInstanceId`（"当前选中的实例"）：提问针对实例 A、用户中途切到 B 之后，
      * 读/列就会去读 **B 的文件并回喂模型** —— 诊断串台，且等于把 B 的文件内容发给第三方端点。
-     * 取不到会话实例时如实报错、不猜一个实例出来。
+     * 取不到会话实例时**抛错**（不猜一个实例出来）：失败会被上层如实标红，
+     * 而不是悄悄回喂一句模型看得见、用户看不见的说明。
      */
     private fun executeAiReadTool(name: String, path: String, instanceId: String?): String {
         val dir = instanceId?.let { instanceStore.get(it) }?.dir
-            ?: return "本轮提问没有绑定实例（提问时未选择实例，或该实例已被删除），无法访问文件"
+            ?: throw IllegalStateException("本轮提问没有绑定实例（提问时未选择实例，或该实例已被删除）")
         return if (name == "read_file") {
             AiFileTools.readFile(dir, container.appContext.filesDir, path)
         } else {
@@ -959,10 +1017,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 用户允许 AI 写入：执行写入（内部已有 .bak 备份），结果回喂并继续本轮。
+     * 用户允许一次工具请求：
+     *  - 写入（[AiWriteRequest.isRead] = false）：执行写入（内部留带时间戳的备份），结果回喂并继续本轮；
+     *  - 敏感读取（isRead = true）：执行读取，结果按"不可信数据"回喂并继续本轮。
      *
-     * 状态与提示行一律按**实际结果**分支：成功才置"已写入"并说"写入了 X"，
-     * 失败置"失败（可重试）"并如实说没写进去。曾经这里是"先置成功、再执行、无条件
+     * 状态与提示行一律按**实际结果**分支：成功才置"已完成"并说"写入了 X / 读取了 X"，
+     * 失败置"失败（可重试）"并如实说没做成。曾经这里是"先置成功、再执行、无条件
      * 追加『写入了 X』" —— 写入抛错时卡片显示已写入、气泡也报成功，用户据此以为文件
      * 已经改好（最坏情况：以为 RCON 密码已换而其实没换），是纯粹的假信息。
      */
@@ -970,18 +1030,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (_aiBusy.value) return
         val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
         val req = msg.writeRequest ?: return
-        // 待确认与"失败可重试"两种状态允许点允许；已写入 / 已拒绝不可再改
+        // 待确认与"失败可重试"两种状态允许点允许；已完成 / 已拒绝不可再改
         if (msg.writeState != AI_WRITE_PENDING && msg.writeState != AI_WRITE_FAILED) return
         val session = aiSession
         if (session == null) {
-            // 会话已结束 = 这次写入**根本没执行**。以前这条路径先置了"已允许"，卡片显示成功，
+            // 会话已结束 = 这次请求**根本没执行**。以前这条路径先置了"已允许"，卡片显示成功，
             // 而文件一个字节都没动 —— 必须如实标注"未执行"。
             setAiWriteState(messageId, AI_WRITE_SKIPPED)
             appendAiMessage(
                 AiChatMessage(
                     nextAiId(), isUser = false,
-                    text = "本轮会话已结束，本次写入未执行（文件未改动）。如需写入请重新提问。",
-                    toolNote = "未执行写入 ${req.path}",
+                    text = "本轮会话已结束，本次${if (req.isRead) "读取" else "写入"}未执行" +
+                        "（文件未改动）。如需继续请重新提问。",
+                    toolNote = "未执行 ${req.path}",
                     isError = true,
                 )
             )
@@ -990,21 +1051,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _aiBusy.value = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // 写入绑定到请求发起时的实例（消息里记录的），不是当前选中的实例
-                val dir = msg.instanceId?.let { instanceStore.get(it) }?.dir
-                val outcome: Result<String> = if (dir == null) {
-                    // 实例不在了：与"写盘抛错"走同一条失败路径，界面表现一致
-                    Result.failure(java.io.IOException("实例不存在或已被删除"))
-                } else {
-                    runCatching { AiFileTools.writeFile(dir, req.path, req.content) }
+                // 工具绑定到请求发起时的实例（消息里记录的），不是当前选中的实例
+                val outcome: Result<String> = when {
+                    msg.instanceId?.let { instanceStore.get(it) } == null ->
+                        // 实例不在了：与"执行抛错"走同一条失败路径，界面表现一致
+                        Result.failure(java.io.IOException("实例不存在或已被删除"))
+                    req.isRead ->
+                        runCatching { executeAiReadTool("read_file", req.path, msg.instanceId) }
+                    else -> {
+                        val dir = msg.instanceId?.let { instanceStore.get(it) }?.dir
+                        if (dir == null) Result.failure(java.io.IOException("实例不存在或已被删除"))
+                        else runCatching { AiFileTools.writeFile(dir, req.path, req.content) }
+                    }
                 }
-                val result = outcome.fold({ it }, { "失败：${it.message}" })
+                val result = outcome.fold({ it }, { "${it.message}" })
                 if (outcome.isSuccess) {
                     setAiWriteState(messageId, AI_WRITE_DONE)
                     appendAiMessage(
                         AiChatMessage(
                             nextAiId(), isUser = false,
-                            text = "写入了 ${req.path}", toolNote = "写入 ${req.path}",
+                            text = "${if (req.isRead) "读取了" else "写入了"} ${req.path}",
+                            toolNote = "${if (req.isRead) "读取" else "写入"} ${req.path}",
                         )
                     )
                 } else {
@@ -1013,23 +1080,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     appendAiMessage(
                         AiChatMessage(
                             nextAiId(), isUser = false,
-                            text = "写入未执行：${result.removePrefix("失败：")}",
-                            toolNote = "写入失败 ${req.path}",
+                            text = "${if (req.isRead) "读取" else "写入"}未执行：$result",
+                            toolNote = "${if (req.isRead) "读取" else "写入"}失败 ${req.path}",
                             isError = true,
                         )
                     )
                 }
                 session.apiMessages += AiMessage(
                     AiMessage.ROLE_USER,
-                    "【工具结果】write_file \"${req.path}\" → $result",
+                    if (outcome.isSuccess) {
+                        AiPrompt.toolResult(if (req.isRead) "read_file" else "write_file", req.path, result)
+                    } else {
+                        AiPrompt.toolFailure(if (req.isRead) "read_file" else "write_file", req.path, result)
+                    },
                 )
                 runTurn(session)
             } catch (e: Exception) {
-                // 循环本身炸了：写入状态同样要落地，不能把卡片留在"待确认"上骗用户再点一次
+                // 循环本身炸了：状态同样要落地，不能把卡片留在"待确认"上骗用户再点一次
                 setAiWriteState(messageId, AI_WRITE_FAILED)
                 aiSession = null
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "写入流程失败", isError = true)
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "工具流程失败", isError = true)
                 )
             } finally {
                 _aiBusy.value = false
@@ -1037,7 +1108,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** 用户拒绝写入：不执行任何落盘，把拒绝结果回喂让 AI 收尾 */
+    /** 用户拒绝一次工具请求：写入不落盘、敏感读取不去读，把拒绝结果回喂让 AI 收尾 */
     fun denyAiWrite(messageId: Long) {
         if (_aiBusy.value) return
         val msg = _aiMessages.value.firstOrNull { it.id == messageId } ?: return
@@ -1050,8 +1121,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             appendAiMessage(
                 AiChatMessage(
                     nextAiId(), isUser = false,
-                    text = "本轮会话已结束，已拒绝本次写入。",
-                    toolNote = "拒绝写入 ${req.path}",
+                    text = "本轮会话已结束，已拒绝本次${if (req.isRead) "读取" else "写入"}。",
+                    toolNote = "拒绝${if (req.isRead) "读取" else "写入"} ${req.path}",
                 )
             )
             return
@@ -1061,7 +1132,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 session.apiMessages += AiMessage(
                     AiMessage.ROLE_USER,
-                    "【工具结果】write_file \"${req.path}\" → 用户拒绝了本次写入。请不要重试，直接基于已有信息给出建议或改用其它方案",
+                    AiPrompt.toolFailure(
+                        if (req.isRead) "read_file" else "write_file", req.path,
+                        if (req.isRead) {
+                            "用户拒绝了本次读取（内容没有被读出）。不要换路径重试，也不要试图从别处获取该文件；" +
+                                "直接基于已有信息给出建议。"
+                        } else {
+                            "用户拒绝了本次写入（文件未改动）。请不要重试，直接基于已有信息给出建议或改用其它方案。"
+                        },
+                    ),
                 )
                 runTurn(session)
             } catch (e: Exception) {
