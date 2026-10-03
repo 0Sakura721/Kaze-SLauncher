@@ -133,6 +133,15 @@ emember(path) 缓存位图的话，
     /** 「对话」功能分配到的档案 id */
     val aiChatProfileId = mutableStateOf(prefs.getString("ai_chat_profile_id", "") ?: "")
 
+    /**
+     * 档案 JSON 损坏标志（设置页要提示 + 给清除入口）。
+     *
+     * 损坏时 [aiProfiles] 会是空列表（界面不能因此打不开），但**原来那份 JSON 一个字都不能丢**：
+     * 原文已在 init 里转存到 [CORRUPT_BACKUP_KEY]，用户有机会人工救回里面的 Key。
+     * 覆盖前转存是关键 —— 原来 decode 直接返回 emptyList()，下一次保存就把整份配置静默顶掉了。
+     */
+    val aiProfilesCorrupt = mutableStateOf(false)
+
     /** 思考强度：false = 标准（快），true = 深度思考（更聪明也更慢） */
     val aiThinking = mutableStateOf(prefs.getBoolean("ai_thinking", false))
 
@@ -154,9 +163,46 @@ emember(path) 缓存位图的话，
     val aiSearchProviderId = mutableStateOf(
         prefs.getString("ai_search_provider", AiSearch.Provider.TAVILY.id) ?: AiSearch.Provider.TAVILY.id
     )
-    val aiSearchKey = mutableStateOf(AiKeyCipher.decrypt(prefs.getString("ai_search_key", "") ?: "").orEmpty())
+
+    /**
+     * 各搜索源的凭据（provider id → Key / SearXNG 实例地址），**按源分槽**。
+     *
+     * 分槽的理由：只有一个全局 Key 时，切换搜索源会把 A 家的 Key 原样发给 B 家。
+     * 内存里是解密后的值，落盘时逐槽加密（见 [setAiSearch]）。
+     */
+    val aiSearchKeys = mutableStateOf(loadSearchKeys())
+
+    /** 某个搜索源当前的凭据（免凭据源恒为空；SearXNG 返回的是实例地址） */
+    fun searchKeyFor(providerId: String): String = AiSearch.keyFor(providerId, aiSearchKeys.value)
+
+    private fun loadSearchKeys(): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        AiSearch.Provider.entries.forEach { p ->
+            val raw = prefs.getString(AiSearch.Provider.keySlot(p.id), "")?.trim().orEmpty()
+            if (raw.isNotEmpty()) out[p.id] = AiKeyCipher.decrypt(raw).orEmpty()
+        }
+        // 旧版单槽（ai_search_key）迁移：它当时只跟"当前选中的源"配过对，所以只搬进那一格；
+        // 迁移后删掉旧键 —— 留着就等于同一份 Key 有两个来源，两边会再次跑偏。
+        val legacy = prefs.getString("ai_search_key", "")?.trim().orEmpty()
+        if (legacy.isNotEmpty()) {
+            val current = AiSearch.Provider.byId(aiSearchProviderId.value).id
+            if (out[current].isNullOrEmpty()) out[current] = AiKeyCipher.decrypt(legacy).orEmpty()
+            prefs.edit()
+                .putString(AiSearch.Provider.keySlot(current), AiKeyCipher.encrypt(out[current].orEmpty()) ?: out[current].orEmpty())
+                .remove("ai_search_key")
+                .apply()
+        }
+        return out
+    }
 
     init {
+        // 损坏检测放在最前面：后面那段"旧单配置 → 档案"的迁移会覆写 ai_profiles，
+        // 必须先把原文转存出去（用户还可能人工救回里面的 Key）
+        val rawProfiles = prefs.getString("ai_profiles", "") ?: ""
+        if (AiProfileStore.decodeChecked(rawProfiles).corrupt) {
+            aiProfilesCorrupt.value = true
+            prefs.edit().putString(CORRUPT_BACKUP_KEY, rawProfiles).apply()
+        }
         // 旧单配置 → 档案：P0/P1 存的是散键（ai_api_key + ai_base_url + ai_model_standard/thinking，
         // 更早还有 ai_model）。只要填过 Key 就拼成一个「DeepSeek」档案并设为对话配置，绝不丢 Key。
         // 放在 aiProfiles 等声明之后：属性按声明顺序初始化。
@@ -247,9 +293,21 @@ emember(path) 缓存位图的话，
         }
         aiProfiles.value = list
         persistProfiles(list)
+        // 用户已经重新存进了合法配置：损坏提示可以撤掉了（转存的原文保留，直到用户显式清除）
+        aiProfilesCorrupt.value = false
         if (aiChatProfileId.value.isBlank() || aiProfiles.value.none { it.id == aiChatProfileId.value }) {
             setChatAiProfile(profile.id)
         }
+    }
+
+    /**
+     * 清除"配置损坏"提示与原串转存（设置页的清除入口）。
+     *
+     * 只删转存与标志，不动当前档案：用户如果已经从原文里抄回了 Key，这一步就是收尾。
+     */
+    fun clearCorruptAiProfiles() {
+        aiProfilesCorrupt.value = false
+        prefs.edit().remove(CORRUPT_BACKUP_KEY).apply()
     }
 
     /** 删除档案；删的是当前对话配置时回退到剩余第一个 */
@@ -272,16 +330,22 @@ emember(path) 缓存位图的话，
         prefs.edit().putBoolean("ai_thinking", v).apply()
     }
 
-    /** 保存联网搜索配置（源 + Key） */
+    /**
+     * 保存联网搜索配置（源 + 该源的凭据）。
+     *
+     * 只写**当前源这一格**：切源不再覆盖别家的 Key，也不会把上一家的 Key 带过去。
+     */
     fun setAiSearch(providerId: String, key: String) {
-        val p = providerId.trim()
+        val p = AiSearch.Provider.byId(providerId.trim()).id
         val k = key.trim()
         aiSearchProviderId.value = p
-        aiSearchKey.value = k
-        prefs.edit()
-            .putString("ai_search_provider", p)
-            .putString("ai_search_key", AiKeyCipher.encrypt(k) ?: k)
-            .apply()
+        val next = LinkedHashMap(aiSearchKeys.value)
+        if (k.isEmpty()) next.remove(p) else next[p] = k
+        aiSearchKeys.value = next
+        val edit = prefs.edit().putString("ai_search_provider", p)
+        if (k.isEmpty()) edit.remove(AiSearch.Provider.keySlot(p))
+        else edit.putString(AiSearch.Provider.keySlot(p), AiKeyCipher.encrypt(k) ?: k)
+        edit.apply()
     }
 
     /** 联网搜索开关（聊天面板随时可切） */
@@ -459,6 +523,9 @@ emember(path) 缓存位图的话，
     companion object {
         /** 背景图保存后的最长边：显示端只做 Crop，超过这个尺寸纯属浪费内存与磁盘 */
         private const val BG_MAX_DIM = 1600
+
+        /** 档案 JSON 损坏时的原文转存键（见 [aiProfilesCorrupt]） */
+        private const val CORRUPT_BACKUP_KEY = "ai_profiles_corrupt_backup"
 
         /**
          * 采样率：让解码结果的最长边**不小于** [target] 的最小 2 的幂。

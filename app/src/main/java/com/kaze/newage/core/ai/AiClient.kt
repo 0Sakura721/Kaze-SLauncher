@@ -447,9 +447,9 @@ object AiClient {
      * 调用方必须 runCatching 解析。
      */
     internal const val FILE_TOOLS_SPEC = """[
-{"type":"function","function":{"name":"read_file","description":"读取服务端实例目录下的文本文件（配置/日志/脚本）。app: 前缀 = 启动器应用目录，只读。二进制与大文件会被拒绝。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"}},"required":["path"]}}},
-{"type":"function","function":{"name":"list_dir","description":"列出实例目录（或 app: 应用目录）下的条目，目录在前。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对路径，. 表示根目录"}},"required":["path"]}}},
-{"type":"function","function":{"name":"write_file","description":"写入/覆盖实例目录下的文本文件（需用户在界面上确认；覆盖已有文件自动留 .bak）。.jar 等二进制与授权类文件（ops.json/eula.txt/whitelist.json 等）被禁止。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"},"content":{"type":"string","description":"完整的新文件内容"}},"required":["path","content"]}}},
+{"type":"function","function":{"name":"read_file","description":"读取服务端实例目录下的文本文件（配置/日志/脚本）。app: 前缀 = 启动器应用目录（**只读，且只开放 logs/、ai_audit.log、diagnostics.txt**）。二进制、备份文件与大文件会被拒绝。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"}},"required":["path"]}}},
+{"type":"function","function":{"name":"list_dir","description":"列出实例目录（或 app: 应用目录，只开放日志与诊断报告）下的条目，目录在前。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对路径，. 表示根目录"}},"required":["path"]}}},
+{"type":"function","function":{"name":"write_file","description":"写入/覆盖实例目录下的文本文件（需用户在界面上确认；覆盖已有文件自动留一份带时间戳的备份）。.jar 等二进制、.bak 备份与授权类文件（ops.json/eula.txt/whitelist.json 等）被禁止。","parameters":{"type":"object","properties":{"path":{"type":"string","description":"相对实例根目录的路径"},"content":{"type":"string","description":"完整的新文件内容"}},"required":["path","content"]}}},
 {"type":"function","function":{"name":"fetch_page","description":"抓取搜索结果里出现的网页正文（http/https），用于把攻略或文档读全。","parameters":{"type":"object","properties":{"url":{"type":"string","description":"完整网页地址"}},"required":["url"]}}},
 {"type":"function","function":{"name":"read_memory","description":"读取你对这台服务器的长期记忆笔记（端口、玩家习惯、已解决的问题等）。","parameters":{"type":"object","properties":{}}}},
 {"type":"function","function":{"name":"write_memory","description":"以覆盖方式更新长期记忆笔记（保持精炼，只记长期有用的事实）。","parameters":{"type":"object","properties":{"content":{"type":"string","description":"完整的新笔记内容"}},"required":["content"]}}}

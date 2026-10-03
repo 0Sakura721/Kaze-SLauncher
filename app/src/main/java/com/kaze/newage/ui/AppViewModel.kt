@@ -748,6 +748,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setAiSearch(providerId: String, key: String) = uiPrefs.setAiSearch(providerId, key)
 
+    /** 设置页的「清除损坏提示」入口（原文转存一并清掉，见 SettingsPrefs.aiProfilesCorrupt） */
+    fun clearCorruptAiProfiles() = uiPrefs.clearCorruptAiProfiles()
+
     fun setAiSearchOn(v: Boolean) = uiPrefs.setAiSearchOn(v)
 
     /** 思考强度开关（面板头部随时可切；DeepSeek = chat/reasoner 模型切换） */
@@ -818,7 +821,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 var searchError: String? = null
                 var searchBlock = ""
                 val provider = AiSearch.Provider.byId(uiPrefs.aiSearchProviderId.value)
-                val searchKey = uiPrefs.aiSearchKey.value
+                // 按源取凭据：切换搜索源不会把上一家的 Key 发给这一家（见 AiSearch.keyFor）
+                val searchKey = uiPrefs.searchKeyFor(provider.id)
                 if (uiPrefs.aiSearchOn.value && (!provider.needsKey || searchKey.isNotBlank())) {
                     try {
                         // 生成查询词是小事：强制用标准模型（省掉思考模式的等待），小 max_tokens
@@ -1009,12 +1013,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     val advisory = repeatGuard(session, "${tool.name}|${tool.path}")
                     val result = runCatching { executeAiReadTool(tool.name, tool.path) }
                         .getOrElse { "工具执行失败：${it.message}" }
+                    // 失败必须让**用户**看见，不能只回喂模型：否则界面上只有"读取 xxx"，
+                    // 用户既不知道没读到，也不知道这轮回答是在缺数据的情况下给出的
+                    val failure = aiReadFailureNote(note, result)
                     appendAiMessage(
                         AiChatMessage(
                             id = nextAiId(),
                             isUser = false,
-                            text = parsed.analysis.ifBlank { note },
+                            text = failure ?: parsed.analysis.ifBlank { note },
                             toolNote = note,
+                            isError = failure != null,
                         )
                     )
                     session.apiMessages += AiMessage(
@@ -1207,8 +1215,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             val result = runCatching { executeAiReadTool(name, targetPath) }
                 .getOrElse { "工具执行失败：${it.message}" }
+            val failure = aiReadFailureNote(note, result)
             appendAiMessage(
-                AiChatMessage(nextAiId(), isUser = false, text = note, toolNote = note)
+                AiChatMessage(
+                    nextAiId(), isUser = false,
+                    text = failure ?: note,
+                    toolNote = note,
+                    isError = failure != null,
+                )
             )
             session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, advisory + result, toolCallId = tc.id)
         }
@@ -1247,13 +1261,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         // 抓网页不需要实例目录
         if (name == "fetch_page") return AiWebPage.fetch(path)
         val dir = _currentInstanceId.value?.let { instanceStore.get(it) }?.dir
-            ?: return "当前未选择实例，无法访问文件"
+            ?: return "失败：当前未选择实例，无法访问文件"
         return if (name == "read_file") {
             AiFileTools.readFile(dir, container.appContext.filesDir, path)
         } else {
             AiFileTools.listDir(dir, container.appContext.filesDir, path)
         }
     }
+
+    /**
+     * 只读工具失败的可见说明（成功返回 null）。
+     *
+     * 约定：工具失败的结果串以"失败"或"工具执行失败"开头（[AiFileTools] 与上方的 runCatching
+     * 共同保证）。失败时气泡显示"动作 + 原因"，而不是只显示动作 —— 后者会让用户以为读成功了，
+     * 而模型其实是在没有数据的情况下继续回答的。
+     */
+    private fun aiReadFailureNote(note: String, result: String): String? =
+        result.takeIf { it.startsWith("失败") || it.startsWith("工具执行失败") }
+            ?.let { "$note\n$it" }
 
     // ── 借鉴 Harness 的三个机制：循环卫生 guard / 权限分档 / 会话记忆 ──
 

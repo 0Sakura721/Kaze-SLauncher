@@ -138,6 +138,31 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
     val profiles = prefs.aiProfiles.value
 
     SectionTitle("模型配置")
+    // 档案 JSON 损坏：配置看起来"全没了"，但原文已被保留 —— 必须明说，并给一个收尾入口。
+    // 沉默的话，用户会以为是自己删的，或者以为启动器把他的 Key 弄丢了。
+    if (prefs.aiProfilesCorrupt.value) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+            shape = M3Shape.largeIncreased,
+            color = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("配置文件读取失败", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "已保存的模型配置（含 API Key）格式损坏，本次没能读出来 —— " +
+                        "原始内容已原样保留，没有被删除。请重新填写一次 API Key；" +
+                        "确认不再需要那份原文后，点下面的按钮清除。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { viewModel.clearCorruptAiProfiles() }) {
+                    Text("我已处理，清除提示")
+                }
+            }
+        }
+    }
     SectionNote(
         "可建多份配置（不同服务商 / Key），单击卡片选择用于对话。DeepSeek 官方推荐用 " +
             "deepseek-flash（思考模式由「深度思考」开关控制，无需填两个模型名）；" +
@@ -379,7 +404,8 @@ private fun CommandModeSection(viewModel: AppViewModel) {
 private fun SearchSection(viewModel: AppViewModel) {
     val prefs = viewModel.uiPrefs
     var providerId by remember { mutableStateOf(prefs.aiSearchProviderId.value) }
-    var searchKey by remember { mutableStateOf(prefs.aiSearchKey.value) }
+    // 凭据按源分槽：编辑框显示的一直是"当前选中源自己的那一格"
+    var searchKey by remember { mutableStateOf(prefs.searchKeyFor(providerId)) }
     var keySaved by remember { mutableStateOf(false) }
     val provider = AiSearch.Provider.byId(providerId)
 
@@ -400,9 +426,10 @@ private fun SearchSection(viewModel: AppViewModel) {
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             onClick = {
                 providerId = prov.id
-                // 换源立即生效（Key 沿用已保存的值），并把本地编辑框回读成已保存值
-                viewModel.setAiSearch(prov.id, prefs.aiSearchKey.value)
-                searchKey = prefs.aiSearchKey.value
+                // 换源立即生效，并把编辑框换成**这一家自己**的凭据：
+                // 沿用上一家的值会把 A 家的 Key 发给 B 家（额度与密钥都算串了）
+                viewModel.setAiSearch(prov.id, prefs.searchKeyFor(prov.id))
+                searchKey = prefs.searchKeyFor(prov.id)
                 keySaved = false
             },
         ) {

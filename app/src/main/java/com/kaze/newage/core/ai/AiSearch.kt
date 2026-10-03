@@ -46,7 +46,30 @@ object AiSearch {
 
         companion object {
             fun byId(id: String): Provider = entries.firstOrNull { it.id == id } ?: TAVILY
+
+            /**
+             * 搜索凭据的存储槽名：**按 provider 分槽**。
+             *
+             * 原来全局只有一个 `ai_search_key`，切源时那份 Key 会被原样发给新的服务商
+             * （A 家的密钥交给 B 家，还可能把 A 家的额度算到 B 家头上）。分槽后每个源只认
+             * 自己那一格；未知 id 先经 [byId] 回退，落到的也是**回退后那个源自己的槽**，
+             * 读不到别家的 Key。
+             */
+            fun keySlot(id: String): String = "ai_search_key_" + byId(id).id
         }
+    }
+
+    /**
+     * 从「provider id → 凭据」的表里取某次搜索真正该用的值。
+     *
+     * 免凭据的源（本机浏览器）恒返回空串：界面上残留的旧值不该被顺手带出去。
+     * 注意 **SearXNG 的"Key 栏"存的是实例地址**（[Provider.needsUrl]），必须原样返回 ——
+     * 一律按"不需要 Key"清空会让 SearXNG 直接不可用。
+     */
+    fun keyFor(providerId: String, keys: Map<String, String>): String {
+        val p = Provider.byId(providerId)
+        if (!p.needsKey && !p.needsUrl) return ""
+        return keys[p.id].orEmpty().trim()
     }
 
     /** 一条搜索结果（标题 + 链接 + 摘要） */
