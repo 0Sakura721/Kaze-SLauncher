@@ -638,14 +638,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private var aiStopReason: String? = null
 
     /**
-     * 用户点「取消」：真的中断在飞的 HTTP 请求，而不是只置一个标志位等它自己超时
-     * （思考模式 readTimeout 最长 240 秒，等着等于继续扣额度）。
+     * 用户点「取消」：立刻停止界面等待，并尽力掐断在飞请求。
+     *
+     * 为什么不是"纯标志位等它超时"：思考模式 readTimeout 最长 240 秒，等着等于继续白等。
+     * 但掐断是**尽力而为** —— 连接已经阻塞在 socket 读上时，JDK 的 disconnect() 自身
+     * 要等到 readTimeout 才返回（CI 实测 ~119 秒），所以这里走异步版本，绝不卡住 UI 线程。
+     * 用户能立刻得到的确定性结果：界面不再等待、本轮结果丢弃、不再发起下一轮工具调用。
      */
     fun cancelAiTurn() {
         if (!_aiBusy.value) return
         if (aiStopReason == null) aiStopReason = AI_STOP_CANCELLED
-        // 1) 掐断阻塞中的连接：线程立刻以 IOException 结束，不再等 readTimeout
-        AiClient.cancelActive()
+        // 1) 关连接（异步：disconnect() 可能阻塞到 readTimeout）
+        AiClient.cancelActiveAsync()
         // 2) 取消协程：本机搜索（隐藏 WebView）挂在协程取消上才会摘窗 + destroy
         aiAskJob?.cancel()
         appendAiMessage(AiChatMessage(nextAiId(), isUser = false, text = "已取消本轮提问。", toolNote = "已取消"))

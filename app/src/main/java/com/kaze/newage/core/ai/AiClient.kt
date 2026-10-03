@@ -59,16 +59,32 @@ object AiClient {
      *
      * 存在的理由：HttpURLConnection 是阻塞的，"取消"如果只置一个标志位，用户点了取消
      * 之后线程仍然卡在 `responseCode` / `read` 上直到 readTimeout（思考模式最长 240 秒），
-     * 期间**额度照扣、界面看着像没反应**。[cancelActive] 从别的线程 `disconnect()`
-     * 让阻塞中的调用立刻以 IOException 结束，这才是真的中断。
+     * 界面看着像没反应。[cancelActive] 关掉这条连接，让阻塞中的调用尽早结束。
+     *
+     * **实测边界（CI 上抓到的，别当成"立刻中断"）**：读取已经卡在 socket 上时，
+     * JDK 的 `disconnect()` 自身会一直阻塞到 readTimeout 才返回（实测约 119 秒），
+     * 之后的读才以异常结束 —— 所以：
+     *  - 调用方**必须**走 [cancelActiveAsync]（独立线程），否则会把 UI 线程卡住；
+     *  - 已经发出去的请求，服务端该计费还是计费（这是服务端的账），我们能保证的是
+     *    界面立刻停止等待、本轮结果丢弃、不再发起下一轮（见 AppViewModel 的停止逻辑）。
      */
     private val activeCall = java.util.concurrent.atomic.AtomicReference<HttpURLConnection?>(null)
 
-    /** 中断当前在飞的请求（没有请求时是空操作）。线程安全，可从主线程调用。 */
+    /**
+     * 中断当前在飞的请求（没有请求时是空操作）。
+     *
+     * **会阻塞**（见 [activeCall] 的说明）：只允许在后台线程调用 —— 界面路径请用
+     * [cancelActiveAsync]。
+     */
     fun cancelActive() {
         activeCall.getAndSet(null)?.let { conn ->
             runCatching { conn.disconnect() }
         }
+    }
+
+    /** 取消的界面入口：把可能阻塞的 [cancelActive] 丢到独立守护线程，绝不让 UI 线程等它 */
+    fun cancelActiveAsync() {
+        kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai-cancel") { cancelActive() }
     }
 
     /**

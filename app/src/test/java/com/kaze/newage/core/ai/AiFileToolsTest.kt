@@ -189,9 +189,11 @@ class AiFileToolsTest {
         repeat(205) { File(root, "file-$it.txt").writeText("x") }
         val out = AiFileTools.listDir(root, null, ".")
         assertTrue("应注明还有多少项未列出：$out", out.contains("还有"))
-        // 上限是 200：多出来的 5 项只计数，不逐条列出
+        // 上限是 200：多出来的 5 项只计数，不逐条列出。
+        // 具体列出哪 200 项取决于目录遍历顺序（不保证有序），所以只数条数、不假定名字
         assertTrue(out.contains("…还有 5 项未列出"))
-        assertFalse(out.contains("file-204.txt"))
+        val listed = Regex("""file-\d+\.txt""").findAll(out).count()
+        assertEquals("最多列出 200 项，实际 $listed", 200, listed)
     }
 
     @Test
