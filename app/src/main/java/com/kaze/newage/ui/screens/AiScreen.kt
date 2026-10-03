@@ -66,6 +66,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -140,6 +141,14 @@ fun AiScreen(
     val serverStates by viewModel.serverStates.collectAsStateWithLifecycle()
     val live by viewModel.aiLiveStream.collectAsStateWithLifecycle()
 
+    // 离开本页 = 软停止本轮工具循环：循环继续跑的话，用户已经在看不到进度的情况下被读文件、
+    // 抓网页、起不可见 WebView。唯一例外是"去 AI 设置"—— 那是同一个功能区域，通常马上回来，
+    // 所以用一个标记把它排除掉（remember 的 MutableState 在 onDispose 里读到的是最新值）。
+    var leftToSettings by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        onDispose { if (!leftToSettings) viewModel.onAiScreenLeft() }
+    }
+
     // 消息按生成它的实例判定运行状态（用户可能已切到别的实例）
     fun runningFor(msg: AppViewModel.AiChatMessage): Boolean {
         val id = msg.instanceId ?: currentId
@@ -204,7 +213,11 @@ fun AiScreen(
                         )
                     }
                 }
-                IconButton(onClick = onOpenSettings) {
+                IconButton(onClick = {
+                    // 去设置不算"离开 AI 页"（见上方的软停止说明）
+                    leftToSettings = true
+                    onOpenSettings()
+                }) {
                     Icon(Icons.Filled.Tune, contentDescription = "AI 设置")
                 }
             },

@@ -645,13 +645,37 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile
     private var aiSession: AiTurnSession? = null
 
-    /** 用户请求取消本轮 AI 提问：在工具循环的每个轮次边界生效（进行中的 HTTP 调用会自然超时结束） */
+    /** 用户请求取消本轮 AI 提问：在工具循环的每个轮次边界生效，并异步掐断在飞的连接 */
     @Volatile
     private var aiCancelRequested = false
 
+    /** 取消原因（用户点取消 / 离开 AI 页面）：会话里留下的可见说明要如实写清是哪一种 */
+    @Volatile
+    private var aiCancelReason: String? = null
+
     /** 取消当前 AI 提问（正在思考/工具循环中时有效） */
     fun cancelAiTurn() {
-        if (_aiBusy.value) aiCancelRequested = true
+        if (!_aiBusy.value) return
+        aiCancelReason = "已取消本轮提问。"
+        aiCancelRequested = true
+        // 只置标志位不够：线程仍卡在阻塞读上直到 readTimeout（思考模式最长 240 秒），
+        // 界面看着像没反应。关连接必须走异步入口 —— disconnect 自身在阻塞读进行中会等到
+        // readTimeout 才返回（实测约 119 秒），同步调会卡死 UI 线程。
+        AiClient.cancelActiveAsync()
+    }
+
+    /**
+     * 离开 AI 页面：软停止本轮工具循环。
+     *
+     * 不停的话，循环会继续在后台读实例文件、抓网页、甚至起一个不可见的 WebView —— 用户已经
+     * 看不到任何进度，也没有办法中断。停止只影响"继续往下跑"：已经挂起的写入确认卡片留在
+     * 会话里（回来仍可批准/拒绝），工具循环会以一条可见说明收尾。
+     */
+    fun onAiScreenLeft() {
+        if (!_aiBusy.value) return
+        aiCancelReason = "你离开了 AI 页面，本轮提问已停止（回到本页可重新提问）。"
+        aiCancelRequested = true
+        AiClient.cancelActiveAsync()
     }
 
     // ── 流式实况（思考/正文逐 token 更新；null = 没有进行中的流）──
@@ -737,16 +761,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     /** 是否已授予悬浮窗权限（本机浏览器搜索走真实窗口的前提） */
     fun canDrawOverlays(): Boolean = android.provider.Settings.canDrawOverlays(container.appContext)
 
-    /** 引导去系统设置授予悬浮窗权限（一次性手动操作，与电池白名单同一套做法） */
-    fun requestOverlayPermission() {
-        try {
-            val intent = android.content.Intent(
-                android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                android.net.Uri.parse("package:${container.appContext.packageName}"),
-            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            container.appContext.startActivity(intent)
-        } catch (_: Exception) {
-        }
+    /**
+     * 引导去系统设置授予悬浮窗权限（一次性手动操作，与电池白名单同一套做法）。
+     *
+     * 返回 null = 已经拉起系统页面；非 null = 失败原因，**必须**由界面显示出来 ——
+     * 原来这里是个空 catch：部分 ROM 没有这个设置页（或 Activity 被禁用）时，用户点了
+     * 卡片什么都不会发生，只能以为"点了没用"。引导卡是死端比没有引导卡更糟。
+     */
+    fun requestOverlayPermission(): String? = try {
+        val intent = android.content.Intent(
+            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            android.net.Uri.parse("package:${container.appContext.packageName}"),
+        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        container.appContext.startActivity(intent)
+        null
+    } catch (e: Exception) {
+        "无法打开系统权限页（${e.message ?: e.javaClass.simpleName}）——" +
+            "请手动进入：系统设置 → 应用 → 本应用 → 显示在其他应用上层"
     }
 
     /** 清空 AI 对话：忙时不允许（正在生成的回复会找不到落点）；挂起中的写入会话一并作废 */
@@ -875,13 +906,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun runTurn(session: AiTurnSession) {
         var lastAnalysis = ""
         while (session.roundsLeft > 0) {
-            // 取消在轮次边界生效：进行中的 HTTP 调用让它自然结束（线程有超时兜底）
+            // 取消在轮次边界生效：进行中的 HTTP 调用已被异步掐断（见 cancelAiTurn）
             if (aiCancelRequested) {
                 aiCancelRequested = false
                 aiSession = null
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = "已取消本轮提问。", toolNote = "已取消")
+                    AiChatMessage(
+                        nextAiId(), isUser = false,
+                        text = aiCancelReason ?: "已取消本轮提问。",
+                        toolNote = "已取消",
+                    )
                 )
+                aiCancelReason = null
                 return
             }
             session.roundsLeft--
@@ -913,7 +949,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (aiReply.aborted) {
                 val userCancelled = aiCancelRequested
+                val reason = aiCancelReason
                 aiCancelRequested = false
+                aiCancelReason = null
                 aiSession = null
                 val partial = aiReply.content.trim()
                 appendAiMessage(
@@ -922,7 +960,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         isUser = false,
                         text = when {
                             partial.isNotEmpty() -> "（已中止）${partial.take(1000)}…"
-                            userCancelled -> "已取消本轮提问。"
+                            userCancelled -> reason ?: "已取消本轮提问。"
                             else -> "AI 响应超时，已停止本轮。可重试或换个问法。"
                         },
                         toolNote = if (userCancelled) "已取消" else "响应超时",

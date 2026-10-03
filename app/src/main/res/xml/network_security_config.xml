@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  网络安全配置。
+
+  背景：targetSdk 28 起平台默认禁止明文 http，而 AI 设置允许填 http:// —— 本地推理端点
+  （同机 llama.cpp / Ollama）只能是 http，于是"填了也连不上"，报的还是底层文案
+  （CLEARTEXT communication to ... not permitted）。这里**只**为本机地址开一个口子：
+
+    localhost / 127.0.0.1 / ::1  → 允许明文（同机端点，出不了设备）
+    其余一切主机                  → 仍然禁止明文，局域网与公网必须 https
+
+  为什么不用 cleartextTrafficPermitted="true" 一把全开：那等于对**所有**端点
+  （包括用户填错的公网地址）放开明文，API Key 与服务器日志都可能被中间人读走。
+
+  为什么没有局域网网段（192.168/10./172.16）：Android 的 network security config
+  **不支持 CIDR**，<domain> 只接受精确主机名或 IP，写 "192.168.0.0/16" 会在解析时抛错。
+  要临时放行某个局域网 IP，就在下面显式加一条 <domain>（如
+  <domain includeSubdomains="false">192.168.1.5</domain>），并同步
+  AiConfig.isCleartextHostAllowed —— 两处必须一致，否则会出现"提示说可以、实际连不上"。
+
+  信任链保持系统 CA（不额外信任用户安装的 CA）：targetSdk 28 的默认行为，
+  刻意不放宽 —— 放行用户 CA 等于把 TLS 校验交给任何能往设备装证书的人。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">::1</domain>
+    </domain-config>
+</network-security-config>

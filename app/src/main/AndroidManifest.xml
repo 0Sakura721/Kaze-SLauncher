@@ -23,12 +23,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- 自定义实例目录：把游戏存到用户任意目录并直接运行（Android 11+ 分区存储下 File API 前提） -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!--
+      「显示在其他应用上层」：本应用**唯一**的用途是 AI 助手的「本机浏览器搜索」——
+      把 1px 透明、不可触摸、不可聚焦的 WebView 挂进真实窗口，让渲染器以全优先级调度，
+      避免被激进后台管理的 ROM 冻结（不授予则自动回退无头模式，功能仍可用）。
+      不声明它的话，代码里那条真窗口分支永远走不到（Settings.canDrawOverlays 恒为 false），
+      设置页的"去授权"引导也变成死端。
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".NewAgeApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"

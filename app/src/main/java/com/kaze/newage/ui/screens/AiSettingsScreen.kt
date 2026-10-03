@@ -29,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,6 +42,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import com.kaze.newage.core.ai.AiCommandPolicy
 import com.kaze.newage.core.ai.AiProfile
@@ -509,14 +512,29 @@ private fun SearchSection(viewModel: AppViewModel) {
     }
 
     // 本机浏览器源：引导授予悬浮窗权限，让 WebView 挂真窗口（渲染器全优先级、不被 ROM 冻结）
-    if (provider.id == AiSearch.Provider.BING_LOCAL.id && !viewModel.canDrawOverlays()) {
+    //
+    // 授权结果只能在系统设置页里变化，Compose 不会因此重组 —— 用 ON_RESUME 重新查一次，
+    // 否则用户授权回来，卡片还挂在那里说"建议授予"，看起来像授权没生效。
+    var overlayGranted by remember { mutableStateOf(viewModel.canDrawOverlays()) }
+    var overlayError by remember { mutableStateOf<String?>(null) }
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                overlayGranted = viewModel.canDrawOverlays()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    if (provider.id == AiSearch.Provider.BING_LOCAL.id && !overlayGranted) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
             shape = M3Shape.largeIncreased,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            onClick = { viewModel.requestOverlayPermission() },
+            onClick = { overlayError = viewModel.requestOverlayPermission() },
         ) {
             Row(
                 Modifier.padding(12.dp),
@@ -539,6 +557,16 @@ private fun SearchSection(viewModel: AppViewModel) {
                     )
                 }
             }
+        }
+        // 拉起系统页失败（个别 ROM 没有这个设置项）：如实显示原因并给出手动路径，
+        // 不能让用户点了卡片却毫无反馈
+        overlayError?.let { err ->
+            Text(
+                err,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = M3Spacing.screenMargin),
+            )
         }
     }
 }
