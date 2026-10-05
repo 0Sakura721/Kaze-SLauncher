@@ -1204,7 +1204,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun execNativeToolCalls(session: AiTurnSession, calls: List<NativeToolCall>): Boolean {
         var pause: NativeToolCall? = null
         var pauseArgs: NativeArgs? = null
-        var pausePolicy: AiFileTools.WritePolicy? = null
+        var pauseWritePolicy: AiFileTools.WritePolicy? = null
+        var pauseReadPolicy: AiFileTools.ReadPolicy? = null
         var pauseKind: String? = null // "write" / "read"
         for (tc in calls) {
             val args = runCatching { aiJson.decodeFromString<NativeArgs>(tc.arguments) }.getOrNull()
@@ -1256,7 +1257,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 pause = tc
                 pauseArgs = args
-                pausePolicy = policy
+                pauseWritePolicy = policy
                 pauseKind = "write"
                 continue
             }
@@ -1291,7 +1292,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 if (policy.sensitive != null && pause == null) {
                     pause = tc
                     pauseArgs = args
-                    pausePolicy = policy
+                    pauseReadPolicy = policy
                     pauseKind = "read"
                     continue
                 }
@@ -1329,7 +1330,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         val pausedCall = pause ?: return false
         val pausedArgs = pauseArgs ?: return false
-        val pausedPolicy = pausePolicy ?: return false
         aiSession = session
         session.pendingToolCallId = pausedCall.id
         when (pauseKind) {
@@ -1341,9 +1341,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         path = pausedArgs.path,
                         content = pausedArgs.content,
                         bytes = pausedArgs.content.toByteArray(Charsets.UTF_8).size,
-                        absPath = pausedPolicy.resolvedPath,
+                        absPath = pauseWritePolicy?.resolvedPath.orEmpty(),
                         instanceName = session.instanceId?.let { instanceStore.get(it) }?.name.orEmpty(),
-                        warning = pausedPolicy.warning,
+                        warning = pauseWritePolicy?.warning,
                     ),
                     instanceId = session.instanceId,
                 )
@@ -1354,9 +1354,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     text = "这个文件里可能有敏感内容，需要你先确认。",
                     readRequest = AiReadRequest(
                         path = pausedArgs.path,
-                        absPath = pausedPolicy.resolvedPath,
+                        absPath = pauseReadPolicy?.resolvedPath.orEmpty(),
                         instanceName = session.instanceId?.let { instanceStore.get(it) }?.name.orEmpty(),
-                        reason = pausedPolicy.sensitive,
+                        reason = pauseReadPolicy?.sensitive,
                     ),
                     instanceId = session.instanceId,
                 )
