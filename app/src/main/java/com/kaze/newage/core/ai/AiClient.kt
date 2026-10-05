@@ -152,6 +152,9 @@ object AiClient {
     private const val THINKING_READ_TIMEOUT_MS = 240_000
     private const val USER_AGENT = "KazeSLauncher/0.4 (com.kaze.newage; ai assistant)"
 
+    /** 流式看门狗的轮询间隔：停止条件（取消/超时）最多延迟这么久生效 */
+    private const val WATCHDOG_POLL_MS = 200L
+
     private val json = Json { ignoreUnknownKeys = true }
 
     /**
@@ -260,6 +263,18 @@ object AiClient {
                 throw RuntimeException(describeHttpError(code, errBody))
             }
             var aborted = false
+            // 看门狗：shouldStop 只能在行边界生效，模型长时间不出 token 时阻塞读感知不到
+            // （取消/超时就停在这里）。看门狗轮询到停止条件就 disconnect，强制阻塞读立刻返回。
+            val done = java.util.concurrent.atomic.AtomicBoolean(false)
+            val watchdog = kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai-watchdog") {
+                while (!done.get()) {
+                    if (shouldStop()) {
+                        runCatching { conn.disconnect() }
+                        break
+                    }
+                    Thread.sleep(WATCHDOG_POLL_MS)
+                }
+            }
             // 流式也要有总量上限：不结束的流能让循环永远跑下去，单行还可能无限长（见 CappedStream）
             val stream = AiBodyLimit.CappedStream(conn.inputStream, AiBodyLimit.MAX_STREAM_BYTES)
             stream.bufferedReader().use { reader ->
@@ -296,7 +311,12 @@ object AiClient {
                         }
                     }
                 }
+                // 看门狗 disconnect 后 readLine 可能返回 null（流被关）而不是抛异常：
+                // 出循环后再确认一次停止条件，别把被中止的半成品当完整回答
+                if (!aborted && shouldStop()) aborted = true
             }
+            done.set(true)
+            watchdog.interrupt()
             // 触到流上限和用户取消同义：这轮拿到的是半成品，不能当完整回答用
             if (stream.capped) aborted = true
             val toolCalls = toolCallNames.mapNotNull { (index, name) ->

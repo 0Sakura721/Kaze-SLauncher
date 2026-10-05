@@ -760,7 +760,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         runCatching {
             if (aiChatFile.isFile) {
                 val snap = aiJson.decodeFromString<AiChatSnapshot>(aiChatFile.readText())
-                if (snap.messages.isNotEmpty()) _aiMessages.value = snap.messages
+                if (snap.messages.isNotEmpty()) {
+                    _aiMessages.value = snap.messages
+                    // 消息 id 必须接着恢复的最大值发号：否则新消息与恢复的消息 id 撞车，
+                    // LazyColumn 的 key 冲突会直接崩溃
+                    aiIdCounter.set((snap.messages.maxOfOrNull { it.id } ?: 0) + 1)
+                }
                 if (snap.draft.isNotEmpty() && _aiDraft.value.isEmpty()) _aiDraft.value = snap.draft
             }
         }
@@ -956,6 +961,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             session.roundsLeft--
             val deadline = System.currentTimeMillis() +
                 if (session.config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS
+            var deadlineFired = false
             // 命令执行档位（借鉴 Harness 的权限分层）：仅建议 / 白名单自动 / 全部自动
             val commandMode = AiCommandPolicy.modeById(uiPrefs.aiCommandMode.value)
             val executeToolEnabled = commandMode != AiCommandPolicy.Mode.SUGGEST
@@ -974,7 +980,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     includeNativeThinkingParam = includeNativeThinking(session.config),
                     includeTools = includeNativeThinking(session.config),
                     includeExecuteCommand = executeToolEnabled,
-                    shouldStop = { aiCancelRequested || System.currentTimeMillis() > deadline },
+                    shouldStop = {
+                        // 整体超时：主动掐断在飞连接（看门狗轮询到才触发，只触发一次）
+                        if (System.currentTimeMillis() > deadline) {
+                            if (!deadlineFired) {
+                                deadlineFired = true
+                                AiClient.cancelActiveAsync()
+                            }
+                            true
+                        } else {
+                            aiCancelRequested
+                        }
+                    },
                     onDelta = { r, c -> updateLiveStream(live.id, r, c) },
                 )
             } finally {
@@ -1060,8 +1077,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     val note = when (tool.name) {
-                        "read_file" -> "读取 ${tool.path}"
-                        "list_dir" -> "列出 ${tool.path}"
+                        "read_file" -> "读取 ${AiSanitize.displayOneLine(tool.path)}"
+                        "list_dir" -> "列出 ${AiSanitize.displayOneLine(tool.path)}"
                         else -> "抓取网页 ${AiSanitize.displayOneLine(tool.path)}"
                     }
                     val advisory = repeatGuard(session, "${tool.name}|${tool.path}")
@@ -1177,10 +1194,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * 执行原生工具调用批次。返回 true = 已挂起等写入确认（本轮暂停）。
+     * 执行原生工具调用批次。返回 true = 已挂起等用户确认（本轮暂停）。
      * 结果以 role=tool 回喂（OpenAI 工具协议），与 JSON 协议共用同一套执行/审批逻辑。
+     *
+     * 协议硬约束：assistant 消息里的**每一个** tool_call 都必须有恰好一条 role=tool 结果，
+     * 否则严格的服务端在下一轮直接 400。所以挂起类调用（写入 / 敏感读取）一批只处理
+     * 第一个，其余同类调用也要回喂"已跳过"的结果占位 —— 恢复后模型可以重新发起。
      */
     private suspend fun execNativeToolCalls(session: AiTurnSession, calls: List<NativeToolCall>): Boolean {
+        var pause: NativeToolCall? = null
+        var pauseArgs: NativeArgs? = null
+        var pausePolicy: AiFileTools.WritePolicy? = null
+        var pauseKind: String? = null // "write" / "read"
         for (tc in calls) {
             val args = runCatching { aiJson.decodeFromString<NativeArgs>(tc.arguments) }.getOrNull()
             if (args == null) {
@@ -1207,8 +1232,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     appendAiMessage(
                         AiChatMessage(
                             id = nextAiId(), isUser = false,
-                            text = "已阻止一次文件写入\n${args.path}\n原因：${policy.forbidden}",
-                            toolNote = "已阻止写入 ${args.path}",
+                            text = "已阻止一次文件写入\n${AiSanitize.displayOneLine(args.path)}\n原因：${policy.forbidden}",
+                            toolNote = "已阻止写入 ${AiSanitize.displayOneLine(args.path)}",
                             isError = true,
                             instanceId = session.instanceId,
                         )
@@ -1220,24 +1245,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     )
                     continue
                 }
-                aiSession = session
-                session.pendingToolCallId = tc.id // 原生协议：恢复时回 role=tool
-                appendAiMessage(
-                    AiChatMessage(
-                        id = nextAiId(), isUser = false,
-                        text = "我准备写入文件。",
-                        writeRequest = AiWriteRequest(
-                            path = args.path,
-                            content = args.content,
-                            bytes = args.content.toByteArray(Charsets.UTF_8).size,
-                            absPath = policy.resolvedPath,
-                            instanceName = target?.name.orEmpty(),
-                            warning = policy.warning,
-                        ),
-                        instanceId = session.instanceId,
+                // 一批只挂起第一个写入；同批后续写入回喂占位，恢复后模型可重新发起
+                if (pause != null) {
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_TOOL,
+                        "已跳过：一次只处理一个待确认写入，请等当前写入确认后再重新发起",
+                        toolCallId = tc.id,
                     )
-                )
-                return true
+                    continue
+                }
+                pause = tc
+                pauseArgs = args
+                pausePolicy = policy
+                pauseKind = "write"
+                continue
             }
             // 命令执行与记忆：与 JSON 协议共用同一套实现（分档判定在 execCommandTool 内）
             if (name == "execute_command") {
@@ -1267,29 +1288,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (name == "read_file") {
                 val target = session.instanceId?.let { instanceStore.get(it) }
                 val policy = AiFileTools.readPolicyFor(target?.dir, targetPath)
+                if (policy.sensitive != null && pause == null) {
+                    pause = tc
+                    pauseArgs = args
+                    pausePolicy = policy
+                    pauseKind = "read"
+                    continue
+                }
                 if (policy.sensitive != null) {
-                    aiSession = session
-                    session.pendingToolCallId = tc.id // 原生协议：恢复时回 role=tool
-                    appendAiMessage(
-                        AiChatMessage(
-                            id = nextAiId(), isUser = false,
-                            text = "这个文件里可能有敏感内容，需要你先确认。",
-                            readRequest = AiReadRequest(
-                                path = targetPath,
-                                absPath = policy.resolvedPath,
-                                instanceName = target?.name.orEmpty(),
-                                reason = policy.sensitive,
-                            ),
-                            instanceId = session.instanceId,
-                        )
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_TOOL,
+                        "已跳过：一次只处理一个待确认读取，请等当前确认完成后再重新发起",
+                        toolCallId = tc.id,
                     )
-                    return true
+                    continue
                 }
             }
             val advisory = repeatGuard(session, "$name|$targetPath")
             val note = when (name) {
-                "read_file" -> "读取 $targetPath"
-                "list_dir" -> "列出 $targetPath"
+                "read_file" -> "读取 ${AiSanitize.displayOneLine(targetPath)}"
+                "list_dir" -> "列出 ${AiSanitize.displayOneLine(targetPath)}"
                 else -> "抓取网页 ${AiSanitize.displayOneLine(targetPath)}"
             }
             val result = runCatching { executeAiReadTool(name, targetPath, session.instanceId) }
@@ -1309,7 +1327,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 toolCallId = tc.id,
             )
         }
-        return false
+        val pausedCall = pause ?: return false
+        val pausedArgs = pauseArgs ?: return false
+        val pausedPolicy = pausePolicy ?: return false
+        aiSession = session
+        session.pendingToolCallId = pausedCall.id
+        when (pauseKind) {
+            "write" -> appendAiMessage(
+                AiChatMessage(
+                    id = nextAiId(), isUser = false,
+                    text = "我准备写入文件。",
+                    writeRequest = AiWriteRequest(
+                        path = pausedArgs.path,
+                        content = pausedArgs.content,
+                        bytes = pausedArgs.content.toByteArray(Charsets.UTF_8).size,
+                        absPath = pausedPolicy.resolvedPath,
+                        instanceName = session.instanceId?.let { instanceStore.get(it) }?.name.orEmpty(),
+                        warning = pausedPolicy.warning,
+                    ),
+                    instanceId = session.instanceId,
+                )
+            )
+            "read" -> appendAiMessage(
+                AiChatMessage(
+                    id = nextAiId(), isUser = false,
+                    text = "这个文件里可能有敏感内容，需要你先确认。",
+                    readRequest = AiReadRequest(
+                        path = pausedArgs.path,
+                        absPath = pausedPolicy.resolvedPath,
+                        instanceName = session.instanceId?.let { instanceStore.get(it) }?.name.orEmpty(),
+                        reason = pausedPolicy.sensitive,
+                    ),
+                    instanceId = session.instanceId,
+                )
+            )
+        }
+        return true
     }
 
     private fun appendFinalAiMessage(
@@ -1418,6 +1471,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         val inst = session.instanceId?.let { instanceStore.get(it) }
             ?: return "失败：实例不存在或已被删除"
+        // 未运行的实例 stdin 不存在，sendCommand 是静默 no-op —— 不检查的话
+        // 审计日志和回喂都会谎报"已执行"，模型还会反复发起无效调用
+        if (serverManager.states.value[inst.id] != ServerState.Running) {
+            return "失败：服务端未运行（命令未执行）。可先建议用户启动服务端，或改用其它方案"
+        }
         serverManager.sendCommand(inst, cmd)
         AiAudit.log(container.appContext, "ai-command（自动）[${inst.name}] $cmd")
         appendAiMessage(
@@ -1993,6 +2051,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             instanceStore.remove(instance.id)
             runCatching { instance.dir.deleteRecursively() }
+            // AI 的每实例长期记忆笔记在应用私有目录（不在实例目录里），一并清理防孤儿文件
+            runCatching { File(container.appContext.filesDir, "ai_memory_${instance.id}.md").delete() }
             // 备份目录在实例目录之外，删除实例后无任何入口再能访问——一并清理防死数据
             runCatching { com.kaze.newage.core.server.BackupManager.deleteAllBackups(instance) }
             // 控制台缓冲 / 运行时长流 / 状态表条目都是按 id 长期持有的，实例没了就再没有任何

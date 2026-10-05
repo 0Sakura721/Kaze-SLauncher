@@ -667,7 +667,7 @@ private fun ThinkingPanel(reasoning: String) {
 @Composable
 private fun ToolNoteRow(msg: AppViewModel.AiChatMessage) {
     Text(
-        "· ${msg.toolNote} ·",
+        "· ${AiSanitize.displayOneLine(msg.toolNote)} ·",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
