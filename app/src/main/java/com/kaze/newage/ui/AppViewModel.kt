@@ -1356,7 +1356,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         path = pausedArgs.path,
                         absPath = pauseReadPolicy?.resolvedPath.orEmpty(),
                         instanceName = session.instanceId?.let { instanceStore.get(it) }?.name.orEmpty(),
-                        reason = pauseReadPolicy?.sensitive,
+                        reason = pauseReadPolicy?.sensitive.orEmpty(),
                     ),
                     instanceId = session.instanceId,
                 )
