@@ -1,5 +1,6 @@
 package com.kaze.newage.core.update
 
+import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -7,58 +8,124 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 版本比较测试。
+ * 更新判定测试（以**发布日期**为准，不再比较版本号）。
  *
- * 这段逻辑（`isNewer`）处理了预发布段的语义：「同主版本下正式版 > 预发布」，
- * 否则 beta 用户永远收不到同号转正的提示。规则细、易回归，因此逐条锁住。
+ * 旧版本号比较（isNewer）为 fix 后缀/预发布语义叠了大量特判，全部退场；
+ * 现在的规则只有一条：候选 Release 的发布日期**严格晚于**当前运行 Release 的发布日期。
+ * 旧测试的场景（fix 修订、预发布转正、装着 fix 不被引导装回原版）在日期语义下自然成立，
+ * 这里逐条以日期形式保留。
  */
 class UpdateCheckerTest {
 
+    private fun release(tag: String, date: String, prerelease: Boolean = false) = UpdateChecker.ReleaseInfo(
+        tag = tag,
+        name = tag,
+        body = "",
+        apkUrl = "https://example.com/$tag.apk",
+        publishedAt = Instant.parse(date).toEpochMilli(),
+        publishedAtText = date.take(10),
+        prerelease = prerelease,
+    )
+
+    private val v040 = "2026-09-01T00:00:00Z"
+    private val v041 = "2026-10-01T00:00:00Z"
+    private val v042 = "2026-10-05T00:00:00Z"
+
     @Test
-    fun `主版本号递增算更新`() {
-        assertTrue(UpdateChecker.isNewer("0.1.3", "0.1.2"))
-        assertTrue(UpdateChecker.isNewer("0.2.0", "0.1.9"))
-        assertTrue(UpdateChecker.isNewer("1.0.0", "0.9.9"))
+    fun `候选发布日期晚于当前版本算更新`() {
+        val releases = listOf(release("v0.4.0", v040), release("v0.4.1", v041))
+        val up = UpdateChecker.selectUpdate(releases, "preview", "0.4.0")
+        assertEquals("v0.4.1", up?.tag)
     }
 
     @Test
-    fun `主版本号下降不算更新`() {
-        assertFalse(UpdateChecker.isNewer("0.1.2", "0.1.3"))
-        assertFalse(UpdateChecker.isNewer("0.9.9", "1.0.0"))
+    fun `候选发布日期更早不提示`() {
+        // 装着日期更新的修订（fix），不该被引导装回日期更早的原版
+        val releases = listOf(release("v0.3.3", v040), release("v0.3.3-fix", v041))
+        assertNull(UpdateChecker.selectUpdate(releases, "preview", "0.3.3-fix"))
     }
 
     @Test
-    fun `相同版本不算更新`() {
-        assertFalse(UpdateChecker.isNewer("0.1.2", "0.1.2"))
-        assertFalse(UpdateChecker.isNewer("v0.1.2", "0.1.2"))
-        // 尾随零差异不应产生"假更新"
-        assertFalse(UpdateChecker.isNewer("1.0", "1.0.0"))
+    fun `同日重发不提示`() {
+        // 同 tag 删了重发、发布日期刷新成同一天：基线与候选同日 → 不算更新
+        val releases = listOf(release("v0.4.1", v041))
+        assertNull(UpdateChecker.selectUpdate(releases, "preview", "0.4.1"))
     }
 
     @Test
-    fun `带 v 前缀与多位版本号`() {
-        assertTrue(UpdateChecker.isNewer("v1.2.3", "1.2.2"))
-        assertTrue(UpdateChecker.isNewer("26.2", "1.99.99"))
+    fun `当前版本匹配带 v 前缀与大小写无关`() {
+        val releases = listOf(release("v0.4.0", v040), release("V0.4.1", v041))
+        val up = UpdateChecker.selectUpdate(releases, "preview", "0.4.0")
+        assertEquals("V0.4.1", up?.tag)
     }
 
     @Test
-    fun `同号正式版高于预发布`() {
-        // beta 用户转到正式版必须收到提示
-        assertTrue(UpdateChecker.isNewer("0.2.0", "0.2.0-beta.1"))
-        // 反之，正式版用户不该被引导去装预发布
-        assertFalse(UpdateChecker.isNewer("0.2.0-beta.1", "0.2.0"))
+    fun `当前版本不在列表时用安装时间兜底`() {
+        val releases = listOf(release("v0.5.0", v042))
+        val oct1 = Instant.parse(v040).toEpochMilli()
+        val oct6 = Instant.parse("2026-10-06T00:00:00Z").toEpochMilli()
+        // 安装时间早于候选发布日期 → 有更新
+        assertEquals("v0.5.0", UpdateChecker.selectUpdate(releases, "preview", "unknown-build", oct1)?.tag)
+        // 安装时间晚于候选发布日期（本地构建比所有 Release 都新）→ 不提示
+        assertNull(UpdateChecker.selectUpdate(releases, "preview", "unknown-build", oct6))
     }
 
     @Test
-    fun `预发布序号递增`() {
-        assertTrue(UpdateChecker.isNewer("1.0.0-beta.2", "1.0.0-beta.1"))
-        assertFalse(UpdateChecker.isNewer("1.0.0-beta.1", "1.0.0-beta.2"))
+    fun `stable 通道过滤预发布`() {
+        val releases = listOf(
+            release("v0.5.0-beta.1", v042, prerelease = true),
+            release("v0.4.1", v041),
+        )
+        // stable：预发布即使日期更新也不作为候选
+        assertEquals("v0.4.1", UpdateChecker.selectUpdate(releases, "stable", "0.4.0")?.tag)
+        // preview：预发布日期更新 → 作为候选
+        assertEquals("v0.5.0-beta.1", UpdateChecker.selectUpdate(releases, "preview", "0.4.0")?.tag)
     }
 
     @Test
-    fun `主版本更高时忽略预发布段`() {
-        // 0.3.0-beta.1 仍高于 0.2.0
-        assertTrue(UpdateChecker.isNewer("0.3.0-beta.1", "0.2.0"))
+    fun `基线日期按当前运行的 Release 计算`() {
+        // 用户装着预发布（比最新 stable 新）：stable 通道下不应被引导"降级"
+        val releases = listOf(
+            release("v0.4.1", v041),
+            release("v0.5.0-preview", v042, prerelease = true),
+        )
+        assertNull(UpdateChecker.selectUpdate(releases, "stable", "0.5.0-preview"))
+    }
+
+    @Test
+    fun `日期解析失败的候选不选中`() {
+        val releases = listOf(
+            release("v0.4.0", v040),
+            release("v0.4.1", v041).copy(publishedAt = 0), // 日期解析失败的极端情况
+        )
+        assertEquals("v0.4.0", UpdateChecker.selectUpdate(releases, "preview", "0.4.0")?.tag)
+    }
+
+    // ── 日期解析（published_at → epoch）──
+
+    @Test
+    fun `GitHub ISO 时间解析`() {
+        val ms = UpdateChecker.parseDate("2026-10-02T18:22:27Z")
+        assertTrue(ms != null && ms > 0)
+        // 带毫秒的变体也能解析
+        assertTrue(UpdateChecker.parseDate("2026-10-02T18:22:27.123Z") != null)
+        assertNull(UpdateChecker.parseDate(""))
+        assertNull(UpdateChecker.parseDate("not-a-date"))
+    }
+
+    @Test
+    fun `发布日期格式化为 yyyy-MM-dd`() {
+        val ms = UpdateChecker.parseDate("2026-10-02T18:22:27Z")!!
+        val text = UpdateChecker.formatDate(ms)
+        assertTrue(text.matches(Regex("\\d{4}-\\d{2}-\\d{2}")))
+    }
+
+    @Test
+    fun `sameRelease 归一匹配`() {
+        assertTrue(UpdateChecker.sameRelease("v0.4.0-fix", "0.4.0-FIX"))
+        assertFalse(UpdateChecker.sameRelease("v0.4.0", "0.4.1"))
+        // 空版本号（本地构建）永不匹配
+        assertFalse(UpdateChecker.sameRelease("v0.4.0", ""))
     }
 
     // ── digest 解析（更新包完整性校验的入口）──

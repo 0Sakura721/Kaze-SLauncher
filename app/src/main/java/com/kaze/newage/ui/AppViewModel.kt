@@ -2389,8 +2389,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (!autoUpdate) return
         container.appScope.launch {
             try {
-                val info = withContext(Dispatchers.IO) { UpdateChecker.check(container.uiPrefs.updateChannel.value) }
-                if (info != null && UpdateChecker.isNewer(info.tag, currentVersionName())) {
+                val info = withContext(Dispatchers.IO) {
+                    UpdateChecker.check(container.uiPrefs.updateChannel.value, currentVersionName(), installedAtMs())
+                }
+                // check() 内部已按发布日期判定：返回非 null 就是「比当前运行的 Release 新」
+                if (info != null) {
                     _appUpdate.value = AppUpdateState.Found(info)
                 }
             } catch (_: Exception) { /* 静默：启动检查失败不影响使用 */ }
@@ -2403,17 +2406,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         _appUpdate.value = AppUpdateState.Checking
         container.appScope.launch {
             try {
-                val info = withContext(Dispatchers.IO) { UpdateChecker.check(container.uiPrefs.updateChannel.value) }
-                _appUpdate.value = if (info == null || !UpdateChecker.isNewer(info.tag, currentVersionName())) {
-                    AppUpdateState.Latest
-                } else {
-                    AppUpdateState.Found(info)
+                val info = withContext(Dispatchers.IO) {
+                    UpdateChecker.check(container.uiPrefs.updateChannel.value, currentVersionName(), installedAtMs())
                 }
+                _appUpdate.value = if (info == null) AppUpdateState.Latest else AppUpdateState.Found(info)
             } catch (e: Exception) {
                 _appUpdate.value = AppUpdateState.Error(e.message ?: "检查失败（网络不可达？）")
             }
         }
     }
+
+    /**
+     * 当前安装包的安装时间（epoch 毫秒）。
+     *
+     * 更新判定改用发布日期后的兜底基线：当前 versionName 匹配不到任何 Release
+     * （本地构建 / tag 改名）时，用「什么时候装的」代替「装的是哪个」——
+     * 发布日期晚于安装时间的 Release 才提示，本地构建不会被旧 Release 骚扰。
+     */
+    fun installedAtMs(): Long = runCatching {
+        container.appContext.packageManager
+            .getPackageInfo(container.appContext.packageName, 0).lastUpdateTime
+    }.getOrDefault(0L)
 
     /** 下载并安装更新。跑在 appScope 上：离开设置页 / 转屏都不会中断 */
     fun downloadAndInstallUpdate(info: UpdateChecker.ReleaseInfo) {

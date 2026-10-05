@@ -334,6 +334,14 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 title = { Text("发现新版本 ${releaseInfo.tag}") },
                 text = {
                     Column {
+                        // 发布日期：更新判定现在以它为准（版本号不再参与比较），亮出来让用户可核对
+                        if (releaseInfo.publishedAtText.isNotBlank()) {
+                            Text(
+                                "发布于 ${releaseInfo.publishedAtText}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         if (releaseInfo.body.isNotBlank()) {
                             // 原来直接把 info.body 丢进 Text：用户看到的是**原始 Markdown**
                             // （## / > / ** / 表格竖线），而且 take(400) 把正文截断，后半截看不到。

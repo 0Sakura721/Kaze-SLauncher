@@ -10,14 +10,21 @@ import org.json.JSONObject
  * 由 Downloader 并发测速选最快源、失败自动回退（断点续传）。
  *
  * 双通道：
- *  - preview（默认）：/releases 列表取最新一条（含 prerelease 预览版）
- *  - stable：/releases/latest（仅正式版，GitHub 对纯 prerelease 仓库恒返 404）
+ *  - preview（默认）：全部 Release 里取发布日期最新的一条（含 prerelease 预览版）
+ *  - stable：同一份列表里过滤掉 prerelease 后取发布日期最新的一条
+ *
+ * ## 更新判定以「发布日期」为准，不再比较版本号
+ * 版本号比较（0.1.2 → 0.1.3-fix 这类）需要枚举后缀语义，规则越叠越多还容易漏。
+ * 改为：候选 Release 的 **`published_at`** 晚于「用户正在运行的那个 Release 的
+ * `published_at`」→ 有更新。基线的确定：
+ *  1. 首选：Releases 列表里 tag 与当前 versionName 匹配的那条的发布日期；
+ *  2. 匹配不到（本地构建 / tag 改名）：退回用**安装时间**兜底。
+ * 两个日期都来自 GitHub 服务端时间，不受设备时钟影响。
  */
 object UpdateChecker {
 
     const val REPO = "0Sakura721/Kaze-SLauncher"
-    private const val API_LATEST = "https://api.github.com/repos/$REPO/releases/latest"
-    private const val API_LIST = "https://api.github.com/repos/$REPO/releases"
+    private const val API_LIST = "https://api.github.com/repos/$REPO/releases?per_page=50"
 
     /**
      * GitHub 下载加速镜像（社区常用线路，前缀直拼 GitHub 原链）。
@@ -96,6 +103,12 @@ object UpdateChecker {
          * 得先拿到 `.json` 里的 `baseSha256` 与本机已装 APK 的 sha256 比对。
          */
         val patchAssets: List<PatchAsset> = emptyList(),
+        /** 发布时间（GitHub `published_at`，epoch 毫秒）——更新判定以此为准 */
+        val publishedAt: Long = 0,
+        /** 发布日期的显示文本（本地时区的 yyyy-MM-dd；解析失败为空串） */
+        val publishedAtText: String = "",
+        /** GitHub 的 prerelease 标记（stable 通道会过滤掉） */
+        val prerelease: Boolean = false,
     )
 
     /** 一对补丁资产：`.json` 元数据 + 对应的 `.zip` */
@@ -106,29 +119,38 @@ object UpdateChecker {
     )
 
     /**
-     * 查询最新 Release；无任何 Release（HTTP 404）返回 null（= 暂无更新）；网络/解析失败抛异常。
+     * 查询更新：拉 Releases 列表 → 按通道过滤 → 取发布日期最新的一条 →
+     * 与「当前运行的 Release」的发布日期比较，**没有更新的返回 null**（网络/解析失败抛异常）。
+     *
      * @param channel preview（含预览版，默认）| stable（仅正式版）
+     * @param currentVersion 当前安装包的 versionName（与 tag 匹配来确定基线日期）
+     * @param installedAt 当前安装包的安装时间（versionName 匹配不到任何 Release 时的兜底基线）
      */
-    fun check(channel: String = "preview"): ReleaseInfo? {
-        val url = if (channel == "stable") API_LATEST else API_LIST
+    fun check(channel: String = "preview", currentVersion: String = "", installedAt: Long = 0L): ReleaseInfo? {
         val text = try {
-            Downloader.downloadText(url, timeoutMs = 20000)
+            Downloader.downloadText(API_LIST, timeoutMs = 20000)
         } catch (e: Exception) {
-            // 404 = 仓库没有符合该通道的 Release（GitHub 对无 release 的 /releases/latest 恒返 404）
+            // 404 = 仓库不存在或没有任何 Release（老版本兼容，理论上列表接口返回空数组）
             if (e.message?.contains("404") == true) return null
             throw e
         }
-        val json: JSONObject = if (channel == "stable") {
-            JSONObject(text)
-        } else {
-            val arr = JSONArray(text)
-            if (arr.length() == 0) return null
-            arr.getJSONObject(0)
-        }
+        val arr = JSONArray(text)
+        val releases = (0 until arr.length())
+            .mapNotNull { parseRelease(arr.optJSONObject(it) ?: return@mapNotNull null) }
+        return selectUpdate(releases, channel, currentVersion, installedAt)
+    }
+
+    /** 单条 Release JSON → [ReleaseInfo]；无 tag / 草稿 / 没有可用 APK 资产返回 null */
+    internal fun parseRelease(json: JSONObject): ReleaseInfo? {
         val tag = json.optString("tag_name", "").removePrefix("v")
+        if (tag.isBlank()) return null
+        if (json.optBoolean("draft", false)) return null
         val assets = json.optJSONArray("assets") ?: return null
         // 按设备架构选对应 APK（release 三版本：arm64-v8a / armeabi-v7a / universal）
         val asset = pickApkAsset(assets) ?: return null
+        val publishedAt = parseDate(json.optString("published_at", ""))
+            ?: parseDate(json.optString("created_at", ""))
+            ?: 0L
         return ReleaseInfo(
             tag = tag,
             name = json.optString("name", tag),
@@ -136,8 +158,53 @@ object UpdateChecker {
             apkUrl = asset.optString("browser_download_url"),
             apkSha256 = parseSha256(asset.optString("digest", "")),
             patchAssets = pickPatchAssets(assets),
+            publishedAt = publishedAt,
+            publishedAtText = formatDate(publishedAt),
+            prerelease = json.optBoolean("prerelease", false),
         )
     }
+
+    /**
+     * 更新选择本体（纯函数，单独测）：
+     *  1. 通道过滤（stable 剔除 prerelease）；
+     *  2. 候选 = 发布日期最新的一条；
+     *  3. 基线 = tag 与 currentVersion 匹配的那条 Release 的发布日期，匹配不到用 installedAt；
+     *  4. 候选日期 **严格晚于** 基线才算更新（同日重发不提示）。
+     */
+    internal fun selectUpdate(
+        releases: List<ReleaseInfo>,
+        channel: String,
+        currentVersion: String,
+        installedAt: Long = 0L,
+    ): ReleaseInfo? {
+        val applicable = releases.filter { channel != "stable" || !it.prerelease }
+        val candidate = applicable.filter { it.publishedAt > 0 }.maxByOrNull { it.publishedAt }
+            ?: return null
+        val baseline = releases
+            .firstOrNull { sameRelease(it.tag, currentVersion) }
+            ?.publishedAt
+            ?: installedAt
+        return candidate.takeIf { it.publishedAt > baseline }
+    }
+
+    /** tag 与 versionName 是否指同一个版本（去 v 前缀、忽略大小写与首尾空白） */
+    internal fun sameRelease(tag: String, versionName: String): Boolean {
+        fun norm(s: String) = s.trim().trimStart('v', 'V').lowercase()
+        val t = norm(tag)
+        return t.isNotEmpty() && t == norm(versionName)
+    }
+
+    /** GitHub 的 ISO-8601 时间（2026-10-02T18:22:27Z）→ epoch 毫秒；解析失败 null */
+    internal fun parseDate(iso: String): Long? =
+        iso.trim().takeIf { it.isNotEmpty() }
+            ?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
+
+    /** epoch 毫秒 → 本地时区的 yyyy-MM-dd 显示文本；解析失败空串 */
+    internal fun formatDate(epochMs: Long): String = runCatching {
+        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")
+            .withZone(java.time.ZoneId.systemDefault())
+            .format(java.time.Instant.ofEpochMilli(epochMs))
+    }.getOrDefault("")
 
     /**
      * 从 release 资产里挑出增量补丁（`patch-*.json`，且配对的 `patch-*.zip` 必须也在）。
@@ -255,89 +322,4 @@ object UpdateChecker {
         // ⚠️ 直连 github.com 放**最后**，只当兜底：实测它只有 ~40 KB/s（镜像 700~900 KB/s），
         // 放最前面时"能下但极慢"，用户感受就是更新卡住了。
         MIRRORS.map { it + apkUrl } + apkUrl
-
-    /**
-     * 版本号比较：latest 比 current 新 → true。
-     * 支持 0.1.0 / v1.2.3-beta.1 / 26.2 形式；关键修复：预发布段不再数字化归零——
-     * 同主版本下「正式版 > 预发布」，否则 beta 用户永远收不到同号转正的提示。
-     */
-    fun isNewer(latest: String, current: String): Boolean {
-        fun split(v: String): Pair<List<Long>, List<String>> {
-            val main = v.substringBefore('-').trimStart('v', 'V')
-            val pre = v.substringAfter('-', "").split('.', ' ').filter { it.isNotEmpty() }
-            val nums = Regex("\\d+").findAll(main).map { it.value.toLong() }.toList()
-            return nums to pre
-        }
-        fun rank(tok: String): Long = when (tok.lowercase()) {
-            "dev" -> 0L
-            "alpha", "a" -> 1L
-            "beta", "b" -> 2L
-            "preview", "rc", "cr", "milestone" -> 3L
-            else -> Long.MAX_VALUE // 未知段视作最"正式"
-        }
-        fun comparePre(a: List<String>, b: List<String>): Int {
-            val n = maxOf(a.size, b.size)
-            for (i in 0 until n) {
-                val at = a.getOrNull(i)
-                val bt = b.getOrNull(i)
-                if (at == bt) continue
-                if (at == null) return -1          // beta < beta.1（缺段更早）
-                if (bt == null) return 1
-                val ar = at.toLongOrNull()
-                val br = bt.toLongOrNull()
-                val cmp = when {
-                    ar != null && br != null -> ar.compareTo(br)
-                    ar != null -> 1                 // 数字段视为更接近正式
-                    br != null -> -1
-                    else -> rank(at).compareTo(rank(bt))
-                }
-                if (cmp != 0) return cmp
-            }
-            return 0
-        }
-        val (lv, lp) = split(latest)
-        val (cv, cp) = split(current)
-        val n = maxOf(lv.size, cv.size)
-        for (i in 0 until n) {
-            val x = lv.getOrNull(i) ?: 0L
-            val y = cv.getOrNull(i) ?: 0L
-            if (x != y) return x > y
-        }
-        return when {
-            // latest 无后缀 vs current 有后缀：只有 current 是**预发布**时才算"转正"。
-            // 若 current 是修订后缀（fix 等），说明用户装的是正式版之上的修订，
-            // 不该被"更新"回不带后缀的那个 —— 两个方向必须对称，否则会出现来回横跳。
-            lp.isEmpty() && cp.isNotEmpty() && isPrereleaseTag(cp) -> true
-            lp.isEmpty() && cp.isNotEmpty() -> false
-            lp.isNotEmpty() && cp.isEmpty() ->
-                // ⚠️ 这里**不能**一律当成"预发布 → 不算更新"。
-                //
-                // 真机反馈："更新机制查不到带原版本加后缀的" —— v0.3.3-fix 的 lp = ["fix"]，
-                // 旧写法直接返回 false，于是装着 0.3.3 的用户**永远查不到** 0.3.3-fix。
-                //
-                // 后缀有两种完全不同的语义，必须分开：
-                //  · alpha / beta / rc / preview / dev / snapshot … → 预发布，正式版用户不该被引导去装
-                //  · fix / hotfix / patch / rev … 以及**任何未知后缀** → 视为在正式版**之上**的修订
-                //    （本仓库的 v0.3.1-fix / v0.3.3-fix 就是这种；用户也说了"以后可能会有其他名字"，
-                //     所以未知后缀一律按"更新"处理，而不是按"预发布"忽略）
-                !isPrereleaseTag(lp)
-            else -> comparePre(lp, cp) > 0
-        }
-    }
-
-    /**
-     * 判断版本后缀是不是"预发布"（而不是"正式版之上的修订"）。
-     *
-     * 只认公认的预发布词；其余（含 fix / hotfix / 以及将来任何新名字）都算修订 → 是更新。
-     */
-    internal fun isPrereleaseTag(parts: List<String>): Boolean {
-        if (parts.isEmpty()) return false
-        // 形如 beta.1 / rc2 时，只要**首段**是预发布词就算预发布
-        val head = parts.first().lowercase().trimEnd { it.isDigit() }
-        return head in PRERELEASE_WORDS
-    }
-
-    private val PRERELEASE_WORDS = setOf(
-        "alpha", "a", "beta", "b", "preview", "pre", "rc", "cr", "milestone", "snapshot", "dev", "nightly",
-    )
 }
