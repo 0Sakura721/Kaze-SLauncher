@@ -96,9 +96,18 @@ class UpdateCheckerTest {
     fun `日期解析失败的候选不选中`() {
         val releases = listOf(
             release("v0.4.0", v040),
-            release("v0.4.1", v041).copy(publishedAt = 0), // 日期解析失败的极端情况
+            release("v0.4.2", v042),
+            // 更新的 tag 但日期解析失败（published_at/created_at 都缺失的极端情况）
+            release("v0.4.3", v042).copy(publishedAt = 0),
         )
-        assertEquals("v0.4.0", UpdateChecker.selectUpdate(releases, "preview", "0.4.0")?.tag)
+        // 候选在有效日期里选最新：日期为 0 的 v0.4.3 不该被选中
+        assertEquals("v0.4.2", UpdateChecker.selectUpdate(releases, "preview", "0.4.0")?.tag)
+    }
+
+    @Test
+    fun `所有候选日期都解析失败时不提示`() {
+        val releases = listOf(release("v0.4.2", v042).copy(publishedAt = 0))
+        assertNull(UpdateChecker.selectUpdate(releases, "preview", "0.4.0"))
     }
 
     // ── 日期解析（published_at → epoch）──
