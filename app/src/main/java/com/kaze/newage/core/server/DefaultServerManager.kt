@@ -869,10 +869,19 @@ class DefaultServerManager(
             add("-XX:+PerfDisableSharedMem")
             add("-XX:MaxGCPauseMillis=200")
             add("-Djava.security.egd=file:/dev/urandom")
+            addAll(extraJvmArgList(instance.extraJvmArgs))
             add("-jar")
             add(jarName)
             if (instance.nogui) add("nogui")
         }
+
+    /**
+     * 用户自定义 JVM 附加参数的切分：按空白拆成独立参数。
+     * 带引号的含空格参数（如 `-Dlog.file="my logs.txt"`）目前不支持 —— 空格分隔是
+     * 最不容易出错的约定；需要含空格参数时写进 Forge 的 user_jvm_args.txt。
+     */
+    internal fun extraJvmArgList(extra: String): List<String> =
+        extra.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
 
     /**
      * 该实例的启动参数。
@@ -908,6 +917,7 @@ class DefaultServerManager(
             add("-XX:+PerfDisableSharedMem")
             add("-XX:MaxGCPauseMillis=200")
             add("-Djava.security.egd=file:/dev/urandom")
+            addAll(extraJvmArgList(instance.extraJvmArgs))
             if (argsFile != null) {
                 // user_jvm_args.txt 是 Forge 留给用户覆盖 JVM 参数的位置，存在就一并传入
                 if (File(instance.dir, "user_jvm_args.txt").isFile) add("@user_jvm_args.txt")

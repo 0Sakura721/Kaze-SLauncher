@@ -522,6 +522,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    /** 自定义 JVM 附加参数（空格分隔；启动时拼进 java 命令行） */
+    fun setExtraJvmArgs(instance: ServerInstance, args: String) {
+        instanceStore.setExtraJvmArgs(instance.id, args)
+        val running = serverManager.states.value[instance.id] == ServerState.Running
+        serverManager.consoleFor(instance.id).emit(
+            "> JVM 附加参数已更新" +
+                if (running) "（当前进程仍按旧参数运行，重启后生效）" else "（下次启动生效）",
+            LineType.System,
+        )
+    }
+
+    /** nogui 开关（启动参数，同上只落盘） */
+    fun setNogui(instance: ServerInstance, nogui: Boolean) {
+        instanceStore.setNogui(instance.id, nogui)
+    }
+
     fun sendCommand(command: String) {
         val id = _currentInstanceId.value ?: return
         instanceStore.get(id)?.let { serverManager.sendCommand(it, command) }

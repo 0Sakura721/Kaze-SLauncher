@@ -24,6 +24,9 @@ data class StoredInstance(
     val autoRestart: Boolean,
     val maxRestarts: Int,
     val dirPath: String,
+    val extraJvmArgs: String = "",
+    val pinned: Boolean = false,
+    val autoBackup: Boolean = false,
 ) {
     fun toInstance(): ServerInstance = ServerInstance(
         id = id,
@@ -37,6 +40,9 @@ data class StoredInstance(
         maxRestarts = maxRestarts,
         dir = File(dirPath),
     )
+        extraJvmArgs = extraJvmArgs,
+        pinned = pinned,
+        autoBackup = autoBackup,
 
     companion object {
         fun from(instance: ServerInstance): StoredInstance = StoredInstance(
@@ -50,6 +56,9 @@ data class StoredInstance(
             autoRestart = instance.autoRestart,
             maxRestarts = instance.maxRestarts,
             dirPath = instance.dir.absolutePath,
+            extraJvmArgs = instance.extraJvmArgs,
+            pinned = instance.pinned,
+            autoBackup = instance.autoBackup,
         )
     }
 }
@@ -464,6 +473,41 @@ class InstanceStore(
         val mb = com.kaze.newage.core.server.MemoryLimits.clamp(memoryMb)
         _instances.value = _instances.value.map {
             if (it.id == id) it.copy(memoryMb = mb) else it
+        }
+        save()
+    }
+
+    /** nogui 开关（启动参数） */
+    fun setNogui(id: String, nogui: Boolean) {
+        _instances.value = _instances.value.map {
+            if (it.id == id) it.copy(nogui = nogui) else it
+        }
+        save()
+    }
+
+    /**
+     * 自定义 JVM 附加参数（空格分隔；启动时拼进 java 命令行）。
+     * 只落盘不改在跑进程 —— 生效时机由调用方说明（"重启后生效"）。
+     */
+    fun setExtraJvmArgs(id: String, args: String) {
+        _instances.value = _instances.value.map {
+            if (it.id == id) it.copy(extraJvmArgs = args.trim().replace(Regex("\\s+"), " ")) else it
+        }
+        save()
+    }
+
+    /** 置顶：服务端列表排序时置顶的排最前（组内保持原顺序） */
+    fun setPinned(id: String, pinned: Boolean) {
+        _instances.value = _instances.value.map {
+            if (it.id == id) it.copy(pinned = pinned) else it
+        }
+        save()
+    }
+
+    /** 停服自动备份开关（见 BackupManager.autoBackupIfNeeded） */
+    fun setAutoBackup(id: String, enabled: Boolean) {
+        _instances.value = _instances.value.map {
+            if (it.id == id) it.copy(autoBackup = enabled) else it
         }
         save()
     }

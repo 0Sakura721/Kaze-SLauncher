@@ -57,6 +57,9 @@ data class ServerInstance(
     val autoRestart: Boolean = false,
     val maxRestarts: Int = 3,
     val dir: File,          // 实例目录（server.jar 所在）
+    val extraJvmArgs: String = "",  // 用户自定义 JVM 附加参数（空格分隔；启动时拼进 java 命令行）
+    val pinned: Boolean = false,    // 置顶：服务端列表排在最前
+    val autoBackup: Boolean = false, // 停服时自动备份世界（auto_ 前缀，保留最近 5 份）
 ) {
     /** 实例目录下的 jar 文件 */
     val jarFile: File

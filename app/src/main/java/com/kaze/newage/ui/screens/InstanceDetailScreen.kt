@@ -350,6 +350,12 @@ fun InstanceDetailScreen(
                             },
                         )
 
+                        AdvancedSettingsCard(
+                            viewModel = viewModel,
+                            instance = instance,
+                            isRunning = state == ServerState.Running,
+                        )
+
                         WorldTab(
                             backups = backups,
                             busy = backupBusy,
@@ -966,6 +972,61 @@ private fun EditMemoryDialog(
 /** 「配置」页：server.properties 可视化编辑器（三个分组卡 + 保存） */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
+/**
+ * 高级设置：自定义 JVM 附加参数 + nogui 开关。
+ *
+ * 都是**启动参数**：保存只落盘，运行中的进程不受影响（保存后往控制台写"重启后生效"）。
+ * extraJvmArgs 按空格切分后追加在固定 JVM flags 之后、-jar/@args 之前
+ * （见 DefaultServerManager.extraJvmArgList）；含空格的参数不支持，
+ * Forge 实例可写 user_jvm_args.txt。
+ */
+@Composable
+private fun AdvancedSettingsCard(
+    viewModel: AppViewModel,
+    instance: ServerInstance,
+    isRunning: Boolean,
+) {
+    var args by remember(instance.id, instance.extraJvmArgs) { mutableStateOf(instance.extraJvmArgs) }
+    var nogui by remember(instance.id, instance.nogui) { mutableStateOf(instance.nogui) }
+
+    M3ECard(
+        variant = M3ECardVariant.Filled,
+        title = "高级设置",
+        supporting = "自定义 JVM 附加参数（空格分隔，重启后生效）。" +
+            "Forge 实例也可写 user_jvm_args.txt；写错参数会导致启动失败，失败原因见控制台。",
+    ) {
+        OutlinedTextField(
+            value = args,
+            onValueChange = { args = it },
+            label = { Text("JVM 附加参数") },
+            placeholder = { Text("-XX:+UseG1GC -Dfile.encoding=UTF-8") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        )
+        Row(
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "无图形界面（nogui）",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(checked = nogui, onCheckedChange = { nogui = it })
+        }
+        TextButton(
+            onClick = {
+                viewModel.setExtraJvmArgs(instance, args)
+                viewModel.setNogui(instance, nogui)
+            },
+            enabled = (args != instance.extraJvmArgs) || (nogui != instance.nogui),
+        ) {
+            Text(if (isRunning) "保存（重启后生效）" else "保存")
+        }
+    }
+}
+
 private fun PropertiesEditor(
     dir: File,
     instanceName: String,
