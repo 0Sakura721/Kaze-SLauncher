@@ -809,6 +809,14 @@ class DefaultServerManager(
         if (!slot.instance.autoBackup) return
         val instance = slot.instance
         scope.launch {
+            // 协程真正开跑前，用户可能已经又点了启动（finalizeStop 移除旧槽位后
+            // start() 建了新槽位，新进程马上要写实例目录）。让位跳过：宁可少一份
+            // 自动备份，也不打包正在被新进程写动的世界。null = 槽位正常移除（常规路径）。
+            val current = slots[instance.id]
+            if (current != null && current !== slot) {
+                slot.log("> 实例已重新启动，跳过本次停服自动备份", LineType.System)
+                return@launch
+            }
             val f = BackupManager.autoBackup(instance)
             if (f != null) {
                 slot.log(

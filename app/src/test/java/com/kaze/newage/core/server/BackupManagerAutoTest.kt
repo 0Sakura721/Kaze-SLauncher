@@ -66,6 +66,22 @@ class BackupManagerAutoTest {
     }
 
     @Test
+    fun `实例名本身以 auto_ 开头时手动备份不被误判为自动备份`() {
+        val root = Files.createTempDirectory("kaze-auto-name").toFile()
+        val dir = File(root, "auto_survival").apply { mkdirs() }
+        File(dir, "server.properties").writeText("server-port=25565\n")
+        val instance = ServerInstance(id = "test-id", name = "auto_survival", dir = dir)
+
+        val manual = BackupManager.backup(instance)
+        // 名字撞车：这份**手动**备份的文件名天生以 auto_ 开头（auto_ + 名字前缀）
+        assertTrue("前提不成立：${manual.name}", manual.name.startsWith(BackupManager.AUTO_PREFIX))
+
+        assertTrue("手动备份不能被认成自动备份", BackupManager.autoBackups(instance).isEmpty())
+        BackupManager.pruneAutoBackups(instance)
+        assertTrue("撞前缀的手动备份不能被清理", manual.isFile)
+    }
+
+    @Test
     fun `备份失败时自动备份返回 null 而不是抛出`() {
         val root = Files.createTempDirectory("kaze-auto-fail").toFile()
         val dir = File(root, "survival").apply { mkdirs() }

@@ -209,6 +209,17 @@ object BackupManager {
     const val AUTO_KEEP = 5
 
     /**
+     * 自动备份的**完整判别前缀**：`auto_ + 该实例的名字前缀`。
+     *
+     * 不能只认裸 `auto_`：实例名本身就以 `auto_` 开头时（比如实例叫 `auto_survival`），
+     * 它的**手动备份** `auto_survival_<id>_<时间>.zip` 同样以 `auto_` 开头——
+     * 用裸前缀判别会把手动备份误认成自动备份，被 [pruneAutoBackups] 当冗余清掉。
+     * 自动备份恒为 `auto_<名字>_<id>_…`，手动恒为 `<名字>_<id>_…`，同一实例专属目录内
+     * 两者用完整前缀一定能区分开（目录按实例隔离，不存在跨实例撞名）。
+     */
+    private fun autoPrefix(instance: ServerInstance): String = AUTO_PREFIX + namePrefix(instance)
+
+    /**
      * 停服自动备份（[ServerInstance.autoBackup] 开着时，进程退出收尾处调用）。
      *
      * 与手动备份的差异：
@@ -224,10 +235,10 @@ object BackupManager {
         null
     }
 
-    /** 该实例的自动备份（新→旧；只认 [AUTO_PREFIX] 前缀，手动备份不在列） */
+    /** 该实例的自动备份（新→旧；只认 [autoPrefix] 完整前缀，手动备份——哪怕是 `auto_` 开头的实例名——不在列） */
     internal fun autoBackups(instance: ServerInstance): List<File> =
         backupsDir(instance)
-            .listFiles { f: File -> f.isFile && f.name.startsWith(AUTO_PREFIX) && f.name.endsWith(".zip") }
+            .listFiles { f: File -> f.isFile && f.name.startsWith(autoPrefix(instance)) && f.name.endsWith(".zip") }
             ?.sortedByDescending { it.lastModified() }
             ?: emptyList()
 

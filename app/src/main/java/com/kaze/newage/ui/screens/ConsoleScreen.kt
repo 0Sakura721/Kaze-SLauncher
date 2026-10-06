@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -929,7 +930,8 @@ private fun DisplaySettingsDialog(
                     Switch(checked = timestamps, onCheckedChange = onTimestamps)
                 }
                 Text(
-                    "时间戳为 [HH:mm:ss] 前缀，只影响控制台显示，不写入日志文件。",
+                    "时间戳为 [HH:mm:ss] 前缀，只影响控制台显示，不写入日志文件。" +
+                        "从磁盘回读的更早日志没有时间记录，显示的是载入时间。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1056,7 +1058,9 @@ private fun QuickCommandChip(
             command,
             style = MaterialTheme.typography.labelLarge,
             maxLines = 1,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            overflow = TextOverflow.Ellipsis,
+            // 上限宽度：200 字符的命令不截的话 chip 会撑到 1400dp，把整行滚动都变得没有意义
+            modifier = Modifier.widthIn(max = 220.dp).padding(horizontal = 14.dp, vertical = 8.dp),
         )
     }
 }
