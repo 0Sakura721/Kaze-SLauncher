@@ -5,7 +5,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,12 +19,15 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -28,23 +35,32 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -55,11 +71,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.core.console.LineType
 import com.kaze.newage.core.server.ServerState
@@ -85,7 +106,6 @@ import com.kaze.newage.core.console.CONSOLE_MAX_LINES
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.TextButton
 import com.kaze.newage.core.console.CountFormat
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
@@ -108,6 +128,26 @@ import com.kaze.newage.core.monitor.ProcessStats
  */
 private const val SCROLL_ANIMATE_MAX_ITEMS = 30
 
+/**
+ * 日志级别过滤档（控制台 DIY 包，单选）。
+ *
+ * 「信息」档收编 System / Command 行：系统提示与命令回显属于"正常流水"，
+ * 排查时丢了会误导（例如「> 正在停止服务器…」不见了，会以为停止没生效）。
+ */
+private enum class ConsoleLevelFilter(val label: String) {
+    ALL("全部"),
+    INFO("信息"),
+    WARN("警告"),
+    ERROR("错误");
+
+    fun matches(type: LineType): Boolean = when (this) {
+        ALL -> true
+        INFO -> type == LineType.Info || type == LineType.System || type == LineType.Command
+        WARN -> type == LineType.Warn
+        ERROR -> type == LineType.Error
+    }
+}
+
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
@@ -122,6 +162,38 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
     val headerCount = if (hasMoreOlder) 1 else 0
     val scope = rememberCoroutineScope()
     val tone = serverState.toTone()
+
+    // ── 控制台 DIY 偏好 ──
+    // SettingsPrefs 持有的就是 Compose State，直接读即随写入自动重组。
+    val uiPrefs = viewModel.uiPrefs
+    val fontSp = uiPrefs.consoleFontSp.floatValue
+    val showTimestamps = uiPrefs.consoleTimestamps.value
+    val quickCommands = uiPrefs.consoleQuickCommands.value
+    var showDisplaySettings by remember { mutableStateOf(false) }
+    var showQuickCommandEditor by remember { mutableStateOf(false) }
+    // 时间戳只在开的时候才格式化：SimpleDateFormat 构造不便宜
+    val tsFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+
+    // 级别过滤 + 搜索（会话态：重进页面恢复「全部 / 空」）
+    var levelFilter by remember { mutableStateOf(ConsoleLevelFilter.ALL) }
+    var searchQuery by remember { mutableStateOf("") }
+
+    // 过滤结果必须放在派生 State 里：跟随滚动靠 snapshotFlow 追踪 State 读取，
+    // 普通 remember 计算值不是 State，过滤后的行数变化滚动收不到通知。
+    // 无过滤时直接透传原列表 —— 5 万行 × 每秒几十行的全量 contains 是白烧 CPU。
+    val shown by remember {
+        derivedStateOf {
+            val q = searchQuery.trim()
+            if (levelFilter == ConsoleLevelFilter.ALL && q.isEmpty()) {
+                lines
+            } else {
+                lines.filter { line ->
+                    levelFilter.matches(line.type) &&
+                        (q.isEmpty() || line.text.contains(q, ignoreCase = true))
+                }
+            }
+        }
+    }
 
     // 停止时清空输入框残留：保证 placeholder「服务端运行后可输入命令」恒定可见
     LaunchedEffect(serverState) {
@@ -163,14 +235,15 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
     // 程序性滚动标记：自动滚底与键盘弹出重滚同样是 isScrollInProgress=true，
     // 不区分的话「用户上滑暂停跟随」会把自己的自动滚动误判成上滑，跟随被自己关掉
     var autoScrolling by remember { mutableStateOf(false) }
+    // 滚动目标一律用过滤后的 shown：过滤/搜索生效时，列表渲染的就是它
     suspend fun scrollToNewest(animated: Boolean) {
-        if (lines.isEmpty()) return
+        if (shown.isEmpty()) return
         autoScrolling = true
         try {
             if (animated) {
-                listState.animateScrollToItem(lines.size - 1 + headerCount)
+                listState.animateScrollToItem(shown.size - 1 + headerCount)
             } else {
-                listState.scrollToItem(lines.size - 1 + headerCount)
+                listState.scrollToItem(shown.size - 1 + headerCount)
             }
         } finally {
             autoScrolling = false
@@ -188,7 +261,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
     // 另外按距离区分：差得少就平滑滚（连续输出的观感），差得多就直接跳
     // （切页回来 / 暂停后恢复），不让人干等一次长动画。
     LaunchedEffect(listState, follow) {
-        snapshotFlow { lines.size }.collect { size ->
+        snapshotFlow { shown.size }.collect { size ->
             if (!follow || size == 0) return@collect
             val distance = (size - 1) - listState.firstVisibleItemIndex
             scrollToNewest(animated = distance in 1..SCROLL_ANIMATE_MAX_ITEMS)
@@ -208,7 +281,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
     var wasImeVisible by remember { mutableStateOf(false) }
     LaunchedEffect(imeBottom) {
         val visible = imeBottom > 0.dp
-        if (visible && !wasImeVisible && follow && lines.isNotEmpty()) {
+        if (visible && !wasImeVisible && follow && shown.isNotEmpty()) {
             scrollToNewest(animated = false)
         }
         wasImeVisible = visible
@@ -408,7 +481,9 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             // 所以这里必须能告诉用户"完整日志多大、在哪"。
             var showCountDetail by remember { mutableStateOf(false) }
             Text(
-                "${CountFormat.short(lines.size.toLong())} 行",
+                // 过滤/搜索生效时同时报出"命中 / 总数"，否则用户以为过滤没起作用
+                if (shown === lines) "${CountFormat.short(lines.size.toLong())} 行"
+                else "${CountFormat.short(shown.size.toLong())} / ${CountFormat.short(lines.size.toLong())} 行",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 // 行数是常驻信息，任何情况下都不许被压成两行：
@@ -451,6 +526,49 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                         TextButton(onClick = { showCountDetail = false }) { Text("知道了") }
                     },
                 )
+            }
+        }
+
+        // ── 显示/过滤行：级别 chip（单选）+ 搜索 + 显示设置（字号 / 时间戳）──
+        //
+        // 不并入上面的动作行：那里已有 4 个 48dp 圆钮（360dp 屏只剩 ~100dp），
+        // 再塞一个「Aa」行数就会被截掉。这一行横向可滚动，窄屏也不会截断。
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ConsoleLevelFilter.entries.forEach { f ->
+                FilterChip(
+                    selected = levelFilter == f,
+                    onClick = { levelFilter = f },
+                    label = { Text(f.label) },
+                )
+            }
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.width(160.dp).height(48.dp),
+                placeholder = { Text("搜索日志…", style = MaterialTheme.typography.bodySmall) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "清除搜索",
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                },
+            )
+            ConsoleAction(Icons.Filled.TextFields, "控制台显示设置（字号 / 时间戳）") {
+                showDisplaySettings = true
             }
         }
 
@@ -534,27 +652,85 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                         }
                     }
                 }
+                // 内存里有日志、但被级别/搜索过滤光了的空态要与"从未输出"区分开：
+                // 前者该提示换条件，后者才是"启动后日志会来"
+                if (lines.isNotEmpty() && shown.isEmpty()) {
+                    item {
+                        Column(
+                            Modifier.fillParentMaxSize().padding(24.dp),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = null,
+                                tint = consoleLineColor(LineType.System).copy(alpha = 0.45f),
+                                modifier = Modifier.size(44.dp),
+                            )
+                            Text(
+                                "当前过滤条件下没有日志行\n换个级别，或清空搜索关键词",
+                                color = consoleLineColor(LineType.System).copy(alpha = 0.75f),
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.padding(top = 12.dp),
+                            )
+                        }
+                    }
+                }
                 // 直接用 items(list) 而不是 items(count) 按下标回读：
                 // count 是组合时定下的，而 key/content 里读的 lines 是**实时** State
                 // （后台协程在 IO 线程整体替换它，切实例/清空时会变短），
                 // 若替换正好落在组合与测量之间，lines[i] 就越界崩溃。
-                items(lines, key = { it.seq }) { line ->
+                items(shown, key = { it.seq }) { line ->
+                    val color = consoleLineColor(line.type)
                     Text(
-                        line.text,
-                        color = consoleLineColor(line.type),
+                        // 时间戳是暗色前缀 span：看得见"这行几点打的"，又不与正文抢注意力
+                        if (showTimestamps) {
+                            buildAnnotatedString {
+                                withStyle(SpanStyle(color = color.copy(alpha = 0.5f))) {
+                                    append("[${tsFormat.format(Date(line.timestamp))}] ")
+                                }
+                                append(line.text)
+                            }
+                        } else {
+                            AnnotatedString(line.text)
+                        },
+                        color = color,
                         fontFamily = FontFamily.Monospace,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.copy(fontSize = fontSp.sp),
                     )
                 }
             }
 
             // 手动上滑暂停跟随后浮出的「回到底部」：点一下恢复跟随并跳到最新一行
             JumpToBottomPill(
-                visible = !follow && lines.isNotEmpty(),
+                visible = !follow && shown.isNotEmpty(),
                 modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
             ) {
                 follow = true
                 scope.launch { scrollToNewest(animated = true) }
+            }
+        }
+
+        // ── 快捷命令 chip 行：点 = 发送，长按 = 删除，「＋」打开编辑器 ──
+        // 常驻（即使列表为空也显示「＋」）：这是控制台 DIY 包最直观的入口，
+        // 藏进菜单的话第一次根本发现不了。发送沿用输入框同一条 Running 守卫。
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(quickCommands, key = { it }) { cmd ->
+                QuickCommandChip(
+                    command = cmd,
+                    enabled = serverState == ServerState.Running,
+                    onClick = { viewModel.sendCommand(cmd) },
+                    onRemove = { uiPrefs.setConsoleQuickCommands(quickCommands - cmd) },
+                )
+            }
+            item {
+                QuickCommandAddChip(onClick = { showQuickCommandEditor = true })
             }
         }
 
@@ -615,6 +791,27 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                 }
             }
         }
+    }
+
+    // 两个 DIY 弹窗挂在 Column 外：它们是窗口级 UI，不参与版式
+    if (showDisplaySettings) {
+        DisplaySettingsDialog(
+            fontSp = fontSp,
+            timestamps = showTimestamps,
+            onFont = { uiPrefs.setConsoleFontSp(it) },
+            onTimestamps = { uiPrefs.setConsoleTimestamps(it) },
+            onDismiss = { showDisplaySettings = false },
+        )
+    }
+    if (showQuickCommandEditor) {
+        QuickCommandEditorDialog(
+            initial = quickCommands,
+            onSave = { list ->
+                uiPrefs.setConsoleQuickCommands(list)
+                showQuickCommandEditor = false
+            },
+            onDismiss = { showQuickCommandEditor = false },
+        )
     }
 }
 
@@ -687,6 +884,207 @@ private fun JumpToBottomPill(
                 )
                 Text("回到底部", style = MaterialTheme.typography.labelLarge)
             }
+        }
+    }
+}
+
+/**
+ * 控制台显示设置：字号滑杆 + 时间戳开关。版式照搬 SettingsScreen 的 SliderDialog
+ * （滑杆塞进列表行会撑变形，点开才出现），多一个 Switch 行 ——
+ * 「字号」与「时间戳」同属"怎么显示"，拆两个弹窗反而把一个概念撕成两处入口。
+ */
+@Composable
+private fun DisplaySettingsDialog(
+    fontSp: Float,
+    timestamps: Boolean,
+    onFont: (Float) -> Unit,
+    onTimestamps: (Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("控制台显示") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "字号 ${fontSp.toInt()}sp",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Slider(
+                    value = fontSp,
+                    onValueChange = onFont,
+                    valueRange = 10f..20f,
+                    steps = 9,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        "时间戳前缀",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Switch(checked = timestamps, onCheckedChange = onTimestamps)
+                }
+                Text(
+                    "时间戳为 [HH:mm:ss] 前缀，只影响控制台显示，不写入日志文件。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+    )
+}
+
+/**
+ * 快捷命令编辑器：在本地副本上增删，点「保存」才落盘（取消不改动现有 chip）。
+ * 条数与单条长度的上限真正执行在 SettingsPrefs.setConsoleQuickCommands，这里只负责提示。
+ */
+@Composable
+private fun QuickCommandEditorDialog(
+    initial: List<String>,
+    onSave: (List<String>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var list by remember { mutableStateOf(initial) }
+    var draft by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("快捷命令") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "点 chip 直接把命令发给服务端；长按 chip 也可快速删除。最多 12 条。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (list.isEmpty()) {
+                    Text(
+                        "还没有快捷命令，在下面输入第一条",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 240.dp)) {
+                        itemsIndexed(list) { index, cmd ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    cmd,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(
+                                    onClick = { list = list.filterIndexed { i, _ -> i != index } }
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Delete,
+                                        contentDescription = "删除 $cmd",
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = {
+                            Text("新命令，如 list / say hi", style = MaterialTheme.typography.bodySmall)
+                        },
+                        singleLine = true,
+                    )
+                    TextButton(
+                        enabled = draft.isNotBlank() && list.size < 12,
+                        onClick = {
+                            list = list + draft.trim()
+                            draft = ""
+                        },
+                    ) { Text("添加") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(list) }) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/**
+ * 快捷命令 chip：点 = 发送；长按 = 从列表删除（编辑器里也有删除入口，
+ * 长按只是高频用户的快捷路径）。服务端未运行时整颗呈禁用色（点不了）。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun QuickCommandChip(
+    command: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier
+            .clip(M3Shape.groupSingle(100f))
+            .combinedClickable(
+                onClick = onClick,
+                onClickLabel = "发送 $command",
+                onLongClick = onRemove,
+                onLongClickLabel = "删除快捷命令 $command",
+            ),
+        shape = M3Shape.groupSingle(100f),
+        color = if (enabled) scheme.secondaryContainer else scheme.surfaceContainerHighest,
+        contentColor = if (enabled) {
+            scheme.onSecondaryContainer
+        } else {
+            scheme.onSurfaceVariant.copy(alpha = 0.38f)
+        },
+    ) {
+        Text(
+            command,
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+        )
+    }
+}
+
+/** 「＋ 快捷命令」chip：列表为空时它就是唯一入口，所以常驻行尾、不受运行状态限制 */
+@Composable
+private fun QuickCommandAddChip(onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.clip(M3Shape.groupSingle(100f)),
+        shape = M3Shape.groupSingle(100f),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        onClick = onClick,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Add,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                "快捷命令",
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(start = 4.dp),
+            )
         }
     }
 }

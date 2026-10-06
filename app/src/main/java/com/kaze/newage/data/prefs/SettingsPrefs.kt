@@ -10,6 +10,9 @@ import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiSearch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
 
 /**
@@ -118,6 +121,50 @@ emember(path) 缓存位图的话，
      * 让用户显式选"省流量"更稳妥。
      */
     val updateMode = mutableStateOf(prefs.getString("update_mode", "full") ?: "full")
+
+    // ── 控制台 DIY（快捷命令 / 字号 / 时间戳）──
+    //
+    // 级别过滤与搜索词是会话态（重进恢复"全部"更符合直觉），这里只存跨会话的偏好。
+
+    /**
+     * 控制台快捷命令（chip 行）。JSON 数组落盘：命令内容里可以有引号、逗号、反斜杠，
+     * 手写分隔符必然转义出错。写入端裁剪（≤12 条、每条 ≤200 字符），读端解析失败按空处理。
+     */
+    val consoleQuickCommands = mutableStateOf(loadQuickCommands())
+
+    /** 控制台日志字号（10..20sp，默认 12） */
+    val consoleFontSp = mutableFloatStateOf(prefs.getFloat("console_font_sp", 12f))
+
+    /** 控制台时间戳前缀（[HH:mm:ss]，默认关） */
+    val consoleTimestamps = mutableStateOf(prefs.getBoolean("console_timestamps", false))
+
+    private fun loadQuickCommands(): List<String> =
+        runCatching {
+            prefs.getString("console_quick_commands", null)
+                ?.takeIf { it.isNotBlank() }
+                ?.let { Json.decodeFromString<List<String>>(it) }
+        }.getOrNull().orEmpty()
+            .map { it.trim().take(200) }
+            .filter { it.isNotEmpty() }
+            .distinct()
+            .take(12)
+
+    fun setConsoleQuickCommands(list: List<String>) {
+        val cleaned = list.map { it.trim().take(200) }.filter { it.isNotEmpty() }.distinct().take(12)
+        consoleQuickCommands.value = cleaned
+        prefs.edit().putString("console_quick_commands", Json.encodeToString(cleaned)).apply()
+    }
+
+    fun setConsoleFontSp(v: Float) {
+        val sp = v.coerceIn(10f, 20f)
+        consoleFontSp.floatValue = sp
+        prefs.edit().putFloat("console_font_sp", sp).apply()
+    }
+
+    fun setConsoleTimestamps(v: Boolean) {
+        consoleTimestamps.value = v
+        prefs.edit().putBoolean("console_timestamps", v).apply()
+    }
 
     // ── AI 助手（OpenAI 兼容接口 + 联网搜索，见 core/ai/）──
     //
