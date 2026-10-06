@@ -752,6 +752,7 @@ class DefaultServerManager(
         if (slot.exitHandled) return
         slot.exitHandled = true
         if (slot.manualStop) {
+            autoBackupAfterStop(slot)
             finalizeStop(slot)
             return
         }
@@ -787,7 +788,36 @@ class DefaultServerManager(
             } else {
                 slot.log("> 服务器已退出", LineType.System)
             }
+            autoBackupAfterStop(slot)
             finalizeStop(slot)
+        }
+    }
+
+    /**
+     * 停服自动备份（[ServerInstance.autoBackup] 开启时）。
+     *
+     * 挂在 [handleExit] 而不是 [finalizeStop]，两个刻意的排除：
+     *  - finalizeStop 也会被「进程本来就没在跑」的停止请求走到 —— 那轮生命周期没有任何
+     *    世界写入，备份只是把上一份原样重复一遍；
+     *  - 崩溃自动重启路径不备份：服务还要接着跑，每次重启都存档会把备份目录塞满重复副本。
+     *
+     * 进程已退出 = 优雅停止时世界已由服务端自己保存完，此时打包拿到的就是完整存档。
+     * 打包在 IO 协程异步做（几百 MB 的世界要几十秒，不能挡收尾），完成后往控制台写结果 ——
+     * slot 那时已被 finalizeStop 移除也无妨：log 走的是实例自己的 ConsoleStream。
+     */
+    private fun autoBackupAfterStop(slot: RuntimeSlot) {
+        if (!slot.instance.autoBackup) return
+        val instance = slot.instance
+        scope.launch {
+            val f = BackupManager.autoBackup(instance)
+            if (f != null) {
+                slot.log(
+                    "> 已自动备份世界：${f.name}（自动备份保留最近 ${BackupManager.AUTO_KEEP} 份）",
+                    LineType.System,
+                )
+            } else {
+                slot.log("> 自动备份失败（磁盘空间或权限问题），可在实例详情里手动备份", LineType.Warn)
+            }
         }
     }
 
@@ -875,13 +905,15 @@ class DefaultServerManager(
             if (instance.nogui) add("nogui")
         }
 
-    /**
-     * 用户自定义 JVM 附加参数的切分：按空白拆成独立参数。
-     * 带引号的含空格参数（如 `-Dlog.file="my logs.txt"`）目前不支持 —— 空格分隔是
-     * 最不容易出错的约定；需要含空格参数时写进 Forge 的 user_jvm_args.txt。
-     */
-    internal fun extraJvmArgList(extra: String): List<String> =
-        extra.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    companion object {
+        /**
+         * 用户自定义 JVM 附加参数的切分：按空白拆成独立参数。
+         * 带引号的含空格参数（如 `-Dlog.file="my logs.txt"`）目前不支持 —— 空格分隔是
+         * 最不容易出错的约定；需要含空格参数时写进 Forge 的 user_jvm_args.txt。
+         */
+        internal fun extraJvmArgList(extra: String): List<String> =
+            extra.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    }
 
     /**
      * 该实例的启动参数。

@@ -543,6 +543,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         instanceStore.setPinned(instance.id, pinned)
     }
 
+    /** 停服自动备份开关（生效时机 = 下一次服务端进程退出，见 BackupManager.autoBackup） */
+    fun setInstanceAutoBackup(instance: ServerInstance, enabled: Boolean) {
+        instanceStore.setAutoBackup(instance.id, enabled)
+    }
+
     fun sendCommand(command: String) {
         val id = _currentInstanceId.value ?: return
         instanceStore.get(id)?.let { serverManager.sendCommand(it, command) }

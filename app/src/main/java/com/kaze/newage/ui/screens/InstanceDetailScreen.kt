@@ -360,6 +360,8 @@ fun InstanceDetailScreen(
                             backups = backups,
                             busy = backupBusy,
                             message = backupMsg,
+                            autoBackup = instance.autoBackup,
+                            onAutoBackup = { viewModel.setInstanceAutoBackup(instance, it) },
                             onBackup = doBackup,
                             onImport = {
                                 importLauncher.launch(
@@ -660,6 +662,8 @@ private fun WorldTab(
     backups: List<File>,
     busy: Boolean,
     message: String?,
+    autoBackup: Boolean,
+    onAutoBackup: (Boolean) -> Unit,
     onBackup: () -> Unit,
     onImport: () -> Unit,
     onRestoreRequest: (File) -> Unit,
@@ -676,6 +680,24 @@ private fun WorldTab(
             }
         },
         content = {
+            // 停服自动备份：进程退出收尾时自动打包（世界在优雅停止时已保存完，
+            // 那是比任何定时器都安全的时机）。auto_ 前缀与手动备份区分，只留最近几份。
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("停服自动备份", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "服务端退出后自动打包一份（auto_ 前缀），保留最近 ${BackupManager.AUTO_KEEP} 份；" +
+                            "手动备份不受清理影响",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = autoBackup, onCheckedChange = onAutoBackup)
+            }
             if (backups.isEmpty()) {
                 Text(
                     "还没有备份。世界数据珍贵，建议开服前/后定期备份。",

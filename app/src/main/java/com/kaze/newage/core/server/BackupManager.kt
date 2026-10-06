@@ -147,11 +147,30 @@ object BackupManager {
      * `.part` 后缀也让中间态天然不被 [list] 命中（它只认 `.zip` 结尾）。
      */
     @Throws(Exception::class)
-    fun backup(instance: ServerInstance): File {
+    fun backup(instance: ServerInstance): File = backup(instance, prefix = "")
+
+    /**
+     * 创建备份，返回备份文件（[prefix] 供自动备份加 [AUTO_PREFIX] 用，手动传空串）。
+     *
+     * 文件名 = `<前缀><净化后的实例名>_<实例 id>_<时间戳>.zip`。
+     * **必须带上实例 id**：显示名可以随时改（`InstanceStore.rename`），也可以两个实例起同一个
+     * 名字，只靠名字前缀的话改名后老备份认不出来（界面上直接消失）、同名实例之间还会互相串
+     *（恢复时把别人的存档盖到自己头上）。id 稳定且唯一，[list] 因此不依赖显示名。
+     *
+     * **先写同目录的 `.part`，全部写完后才 rename 成正式名**。
+     * 直接写最终文件名的话，中途失败（世界 region 被占住读不了、空间不足、进程被杀）会留下
+     * 一个"能列出、能解压、但少了几个 region"的半截 zip —— 恢复它就是把世界覆盖成残缺版本，
+     * 比没有备份更危险，而 [list] 完全看不出它坏了。
+     * 同目录 rename 在同一文件系统上是原子的，所以 [list] 只会看到两种状态：不存在、完整。
+     *
+     * `.part` 后缀也让中间态天然不被 [list] 命中（它只认 `.zip` 结尾）。
+     */
+    @Throws(Exception::class)
+    fun backup(instance: ServerInstance, prefix: String): File {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val dir = backupsRoot(instance)
         // 名字必须净化：见 [sanitizeName]（带 `/` 的名字会让路径落进不存在的子目录 → 备份必然失败）
-        val dest = File(dir, "${namePrefix(instance)}${instance.id}_$stamp.zip")
+        val dest = File(dir, "$prefix${namePrefix(instance)}${instance.id}_$stamp.zip")
         val tmp = File(dir, "${dest.name}.part")
         try {
             ZipOutputStream(FileOutputStream(tmp)).use { zip ->
@@ -181,6 +200,40 @@ object BackupManager {
             throw e
         }
         return dest
+    }
+
+    /** 自动备份文件名前缀（与手动备份区分；清理只清这一系列，见 [pruneAutoBackups]） */
+    const val AUTO_PREFIX = "auto_"
+
+    /** 自动备份保留份数：超出后从最旧开始删 */
+    const val AUTO_KEEP = 5
+
+    /**
+     * 停服自动备份（[ServerInstance.autoBackup] 开着时，进程退出收尾处调用）。
+     *
+     * 与手动备份的差异：
+     *  - 文件名带 [AUTO_PREFIX]；[pruneAutoBackups] 只清这一系列，手动备份永不触碰；
+     *  - 失败**静默**（返回 null）：自动路径没有用户盯着弹窗，失败只由调用方写一条控制台行，
+     *    绝不能让备份把停止流程本身打断。
+     */
+    fun autoBackup(instance: ServerInstance): File? = try {
+        val f = backup(instance, AUTO_PREFIX)
+        pruneAutoBackups(instance)
+        f
+    } catch (_: Exception) {
+        null
+    }
+
+    /** 该实例的自动备份（新→旧；只认 [AUTO_PREFIX] 前缀，手动备份不在列） */
+    internal fun autoBackups(instance: ServerInstance): List<File> =
+        backupsDir(instance)
+            .listFiles { f: File -> f.isFile && f.name.startsWith(AUTO_PREFIX) && f.name.endsWith(".zip") }
+            ?.sortedByDescending { it.lastModified() }
+            ?: emptyList()
+
+    /** 自动备份只留最近 [keep] 份（最旧的删除）；无 [AUTO_PREFIX] 的手动备份永不触碰 */
+    fun pruneAutoBackups(instance: ServerInstance, keep: Int = AUTO_KEEP) {
+        autoBackups(instance).drop(keep).forEach { it.delete() }
     }
 
     /**
