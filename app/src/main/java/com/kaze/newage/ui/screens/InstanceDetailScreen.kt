@@ -992,8 +992,6 @@ private fun EditMemoryDialog(
 }
 
 /** 「配置」页：server.properties 可视化编辑器（三个分组卡 + 保存） */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
 /**
  * 高级设置：自定义 JVM 附加参数 + nogui 开关。
  *
@@ -1002,6 +1000,7 @@ private fun EditMemoryDialog(
  * （见 DefaultServerManager.extraJvmArgList）；含空格的参数不支持，
  * Forge 实例可写 user_jvm_args.txt。
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AdvancedSettingsCard(
     viewModel: AppViewModel,

@@ -39,10 +39,10 @@ data class StoredInstance(
         autoRestart = autoRestart,
         maxRestarts = maxRestarts,
         dir = File(dirPath),
-    )
         extraJvmArgs = extraJvmArgs,
         pinned = pinned,
         autoBackup = autoBackup,
+    )
 
     companion object {
         fun from(instance: ServerInstance): StoredInstance = StoredInstance(
@@ -504,7 +504,7 @@ class InstanceStore(
         save()
     }
 
-    /** 停服自动备份开关（见 BackupManager.autoBackupIfNeeded） */
+    /** 停服自动备份开关（见 BackupManager.autoBackup：进程退出收尾处调用） */
     fun setAutoBackup(id: String, enabled: Boolean) {
         _instances.value = _instances.value.map {
             if (it.id == id) it.copy(autoBackup = enabled) else it
