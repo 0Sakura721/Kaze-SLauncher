@@ -3,8 +3,10 @@ package com.kaze.newage.ui.screens
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -43,6 +45,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
@@ -80,6 +83,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -116,7 +120,12 @@ import com.kaze.newage.core.monitor.ProcessStats
  * 控制台：实时日志（主题化深色终端）+ 命令输入 —— 本应用的主工作台。
  *
  * 版式来自 m3e-canvas 生成的 `docs/m3e/prompt-控制台.md`：
- *   屏幕头（实例切换 + 实例摘要 + 状态胶囊）→ 日志动作行 → 终端画布 → 命令输入
+ *   屏幕头（实例切换 + 实例摘要 + 状态胶囊）→ 日志动作行（复制/保存/跟随/清空/筛选 + 行数）
+ *   → 筛选搜索栏（默认收起，动作行开关展开）→ 快捷命令行（运行中或有命令才出现）
+ *   → 终端画布 → 命令输入
+ *
+ * 控件默认收起/条件出现的原则：控制台的主工作区是日志本身，DIY 控件全部常驻的话
+ * 三条行加输入框要吃掉小半屏（真机 360dp 宽度下尤其明显）。
  *
  * 两条刻意保留的旧设计：
  *  - 日志面板是「终端画布」而不是普通卡片：深色底（consoleBackgroundColor）、等宽字体、
@@ -178,6 +187,10 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
     // 级别过滤 + 搜索（会话态：重进页面恢复「全部 / 空」）
     var levelFilter by remember { mutableStateOf(ConsoleLevelFilter.ALL) }
     var searchQuery by remember { mutableStateOf("") }
+    // 筛选/搜索栏默认收起：控制台的主工作区是日志本身，常驻三行控件太挤。
+    // 收起时条件继续生效 —— 动作行按钮保持选中色、行数显示「命中/总数」
+    var showFilterBar by remember { mutableStateOf(false) }
+    val filterActive = levelFilter != ConsoleLevelFilter.ALL || searchQuery.isNotBlank()
 
     // 过滤结果必须放在派生 State 里：跟随滚动靠 snapshotFlow 追踪 State 读取，
     // 普通 remember 计算值不是 State，过滤后的行数变化滚动收不到通知。
@@ -476,6 +489,13 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                 }
             }
             ConsoleAction(Icons.Filled.Delete, "清空日志") { viewModel.clearConsole() }
+            // 筛选/搜索/显示设置的开关。选中色在「栏展开」或「条件仍在生效」时都点亮：
+            // 收起状态下的生效过滤靠它和行数里的「命中/总数」提示，否则用户会以为列表坏了
+            ConsoleAction(
+                icon = Icons.Filled.FilterList,
+                label = if (showFilterBar) "收起筛选与搜索" else "筛选与搜索",
+                active = showFilterBar || filterActive,
+            ) { showFilterBar = !showFilterBar }
             Spacer(Modifier.weight(1f))
             // 行数按「万 / 百万 / 千万 / 亿」缩写（一位小数），点一下看精确数字与日志体积。
             // 内存里不可能真的无限（120 万行 ≈ 150 MB），真正的全量在磁盘上的 console-output.log，
@@ -530,46 +550,52 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             }
         }
 
-        // ── 显示/过滤行：级别 chip（单选）+ 搜索 + 显示设置（字号 / 时间戳）──
+        // ── 筛选与搜索栏：级别 chip（单选）+ 搜索 + 显示设置（字号 / 时间戳）──
         //
-        // 不并入上面的动作行：那里已有 4 个 48dp 圆钮（360dp 屏只剩 ~100dp），
-        // 再塞一个「Aa」行数就会被截掉。这一行横向可滚动，窄屏也不会截断。
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        // 默认收起（见动作行「筛选」开关）：控制台的主工作区是日志本身，
+        // DIY 控件全部常驻的话三条行加输入框要吃掉小半屏。展开时横向可滚动，窄屏也不截断。
+        AnimatedVisibility(
+            visible = showFilterBar,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
         ) {
-            ConsoleLevelFilter.entries.forEach { f ->
-                FilterChip(
-                    selected = levelFilter == f,
-                    onClick = { levelFilter = f },
-                    label = { Text(f.label) },
-                )
-            }
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier.width(160.dp).height(48.dp),
-                placeholder = { Text("搜索日志…", style = MaterialTheme.typography.bodySmall) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall,
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                Icons.Filled.Close,
-                                contentDescription = "清除搜索",
-                                modifier = Modifier.size(16.dp),
-                            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ConsoleLevelFilter.entries.forEach { f ->
+                    FilterChip(
+                        selected = levelFilter == f,
+                        onClick = { levelFilter = f },
+                        label = { Text(f.label) },
+                    )
+                }
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.width(160.dp).height(48.dp),
+                    placeholder = { Text("搜索日志…", style = MaterialTheme.typography.bodySmall) },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodySmall,
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "清除搜索",
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
                         }
-                    }
-                },
-            )
-            ConsoleAction(Icons.Filled.TextFields, "控制台显示设置（字号 / 时间戳）") {
-                showDisplaySettings = true
+                    },
+                )
+                ConsoleAction(Icons.Filled.TextFields, "控制台显示设置（字号 / 时间戳）") {
+                    showDisplaySettings = true
+                }
             }
         }
 
@@ -714,24 +740,28 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
         }
 
         // ── 快捷命令 chip 行：点 = 发送，长按 = 删除，「＋」打开编辑器 ──
-        // 常驻（即使列表为空也显示「＋」）：这是控制台 DIY 包最直观的入口，
-        // 藏进菜单的话第一次根本发现不了。发送沿用输入框同一条 Running 守卫。
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(quickCommands, key = { it }) { cmd ->
-                QuickCommandChip(
-                    command = cmd,
-                    enabled = serverState == ServerState.Running,
-                    onClick = { viewModel.sendCommand(cmd) },
-                    onRemove = { uiPrefs.setConsoleQuickCommands(quickCommands - cmd) },
-                )
-            }
-            item {
-                QuickCommandAddChip(onClick = { showQuickCommandEditor = true })
+        //
+        // 只在「运行中」或「已有命令」时出现：它服务的动作（发命令）停止态做不了，
+        // 空列表在停止态更没有意义 —— 这两行让位给日志区。入口收敛为：服务端跑起来
+        // 后点「＋ 快捷命令」开始配（发送沿用输入框同一条 Running 守卫）。
+        if (serverState == ServerState.Running || quickCommands.isNotEmpty()) {
+            LazyRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(quickCommands, key = { it }) { cmd ->
+                    QuickCommandChip(
+                        command = cmd,
+                        enabled = serverState == ServerState.Running,
+                        onClick = { viewModel.sendCommand(cmd) },
+                        onRemove = { uiPrefs.setConsoleQuickCommands(quickCommands - cmd) },
+                    )
+                }
+                item {
+                    QuickCommandAddChip(onClick = { showQuickCommandEditor = true })
+                }
             }
         }
 
@@ -743,7 +773,10 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
         ) {
             // AI 助手入口：与运行状态无关 —— 起不来/出错时恰恰最需要问"为什么"，
             // 所以只要选了实例就能点（不跟随输入框的 Running 守卫）。跳全屏 AI 页。
-            ConsoleAction(Icons.Filled.SmartToy, "AI 助手", enabled = current != null) { onOpenAi() }
+            // 输入行是这一屏的主行动，保持 48dp（动作行五个钮已降到 44dp）。
+            ConsoleAction(Icons.Filled.SmartToy, "AI 助手", enabled = current != null, size = 48.dp) {
+                onOpenAi()
+            }
             Spacer(Modifier.width(6.dp))
 
             // 只有运行中才可发送：与按钮的可用性同源，键盘上的发送键也走同一守卫
@@ -817,8 +850,11 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
 }
 
 /**
- * 控制台动作：48dp 圆底图标按钮（与主页的次要动作同一套语言）。
- * 不使用裸 IconButton —— 圆底容器让四个动作在深色终端上方保持同一视觉分量。
+ * 控制台动作：圆底图标按钮（与主页的次要动作同一套语言）。
+ * 不使用裸 IconButton —— 圆底容器让动作在深色终端上方保持同一视觉分量。
+ *
+ * [size] 默认 48dp；动作行加了第五个钮（筛选）后整体降到 44dp 给行数留位 ——
+ * 360dp 屏上五个 48dp 钮 + 间距会把「…行」挤到截断。输入行的主行动（AI）仍是 48dp。
  */
 @Composable
 private fun ConsoleAction(
@@ -827,11 +863,12 @@ private fun ConsoleAction(
     enabled: Boolean = true,
     /** 开关型动作（跟随）的选中态：用 secondaryContainer 表达「正在生效」 */
     active: Boolean = false,
+    size: Dp = 44.dp,
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     Surface(
-        modifier = Modifier.size(48.dp).clip(CircleShape),
+        modifier = Modifier.size(size).clip(CircleShape),
         shape = CircleShape,
         color = if (active) scheme.secondaryContainer else scheme.surfaceContainerHigh,
         contentColor = when {
