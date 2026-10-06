@@ -991,7 +991,6 @@ private fun EditMemoryDialog(
     )
 }
 
-/** 「配置」页：server.properties 可视化编辑器（三个分组卡 + 保存） */
 /**
  * 高级设置：自定义 JVM 附加参数 + nogui 开关。
  *
@@ -1048,6 +1047,9 @@ private fun AdvancedSettingsCard(
     }
 }
 
+/** 「配置」页：server.properties 可视化编辑器（三个分组卡 + 保存） */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
 private fun PropertiesEditor(
     dir: File,
     instanceName: String,
