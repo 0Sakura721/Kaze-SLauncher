@@ -538,6 +538,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         instanceStore.setNogui(instance.id, nogui)
     }
 
+    /** 实例置顶（服务端列表排最前；纯展示排序，不影响任何运行逻辑） */
+    fun setInstancePinned(instance: ServerInstance, pinned: Boolean) {
+        instanceStore.setPinned(instance.id, pinned)
+    }
+
     fun sendCommand(command: String) {
         val id = _currentInstanceId.value ?: return
         instanceStore.get(id)?.let { serverManager.sendCommand(it, command) }

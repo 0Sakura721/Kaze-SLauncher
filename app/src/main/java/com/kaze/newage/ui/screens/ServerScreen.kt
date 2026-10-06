@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -104,6 +105,8 @@ fun ServerScreen(
         if (category == null) instances
         else instances.filter { it.coreType.category == category }
     }
+    // 置顶优先、组内保持原顺序（sortedByDescending 是稳定排序，不会打乱既有排列）
+    val visible = remember(filtered) { filtered.sortedByDescending { it.pinned } }
     fun countOf(cat: CoreCategory?): Int =
         if (cat == null) instances.size else instances.count { it.coreType.category == cat }
 
@@ -220,15 +223,17 @@ fun ServerScreen(
                     bottom = M3Spacing.betweenGroups,
                 ),
             ) {
-                item { SectionLabel("实例（${filtered.size}）") }
+                item { SectionLabel("实例（${visible.size}）") }
                 item {
-                    M3EConnectedList(count = filtered.size) { index, shape ->
-                        val instance = filtered[index]
+                    M3EConnectedList(count = visible.size) { index, shape ->
+                        val instance = visible[index]
                         InstanceRow(
                             instance = instance,
                             shape = shape,
                             selected = instance.id == currentInstanceId,
                             state = states[instance.id] ?: ServerState.Idle,
+                            pinned = instance.pinned,
+                            onTogglePin = { viewModel.setInstancePinned(instance, !instance.pinned) },
                             // 点行 = 选为当前实例 + 打开实例详情（与旧版一致）
                             onSelect = {
                                 viewModel.selectInstance(instance)
@@ -470,6 +475,8 @@ private fun InstanceRow(
     shape: Shape,
     selected: Boolean,
     state: ServerState,
+    pinned: Boolean,
+    onTogglePin: () -> Unit,
     onSelect: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
@@ -512,6 +519,15 @@ private fun InstanceRow(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
+                    if (pinned) {
+                        // 置顶标记：排序列表之外的第二重确认，扫一眼就知道哪几个在前面
+                        Icon(
+                            Icons.Filled.PushPin,
+                            contentDescription = "已置顶",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                     if (eulaMissing) {
                         // 用警示图标而不是「EULA 未接受」四个字：那段文字要占 ~55dp，
                         // 把标题/摘要挤到只剩不到 90dp，摘要被折成两行后又被 72dp 行高压掉
@@ -553,12 +569,20 @@ private fun InstanceRow(
                     )
                 }
 
-                // 实例菜单：打开实例目录 / 删除（删除进二次确认）
+                // 实例菜单：置顶 / 打开实例目录 / 删除（删除进二次确认）
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
                     shape = M3Shape.medium,
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(if (pinned) "取消置顶" else "置顶") },
+                        leadingIcon = { Icon(Icons.Filled.PushPin, null, Modifier.size(20.dp)) },
+                        onClick = {
+                            menuExpanded = false
+                            onTogglePin()
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text("打开实例目录") },
                         leadingIcon = { Icon(Icons.Filled.FolderOpen, null, Modifier.size(20.dp)) },
