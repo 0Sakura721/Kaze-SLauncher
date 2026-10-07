@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -71,9 +72,12 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
             .navigationBarsPadding()
+            // 表单页必须避让键盘：本项目是 adjustNothing + edge-to-edge，
+            // 不补的话聚焦下半屏输入框时键盘直接盖住内容且滚不出来
+            .imePadding()
     ) {
+        // 头部钉住不随内容滚走：长内容滚下去后返回键也得在
         M3EScreenHeader(
             title = "AI 设置",
             subtitle = "模型配置 · 联网搜索",
@@ -84,6 +88,12 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             },
         )
 
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+        ) {
         val editingProfile = editing
         if (editingProfile != null) {
             AiProfileEditForm(
@@ -107,6 +117,7 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             SearchSection(viewModel)
         }
         Spacer(Modifier.height(32.dp))
+        }
     }
 }
 
@@ -164,9 +175,7 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
         }
     }
     SectionNote(
-        "可建多份配置（不同服务商 / Key），单击卡片选择用于对话。DeepSeek 官方推荐用 " +
-            "deepseek-flash（思考模式由「深度思考」开关控制，无需填两个模型名）；" +
-            "其它服务商若“思考 = 换模型名”，可把两个名字都填进模型名（逗号分隔）。"
+        "可建多份配置（不同服务商 / Key），单击卡片选择用于对话；点「编辑」修改模型与 Key。"
     )
     Spacer(Modifier.height(8.dp))
 
@@ -305,11 +314,9 @@ private fun AiProfileEditForm(
     )
     Spacer(Modifier.height(6.dp))
     SectionNote(
-        "提示：模型名留空回退 DeepSeek 默认（deepseek-flash）；旧名 deepseek-chat / " +
-            "deepseek-reasoner 已于 2026-07-24 停用，保存时自动归一到 deepseek-flash。\n" +
+        "模型名留空回退 DeepSeek 默认；旧名（deepseek-chat / deepseek-reasoner）保存时自动归一。\n" +
             "「深度思考」：DeepSeek 走原生 thinking 参数；其它服务商若思考=换模型名，" +
-            "填第二个模型名即可（如 qwen3 的 thinking 版）；要显式参数（如 {\"enable_thinking\":true}）" +
-            "写进附加参数。删除当前使用的配置会自动回退到剩余第一个。"
+            "填第二个模型名即可，或把显式参数写进附加参数。"
     )
     Spacer(Modifier.height(12.dp))
     Row(
@@ -348,7 +355,7 @@ private fun CommandModeSection(viewModel: AppViewModel) {
     val current = AiCommandPolicy.modeById(prefs.aiCommandMode.value)
 
     SectionTitle("控制台命令执行")
-    SectionNote("决定 AI 能在多大范围内直接执行服务端命令。无论哪档，执行记录都会写入审计日志（filesDir/ai_audit.log）。")
+    SectionNote("决定 AI 能在多大范围内直接执行服务端命令。无论哪档，执行记录都会写入审计日志。")
     Spacer(Modifier.height(8.dp))
 
     AiCommandPolicy.Mode.entries.forEach { mode ->
@@ -470,28 +477,34 @@ private fun SearchSection(viewModel: AppViewModel) {
     }
 
     if (provider.id == AiSearch.Provider.SEARXNG.id) {
-        // SearXNG：Key 栏语义是实例地址（明文、http(s)），免凭据
-        OutlinedTextField(
-            value = searchKey,
-            onValueChange = {
-                searchKey = it
-                keySaved = false
-            },
-            label = { Text("SearXNG 实例地址") },
-            placeholder = { Text("https://searx.example.com") },
-            singleLine = true,
-            modifier = Modifier
+        // SearXNG：Key 栏语义是实例地址（明文、http(s)），免凭据。
+        // 版式与 Key 分支一致（输入框 weight + 保存按钮同行），不再多占一行
+        Row(
+            Modifier
                 .fillMaxWidth()
-                .padding(horizontal = M3Spacing.screenMargin),
-        )
-        Button(
-            onClick = {
-                viewModel.setAiSearch(providerId, searchKey)
-                keySaved = true
-            },
-            modifier = Modifier.padding(horizontal = M3Spacing.screenMargin),
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("保存")
+            OutlinedTextField(
+                value = searchKey,
+                onValueChange = {
+                    searchKey = it
+                    keySaved = false
+                },
+                label = { Text("SearXNG 实例地址") },
+                placeholder = { Text("https://searx.example.com") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+            Button(
+                onClick = {
+                    viewModel.setAiSearch(providerId, searchKey)
+                    keySaved = true
+                },
+            ) {
+                Text("保存")
+            }
         }
     } else if (provider.needsKey) {
         Row(

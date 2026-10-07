@@ -227,6 +227,10 @@ fun AddonsScreen(
                 )
             }
 
+            // ── 搜索/排序/安装进度：只在核心支持时出现 ──
+            // 不支持时这些全是僵尸控件（搜索永远发不出去、排序点了没反应），
+            // 留着只会占掉 ~200dp 并暗示"能搜" —— 只留上面的警示卡和已安装区
+            if (supported) {
             // ── 搜索栏（高 56dp、全圆角、surfaceContainerHigh）──
             SearchField(
                 query = query,
@@ -261,6 +265,7 @@ fun AddonsScreen(
                     label = "下载最多",
                     onClick = { sortByDownloads = true },
                 )
+            }
             }
 
             // ── 安装 / 搜索反馈（常驻：滚到列表末尾也要看得到）──
@@ -308,7 +313,8 @@ fun AddonsScreen(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = M3Spacing.screenMargin)
-                .padding(top = M3Spacing.betweenGroups, bottom = M3Spacing.bottomBarSpace),
+                // 本页是不显示底栏的子路由，底部只留导航栏避让量（与实例详情/日志页同一约定）
+                .padding(top = M3Spacing.betweenGroups, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenParts),
         ) {
             // 搜索结果
@@ -360,8 +366,8 @@ fun AddonsScreen(
                     iconContainer = MaterialTheme.colorScheme.surfaceContainerHighest,
                     shape = M3Shape.listSingle,
                 )
-            } else if (!searched) {
-                // 还没搜过：说清楚怎么开始，别留一片空白
+            } else if (!searched && supported) {
+                // 还没搜过：说清楚怎么开始，别留一片空白（不支持核心时不给这条假入口）
                 M3EListItem(
                     headline = "搜索 Modrinth",
                     supporting = "输入关键词后回车，或点右侧搜索图标；结果按上面的排序方式显示",
@@ -378,25 +384,28 @@ fun AddonsScreen(
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
             )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                CheckChip(
-                    selected = installedFilter == 0,
-                    label = "全部 ${installed.size}",
-                    onClick = { installedFilter = 0 },
-                )
-                CheckChip(
-                    selected = installedFilter == 1,
-                    label = "已启用 $enabledCount",
-                    onClick = { installedFilter = 1 },
-                )
-                CheckChip(
-                    selected = installedFilter == 2,
-                    label = "已禁用 ${installed.size - enabledCount}",
-                    onClick = { installedFilter = 2 },
-                )
+            // 过滤 chip 只在有东西可滤时出现：零安装时三颗全是 0、点了没效果
+            if (installed.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CheckChip(
+                        selected = installedFilter == 0,
+                        label = "全部 ${installed.size}",
+                        onClick = { installedFilter = 0 },
+                    )
+                    CheckChip(
+                        selected = installedFilter == 1,
+                        label = "已启用 $enabledCount",
+                        onClick = { installedFilter = 1 },
+                    )
+                    CheckChip(
+                        selected = installedFilter == 2,
+                        label = "已禁用 ${installed.size - enabledCount}",
+                        onClick = { installedFilter = 2 },
+                    )
+                }
             }
             if (installed.isEmpty()) {
                 Text(

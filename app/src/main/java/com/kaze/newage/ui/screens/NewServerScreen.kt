@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -254,8 +255,14 @@ private fun CoreSelectPhase(
             }
         }
 
-        // 底部动作：选中一个核心之前不可点
-        Column(Modifier.padding(horizontal = M3Spacing.screenMargin, vertical = M3Spacing.betweenGroups)) {
+        // 底部动作：选中一个核心之前不可点。
+        // 本路由不显示常驻底栏，navigationBarsPadding 必须自己补：
+        // 不补的话三键导航设备的系统栏会直接叠在「下一步」下半段上
+        Column(
+            Modifier
+                .navigationBarsPadding()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = M3Spacing.betweenGroups)
+        ) {
             PrimaryButton(
                 label = "下一步",
                 icon = Icons.AutoMirrored.Filled.ArrowForward,
@@ -934,9 +941,9 @@ private fun ConfigPage(
                     onMemoryMb = onMemoryMb,
                 )
 
-                // 状态文案：自动→系统建议（只读）；手动→游戏分配
+                // 状态文案：数值已在滑块 thumb 与档位标签上显示过，这里只说差异信息
                 val statusText = if (autoMemory) {
-                    "自动分配 ${fmtGb(effectiveMb)} · 根据设备可用内存，不可手动修改"
+                    "根据设备可用内存自动分配，不可手动修改"
                 } else {
                     "游戏分配 ${fmtGb(effectiveMb)}"
                 }
@@ -946,21 +953,24 @@ private fun ConfigPage(
                     color = if (exceeded) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "范围 512 MB ~ 8192 MB",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    TextButton(
-                        onClick = { onShowMemoryDialog(true) },
-                        enabled = !autoMemory, // 自动模式不可手动改动
+                // 范围提示 + 精确输入只在手动模式出现：自动模式下这一行是纯占位
+                //（精确输入不可点，滑块本身已表达范围）
+                if (!autoMemory) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("精确输入", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "范围 512 MB ~ 8192 MB",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(
+                            onClick = { onShowMemoryDialog(true) },
+                        ) {
+                            Text("精确输入", style = MaterialTheme.typography.labelMedium)
+                        }
                     }
                 }
             }
@@ -1079,7 +1089,12 @@ private fun ConfigPage(
         }
 
         // ── 底部动作：下载中就是"取消"，否则才是"下载并创建"（与旧版同一个位置、同一个判断）──
-        Column(Modifier.padding(horizontal = M3Spacing.screenMargin, vertical = M3Spacing.betweenGroups)) {
+        // 同上：本路由没有常驻底栏，导航栏避让要自己补
+        Column(
+            Modifier
+                .navigationBarsPadding()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = M3Spacing.betweenGroups)
+        ) {
             if (download.running) {
                 TonalButton(
                     label = "取消下载",

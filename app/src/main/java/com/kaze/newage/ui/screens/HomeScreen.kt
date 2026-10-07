@@ -182,7 +182,7 @@ fun HomeScreen(
                         append(" · ")
                         append(current.memoryMb)
                         append(" MB")
-                        if (running) append(" · 在线 ${onlinePlayers.size} 人")
+                        if (running) append(" · 在线 ${onlinePlayers.size} 人 · 端口已监听")
                     },
                     onClick = { listOpen = true },
                     trailing = {
@@ -347,23 +347,16 @@ fun HomeScreen(
             }
         }
 
-        // ── 运行时长卡（服务器没跑时不留 00:00:00 的假数据）──
-        if (running) {
-            M3ECard(
-                variant = M3ECardVariant.Outlined,
-                title = formatUptime(uptime),
-                titleIcon = null,
-                supporting = "已运行 · 在线 ${onlinePlayers.size} 人 · 端口已监听",
-                content = { },
-            )
-        }
-
         // ── eula 三步指示（首次启动流程）──
+        // 运行时长卡已删：头部状态胶囊显示同一个 uptime，实例卡正文显示在线人数，
+        // 这张 ~94dp 的卡唯一的新信息（端口已监听）并进了实例卡 supporting
         if (serverState == ServerState.FirstRun || serverState == ServerState.AcceptingEula) {
             EulaSteps(serverState)
         }
 
         // ── 环境状态行 / 部署进度 ──
+        // 就绪态不再渲染这一行：它是条没有任何可操作项的常驻纯信息（~72dp），
+        // Java 版本在实例卡/服务端列表里都有 —— 只在需要用户动作（未部署/失败/部署中）时出现
         if (envState == ProotEnvironment.State.SETTING_UP) {
             M3ECard(
                 variant = M3ECardVariant.Outlined,
@@ -375,7 +368,7 @@ fun HomeScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-        } else {
+        } else if (envState != ProotEnvironment.State.READY) {
             M3EListItem(
                 headline = when (envState) {
                     ProotEnvironment.State.READY -> "Linux 环境已就绪"

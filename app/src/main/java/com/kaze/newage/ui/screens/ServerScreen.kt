@@ -223,7 +223,8 @@ fun ServerScreen(
                     bottom = M3Spacing.betweenGroups,
                 ),
             ) {
-                item { SectionLabel("实例（${visible.size}）") }
+                // 「实例（N）」小标题删掉：头部副标题「共 N 个实例 · M 个运行中」与
+                // 分段筛选档位上的计数已经把数量说了两遍，这里再报第三遍是纯占位
                 item {
                     M3EConnectedList(count = visible.size) { index, shape ->
                         val instance = visible[index]
@@ -256,13 +257,16 @@ fun ServerScreen(
         }
 
         // ── 批量启停：只作用于当前筛选出来的实例 ──
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = M3Spacing.screenMargin)
-                .padding(top = M3Spacing.betweenGroups),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
+        // 筛选结果为空（或一个实例都没有）时整行隐藏：两个禁用按钮钉在空态页底部
+        // 只是占位，还会把空态文案顶出可视区
+        if (filtered.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = M3Spacing.screenMargin)
+                    .padding(top = M3Spacing.betweenGroups),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
             GroupButton(
                 label = "启动全部",
                 icon = Icons.Filled.PlayArrow,
@@ -296,6 +300,7 @@ fun ServerScreen(
                     }
                 },
             )
+        }
         }
 
         // 常驻底栏占位：列表最后一项能滚到底栏之上，不被永久遮住
@@ -353,17 +358,6 @@ private fun RowScope.GroupButton(
             Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }
-}
-
-/** 分组小标题：列表上方的一行说明文字 */
-@Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = M3Spacing.betweenParts),
-    )
 }
 
 /** 空态：一个实例都没有，或当前筛选档下一个都没有 —— 两种文案不一样 */

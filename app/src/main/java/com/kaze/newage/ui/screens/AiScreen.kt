@@ -79,6 +79,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -483,7 +484,8 @@ private fun ChatMessageRow(
                 msg.isError -> scheme.onErrorContainer
                 else -> scheme.onSurface
             },
-            modifier = Modifier.fillMaxWidth(0.85f),
+            // 宽度随内容收缩，上限 85% 屏宽（原来 fillMaxWidth 把一句话也拉满整行）
+            modifier = Modifier.widthIn(max = LocalConfiguration.current.screenWidthDp.dp * 0.85f),
         ) {
             Column(
                 Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -559,6 +561,8 @@ private val AI_BUBBLE_SHAPE = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
 @Composable
 private fun LiveStreamRow(stream: AppViewModel.AiLiveStream) {
     val scheme = MaterialTheme.colorScheme
+    // 气泡宽度按内容收缩，上限 85% 屏宽（fillMaxWidth 会把一句话也拉满整行）
+    val maxBubbleWidth = LocalConfiguration.current.screenWidthDp.dp * 0.85f
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Box(
             Modifier
@@ -579,13 +583,19 @@ private fun LiveStreamRow(stream: AppViewModel.AiLiveStream) {
             shape = AI_BUBBLE_SHAPE,
             color = scheme.surfaceContainerHigh,
             contentColor = scheme.onSurface,
-            modifier = Modifier.fillMaxWidth(0.85f),
+            modifier = Modifier.widthIn(max = maxBubbleWidth),
         ) {
             Column(
                 Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (stream.reasoning.isNotEmpty()) {
+                    // 实况推理保留（用户明确要看思考过程），但限高收紧到 110dp 并自动贴底：
+                    // 160dp 的框叠加 busy 行与输入坞，会把历史消息区压到小半屏
+                    val reasoningScroll = rememberScrollState()
+                    LaunchedEffect(stream.reasoning.length) {
+                        reasoningScroll.scrollTo(reasoningScroll.maxValue)
+                    }
                     Text(
                         if (stream.thinking) "思考中（${stream.reasoning.length} 字）…"
                         else "推理中（${stream.reasoning.length} 字）…",
@@ -596,7 +606,7 @@ private fun LiveStreamRow(stream: AppViewModel.AiLiveStream) {
                         stream.reasoning.takeLast(600),
                         style = MaterialTheme.typography.bodySmall,
                         color = scheme.onSurfaceVariant,
-                        modifier = Modifier.heightIn(max = 160.dp).verticalScroll(rememberScrollState()),
+                        modifier = Modifier.heightIn(max = 110.dp).verticalScroll(reasoningScroll),
                     )
                 }
                 if (stream.content.isNotEmpty()) {
@@ -773,7 +783,7 @@ private fun WriteRequestRow(
                     Column(
                         Modifier
                             .padding(10.dp)
-                            .heightIn(max = if (showFull) 320.dp else 200.dp)
+                            .heightIn(max = if (showFull) 280.dp else 140.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
                         Text(

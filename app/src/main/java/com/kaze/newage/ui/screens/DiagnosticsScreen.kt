@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -166,14 +167,20 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             M3ECard(
                 variant = M3ECardVariant.Outlined,
                 title = "应用日志",
-                supporting = "logcat 只存在内存里（重启即失），这里留存最近 ${com.kaze.newage.core.log.AppLogStore.KEEP_FILES} 天",
+                supporting = "logcat 只存在内存里（重启即失），这里留存最近 ${com.kaze.newage.core.log.AppLogStore.KEEP_FILES} 天；分享可得全文",
             ) {
+                // 高度必须有界：tail(1200) 满载约 19000dp，不设上限会把「环境自检」卡
+                // 挤出几屏之外、根本触达不到。内滚 + 「分享」拿全文。
                 SelectionContainer {
                     Text(
                         text,
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
                     )
                 }
             }
@@ -189,6 +196,10 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp)
+                            .verticalScroll(rememberScrollState()),
                     )
                 }
             }

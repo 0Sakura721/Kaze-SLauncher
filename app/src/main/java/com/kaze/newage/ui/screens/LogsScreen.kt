@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -166,16 +167,13 @@ fun LogsScreen(
     Column(
         Modifier
             .fillMaxSize()
-            // 崩溃报告是列表全量展开的，不滚动的话记录一多，下面两张日志卡会被推出视口且
-            // 完全触达不到（反复崩溃的服务端必然产生多份报告）
-            .verticalScroll(rememberScrollState())
             // 本页不在常驻底栏的四个目的地里（AppRoot 只在 Dest 路由上显示底栏），
             // 所以不需要 bottomBarSpace 的额外留白
             .padding(horizontal = M3Spacing.screenMargin)
             .padding(top = 12.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // ── 屏幕头：返回 +（文件名 / 启动日志）+ 刷新 ──
+        // ── 屏幕头：返回 +（文件名 / 启动日志）+ 刷新。钉在顶部不随内容滚走：
+        // 查看大文件的中段时，刷新/返回也得随手可用 ──
         val openFile = selected
         M3EScreenHeader(
             title = openFile?.name ?: "启动日志",
@@ -205,41 +203,58 @@ fun LogsScreen(
 
         if (openFile != null) {
             // ── 文件查看器：深色终端画布（与主控制台同一套观感）──
+            //
+            // 高度必须有界（weight 吃掉头部之外的整段），内层 verticalScroll 才有意义：
+            // 旧版把 300KB 文本放进全页无界滚动里 —— 看大日志的中段只能整页线性划过
+            // 几万 dp，巨型文本还每帧参与整页布局。
             val content = remember(openFile, refresh) { readTail(openFile) }
-            M3ECard(
-                variant = M3ECardVariant.Filled,
-                // 旧版把「多大 / 显示了多少行」写在卡片标题里，这里保留成辅助文本
-                supporting = "${content.length / 1024} KB · 显示末尾 ${content.lines().size} 行",
-                content = {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(M3Shape.large)
-                            .background(consoleBackgroundColor())
-                            .padding(12.dp)
-                    ) {
-                        // 外层 Column 已经是全页滚动，这里不再套内层滚动
-                        //（旧版内层 verticalScroll 在无界高度下永远滚不动，是死代码）
-                        Text(
-                            content,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = consoleLineColor(LineType.Info),
-                        )
-                    }
-                },
+            Text(
+                "${content.length / 1024} KB · 显示末尾 ${content.lines().size} 行",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
             )
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(M3Shape.largeIncreased)
+                    .background(consoleBackgroundColor())
+            ) {
+                SelectionContainer {
+                    Text(
+                        content,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = consoleLineColor(LineType.Info),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(12.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
         } else {
-            // ── 筛选：全部 / 只看失败 ──
-            M3ESegmentedRow(
-                options = LogFilter.entries,
-                selected = filter,
-                label = { it.label },
-                onSelect = { filter = it },
-            )
+            // 崩溃报告是列表全量展开的，不滚动的话记录一多，下面两张日志卡会被推出视口且
+            // 完全触达不到（反复崩溃的服务端必然产生多份报告）
+            Column(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // ── 筛选：全部 / 只看失败 ──
+                M3ESegmentedRow(
+                    options = LogFilter.entries,
+                    selected = filter,
+                    label = { it.label },
+                    onSelect = { filter = it },
+                )
 
-            // ── 失败记录：崩过的服务端都会在 crash-reports 里留下一份 txt ──
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // ── 失败记录：崩过的服务端都会在 crash-reports 里留下一份 txt ──
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 SectionLabel(
                     if (filter == LogFilter.Failure) "启动失败记录（${crashReports.size}）"
                     else "崩溃报告（${crashReports.size}）"
@@ -331,6 +346,7 @@ fun LogsScreen(
                     shape = M3Shape.groupLast(56f),
                     enabled = crashReports.isNotEmpty(),
                 ) { confirmClear = true }
+            }
             }
         }
     }

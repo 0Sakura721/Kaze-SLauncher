@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
@@ -40,6 +41,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
@@ -286,14 +289,16 @@ fun InstanceDetailScreen(
 
         // ── 分区内容：四块按顺序铺在同一页 ──
         // 原来上面有一条 运行 / 配置 / 世界 / 附加 的主标签栏，真机反馈要求去掉。
-        // 仍然是一个 Column + verticalScroll，底部留出常驻底栏的高度。
+        // 仍然是一个 Column + verticalScroll。本页是不显示底栏的子路由
+        // （AppRoot 只在四个主 Tab 显示底栏），底部只留导航栏避让 + 一点缓冲，
+        // 预留 bottomBarSpace(96dp) 的话最长页的末尾会多出近一屏的死滚动行程。
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Column(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(scrollState)
                         .padding(horizontal = M3Spacing.screenMargin)
-                        .padding(top = M3Spacing.betweenGroups, bottom = M3Spacing.bottomBarSpace),
+                        .padding(top = M3Spacing.betweenGroups, bottom = 24.dp),
                     verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenGroups),
                 ) {
                     run {
@@ -568,7 +573,7 @@ private fun RunTab(
                 append(" 人")
             }
         },
-        trailing = { M3EStatusChip(text = state.shortLabel(), color = stateColor) },
+        // 状态胶囊不再重复：上方常驻状态条已经显示同一个值，同一屏两枚胶囊互相抢注意力
         content = {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 M3EMetric(
@@ -673,7 +678,7 @@ private fun WorldTab(
     M3ECard(
         variant = M3ECardVariant.Filled,
         title = "备份",
-        supporting = "世界 + 配置全量打包；运行中会先让服务端落盘（save-off → save-all flush）再打包",
+        supporting = "世界 + 配置全量打包；运行中会先让服务端落盘再打包",
         trailing = {
             Button(onClick = onBackup, enabled = !busy, modifier = Modifier.height(40.dp)) {
                 Text(if (busy) "备份中…" else "立即备份")
@@ -690,8 +695,7 @@ private fun WorldTab(
                 Column(Modifier.weight(1f)) {
                     Text("停服自动备份", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "服务端退出后自动打包一份（auto_ 前缀），保留最近 ${BackupManager.AUTO_KEEP} 份；" +
-                            "手动备份不受清理影响",
+                        "服务端退出后自动打包（auto_ 前缀），保留最近 ${BackupManager.AUTO_KEEP} 份",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -721,15 +725,43 @@ private fun WorldTab(
                         shape = shape,
                         trailing = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // 有备份任务在跑（备份 / 恢复 / 导入 / 导出）时全部禁用：
-                                // 恢复会把实例目录整体换掉，跟其余的读写并发会互相踩
+                                // 「恢复」是最高频动作，保留为一键直达（有二次确认兜底）；
+                                // 导出/删除是低频动作，收进溢出菜单 —— 原来三个控件并排
+                                // 会把 360dp 屏的备份名/时间戳列挤到只剩 ~100dp。
                                 TextButton(onClick = { onRestoreRequest(f) }, enabled = !busy) { Text("恢复") }
-                                TextButton(onClick = { onExport(f) }, enabled = !busy) { Text("导出") }
-                                IconButton(onClick = { onDelete(f) }, enabled = !busy) {
+                                var backupMenu by remember { mutableStateOf(false) }
+                                IconButton(onClick = { backupMenu = true }, enabled = !busy) {
                                     Icon(
-                                        Icons.Filled.Delete,
-                                        contentDescription = "删除备份",
-                                        tint = MaterialTheme.colorScheme.error,
+                                        Icons.Filled.MoreVert,
+                                        contentDescription = "更多操作（导出 / 删除）",
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = backupMenu,
+                                    onDismissRequest = { backupMenu = false },
+                                    shape = M3Shape.medium,
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("导出") },
+                                        onClick = {
+                                            backupMenu = false
+                                            onExport(f)
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.Delete,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(20.dp),
+                                                tint = MaterialTheme.colorScheme.error,
+                                            )
+                                        },
+                                        onClick = {
+                                            backupMenu = false
+                                            onDelete(f)
+                                        },
                                     )
                                 }
                             }
@@ -873,18 +905,15 @@ private fun PlayerManageCard(
                     shape = M3Shape.large,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 )
-                Row(
-                    Modifier.padding(top = 10.dp),
+                // FlowRow 而不是两个 Row：字体放大时普通 Row 会把靠后的按钮压到 0 宽，
+                // FlowRow 自动换行；五条命令收进一个流式组也少占一行
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(onClick = { doCmd("op") }) { Text("设为 OP") }
                     OutlinedButton(onClick = { doCmd("deop") }) { Text("取消 OP") }
                     OutlinedButton(onClick = { doCmd("kick") }) { Text("踢出") }
-                }
-                Row(
-                    Modifier.padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
                     OutlinedButton(onClick = { doCmd("whitelist add") }) { Text("白名单 +") }
                     OutlinedButton(onClick = { doCmd("whitelist remove") }) { Text("白名单 −") }
                 }
@@ -1012,8 +1041,7 @@ private fun AdvancedSettingsCard(
     M3ECard(
         variant = M3ECardVariant.Filled,
         title = "高级设置",
-        supporting = "自定义 JVM 附加参数（空格分隔，重启后生效）。" +
-            "Forge 实例也可写 user_jvm_args.txt；写错参数会导致启动失败，失败原因见控制台。",
+        supporting = "空格分隔，重启后生效；写错会导致启动失败（原因见控制台）。Forge 也可写 user_jvm_args.txt",
     ) {
         OutlinedTextField(
             value = args,
