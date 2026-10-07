@@ -250,6 +250,7 @@ fun ServerScreen(
                                     viewModel.stopInstance(instance)
                                 }
                             },
+                            onRestart = { viewModel.restartInstance(instance) },
                             onDelete = { viewModel.removeInstance(instance) },
                         )
                     }
@@ -475,6 +476,7 @@ private fun InstanceRow(
     onSelect: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onRestart: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val running = state == ServerState.Running
@@ -586,7 +588,7 @@ private fun InstanceRow(
                         enabled = running,
                         onClick = {
                             menuExpanded = false
-                            viewModel.restartInstance(instance)
+                            onRestart()
                         },
                     )
                     DropdownMenuItem(
