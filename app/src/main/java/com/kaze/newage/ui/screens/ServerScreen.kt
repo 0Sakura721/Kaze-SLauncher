@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
@@ -575,6 +576,17 @@ private fun InstanceRow(
                         onClick = {
                             menuExpanded = false
                             onTogglePin()
+                        },
+                    )
+                    // 一键重启：与实例详情/主页同一个 stop→等停稳→start 链路。
+                    // 只在运行中可点（停止态谈不上的重启），停止中交给停止流程自己收尾
+                    DropdownMenuItem(
+                        text = { Text("重启") },
+                        leadingIcon = { Icon(Icons.Filled.RestartAlt, null, Modifier.size(20.dp)) },
+                        enabled = running,
+                        onClick = {
+                            menuExpanded = false
+                            viewModel.restartInstance(instance)
                         },
                     )
                     DropdownMenuItem(

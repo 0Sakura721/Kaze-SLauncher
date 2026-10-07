@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Stop
@@ -61,7 +63,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.core.addons.AddonKind
@@ -70,6 +75,7 @@ import com.kaze.newage.core.server.BackupManager
 import com.kaze.newage.core.server.ServerProperties
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.ServerInstance
+import com.kaze.newage.util.LanIp
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.ForceStopConfirmDialog
 import com.kaze.newage.core.server.MemoryLimits
@@ -259,6 +265,7 @@ fun InstanceDetailScreen(
                 if (state == ServerState.Stopping) askForceStop = true
                 else viewModel.stopInstance(instance)
             },
+            onRestart = { viewModel.restartInstance(instance) },
         )
         ForceStopConfirmDialog(
             visible = askForceStop,
@@ -487,6 +494,7 @@ private fun InstanceActionRow(
     stateColor: Color,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onRestart: () -> Unit,
 ) {
     val busy = state.isBusy()
     val running = state == ServerState.Running
@@ -502,6 +510,17 @@ private fun InstanceActionRow(
         if (busy) {
             // 过渡中给一个「生命体征」：与主页同一个加载指示器，加速表示正在忙
             ExpressiveLoadingIndicator(size = 28.dp, color = stateColor, speed = 1.8f)
+        }
+        if (running) {
+            // 一键重启：原来要「停止 → 等世界存完 → 再点启动」三步。
+            // 改配置/装插件后最常用的动作，降到一步（走 stop→等停稳→start 的既有链路）
+            IconButton(onClick = onRestart, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    Icons.Filled.RestartAlt,
+                    contentDescription = "重启服务端",
+                    modifier = Modifier.size(26.dp),
+                )
+            }
         }
         Button(
             onClick = {
@@ -586,6 +605,34 @@ private fun RunTab(
                     label = "内存上限",
                     modifier = Modifier.weight(1f),
                 )
+            }
+            // ── 连接地址：一键复制 ──
+            // 手机开服最高频的动作就是把地址填进 MC 客户端 / 发给同 Wi-Fi 的朋友；
+            // 让用户自己拼 127.0.0.1:端口、再手动去系统设置里抄局域网 IP，门槛太高。
+            // 端口读不到（server.properties 还没生成）就不渲染这一段。
+            if (port != "—") {
+                val clipboard = LocalClipboardManager.current
+                val ctx = LocalContext.current
+                fun copyAddress(label: String, addr: String) {
+                    clipboard.setText(AnnotatedString(addr))
+                    android.widget.Toast.makeText(
+                        ctx,
+                        "已复制${label}地址 $addr",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                val lanIp = remember(port) { LanIp.lanIpv4() }
+                Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                    Text(
+                        "连接地址（MC 客户端「多人游戏 → 直接连接」粘贴）",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    AddressCopyRow("本机", "127.0.0.1:$port") { copyAddress("本机", "127.0.0.1:$port") }
+                    if (lanIp != null) {
+                        AddressCopyRow("局域网", "$lanIp:$port") { copyAddress("局域网", "$lanIp:$port") }
+                    }
+                }
             }
             // 建好之后还能改内存（真机需求："创建完实例，还是可以像创建时那样编辑内存分配"）。
             // 内存是启动参数，运行中改只会落盘，AppViewModel 会往控制台写"重启后生效"。
@@ -1452,3 +1499,35 @@ private val propsSaver: Saver<LinkedHashMap<String, String>, ArrayList<String>> 
         }
     },
 )
+
+/**
+ * 连接地址行：标签 + 等宽地址 + 复制按钮（手机上抄地址是高频且易错的动作）。
+ * 局域网 IP 的提取见 [com.kaze.newage.util.LanIp]。
+ */
+@Composable
+private fun AddressCopyRow(label: String, address: String, onCopy: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            address,
+            style = MaterialTheme.typography.bodyMedium,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onCopy, modifier = Modifier.size(32.dp)) {
+            Icon(
+                Icons.Filled.ContentCopy,
+                contentDescription = "复制 $address",
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}

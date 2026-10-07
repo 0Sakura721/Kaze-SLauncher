@@ -863,7 +863,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val config = uiPrefs.aiConfig()
         if (!config.isConfigured) {
             appendAiMessage(
-                AiChatMessage(nextAiId(), isUser = false, text = "尚未配置 AI 接口：请先填写 API Key。", isError = true)
+                // 给出可执行的下一步：哪里点、填什么 —— 只说"去配置"用户还得找入口
+                AiChatMessage(
+                    nextAiId(),
+                    isUser = false,
+                    text = "还没有配置 AI：点右上角的滑块图标进入设置，填入 API Key（默认 DeepSeek）即可开始对话。",
+                    isError = true,
+                )
             )
             return
         }

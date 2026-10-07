@@ -580,6 +580,18 @@ class DefaultServerManager(
         slot.launchedAtMs = System.currentTimeMillis()
         slot.setState(ServerState.Running)
         slot.log("> 服务器启动中", LineType.System)
+        // 开服即把连接地址送到控制台：这是用户接下来最需要的信息，
+        // 不用再翻实例详情页去找；端口读不到（还没生成 server.properties）就不打扰
+        runCatching {
+            val port = ServerProperties.load(slot.instance.dir)["server-port"]
+            if (!port.isNullOrBlank()) {
+                val lan = com.kaze.newage.util.LanIp.lanIpv4()
+                slot.log(
+                    "> 连接地址：本机 127.0.0.1:$port" + (lan?.let { " · 局域网 $it:$port" } ?: ""),
+                    LineType.System,
+                )
+            }
+        }
         startGuard(slot.instance)
 
         // 消费输出（slot.log 已同步写入运行日志 console-output.log）
