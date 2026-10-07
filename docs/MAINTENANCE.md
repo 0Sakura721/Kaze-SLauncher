@@ -227,3 +227,38 @@ signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else null
 - [ ] 资产数量对不对：**2 个 APK + 每个 ABI 一份补丁 `.zip`/`.json`**
 - [ ] 补丁大小是否远小于整包（当前约 5%，如果接近整包说明对比基线选错了）
 - [ ] 抽一次真实校验：下载「补丁 + 上一版 APK」→ 拼装 → sha256 是否等于新版 APK
+
+---
+
+## 七、「插进函数之间」的编辑事故（2026-10，CI 抓到）
+
+一次往 `InstanceDetailScreen.kt` 插入新 composable 时，插入点选在了
+`PropertiesEditor` 的**注解与函数签名之间**：
+
+```
+@OptIn(ExperimentalLayoutApi::class)
+@Composable            ← 本来属于 PropertiesEditor
+/** 新卡的 KDoc */
+@Composable            ← 新卡自己的
+private fun AdvancedSettingsCard(   ← 新卡
+    …
+private fun PropertiesEditor(       ← 注解被"顶"走了，裸奔
+```
+
+三个连锁后果，全部是**语法错或 Compose 契约错**，不是逻辑错：
+
+1. `@Composable` 出现两次 → `This annotation is not repeatable`；
+2. `PropertiesEditor` 失去 `@Composable` → 它体内**每一个** composable 调用都报
+   `invocations can only happen from the context of a @Composable function`（错误一大串，
+   但根因只有一个）；
+3. 同一轮往 `StoredInstance.toInstance()` 加字段时，三个实参写在了
+   `ServerInstance(...)` **右括号之后** —— 语法错。
+
+**教训：**
+
+- 往长文件里插新声明，插入点必须是「上一个函数**完整结束后**」，不是「某个函数的
+  注解之后」；插完扫一眼前后各 10 行。
+- CI 报一串 `@Composable invocations` 错时，先找**最上面**那个——往往一个函数丢了注解，
+  后面全是级联。
+- 推送前真的等 CI 跑完再推下一组：这一轮就是 A 组的错带着 B/C/D 一起推上去，
+  导致三组提交全部"未验证"状态多挂了 45 分钟。
