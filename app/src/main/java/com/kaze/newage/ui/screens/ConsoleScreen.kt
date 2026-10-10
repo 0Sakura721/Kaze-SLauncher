@@ -771,10 +771,15 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // AI 助手入口：与运行状态无关 —— 起不来/出错时恰恰最需要问"为什么"，
-            // 所以只要选了实例就能点（不跟随输入框的 Running 守卫）。跳全屏 AI 页。
+            // AI 助手入口：永远可点，与运行状态、甚至与「有没有实例」都无关。
+            //
+            // 之前这里写的是 enabled = current != null，即一个实例都没建时点不进去 ——
+            // 而那恰恰是最需要问 AI 的时候（装哪个服务端核心、Java 选哪个版本、为什么起不来）。
+            // 出错的现场更是如此：入口被禁用等于在最需要求助的时刻把求助关掉。
+            // 需要实例的能力自己降级（取不到实例就如实说取不到），入口不该替它做判断。
+            // 也不跟随输入框的 Running 守卫（发命令才需要 Running）。跳全屏 AI 页。
             // 输入行是这一屏的主行动，保持 48dp（动作行五个钮已降到 44dp）。
-            ConsoleAction(Icons.Filled.SmartToy, "AI 助手", enabled = current != null, size = 48.dp) {
+            ConsoleAction(Icons.Filled.SmartToy, "AI 助手", enabled = true, size = 48.dp) {
                 onOpenAi()
             }
             Spacer(Modifier.width(6.dp))
