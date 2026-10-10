@@ -42,3 +42,6 @@ MEMORY.md
 
 # 本地工具忽略文件：只在本机生效，绝不入库（用户要求）
 .zcodeignore
+# .zcode/ 是本机工具（zcode）的产物目录（plans/ 等会话文件），与项目无关。
+# 上次 .zcodeignore 被 `git add -A` 顺手提进了仓库，这次直接把整个目录挡在门外。
+.zcode/

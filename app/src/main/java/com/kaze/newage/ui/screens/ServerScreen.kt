@@ -32,12 +32,14 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -93,6 +95,11 @@ fun ServerScreen(
     viewModel: AppViewModel,
     onOpenInstance: (ServerInstance) -> Unit,
     onNewServer: () -> Unit,
+    /**
+     * 打开 AI 助手。默认空实现只是为了不打扰截图测试的调用点；
+     * 生产调用方（AppRoot）必须传真实导航 —— 这条入口是本页唯一的"求助"通道。
+     */
+    onOpenAi: () -> Unit = {},
 ) {
     val instances by viewModel.instances.collectAsStateWithLifecycle()
     val states by viewModel.serverStates.collectAsStateWithLifecycle()
@@ -156,6 +163,23 @@ fun ServerScreen(
                 "还没有服务端实例"
             } else {
                 "共 ${instances.size} 个实例 · $runningCount 个运行中"
+            },
+            // AI 助手入口：钉在顶栏而不是塞进下面那排动作按钮 ——
+            // 动作按钮组是「对实例做什么」（新建/导入），AI 是「问怎么办」，
+            // 混进去会让四档筛选 + 两个按钮的行更挤；顶栏图标与其它页的
+            // 刷新/状态胶囊同一套语言。
+            //
+            // 且**恒可点**：空态（"还没有服务端"）恰恰是最需要它的场景 ——
+            // "装哪个核心、Java 选哪个版本"就发生在建第一个实例之前；
+            // 所以这里不加任何 instances.isEmpty() / 运行状态的守卫。
+            trailing = {
+                IconButton(onClick = onOpenAi) {
+                    Icon(
+                        Icons.Filled.SmartToy,
+                        contentDescription = "AI 助手",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             },
         )
 

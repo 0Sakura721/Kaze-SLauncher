@@ -209,6 +209,8 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         viewModel,
                         onOpenInstance = { inst -> navController.navigate("instance/${android.net.Uri.encode(inst.id)}") },
                         onNewServer = { navController.navigate("server/new") },
+                        // 与 ConsoleScreen 那处同一条路由：AI 入口独立于实例是否存在
+                        onOpenAi = { navController.navigate("ai") },
                     )
                 }
                 composable("server/new") {
