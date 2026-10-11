@@ -50,15 +50,21 @@ object AiKeyCipher {
         }.getOrNull()
     }
 
-    private fun cipher(mode: Int): Cipher? = key?.let {
-        runCatching { Cipher.getInstance("AES/GCM/NoPadding").apply { init(mode, it) } }.getOrNull()
-    }
+    /**
+     * 只创建 Cipher，不提前 init。
+     * GCM 解密必须在 init 时提供密文对应的 IV；若在此处先以无 IV 的方式 init，
+     * Android Keystore 可能直接拒绝初始化，导致所有已保存的 enc1 密钥都无法读取。
+     */
+    private fun cipher(): Cipher? =
+        runCatching { Cipher.getInstance("AES/GCM/NoPadding") }.getOrNull()
 
     /** 加密；Keystore 不可用返回 null（调用方必须拒绝明文降级） */
     fun encrypt(plain: String): String? {
         if (plain.isBlank()) return null
-        val c = cipher(Cipher.ENCRYPT_MODE) ?: return null
+        val secretKey = key ?: return null
+        val c = cipher() ?: return null
         return runCatching {
+            c.init(Cipher.ENCRYPT_MODE, secretKey)
             val iv = c.iv
             val ct = c.doFinal(plain.toByteArray(Charsets.UTF_8))
             MARKER + b64(iv) + ":" + b64(ct)
@@ -73,8 +79,9 @@ object AiKeyCipher {
         return runCatching {
             val parts = stored.removePrefix(MARKER).split(":")
             require(parts.size == 2)
-            val c = cipher(Cipher.DECRYPT_MODE) ?: return null
-            c.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_BITS, b64(parts[0])))
+            val secretKey = key ?: return null
+            val c = cipher() ?: return null
+            c.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_BITS, b64(parts[0])))
             String(c.doFinal(b64(parts[1])), Charsets.UTF_8)
         }.getOrNull()
     }
