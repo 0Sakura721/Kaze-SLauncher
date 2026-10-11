@@ -96,12 +96,19 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         ) {
         val editingProfile = editing
         if (editingProfile != null) {
+            if (prefs.aiSecretStorageError.value) {
+                Text(
+                    "系统密钥库不可用或写入失败，API Key 未保存。请检查设备安全组件后重试；应用不会降级为明文存储。",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = M3Spacing.screenMargin, vertical = 8.dp),
+                )
+            }
             AiProfileEditForm(
                 initial = editingProfile,
                 isNew = prefs.aiProfiles.value.none { it.id == editingProfile.id },
                 onSave = { p ->
-                    viewModel.saveAiProfile(p)
-                    editing = null
+                    if (viewModel.saveAiProfile(p)) editing = null
                 },
                 onDelete = { id ->
                     viewModel.deleteAiProfile(id)
@@ -499,8 +506,7 @@ private fun SearchSection(viewModel: AppViewModel) {
             )
             Button(
                 onClick = {
-                    viewModel.setAiSearch(providerId, searchKey)
-                    keySaved = true
+                    keySaved = viewModel.setAiSearch(providerId, searchKey)
                 },
             ) {
                 Text("保存")
@@ -527,8 +533,7 @@ private fun SearchSection(viewModel: AppViewModel) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             )
             Button(onClick = {
-                viewModel.setAiSearch(providerId, searchKey)
-                keySaved = true
+                keySaved = viewModel.setAiSearch(providerId, searchKey)
             }) {
                 Text("保存")
             }
@@ -541,6 +546,14 @@ private fun SearchSection(viewModel: AppViewModel) {
             delay(2000)
             keySaved = false
         }
+    }
+    if (prefs.aiSecretStorageError.value) {
+        Text(
+            "系统密钥库不可用或写入失败，搜索凭据未保存；不会降级为明文存储。",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(horizontal = M3Spacing.screenMargin),
+        )
     }
     if (keySaved) {
         Text(

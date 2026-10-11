@@ -9,8 +9,11 @@
   恢复时还可能拿到一份"解压到一半"的 rootfs，proot 直接起不来。
 
   实例目录、世界存档、备份 zip 都在共享存储 /sdcard/KazeS 下，本来就不在备份范围内。
+
+  AI 密钥独立存放在 kaze_ai_secrets.xml，避免随自动云备份导出。
 -->
 <full-backup-content>
     <exclude domain="file" path="linux" />
     <exclude domain="file" path="native-extract" />
+    <exclude domain="sharedpref" path="kaze_ai_secrets.xml" />
 </full-backup-content>
