@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.kaze.newage.NewAgeApp
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
+import com.kaze.newage.core.ai.AiSearch
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
