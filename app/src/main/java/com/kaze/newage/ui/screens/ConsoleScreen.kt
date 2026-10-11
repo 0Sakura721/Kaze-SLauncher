@@ -771,7 +771,8 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // AI 助手入口：永远可点，与运行状态、甚至与「有没有实例」都无关。
+            // AI 助手入口（常驻）：受「设置 → 控制台 AI 入口」开关控制（默认关）。
+            // 打开后永远可点，与运行状态、甚至与「有没有实例」都无关。
             //
             // 之前这里写的是 enabled = current != null，即一个实例都没建时点不进去 ——
             // 而那恰恰是最需要问 AI 的时候（装哪个服务端核心、Java 选哪个版本、为什么起不来）。
@@ -779,10 +780,15 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             // 需要实例的能力自己降级（取不到实例就如实说取不到），入口不该替它做判断。
             // 也不跟随输入框的 Running 守卫（发命令才需要 Running）。跳全屏 AI 页。
             // 输入行是这一屏的主行动，保持 48dp（动作行五个钮已降到 44dp）。
-            ConsoleAction(Icons.Filled.SmartToy, "AI 助手", enabled = true, size = 48.dp) {
-                onOpenAi()
+            //
+            // 默认关：入口常驻会一直占着输入行一截位置（360dp 屏上更挤），
+            // 不用 AI 的人不该被迫天天看到它 —— 要用的在设置里开一次。
+            if (uiPrefs.consoleAiEntry.value) {
+                ConsoleAction(Icons.Filled.SmartToy, "AI 助手", enabled = true, size = 48.dp) {
+                    onOpenAi()
+                }
+                Spacer(Modifier.width(6.dp))
             }
-            Spacer(Modifier.width(6.dp))
 
             // 只有运行中才可发送：与按钮的可用性同源，键盘上的发送键也走同一守卫
             val sendEnabled = serverState == ServerState.Running && input.isNotBlank()

@@ -52,8 +52,10 @@ import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Wallpaper
@@ -682,6 +684,37 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     },
                 )
             }
+
+            // ═══ 控制台 ═══
+            GroupHeader(
+                modifier = Modifier.padding(top = M3Spacing.betweenParts),
+                title = "控制台",
+                icon = Icons.Filled.Terminal,
+                supporting = "AI 入口 · 常驻显示",
+                section = SettingsSection.Console,
+                sectionOffsets = sectionOffsets,
+            )
+            M3EConnectedList(count = 1) { _, shape ->
+                M3EListItem(
+                    headline = "控制台 AI 入口",
+                    supporting = "在控制台命令输入行常驻显示 AI 助手按钮（默认关闭）",
+                    leadingIcon = Icons.Filled.SmartToy,
+                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = shape,
+                    onClick = { uiPrefs.setConsoleAiEntry(!uiPrefs.consoleAiEntry.value) },
+                    trailing = {
+                        // onCheckedChange 必须是 null：整行的 onClick 已经负责切换，
+                        // 两条触发路径会让开关点一下被切两次、又弹回原位
+                        Switch(
+                            checked = uiPrefs.consoleAiEntry.value,
+                            onCheckedChange = null,
+                        )
+                    },
+                )
+            }
+            SettingNote(
+                "打开后 AI 助手按钮会常驻在控制台命令输入行左侧；关闭时仍可从「服务端」页顶栏进入 AI 助手。"
+            )
 
             // ═══ 后台与更新 ═══
             GroupHeader(
@@ -1461,6 +1494,7 @@ private enum class SettingsSection(val label: String) {
     Background("背景图"),
     Storage("存储"),
     JavaRuntime("Java"),
+    Console("控制台"),
     BackgroundAndUpdate("后台"),
     About("关于"),
 }

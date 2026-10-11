@@ -138,6 +138,14 @@ emember(path) 缓存位图的话，
     /** 控制台时间戳前缀（[HH:mm:ss]，默认关） */
     val consoleTimestamps = mutableStateOf(prefs.getBoolean("console_timestamps", false))
 
+    /**
+     * 控制台常驻 AI 入口（命令输入行左侧的 AI 助手按钮，默认关）。
+     *
+     * 默认关是刻意的：入口常驻会一直占着输入行一截位置，不用 AI 的人没有理由天天看到它；
+     * 要用的人在设置里打开一次即可（「服务端」页顶栏另有入口，不受此项影响）。
+     */
+    val consoleAiEntry = mutableStateOf(prefs.getBoolean("console_ai_entry", false))
+
     private fun loadQuickCommands(): List<String> =
         runCatching {
             prefs.getString("console_quick_commands", null)
@@ -164,6 +172,11 @@ emember(path) 缓存位图的话，
     fun setConsoleTimestamps(v: Boolean) {
         consoleTimestamps.value = v
         prefs.edit().putBoolean("console_timestamps", v).apply()
+    }
+
+    fun setConsoleAiEntry(v: Boolean) {
+        consoleAiEntry.value = v
+        prefs.edit().putBoolean("console_ai_entry", v).apply()
     }
 
     // ── AI 助手（OpenAI 兼容接口 + 联网搜索，见 core/ai/）──
