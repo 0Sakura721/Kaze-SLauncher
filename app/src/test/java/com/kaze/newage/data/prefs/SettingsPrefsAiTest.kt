@@ -3,6 +3,7 @@ package com.kaze.newage.data.prefs
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.kaze.newage.core.ai.AiProfile
+import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiSearch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -19,8 +20,8 @@ import org.robolectric.annotation.Config
  *  - **搜索凭据按源分槽**：切源不能把 A 家的 Key 发给 B 家（含旧版单槽的迁移）；
  *  - **档案 JSON 损坏**：必须留下"损坏"标志与原串，不能静默当成"没有配置"。
  *
- * 说明：Robolectric 没有 AndroidKeyStore，[AiKeyCipher] 会走明文兜底（这是设计里的降级路径），
- * 所以这里验证的是槽位与迁移逻辑；加解密本身在真机上验证。
+ * 说明：Robolectric 没有 AndroidKeyStore，因此测试注入可预测的假加密器验证持久化边界；
+ * 真正的 Android Keystore AES-GCM 加解密需要在真机环境验证。
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -29,9 +30,9 @@ class SettingsPrefsAiTest {
     private val context: Context get() = ApplicationProvider.getApplicationContext()
     private val raw get() = context.getSharedPreferences("kaze_ui_settings", Context.MODE_PRIVATE)
     private val secret get() = context.getSharedPreferences(SettingsPrefs.SECRET_PREFS_NAME, Context.MODE_PRIVATE)
-    private val encryptForTest: (String) -> String? = { "testenc:$it" }
+    private val encryptForTest: (String) -> String? = { "enc1:test:$it" }
     private val decryptForTest: (String) -> String? = {
-        if (it.startsWith("testenc:")) it.removePrefix("testenc:") else it.takeIf(String::isNotBlank)
+        if (it.startsWith("enc1:test:")) it.removePrefix("enc1:test:") else it.takeIf(String::isNotBlank)
     }
     private fun newPrefs() = SettingsPrefs(context, encryptForTest, decryptForTest)
 
@@ -86,7 +87,11 @@ class SettingsPrefsAiTest {
         // 清除入口：只清转存与标志
         prefs.clearCorruptAiProfiles()
         assertFalse(prefs.aiProfilesCorrupt.value)
-        assertFalse(raw.contains("ai_profiles_corrupt_backup"))
+        assertFalse(secret.contains("ai_profiles"))
+        assertEquals(
+            "[{\"name\":\"x\",\"apiKey\":\"enc1:broken",
+            secret.getString(SettingsPrefs.CORRUPT_BACKUP_KEY, null),
+        )
     }
 
     @Test
@@ -126,8 +131,8 @@ class SettingsPrefsAiTest {
 
         assertEquals("legacy-model-key", prefs.aiProfiles.value.single().apiKey)
         assertEquals("legacy-search-key", prefs.searchKeyFor(AiSearch.Provider.BOCHA.id))
-        assertTrue(secret.getString("ai_profiles", "").orEmpty().contains("testenc:legacy-model-key"))
-        assertEquals("testenc:legacy-search-key", secret.getString(AiSearch.Provider.keySlot("bocha"), null))
+        assertTrue(secret.getString("ai_profiles", "").orEmpty().contains("enc1:test:legacy-model-key"))
+        assertEquals("enc1:test:legacy-search-key", secret.getString(AiSearch.Provider.keySlot("bocha"), null))
         assertFalse(raw.contains("ai_profiles"))
         assertFalse(raw.contains("ai_search_key"))
         assertEquals("m3", raw.getString("theme_mode", null))
