@@ -1,6 +1,7 @@
 package com.kaze.newage.core.ai
 
 import kotlinx.serialization.encodeToString
+import java.io.ByteArrayInputStream
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -15,6 +16,24 @@ class AiSearchTest {
 
     /** 模拟 evaluateJavascript 的返回形式：把 JS 的返回字符串再 JSON 编码一层 */
     private fun encodeAsEvalString(payload: String): String = Json.encodeToString(payload)
+
+    @Test
+    fun `搜索响应体超过上限时中止读取`() {
+        val oversized = ByteArray(AiBodyLimit.MAX_BODY_BYTES + 1) { 'x'.code.toByte() }
+        try {
+            AiSearch.readResponseBody(ByteArrayInputStream(oversized))
+            throw AssertionError("超大响应体应被拒绝")
+        } catch (e: RuntimeException) {
+            assertTrue(e.message.orEmpty().contains("超过 2MB"))
+            assertTrue(e.message.orEmpty().contains("已中止读取"))
+        }
+    }
+
+    @Test
+    fun `正常搜索响应体完整保留`() {
+        val body = """{"results":[]}"""
+        assertEquals(body, AiSearch.readResponseBody(ByteArrayInputStream(body.toByteArray())))
+    }
 
     @Test
     fun `解析 Tavily 响应`() {
