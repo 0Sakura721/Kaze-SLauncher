@@ -294,13 +294,15 @@ emember(path) 缓存位图的话，
                 aiChatProfileId.value = legacy.id
                 secretPrefs.edit()
                     .putString("ai_profiles", AiProfileStore.encode(encProfiles(listOf(legacy))))
+                    .apply()
+                prefs.edit()
                     .putString("ai_chat_profile_id", legacy.id)
-                        .remove("ai_api_key")
-                        .remove("ai_base_url")
-                        .remove("ai_model")
-                        .remove("ai_model_standard")
-                        .remove("ai_model_thinking")
-                        .apply()
+                    .remove("ai_api_key")
+                    .remove("ai_base_url")
+                    .remove("ai_model")
+                    .remove("ai_model_standard")
+                    .remove("ai_model_thinking")
+                    .apply()
             }
         }
         // 存量档案里的旧模型名归一：deepseek-chat / deepseek-reasoner 在官方端点已停用
