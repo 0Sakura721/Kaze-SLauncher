@@ -23,6 +23,9 @@ class SettingsPrefs(context: Context) {
 
     private val appContext: Context = context.applicationContext
     private val prefs = context.getSharedPreferences("kaze_ui_settings", Context.MODE_PRIVATE)
+    /** AI secrets are isolated so Android backup rules can exclude them without excluding ordinary settings. */
+    private val secretPrefs = context.getSharedPreferences(SECRET_PREFS_NAME, Context.MODE_PRIVATE)
+        .also { migrateAiSecrets(it, prefs) }
     private val bgFile = File(context.filesDir, "background.png")
 
     /** 背景图是否存在（State：保存/清除后自动刷新 UI） */
@@ -188,7 +191,7 @@ emember(path) 缓存位图的话，
     //   其它服务商若思考=换模型名，可把第二个模型名填进档案。
     // API Key / 搜索 Key 用 Keystore AES-GCM 加密后存（AiKeyCipher），Keystore 不可用回退明文；
     // 绝不入库、绝不写日志。内存中的 State 持有**解密后**的值，加解密只发生在持久化边界。
-    val aiProfiles = mutableStateOf(decProfiles(prefs.getString("ai_profiles", "") ?: ""))
+    val aiProfiles = mutableStateOf(decProfiles(secretPrefs.getString("ai_profiles", "") ?: ""))
 
     /** 「对话」功能分配到的档案 id */
     val aiChatProfileId = mutableStateOf(prefs.getString("ai_chat_profile_id", "") ?: "")
@@ -238,7 +241,7 @@ emember(path) 缓存位图的话，
     private fun loadSearchKeys(): Map<String, String> {
         val out = LinkedHashMap<String, String>()
         AiSearch.Provider.entries.forEach { p ->
-            val raw = prefs.getString(AiSearch.Provider.keySlot(p.id), "")?.trim().orEmpty()
+            val raw = secretPrefs.getString(AiSearch.Provider.keySlot(p.id), "")?.trim().orEmpty()
             if (raw.isNotEmpty()) out[p.id] = AiKeyCipher.decrypt(raw).orEmpty()
         }
         // 旧版单槽（ai_search_key）迁移：它当时只跟"当前选中的源"配过对，所以只搬进那一格；
@@ -258,10 +261,10 @@ emember(path) 缓存位图的话，
     init {
         // 损坏检测放在最前面：后面那段"旧单配置 → 档案"的迁移会覆写 ai_profiles，
         // 必须先把原文转存出去（用户还可能人工救回里面的 Key）
-        val rawProfiles = prefs.getString("ai_profiles", "") ?: ""
+        val rawProfiles = secretPrefs.getString("ai_profiles", "") ?: ""
         if (AiProfileStore.decodeChecked(rawProfiles).corrupt) {
             aiProfilesCorrupt.value = true
-            prefs.edit().putString(CORRUPT_BACKUP_KEY, rawProfiles).apply()
+            secretPrefs.edit().putString(CORRUPT_BACKUP_KEY, rawProfiles).apply()
         }
         // 旧单配置 → 档案：P0/P1 存的是散键（ai_api_key + ai_base_url + ai_model_standard/thinking，
         // 更早还有 ai_model）。只要填过 Key 就拼成一个「DeepSeek」档案并设为对话配置，绝不丢 Key。
@@ -289,7 +292,7 @@ emember(path) 缓存位图的话，
                 )
                 aiProfiles.value = listOf(legacy)
                 aiChatProfileId.value = legacy.id
-                prefs.edit()
+                secretPrefs.edit()
                     .putString("ai_profiles", AiProfileStore.encode(encProfiles(listOf(legacy))))
                     .putString("ai_chat_profile_id", legacy.id)
                         .remove("ai_api_key")
@@ -309,7 +312,7 @@ emember(path) 缓存位图的话，
         }
         if (normalized != aiProfiles.value) {
             aiProfiles.value = normalized
-            prefs.edit().putString("ai_profiles", AiProfileStore.encode(encProfiles(normalized))).apply()
+            secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(encProfiles(normalized))).apply()
         }
         // 分配指向的档案被删/损坏时回退到第一个（或空 = 未配置，界面会引导新增）
         if (aiChatProfileId.value.isNotBlank() &&
@@ -341,7 +344,7 @@ emember(path) 缓存位图的话，
         }
 
     private fun persistProfiles(profiles: List<AiProfile>) {
-        prefs.edit().putString("ai_profiles", AiProfileStore.encode(encProfiles(profiles))).apply()
+        secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(encProfiles(profiles))).apply()
     }
 
     /** 新增或更新档案（按 id 覆盖，编辑保持原位置）；首个档案自动成为对话配置 */
@@ -367,7 +370,7 @@ emember(path) 缓存位图的话，
      */
     fun clearCorruptAiProfiles() {
         aiProfilesCorrupt.value = false
-        prefs.edit().remove(CORRUPT_BACKUP_KEY).apply()
+        secretPrefs.edit().remove(CORRUPT_BACKUP_KEY).apply()
     }
 
     /** 删除档案；删的是当前对话配置时回退到剩余第一个 */
@@ -402,7 +405,8 @@ emember(path) 缓存位图的话，
         val next = LinkedHashMap(aiSearchKeys.value)
         if (k.isEmpty()) next.remove(p) else next[p] = k
         aiSearchKeys.value = next
-        val edit = prefs.edit().putString("ai_search_provider", p)
+        prefs.edit().putString("ai_search_provider", p).apply()
+        val edit = secretPrefs.edit()
         if (k.isEmpty()) edit.remove(AiSearch.Provider.keySlot(p))
         else edit.putString(AiSearch.Provider.keySlot(p), AiKeyCipher.encrypt(k) ?: k)
         edit.apply()
@@ -581,6 +585,43 @@ emember(path) 缓存位图的话，
     }
 
     companion object {
+        /** AI 凭据单独存储；备份规则必须排除 kaze_ai_secrets.xml。 */
+        internal const val SECRET_PREFS_NAME = "kaze_ai_secrets"
+
+        /**
+         * 先将敏感配置写入独立 prefs 并确认提交成功，再清理旧的、可能被 Android 备份的副本。
+         * 复制原始 JSON 是为了保留旧密文格式和损坏数据；正常读取/保存流程再负责解密与升级。
+         */
+        internal fun migrateAiSecrets(secret: android.content.SharedPreferences, legacy: android.content.SharedPreferences) {
+            val hasLegacy = legacy.contains("ai_profiles") ||
+                legacy.contains("ai_search_key") ||
+                AiSearch.Provider.entries.any { legacy.contains(AiSearch.Provider.keySlot(it.id)) }
+            if (!hasLegacy) return
+
+            val editor = secret.edit()
+            if (!secret.contains("ai_profiles") && legacy.contains("ai_profiles")) {
+                legacy.getString("ai_profiles", null)?.let { editor.putString("ai_profiles", it) }
+            }
+            AiSearch.Provider.entries.forEach { provider ->
+                val slot = AiSearch.Provider.keySlot(provider.id)
+                if (!secret.contains(slot) && legacy.contains(slot)) {
+                    legacy.getString(slot, null)?.let { editor.putString(slot, it) }
+                }
+            }
+            val oldSearchKey = legacy.getString("ai_search_key", "")?.trim().orEmpty()
+            if (oldSearchKey.isNotEmpty()) {
+                val provider = AiSearch.Provider.byId(legacy.getString("ai_search_provider", "") ?: "")
+                val slot = AiSearch.Provider.keySlot(provider.id)
+                if (!secret.contains(slot)) editor.putString(slot, oldSearchKey)
+            }
+
+            // Do not remove the original unless the destination write succeeded.
+            if (!editor.commit()) return
+            val cleanup = legacy.edit().remove("ai_profiles").remove("ai_search_key")
+            AiSearch.Provider.entries.forEach { cleanup.remove(AiSearch.Provider.keySlot(it.id)) }
+            cleanup.commit()
+        }
+
         /** 背景图保存后的最长边：显示端只做 Crop，超过这个尺寸纯属浪费内存与磁盘 */
         private const val BG_MAX_DIM = 1600
 
