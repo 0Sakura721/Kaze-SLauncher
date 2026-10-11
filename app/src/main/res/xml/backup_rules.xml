@@ -13,4 +13,5 @@
 <full-backup-content>
     <exclude domain="file" path="linux" />
     <exclude domain="file" path="native-extract" />
+    <exclude domain="sharedpref" path="kaze_ai_secrets.xml" />
 </full-backup-content>
