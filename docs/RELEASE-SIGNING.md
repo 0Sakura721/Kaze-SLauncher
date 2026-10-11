@@ -73,7 +73,7 @@ $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs app/bu
 Windows 环境可使用对应的 `apksigner.bat`。发布前至少核验：
 
 1. 命令以成功状态退出，且 APK 能通过签名验证。
-2. 输出的证书 SHA-256 指纹与上一份已确认的正式发布包一致；若不一致，停止发布并确认是否计划轮换密钥。
+2. 输出的证书 SHA-256 指纹与上一份已确认的正式发布包一致；若不一致，停止发布并确认是否计划轮换密钥。 证书主体不得是 `CN=Android Debug`，指纹也不得匹配历史泄露的 debug 证书（已知旧指纹前缀为 `d8317c…`）；如果上一份参考包本身未经确认，先从可信的正式 Release 资产重新建立基准。
 3. `versionCode` 严格大于上一版。
 4. 两种架构的产物都已验证；不要只检查 arm64 包。
 5. 实际上传到 Releases 的文件与经过验证的文件是同一份。下载后可再次核对 GitHub asset 的 SHA-256。
