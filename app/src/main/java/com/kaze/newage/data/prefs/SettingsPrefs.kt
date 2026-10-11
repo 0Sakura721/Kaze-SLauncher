@@ -312,6 +312,10 @@ emember(path) 缓存位图的话，
         }
         if (normalized != aiProfiles.value) {
             aiProfiles.value = normalized
+        }
+        // Also upgrades legacy plaintext API keys in valid profiles to Keystore ciphertext.
+        // If the profile JSON is corrupt, leave it untouched for the explicit recovery flow.
+        if (!aiProfilesCorrupt.value) {
             secretPrefs.edit().putString("ai_profiles", AiProfileStore.encode(encProfiles(normalized))).apply()
         }
         // 分配指向的档案被删/损坏时回退到第一个（或空 = 未配置，界面会引导新增）
@@ -612,7 +616,18 @@ emember(path) 缓存位图的话，
             if (oldSearchKey.isNotEmpty()) {
                 val provider = AiSearch.Provider.byId(legacy.getString("ai_search_provider", "") ?: "")
                 val slot = AiSearch.Provider.keySlot(provider.id)
-                if (!secret.contains(slot)) editor.putString(slot, oldSearchKey)
+                if (!secret.contains(slot)) {
+                    editor.putString(slot, AiKeyCipher.encrypt(oldSearchKey) ?: oldSearchKey)
+                }
+            }
+            // Upgrade old per-provider plaintext slots as they are moved.
+            AiSearch.Provider.entries.forEach { provider ->
+                val slot = AiSearch.Provider.keySlot(provider.id)
+                val value = if (secret.contains(slot)) secret.getString(slot, null)
+                    else legacy.getString(slot, null)
+                if (!value.isNullOrBlank() && !value.startsWith("enc1:")) {
+                    AiKeyCipher.encrypt(value)?.let { editor.putString(slot, it) }
+                }
             }
 
             // Do not remove the original unless the destination write succeeded.
