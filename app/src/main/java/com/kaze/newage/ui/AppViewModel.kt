@@ -505,6 +505,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         serverManager.forceStop(instance)
     }
 
+    // ── MCP 服务（外部 AI 控制接口，「设置 → MCP 服务」配置）──
+
+    /** MCP 服务（暴露给设置页读绑定端口 / 错误状态） */
+    val mcpServer get() = container.mcpServer
+
+    /** 开关 MCP 服务（关 = 断开所有外部连接；开 = 按当前端口配置拉起） */
+    fun setMcpEnabled(v: Boolean) {
+        uiPrefs.setMcpEnabled(v)
+        if (v) startMcp() else container.mcpServer.stop()
+    }
+
+    /** 端口/范围改动后重绑（设置页保存时调用；服务没开就只记配置） */
+    fun rebindMcp() {
+        if (uiPrefs.mcpEnabled.value) {
+            container.mcpServer.stop()
+            startMcp()
+        }
+    }
+
+    private fun startMcp() {
+        container.mcpServer.start(
+            preferredPort = uiPrefs.mcpPort.value,
+            rangeStart = uiPrefs.mcpPortRangeStart.value,
+            rangeEnd = uiPrefs.mcpPortRangeEnd.value,
+        )
+    }
+
     /**
      * 改实例的内存分配（真机需求："创建完实例，还是可以像创建时那样编辑内存分配"）。
      *

@@ -10,6 +10,7 @@ import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiSearch
+import com.kaze.newage.core.mcp.McpServer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -178,6 +179,70 @@ emember(path) 缓存位图的话，
         consoleAiEntry.value = v
         prefs.edit().putBoolean("console_ai_entry", v).apply()
     }
+
+    // ── MCP 服务（外部 AI 控制接口，见 core/mcp/）──
+
+    /**
+     * MCP 服务开关（默认关）。
+     *
+     * 这是**开放给外部的控制面**（可启停服务端、发控制台命令）——默认敞着等于
+     * 同一 Wi-Fi 下谁都能操作你的服务端，所以必须由用户显式打开，且配访问令牌。
+     */
+    val mcpEnabled = mutableStateOf(prefs.getBoolean("mcp_enabled", false))
+
+    /**
+     * 映射端口：外部 AI 客户端连接的入口端口（被占用时按 [mcpPortRangeStart] 范围顺延）。
+     * 服务实际监听的端口可能与它不同，以 McpServer.boundPort 为准。
+     */
+    val mcpPort = mutableStateOf(prefs.getInt("mcp_port", McpServer.DEFAULT_PORT))
+
+    /** 自动分配范围：映射端口被占用时在该范围内顺延取第一个可用端口 */
+    val mcpPortRangeStart = mutableStateOf(prefs.getInt("mcp_port_range_start", McpServer.DEFAULT_RANGE_START))
+    val mcpPortRangeEnd = mutableStateOf(prefs.getInt("mcp_port_range_end", McpServer.DEFAULT_RANGE_END))
+
+    /** 访问令牌（Bearer 认证；Keystore 加密存，首次启用前就生成好） */
+    val mcpToken = mutableStateOf(loadMcpToken())
+
+    fun setMcpEnabled(v: Boolean) {
+        mcpEnabled.value = v
+        prefs.edit().putBoolean("mcp_enabled", v).apply()
+    }
+
+    fun setMcpPort(v: Int) {
+        val p = v.coerceIn(1024, 65535)
+        mcpPort.value = p
+        prefs.edit().putInt("mcp_port", p).apply()
+    }
+
+    /** 端口范围（自动分配）；非法（起>止或越界）时保持原值不写 */
+    fun setMcpPortRange(start: Int, end: Int) {
+        if (start !in 1024..65535 || end !in 1024..65535 || start > end) return
+        mcpPortRangeStart.value = start
+        mcpPortRangeEnd.value = end
+        prefs.edit().putInt("mcp_port_range_start", start).putInt("mcp_port_range_end", end).apply()
+    }
+
+    /** 重新生成访问令牌（旧令牌立即失效；服务端即时读取，不用重启） */
+    fun regenerateMcpToken(): String {
+        val t = newMcpToken()
+        mcpToken.value = t
+        prefs.edit().putString("mcp_token", AiKeyCipher.encrypt(t) ?: t).apply()
+        return t
+    }
+
+    private fun loadMcpToken(): String {
+        val raw = prefs.getString("mcp_token", "")?.trim().orEmpty()
+        val token = if (raw.isEmpty()) "" else AiKeyCipher.decrypt(raw).orEmpty()
+        return token.ifBlank {
+            // 首次（或旧值不可解）现生成并落盘：启用服务前就要有，界面直接显示可用
+            val t = newMcpToken()
+            prefs.edit().putString("mcp_token", AiKeyCipher.encrypt(t) ?: t).apply()
+            t
+        }
+    }
+
+    private fun newMcpToken(): String =
+        java.util.UUID.randomUUID().toString().replace("-", "")
 
     // ── AI 助手（OpenAI 兼容接口 + 联网搜索，见 core/ai/）──
     //
