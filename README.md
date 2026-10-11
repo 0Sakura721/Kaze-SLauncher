@@ -51,7 +51,7 @@
 ### 运行环境与控制台
 
 - APK 内置 Ubuntu 24.04 rootfs 和修补版 proot；不需要 Root 或 Termux。
-- 按 Minecraft 版本推断 Java 版本：1.8–1.16.5 使用 Java 8，1.17–1.20.4 使用 Java 17，1.20.5–1.21.x 使用 Java 21，26.x 使用 Java 25。自定义核心还会尝试按 JAR 的 class 文件版本推断。
+- 按 Minecraft 版本推断 Java 版本：1.8–1.16.5 使用 Java 8，1.17–1.20.4 使用 Java 17，1.20.5+ 及 24.x–25.x 使用 Java 21，26.x 起使用 Java 25。快照版会尝试按年份推断；自定义核心还会尝试按 JAR 的 class 文件版本推断。
 - 控制台支持实时日志、命令输入、日志筛选与搜索、快捷命令、玩家管理以及 CPU/内存监控。
 - 应用内更新支持完整 APK 与增量更新；下载后会验证 SHA-256，失败时可回退到完整包。
 
@@ -118,6 +118,14 @@ CI 会运行单元测试和界面截图测试；Release 流水线还会检查正
 项目整体采用 **GPL-3.0**，见 [LICENSE](LICENSE)。第三方代码、素材、二进制及运行时组件清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 本项目参考或改编了 [Fold Craft Launcher](https://github.com/FCL-Team/FoldCraftLauncher)、[ZalithLauncher 2](https://github.com/ZalithLauncher/ZalithLauncher2)、[PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher)、[Miuix](https://github.com/Miuix-Kotlin-Multiplatform/Miuix) 等项目。具体来源与许可证以第三方声明及对应上游许可证文本为准。
+
+## ☕ 赞助支持
+
+如果这个项目对你有帮助，可以请我喝杯奶茶 ☕
+
+| 支付宝 | 微信 |
+|:------:|:----:|
+| ![支付宝](docs/images/alipay.png) | ![微信](docs/images/wechat.png) |
 
 ## 免责声明
 
