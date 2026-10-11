@@ -88,10 +88,7 @@ class SettingsPrefsAiTest {
         prefs.clearCorruptAiProfiles()
         assertFalse(prefs.aiProfilesCorrupt.value)
         assertFalse(secret.contains("ai_profiles"))
-        assertEquals(
-            "[{\"name\":\"x\",\"apiKey\":\"enc1:broken",
-            secret.getString(SettingsPrefs.CORRUPT_BACKUP_KEY, null),
-        )
+        assertFalse("用户明确清除后，损坏原文转存也应删除", secret.contains(SettingsPrefs.CORRUPT_BACKUP_KEY))
     }
 
     @Test

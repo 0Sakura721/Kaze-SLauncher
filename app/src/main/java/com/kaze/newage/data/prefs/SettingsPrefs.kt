@@ -419,19 +419,21 @@ emember(path) 缓存位图的话，
     }
 
     /**
-     * 清除"配置损坏"提示与原串转存（设置页的清除入口）。
-     *
-     * 只删转存与标志，不动当前档案：用户如果已经从原文里抄回了 Key，这一步就是收尾。
+     * 用户明确确认已处理损坏配置后，删除损坏的活动 JSON 与它的原文转存。
+     * 两个键一起提交：失败时保留原始数据，避免只删掉可恢复副本。
      */
     fun clearCorruptAiProfiles() {
-        val editor = secretPrefs.edit()
-        if (rawAiProfiles.isNotEmpty()) editor.putString(CORRUPT_BACKUP_KEY, rawAiProfiles)
-        editor.remove("ai_profiles")
-        if (editor.commit()) {
+        val saved = secretPrefs.edit()
+            .remove("ai_profiles")
+            .remove(CORRUPT_BACKUP_KEY)
+            .commit()
+        if (saved) {
             aiProfiles.value = emptyList()
             aiProfilesCorrupt.value = false
             aiSecretStorageError.value = false
-        } else aiSecretStorageError.value = true
+        } else {
+            aiSecretStorageError.value = true
+        }
     }
 
     /** 删除档案；删的是当前对话配置时回退到剩余第一个 */
