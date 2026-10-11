@@ -58,7 +58,7 @@ app/src/test/              # 单元测试与界面截图测试
 - **Java 与 Minecraft 版本对应：** [itzg/docker-minecraft-server 文档](https://docker-minecraft-server.readthedocs.io) 是版本推断逻辑的参考来源之一；当前行为以 `ServerInstance.kt` 中的实现与注释为准。
 - **Material 3 Expressive（M3E）：** 2026 年界面重构采用动态取色、较大圆角、Expressive 动效与波浪进度指示器等设计方向。生成过程与设计资产保存在 [`docs/m3e/`](m3e/)，这些记录用于追溯设计来源，不代表每项效果都仍在主线启用。
 
-## 5. 初始里程碑（历史状态）
+## 6. 初始里程碑（历史状态）
 
 以下是初始开发计划中的里程碑，表示它们在初始阶段完成，不代表项目当前只有这些功能，也不是当前待办列表。
 
