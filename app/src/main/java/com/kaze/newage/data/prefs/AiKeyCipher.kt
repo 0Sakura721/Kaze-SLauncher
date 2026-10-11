@@ -16,10 +16,10 @@ import javax.crypto.spec.GCMParameterSpec
  * 这里用 Android Keystore 里的 AES-256-GCM 密钥把 Key 包一层：密钥材料不出安全硬件，
  * 拿到 prefs 文件也解不开。
  *
- * 兜底原则（都不能让用户被锁死）：
- *  - Keystore 初始化/加解密任何一步失败 → 返回 null，调用方回退**明文**存储；
- *  - 历史明文值（无 "enc1:" 前缀）decrypt 时原样返回，下次保存才升级为密文；
- *  - 密文损坏 → 返回 null（调用方视为未配置，用户重填一次即可）。
+ * 安全边界：
+ *  - Keystore 初始化/加解密任何一步失败 → 返回 null；调用方必须拒绝持久化，不能明文降级；
+ *  - 历史明文值（无 "enc1:" 前缀）decrypt 时原样返回，迁移到隔离存储后尽力升级为密文；
+ *  - 密文损坏 / Keystore 密钥丢失 → 返回 null，用户需要重新填写 Key。
  *
  * 标记格式：`enc1:<base64(iv)>:<base64(ciphertext)>`
  */
@@ -54,7 +54,7 @@ object AiKeyCipher {
         runCatching { Cipher.getInstance("AES/GCM/NoPadding").apply { init(mode, it) } }.getOrNull()
     }
 
-    /** 加密；Keystore 不可用返回 null（调用方回退明文） */
+    /** 加密；Keystore 不可用返回 null（调用方必须拒绝明文降级） */
     fun encrypt(plain: String): String? {
         if (plain.isBlank()) return null
         val c = cipher(Cipher.ENCRYPT_MODE) ?: return null
