@@ -132,4 +132,3 @@ CI 会运行单元测试和界面截图测试；Release 流水线还会检查正
 - 使用 Minecraft 服务端前，请阅读并遵守 [Minecraft EULA](https://aka.ms/MinecraftEULA)。
 - 本项目与 Mojang Studios 无隶属或背书关系；Minecraft 是其各自权利人拥有的商标。
 - 请在重要操作前备份世界数据。因设备兼容性、系统后台限制、网络或误操作造成的数据损失，由使用者自行承担。
-- 如果项目对你有帮助，欢迎通过仓库的方式支持作者。
