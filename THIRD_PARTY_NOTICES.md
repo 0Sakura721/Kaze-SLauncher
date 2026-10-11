@@ -1,6 +1,8 @@
 # THIRD PARTY NOTICES
 
-Kaze SLauncher（GPL-3.0）参考/复用了以下开源项目的体系与代码，遵循各自许可证：
+本文件列出 Kaze SLauncher 开发中参考、改编或随项目使用的主要开源项目、素材与运行时组件。整体项目采用 GPL-3.0；各条目仍受其上游许可证及具体分发方式约束。
+
+这份清单用于帮助核对来源，不替代各上游仓库附带的许可证文本。发布前应特别检查改编源码、预编译二进制、图标素材与运行时下载内容，并确保对应的许可证文本和源码获取信息可用。
 
 ## 架构与代码来源
 
@@ -56,7 +58,7 @@ Jetpack Compose / AndroidX（Apache-2.0）、Kotlin & kotlinx（Apache-2.0）、
 ## 许可义务摘要（本项目合规清单）
 
 - [x] 本软件整体以 **GPL-3.0** 发布（见 LICENSE，全文随发行提供）。
-- [x] 使用 GPL-3.0 组件（FCL / Zalith / Pojav / proot-distro）的衍生作品须整体 GPL-3.0 开源 —— 本项目开源。
+- [x] 本项目依据实际采用/改编的组件与许可证条件，以 GPL-3.0 发布；具体义务应结合相应文件、上游许可证原文和实际分发方式核验。
 - [x] 改编自 ZalithLauncher2 / FCL 的源文件保留来源注释（`// 改编自 ZalithLauncher2 … GPL-3.0`）。
 - [x] M3E Canvas 为 MIT：本项目取其设计令牌与版式约定（非整文件复制），来源与用途已记于上表，`docs/m3e/` 保留其生成的 prompt 原文。
 - [x] Material Design 形状资产为 Apache-2.0（Copyright (C) 2024 Google LLC）：`LoadingShapes.kt` 文件头与上表均标注来源；自 material-components-android 移植的动画/采样逻辑同为 Apache-2.0。
