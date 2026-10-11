@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
@@ -41,6 +42,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.Colorize
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FolderOpen
@@ -48,9 +50,13 @@ import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Lan
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
@@ -84,8 +90,11 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.BuildConfig
@@ -108,6 +117,7 @@ import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.M3Spacing
 import com.kaze.newage.ui.theme.parseSeedColor
 import com.kaze.newage.ui.theme.statusPalette
+import com.kaze.newage.util.LanIp
 import com.kaze.newage.util.StorageDirUtil
 import kotlinx.coroutines.launch
 import java.io.File
@@ -164,6 +174,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
     val javaTask by viewModel.javaTask.collectAsStateWithLifecycle()
     val appContext = LocalContext.current.applicationContext
     val uiPrefs = viewModel.uiPrefs
+    val clipboard = LocalClipboardManager.current
 
     // 同一时刻只开一个「行 → 选择器」弹窗（null = 全关）
     var openDialog by remember { mutableStateOf<SettingsDialog?>(null) }
@@ -315,7 +326,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
     LaunchedEffect(Unit) { viewModel.refreshJava() }
 
     // ── 分区导航 ──
-    // 设置页有 7 个分区、20 多个条目，一整页滚下来找一项要滑很久。顶部固定一排气分类 chip：
+    // 设置页有 8 个分区、20 多个条目，一整页滚下来找一项要滑很久。顶部固定一排气分类 chip：
     // 点击平滑滚到对应分区，滚动时自动高亮当前分区。
     // 偏移量用 onGloballyPositioned 实测（不用写死的下标）：各条目高度随文案换行变化，
     // 而且 Java 分区的条目数还依赖已安装的版本数。
@@ -716,6 +727,99 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 "打开后 AI 助手按钮会常驻在控制台命令输入行左侧；关闭时仍可从「服务端」页顶栏进入 AI 助手。"
             )
 
+            // ═══ MCP 服务 ═══
+            GroupHeader(
+                modifier = Modifier.padding(top = M3Spacing.betweenParts),
+                title = "MCP 服务",
+                icon = Icons.Filled.Lan,
+                supporting = "外部 AI 控制 · 映射端口 · 访问令牌",
+                section = SettingsSection.Mcp,
+                sectionOffsets = sectionOffsets,
+            )
+            M3EConnectedList(count = 5) { index, shape ->
+                when (index) {
+                    0 -> M3EListItem(
+                        headline = "启用 MCP 服务",
+                        supporting = "开放本地接口供外部 AI 客户端控制服务端（默认关闭）",
+                        leadingIcon = Icons.Filled.SmartToy,
+                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = shape,
+                        onClick = { viewModel.setMcpEnabled(!uiPrefs.mcpEnabled.value) },
+                        trailing = {
+                            // onCheckedChange 必须是 null：整行 onClick 已负责切换，双路径会切两次弹回
+                            Switch(
+                                checked = uiPrefs.mcpEnabled.value,
+                                onCheckedChange = null,
+                            )
+                        },
+                    )
+                    1 -> M3EListItem(
+                        headline = "映射端口",
+                        supporting = "外部 AI 连接的入口端口（当前 ${uiPrefs.mcpPort.value}）",
+                        leadingIcon = Icons.Filled.Router,
+                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = shape,
+                        onClick = { openDialog = SettingsDialog.McpPort },
+                        trailing = { RowChevron() },
+                    )
+                    2 -> M3EListItem(
+                        headline = "自动分配范围",
+                        supporting = "映射端口被占用时按范围顺延（${uiPrefs.mcpPortRangeStart.value}–${uiPrefs.mcpPortRangeEnd.value}）",
+                        leadingIcon = Icons.Filled.Tune,
+                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = shape,
+                        onClick = { openDialog = SettingsDialog.McpRange },
+                        trailing = { RowChevron() },
+                    )
+                    3 -> M3EListItem(
+                        headline = "访问令牌",
+                        supporting = "Bearer 认证：外部请求必须携带此令牌",
+                        leadingIcon = Icons.Filled.Key,
+                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = shape,
+                        onClick = { openDialog = SettingsDialog.McpToken },
+                        trailing = { RowChevron() },
+                    )
+                    4 -> {
+                        // 实际监听端口（映射端口被占用时是顺延后的）：外部 AI 配置以它为准
+                        val boundPort = viewModel.mcpServer.boundPort.collectAsStateWithLifecycle().value
+                        val lastError = viewModel.mcpServer.lastError.collectAsStateWithLifecycle().value
+                        val lanIp = remember { LanIp.lanIpv4() }
+                        val address = boundPort?.let { "http://${lanIp ?: "127.0.0.1"}:$it/mcp" }
+                        M3EListItem(
+                            headline = "连接地址",
+                            supporting = address
+                                ?: if (uiPrefs.mcpEnabled.value) {
+                                    "服务未运行${lastError?.let { "（$it）" } ?: ""}"
+                                } else {
+                                    "启用服务后显示连接地址"
+                                },
+                            leadingIcon = Icons.Filled.Link,
+                            iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = shape,
+                            onClick = address?.let { a -> {
+                                clipboard.setText(AnnotatedString(a))
+                                Toast.makeText(appContext, "已复制连接地址", Toast.LENGTH_SHORT).show()
+                            } },
+                            trailing = {
+                                if (address != null) {
+                                    Icon(
+                                        Icons.Filled.ContentCopy,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+            SettingNote(
+                "MCP（Model Context Protocol）在本机开放 HTTP 接口（POST /mcp），Claude / Cursor 等 " +
+                    "AI 客户端填入「连接地址 + 访问令牌」即可读控制台、发命令、启停服务端（工具清单见 tools/list）。" +
+                    "接口随应用运行存活，局域网内均可访问——务必保管好令牌，不用时关闭。"
+            )
+
             // ═══ 后台与更新 ═══
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
@@ -985,6 +1089,133 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 onSelect = { uiPrefs.setUpdateChannel(it) },
                 onDismiss = { openDialog = null },
             )
+
+            SettingsDialog.McpPort -> {
+                var text by remember { mutableStateOf(uiPrefs.mcpPort.value.toString()) }
+                AlertDialog(
+                    onDismissRequest = { openDialog = null },
+                    title = { Text("映射端口") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = text,
+                                onValueChange = { s -> text = s.filter { it.isDigit() }.take(5) },
+                                label = { Text("端口（1024–65535）") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            )
+                            Text(
+                                "外部 AI 客户端填的入口端口；被占用时按「自动分配范围」顺延，" +
+                                    "实际端口以「连接地址」为准。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val p = text.toIntOrNull()
+                            if (p == null || p !in 1024..65535) {
+                                Toast.makeText(appContext, "端口需在 1024 ~ 65535", Toast.LENGTH_SHORT).show()
+                            } else {
+                                uiPrefs.setMcpPort(p)
+                                viewModel.rebindMcp()
+                                openDialog = null
+                            }
+                        }) { Text("保存") }
+                    },
+                    dismissButton = { TextButton(onClick = { openDialog = null }) { Text("取消") } },
+                )
+            }
+
+            SettingsDialog.McpRange -> {
+                var startText by remember { mutableStateOf(uiPrefs.mcpPortRangeStart.value.toString()) }
+                var endText by remember { mutableStateOf(uiPrefs.mcpPortRangeEnd.value.toString()) }
+                AlertDialog(
+                    onDismissRequest = { openDialog = null },
+                    title = { Text("自动分配范围") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = startText,
+                                    onValueChange = { s -> startText = s.filter { it.isDigit() }.take(5) },
+                                    label = { Text("起始") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                )
+                                OutlinedTextField(
+                                    value = endText,
+                                    onValueChange = { s -> endText = s.filter { it.isDigit() }.take(5) },
+                                    label = { Text("结束") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                )
+                            }
+                            Text(
+                                "映射端口被占用时，从起始端口顺延取第一个可用端口。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            val s = startText.toIntOrNull()
+                            val e = endText.toIntOrNull()
+                            if (s == null || e == null || s !in 1024..65535 || e !in 1024..65535 || s > e) {
+                                Toast.makeText(
+                                    appContext,
+                                    "范围无效：起止须在 1024 ~ 65535，且起始不大于结束",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            } else {
+                                uiPrefs.setMcpPortRange(s, e)
+                                viewModel.rebindMcp()
+                                openDialog = null
+                            }
+                        }) { Text("保存") }
+                    },
+                    dismissButton = { TextButton(onClick = { openDialog = null }) { Text("取消") } },
+                )
+            }
+
+            SettingsDialog.McpToken -> {
+                var token by remember { mutableStateOf(uiPrefs.mcpToken.value) }
+                AlertDialog(
+                    onDismissRequest = { openDialog = null },
+                    title = { Text("访问令牌") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = token,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Bearer 令牌") },
+                                singleLine = true,
+                            )
+                            Text(
+                                "外部请求需带请求头 Authorization: Bearer <令牌>。" +
+                                    "重新生成后旧令牌立即失效，已配置的客户端要改用新令牌。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { openDialog = null }) { Text("完成") } },
+                    dismissButton = {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = {
+                                clipboard.setText(AnnotatedString(token))
+                                Toast.makeText(appContext, "已复制访问令牌", Toast.LENGTH_SHORT).show()
+                            }) { Text("复制") }
+                            TextButton(onClick = { token = uiPrefs.regenerateMcpToken() }) { Text("重新生成") }
+                        }
+                    },
+                )
+            }
 
             SettingsDialog.About -> AboutDialog(onDismiss = { openDialog = null })
         }
@@ -1276,6 +1507,9 @@ private enum class SettingsDialog {
     BgMask,
     UpdateChannel,
     UpdateMode,
+    McpPort,
+    McpRange,
+    McpToken,
     About,
 }
 
@@ -1495,6 +1729,7 @@ private enum class SettingsSection(val label: String) {
     Storage("存储"),
     JavaRuntime("Java"),
     Console("控制台"),
+    Mcp("MCP"),
     BackgroundAndUpdate("后台"),
     About("关于"),
 }
@@ -1502,7 +1737,7 @@ private enum class SettingsSection(val label: String) {
 /**
  * 顶部吸附分类条：点击平滑滚到对应分区，滚动设置页时高亮当前分区。
  *
- * 设置页有 7 个分区、20 多个条目，一整页滚下来找一项要滑很久；
+ * 设置页有 8 个分区、20 多个条目，一整页滚下来找一项要滑很久；
  * 分类条固定不滚动才有「吸附」的意义（见 SettingsScreen 的根布局）。
  */
 @Composable

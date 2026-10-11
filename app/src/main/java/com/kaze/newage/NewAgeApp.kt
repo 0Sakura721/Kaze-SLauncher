@@ -6,6 +6,8 @@ import com.kaze.newage.core.console.ConsoleStream
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.java.RootfsJavaManager
 import com.kaze.newage.core.log.AppLogStore
+import com.kaze.newage.core.mcp.McpServer
+import com.kaze.newage.core.mcp.McpTools
 import com.kaze.newage.core.server.DefaultServerManager
 import com.kaze.newage.data.InstanceStore
 import com.kaze.newage.data.prefs.SettingsPrefs
@@ -67,6 +69,33 @@ class AppContainer(context: Context) {
     val serverManager: DefaultServerManager = DefaultServerManager(env, javaManager, console, appContext)
 
     val instanceStore: InstanceStore = InstanceStore(appContext, uiPrefs)
+
+    /**
+     * MCP 服务（外部 AI 控制接口，「设置 → MCP 服务」配置）。
+     *
+     * 令牌即时读取（[SettingsPrefs.mcpToken]），重新生成后无需重启服务。
+     */
+    val mcpServer: McpServer = McpServer(
+        tools = McpTools(
+            serverManager = serverManager,
+            instanceById = { instanceStore.get(it) },
+            allInstances = { instanceStore.instances.value },
+        ),
+        serverVersion = BuildConfig.VERSION_NAME,
+        tokenProvider = { uiPrefs.mcpToken.value },
+    )
+
+    init {
+        // 上次退出时开着就直接拉起：服务随应用进程存活，重启应用不该丢配置。
+        // 启动失败（端口全被占）只记 lastError，不影响应用本身。
+        if (uiPrefs.mcpEnabled.value) {
+            mcpServer.start(
+                preferredPort = uiPrefs.mcpPort.value,
+                rangeStart = uiPrefs.mcpPortRangeStart.value,
+                rangeEnd = uiPrefs.mcpPortRangeEnd.value,
+            )
+        }
+    }
 
     /**
      * 应用自身的日志采集（「设置 → 诊断日志」查看）。
