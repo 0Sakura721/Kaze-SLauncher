@@ -17,6 +17,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
+import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -217,20 +218,22 @@ class McpServerTest {
 
     @Test
     fun `映射端口被占用时按范围顺延`() {
-        val occupied = ServerSocket(PREFERRED, 16, InetAddress.getByName("127.0.0.1"))
+        val base = freePortBlock(2)
+        val occupied = ServerSocket(base, 16, InetAddress.getByName("127.0.0.1"))
         occupied.use {
-            val port = server.start(PREFERRED, PREFERRED, PREFERRED + 2)
-            assertEquals(PREFERRED + 1, port)
-            assertEquals(PREFERRED + 1, server.boundPort.value)
+            val port = server.start(base, base, base + 1)
+            assertEquals(base + 1, port)
+            assertEquals(base + 1, server.boundPort.value)
         }
     }
 
     @Test
     fun `范围内的端口全部被占用时启动失败并记录原因`() {
-        val a = ServerSocket(PREFERRED, 16, InetAddress.getByName("127.0.0.1"))
-        val b = ServerSocket(PREFERRED + 1, 16, InetAddress.getByName("127.0.0.1"))
+        val base = freePortBlock(2)
+        val a = ServerSocket(base, 16, InetAddress.getByName("127.0.0.1"))
+        val b = ServerSocket(base + 1, 16, InetAddress.getByName("127.0.0.1"))
         a.use { b.use {
-            val port = server.start(PREFERRED, PREFERRED, PREFERRED + 1)
+            val port = server.start(base, base, base + 1)
             assertNull(port)
             assertNull(server.boundPort.value)
             assertNotNull(server.lastError.value)
@@ -248,7 +251,8 @@ class McpServerTest {
     // ── 辅助 ──
 
     private fun startServer(): Int {
-        val port = server.start(PREFERRED, PREFERRED, PREFERRED + 10)
+        val base = freePortBlock(2)
+        val port = server.start(base, base, base + 1)
         assertNotNull("服务应成功绑定端口", port)
         return port!!
     }
@@ -305,8 +309,31 @@ class McpServerTest {
         return -1
     }
 
+    /**
+     * 找 n 个连续空闲端口并返回起始值。
+     *
+     * 不用固定端口：CI runner 上前面步骤的出站连接可能刚好占着某个端口（41000 就撞过，
+     * 而它落在 Linux 临时端口区 32768–60999 内），`ServerSocket(固定端口)` 直接
+     * BindException —— 测试在 CI 上必挂、本地却往往看不出来。这里在临时端口区之外
+     * 探测一段连续空闲端口，探测完立即交给被测代码绑定。
+     */
+    private fun freePortBlock(n: Int): Int {
+        for (base in FREE_PORT_BASE downTo FREE_PORT_BASE - 1000) {
+            val probe = ArrayList<ServerSocket>(n)
+            try {
+                for (i in 0 until n) probe += ServerSocket(base + i, 16, InetAddress.getByName("127.0.0.1"))
+                probe.forEach { it.close() }
+                return base
+            } catch (_: IOException) {
+                probe.forEach { runCatching { it.close() } }
+            }
+        }
+        throw IllegalStateException("找不到 $n 个连续空闲端口（$FREE_PORT_BASE 起向下探测 1000 个起点）")
+    }
+
     companion object {
-        private const val PREFERRED = 41000
+        /** 探测起点：远低于临时端口区下限 32768，避开出站连接撞端口 */
+        private const val FREE_PORT_BASE = 30000
     }
 }
 
