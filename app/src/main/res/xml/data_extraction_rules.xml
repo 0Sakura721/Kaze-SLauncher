@@ -9,6 +9,7 @@
     <cloud-backup>
         <exclude domain="file" path="linux" />
         <exclude domain="file" path="native-extract" />
+        <exclude domain="sharedpref" path="kaze_ai_secrets.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="linux" />
