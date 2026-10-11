@@ -1,172 +1,194 @@
 # Kaze SLauncher
 
-> 在 Android 上运行 **Minecraft Java 服务端**的启动器 —— 自包含（proot + Ubuntu 24.04），无需 Root、无需 Termux，
-> 一条链路走完「环境 → Java → 服务端 → EULA → 实时控制台」。
+> 在 Android 手机上部署和管理 Minecraft Java 版服务端。内置 PRoot 与 Ubuntu 24.04 运行环境，无需 Root 或单独安装 Termux。
 
 [![CI](https://github.com/0Sakura721/Kaze-SLauncher/actions/workflows/ci.yml/badge.svg)](https://github.com/0Sakura721/Kaze-SLauncher/actions/workflows/ci.yml)
 ![Kotlin](https://img.shields.io/badge/Kotlin-2.1-blue?logo=kotlin)
-![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-green)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-6750A4?logo=jetpackcompose)
 ![minSdk](https://img.shields.io/badge/minSdk-27-orange)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
-当前版本 **v0.5.0-beta.1**（预发布，[下载](https://github.com/0Sakura721/Kaze-SLauncher/releases)） · 变更见 [CHANGELOG](CHANGELOG.md)
-> 液态玻璃已从构建中移除（代码保留）；想要**可用的液态玻璃版本**请用分支 [`liquidglassver`](https://github.com/0Sakura721/Kaze-SLauncher/tree/liquidglassver)（说明见 [LIQUIDGLASS_BRANCH.md](LIQUIDGLASS_BRANCH.md)）。
+**当前版本：** `v0.5.0-beta.1`（预发布） · [下载 APK](https://github.com/0Sakura721/Kaze-SLauncher/releases) · [更新日志](CHANGELOG.md)
+
+> 主分支当前不将液态玻璃主题接入构建。需要完整液态玻璃实现，请查看 [`liquidglassver` 分支说明](LIQUIDGLASS_BRANCH.md)。
 >
-> 动手改之前建议先看 [维护笔记](docs/MAINTENANCE.md) —— 记的是那些"只有真跑一次才会
-> 暴露、而且往往以'静默成功'的样子出现"的坑（CI 流水线 / 测试基建 / 增量补丁格式 / 本机工具链）。
+> 开发者开始修改前，建议先阅读[维护指南](docs/MAINTENANCE.md)，了解项目中的构建、测试和发布注意事项。
 
----
+## 目录
 
-## 📖 文档
+- [项目简介](#项目简介)
+- [功能概览](#功能概览)
+- [快速开始](#快速开始)
+- [安装包选择与限制](#安装包选择与限制)
+- [开发与构建](#开发与构建)
+- [项目结构](#项目结构)
+- [文档索引](#文档索引)
+- [许可证与致谢](#许可证与致谢)
+- [赞助支持](#赞助支持)
+- [免责声明](#免责声明)
 
-| 想了解 | 看这个 |
-|---|---|
-| **怎么用**：新建实例、启停、控制台、玩家管理、备份、设置、[常见问题速查](docs/使用说明.md#常见问题) | **[📘 使用说明](docs/使用说明.md)** |
-| 怎么改、踩过哪些坑（面向接手的人） | [维护笔记](docs/MAINTENANCE.md) |
-| 液态玻璃：为什么从构建移除、分支怎么用 | [分支说明](LIQUIDGLASS_BRANCH.md) |
-| 发版签名与密钥轮换 | [发布签名手册](docs/RELEASE-SIGNING.md) |
-| 版本计划 | [项目计划](docs/PLAN.md) |
+## 项目简介
 
-## 📱 快速开始
+Kaze SLauncher 是一款面向 Android 的 Minecraft Java 版服务端管理应用。它将 Linux 运行环境、Java 安装、服务端下载、实例管理和控制台操作整合在一个应用中，适合希望使用手机部署或维护 Minecraft 服务端的用户。
 
-1. 从 [Releases](https://github.com/0Sakura721/Kaze-SLauncher/releases) 下载对应架构的 APK 安装
-2. 主页 →「部署」环境（rootfs 已内置，不需要下载）
-3. 「服务端」→「新建」→ 选核心类型 → 选版本 → 配置 → 下载并创建
-4. 点「启动」→ 首次会自动接受 EULA 并重启 → 「控制台」实时查看日志
+- **无需 Root：** 通过 PRoot 在 Android 上运行 Ubuntu 24.04 用户空间环境。
+- **无需单独安装 Termux：** PRoot 与基础 rootfs 随 APK 提供。
+- **多实例管理：** 为不同服务端实例分别管理配置、端口、运行状态和备份。
+- **可视化操作：** 通过 Compose 界面完成创建、启停、控制台管理和日志排查。
 
-**选哪个安装包**：64 位手机用 `arm64-v8a`；32 位老设备用 `armeabi-v7a`（标记 experimental，真机验证较少）。
-不再发布 `universal` 包。
+首次部署环境、安装 Java 或下载服务端时需要网络连接；已准备好的实例在满足运行条件时可离线启动。
 
-> 📖 **每个按钮做什么、出问题先看哪里**：见 [docs/使用说明.md](docs/使用说明.md)（含常见问题速查表）。
+## 功能概览
 
-## 🛠️ 构建
+### 服务端管理
 
-```bash
-# 需要 JDK 17+ 与 Android SDK（compileSdk 35）
-./gradlew assembleArm64Debug        # 产物 app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
-./gradlew assembleArmhfRelease      # arm64 / armhf / universal 三种 flavor，debug / release 各一套（发布只出前两个）
-```
-
-发布包需要签名凭据，从 `local.properties`（本地）或环境变量（CI）读取，**取不到时产出未签名包，
-不会回退到 debug 密钥**。轮换步骤与发版检查清单见 [docs/RELEASE-SIGNING.md](docs/RELEASE-SIGNING.md)。
-
-### 测试与截图
-
-```bash
-./gradlew testArm64DebugUnitTest          # 单元测试（纯 JVM，不需要设备）
-./gradlew recordRoborazziArm64Debug       # 渲染界面截图 → app/build/screenshots/
-```
-
-截图测试用 Robolectric 实例化真实的 `Application`，因此 `AppViewModel` 等依赖都是真的，
-整屏渲染不需要任何假实现 —— 改 UI 后可以在几十秒内离线看到结果，不必装到设备上。
-CI 会跑这两步并把截图作为 artifact 上传。
-
-## 📁 结构
-
-```
-app/src/main/java/com/kaze/newage/
-├── ui/                 # Compose 界面
-│   ├── theme/          #   双主题设计系统、动态取色、背景层
-│   ├── components/     #   卡片、状态球、实例图标等
-│   ├── screens/        #   主页 / 服务端 / 控制台 / 设置 / 新建向导 / 详情 / 日志 / 插件
-│   ├── AppRoot.kt      #   NavHost、底部导航
-│   └── AppViewModel.kt #   界面与 core 的接线
-├── core/
-│   ├── env/            #   proot 环境部署与执行
-│   ├── java/           #   JDK 的 apt 安装与管理
-│   ├── server/         #   实例生命周期、EULA、server.properties、备份、控制台流
-│   ├── download/       #   各核心的版本 / 构建 / 下载地址解析
-│   ├── console/        #   日志解析（玩家列表、聊天行）
-│   ├── addons/         #   Modrinth 插件与模组
-│   ├── update/         #   应用内自更新
-│   └── service/        #   前台保活服务
-├── data/               # 实例存储、设置偏好、数据模型
-└── util/               # 下载器、解压、存储目录工具
-
-app/src/test/           # 单元测试 + 界面截图测试
-.github/workflows/      # CI
-```
-
-## ✨ 特性
-
-### 服务端
-- 📦 **八种核心**：原版 Vanilla、Paper、Purpur、Spigot、Fabric、Forge、NeoForge，以及**导入自己的 jar**
-- 🧩 **安装时可选项**：核心构建（Paper build）/ 加载器（Fabric loader）版本、实例名、内存、
-  端口、最大玩家数、正版验证、默认游戏模式、EULA 显式同意
-- 🔎 **版本列表**：按类型分档（正式版 / 快照版 / 远古测试版 / 远古预览版）+ 实时搜索
-- 🗂️ **多实例**：各自独立的目录、内存、端口与运行状态，可同时运行；支持**置顶**排序
-- ⚙️ **实例高级设置**：自定义 JVM 附加参数（空格分隔，追加在固定参数后）+ nogui 开关，
-  建好之后随时改（重启生效）
-- 🔄 **一键重启**：首页菜单 / 实例详情 / 列表菜单三处入口，走「优雅停止 → 等存档完成 → 再启动」的安全链路
-- 📋 **连接地址一键复制**：本机 127.0.0.1:端口 / 局域网 IP:端口，开服时还会直接写进控制台
-- 💾 **备份 / 恢复 / 导入导出**：按实例隔离的备份目录，支持 SAF 导出到任意位置；
-  可开**停服自动备份**（`auto_` 前缀，保留最近 5 份，不动手动备份）
-- 🔌 **插件与模组**：从 Modrinth 搜索安装，可单独启停
+- 支持 Vanilla、Paper、Purpur、Spigot、Fabric、Forge、NeoForge，以及导入自定义服务端 JAR。
+- 创建实例时配置游戏版本、核心构建或加载器版本、内存、端口、MOTD 和服务器属性。
+- 支持多实例管理、置顶排序、启动、优雅停止与安全重启。
+- 支持实例备份、恢复、导入和导出，并可配置停服自动备份。
+- 可通过 Modrinth 搜索、安装和管理插件或模组。
 
 ### 运行环境
-- 🐧 **自包含 Linux 环境**：proot + Ubuntu 24.04 rootfs 随 APK 内置，**不需要下载几百 MB 的 rootfs**
-  （修补版 proot 绕过 targetSdk 29+ 的 W^X 与 zygote seccomp 限制，无需 Root；部署时会联网初始化 apt 源索引）
-- ☕ **Java 自动安装**：按 MC 版本推断并从 apt 安装 —— 1.8–1.16.5→8 / 1.17–1.20.4→17 /
-  ≥1.20.5→21 / 26.x→25；快照版按年份推断；导入的自定义核心按 jar 内 class 文件版本推断
-- ⚖️ **EULA 处理**：安装时显式勾选同意；首启自动生成并改写 `eula.txt`，全程可视化三步指示
-- 🛡️ **前台保活**：服务端运行期间常驻通知保活 + 运行期持有唤醒锁（熄屏后 CPU 不休眠），全部停止后自动退出；首次启动自动申请忽略电池优化
 
-### 界面
-- 🎨 **Material 3 Expressive 界面**：版式由 [M3E Canvas](https://github.com/lnkiai/m3e-canvas) 设计并生成提示词
-  （设计稿与画布分享链接见 [docs/m3e](docs/m3e/)）；卡片 20dp 圆角、相连按钮组、波浪形进度条、
-  可点组件带涟漪与轻微缩小反馈，动效走官方 spatial/effects 两组弹簧
-- 🔵 **形状变化加载指示器**：签名元素，就是官方那个会变形的加载指示器 —— 7 个形状每 650ms 变一次，
-  同时承担服务状态：运行中常速变形、启动中加速、停止时定格成单个形状
-- 🌗 **两套外观**：简洁面板（默认）/ 液态玻璃（玻璃卡片 + 镜面高光 + 柔光斑），跟随系统深浅色，
-  支持 AMOLED 纯黑、自定义种子色与取色风格
-- 🖥️ **实时控制台**：逐行着色、自动跟随、`\r` 进度行原地刷新、命令输入（stop / op / say…）、
-  一键复制与导出日志
-- 🎛️ **控制台 DIY**：快捷命令 chip（点按发送、长按删除）、级别过滤（全部/信息/警告/错误）+
-  关键词搜索、日志字号（10–20sp）、时间戳前缀开关
-- 👥 **玩家管理**：解析 `list` 响应与 join/leave 事件，提供 OP / 白名单 / 踢出快捷命令
-- 🔄 **应用内更新**：GitHub Releases + 多个国内加速镜像测速择优，下载后校验收包 SHA-256
+- APK 内置 PRoot 与 Ubuntu 24.04 基础环境，首次部署时初始化运行环境。
+- 根据 Minecraft 版本推断合适的 Java 版本，并允许在创建流程中调整。
+- 提供 EULA 确认流程；用户须先同意 Minecraft EULA 才能运行服务端。
+- 服务端运行期间使用前台服务和唤醒锁降低后台中断风险。实际保活效果仍受 Android 厂商的后台管理策略影响。
 
-### AI 助手
-- 🤖 **只读诊断 + 逐次确认**：读取/列出/写入实例文件（写入带完整预览 + 自动 `.bak`）、抓网页正文、
-  执行控制台命令 —— 每一步都由你点按钮决定
-- 🧠 **DeepSeek V4 原生接入**：流式输出、思考过程逐 token 实时显示；多模型档案制
-  （可建多份、单选分配），Key 用 Keystore AES-256-GCM 加密存储
-- 🌐 **联网搜索四源**：Tavily / 博查 / SearXNG（免 Key 自建）/ 本机浏览器（零配置），带结果缓存
-- 🛡️ **命令三档控制**：仅建议（默认）/ 白名单自动（查询类直接执行）/ 全部自动，所有执行记入审计日志
+### 控制台与诊断
 
-## ⚠️ 已知限制
+- 实时查看服务端输出，支持日志着色、自动跟随、关键词搜索和级别过滤。
+- 发送服务端命令，并管理快捷命令。
+- 解析玩家列表与进出服事件，提供常用玩家管理命令入口。
+- 支持日志复制、导出及启动问题排查。
+- 提供 AI 辅助诊断与文件操作能力；涉及写入或命令执行的操作按应用内确认流程执行。使用联网 AI 服务时，请留意发送的数据与服务商的隐私政策。
 
-- **x86_64 模拟器无法运行服务端**：应用依赖 proot，而模拟器普遍用 ARM 翻译层（如 MuMu 的 houdini）
-  执行 `libproot.so` 会直接段错误。界面与下载功能可用，但部署环境与启动服务端需要**真实 ARM 设备**
-- **Forge / NeoForge 的 `--installServer` 已实现但尚未真机验证**：失败时控制台会打印安装器的完整输出
-- 首次部署环境与安装 Java 需要网络；核心 jar 从官方源下载（Spigot 走社区 CDN，无官方哈希）
+### 界面与更新
 
-## 📄 许可证与致谢
+- 基于 Kotlin、Jetpack Compose 与 Material 3 Expressive 的 Android 界面。
+- 支持浅色/深色外观、动态取色及相关外观设置。
+- 提供应用内更新检查与下载校验流程。
 
-**GPL-3.0**（见 [LICENSE](LICENSE)）。完整第三方组件清单与许可义务见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+## 快速开始
 
-| 项目 | 许可证 | 借鉴内容 |
+1. 打开 [GitHub Releases](https://github.com/0Sakura721/Kaze-SLauncher/releases)，下载适合设备架构的 APK。
+2. 安装并打开应用，按提示部署 Linux 运行环境。
+3. 进入「服务端」页面，选择「新建」。
+4. 选择服务端核心与版本，设置内存、端口及其他参数，并确认已阅读且同意 Minecraft EULA。
+5. 等待核心下载和创建完成，然后启动实例。
+6. 在「控制台」查看启动输出；若启动失败，请先查看启动日志和[使用说明中的常见问题](docs/使用说明.md#常见问题)。
+
+首次部署环境、安装 Java、下载服务端核心或获取更新时需要网络连接。
+
+## 安装包选择与限制
+
+| 架构 | 适用设备 | 说明 |
 |---|---|---|
-| [Fold Craft Launcher (FCL)](https://github.com/FCL-Team/FoldCraftLauncher) | GPL-3.0 | 分层架构思路、JRE 管理、下载源、版本安装流程 |
-| [ZalithLauncher 2](https://github.com/ZalithLauncher/ZalithLauncher2) | GPL-3.0 | Compose 重写路线、UI 卡片体系 |
-| [PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher) | GPL-3.0 | 服务器原生运行思路、JRE 生态 |
-| [BiliPai](https://github.com/jay3-yy/BiliPai) | GPL-3.0 | 主题设置体系、安卓原生液态玻璃 |
-| [Miuix](https://github.com/Miuix-Kotlin-Multiplatform/Miuix) | Apache-2.0 | 浮动胶囊底栏结构 |
-| [oonid/pr](https://github.com/oonid/pr) | GPL-2.0-or-later | 修补版 proot + loader |
-| [termux/proot](https://github.com/termux/proot) · [proot-distro](https://github.com/termux/proot-distro) | GPL-2.0+ / GPL-3.0 | proot 运行时与 rootfs 部署方案 |
-| [Haze](https://github.com/chrisbanes/haze) · [materialkolor](https://github.com/jordond/materialkolor) | Apache-2.0 | 背景模糊 / 动态取色 |
-| [Roborazzi](https://github.com/takahirom/roborazzi) · [Robolectric](https://robolectric.org/) | Apache-2.0 / MIT | 离线界面截图测试 |
+| `arm64-v8a` | 大多数现代 Android 手机和平板 | 推荐优先选择 |
+| `armeabi-v7a` | 部分 32 位 ARM 设备 | 标记为 experimental，真机验证较少 |
 
-## ☕ 赞助支持
+当前不再发布 `universal` 包。请以 Releases 页面实际提供的文件为准。
 
-如果这个项目对你有帮助，可以请我喝杯奶茶 ☕
+### 已知限制
+
+- **建议使用真实 ARM 设备运行服务端。** 部分 x86_64 模拟器无法正确执行 PRoot，可能出现崩溃；模拟器中的界面可用性不代表服务端运行环境可用。
+- **Forge / NeoForge 安装流程仍需更多真实设备验证。** 若安装失败，请保存控制台输出以便排查。
+- 首次部署、安装 Java、下载核心、插件或模组需要网络；具体可用性也取决于对应上游服务。
+- Android 厂商的省电策略可能影响后台运行。请按系统提示设置通知和电池优化权限。
+
+## 开发与构建
+
+### 环境要求
+
+- JDK 17 或更高版本
+- Android SDK（项目当前使用 `compileSdk 35`）
+- 可访问项目所需依赖仓库的网络环境
+
+### 构建 APK
+
+在仓库根目录执行：
+
+```bash
+# ARM64 Debug APK
+./gradlew assembleArm64Debug
+
+# ARM64 Release APK
+./gradlew assembleArm64Release
+
+# ARMHF Release APK（实验性）
+./gradlew assembleArmhfRelease
+```
+
+构建产物位于 `app/build/outputs/apk/` 下对应 flavor 的目录中。具体任务名称与产物文件名以当前 Gradle 配置为准。
+
+Release 包需要正式签名凭据。项目不会在缺少 Release 签名配置时自动回退到 Debug 密钥；签名配置与发布检查请参阅[发布签名手册](docs/RELEASE-SIGNING.md)。
+
+### 运行测试与生成界面截图
+
+```bash
+# ARM64 Debug 单元测试
+./gradlew testArm64DebugUnitTest
+
+# 生成 Robolectric / Roborazzi 界面截图
+./gradlew recordRoborazziArm64Debug
+```
+
+测试与截图任务是否成功，以 Gradle 输出和 CI 结果为准。截图通常生成在构建目录中；具体位置请查看任务输出及相关维护文档。
+
+## 项目结构
+
+```text
+app/src/main/java/com/kaze/newage/
+├── ui/          # Compose 界面、主题、组件和页面
+├── core/        # 环境、Java、服务端、下载、控制台等核心逻辑
+├── data/        # 数据模型、实例存储与偏好设置
+└── util/        # 下载、解压和存储等通用工具
+
+app/src/test/    # 单元测试与界面截图测试
+docs/            # 使用、维护、发布及设计文档
+.github/workflows/ # CI、构建与发布工作流
+```
+
+## 文档索引
+
+| 文档 | 内容 |
+|---|---|
+| [使用说明](docs/使用说明.md) | 安装、创建实例、启停、控制台、备份、设置与常见问题 |
+| [维护指南](docs/MAINTENANCE.md) | 项目维护、构建测试注意事项和已知工程陷阱 |
+| [项目计划](docs/PLAN.md) | 项目计划与待办事项 |
+| [发布签名手册](docs/RELEASE-SIGNING.md) | Release 签名、密钥管理和发版前检查 |
+| [液态玻璃分支说明](LIQUIDGLASS_BRANCH.md) | 主分支与 `liquidglassver` 分支的区别 |
+| [第三方声明](THIRD_PARTY_NOTICES.md) | 第三方项目、依赖、许可证及来源说明 |
+| [界面设计稿说明](docs/m3e/README.md) | M3E Canvas 设计文件、生成脚本与截图说明 |
+| [更新日志](CHANGELOG.md) | 按版本记录的功能变化与修复 |
+
+## 许可证与致谢
+
+本项目以 **GPL-3.0** 许可证发布，详见 [LICENSE](LICENSE)。第三方代码、依赖和运行时组件的来源与许可信息见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+项目在架构、界面或运行环境实现方面参考或复用了多个开源项目，包括：
+
+- [Fold Craft Launcher](https://github.com/FCL-Team/FoldCraftLauncher)
+- [ZalithLauncher 2](https://github.com/ZalithLauncher/ZalithLauncher2)
+- [PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher)
+- [BiliPai](https://github.com/jay3-yy/BiliPai)
+- [Miuix](https://github.com/Miuix-Kotlin-Multiplatform/Miuix)
+- [M3E Canvas](https://github.com/lnkiai/m3e-canvas)
+- [oonid/pr](https://github.com/oonid/pr)
+
+具体采用内容和对应许可证以第三方声明及各上游项目为准。
+
+## 赞助支持
+
+如果 Kaze SLauncher 对你有帮助，欢迎请作者喝杯奶茶。
 
 | 支付宝 | 微信 |
-|:------:|:----:|
-| ![支付宝](docs/images/alipay.png) | ![微信](docs/images/wechat.png) |
+|:---:|:---:|
+| ![支付宝赞助二维码](docs/images/alipay.png) | ![微信赞助二维码](docs/images/wechat.png) |
 
-## ⚠️ 免责声明
+## 免责声明
 
-- 运行 Minecraft 服务端即表示你同意 [Minecraft EULA](https://aka.ms/MinecraftEULA)
-- 本项目仅供学习与个人使用，使用造成的任何损失由使用者自行承担
-- Minecraft 是 Mojang Studios 的注册商标，本项目与 Mojang 无关
+- 使用 Minecraft 服务端前，请阅读并遵守 [Minecraft EULA](https://aka.ms/MinecraftEULA) 及相关条款。
+- 本项目与 Mojang Studios 或 Microsoft 无隶属关系，也不代表其认可或背书。
+- Minecraft 及相关标识归其各自权利人所有。
+- 请在遵守当地法律、上游软件许可证和服务条款的前提下使用本项目。使用者应自行备份重要世界数据，并承担使用本软件的相应风险。
