@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -139,14 +140,7 @@ object AiSearch {
                 }.getOrDefault("")
                 throw RuntimeException("搜索服务返回 HTTP $code${err.take(120).ifBlank { "" }}")
             }
-            // 搜索端点同样是不可信网络响应：限制体量，避免异常/恶意服务端用超大 body 撑爆内存。
-            val limitedBody = AiBodyLimit.read(conn.inputStream)
-            if (limitedBody.truncated) {
-                throw RuntimeException(
-                    "搜索服务响应体超过 ${AiBodyLimit.MAX_BODY_BYTES / 1024 / 1024}MB，已中止读取：请检查搜索端点是否返回异常内容"
-                )
-            }
-            val respBody = limitedBody.text
+            val respBody = readResponseBody(conn.inputStream)
             return when (provider) {
                 Provider.TAVILY -> parseTavily(respBody)
                 Provider.BOCHA -> parseBocha(respBody)
@@ -159,6 +153,17 @@ object AiSearch {
         } finally {
             conn.disconnect()
         }
+    }
+
+    /** 读取搜索服务响应体并强制执行统一大小上限，供网络入口与单元测试共用。 */
+    internal fun readResponseBody(stream: InputStream): String {
+        val limited = AiBodyLimit.read(stream)
+        if (limited.truncated) {
+            throw RuntimeException(
+                "搜索服务响应体超过 ${AiBodyLimit.MAX_BODY_BYTES / 1024 / 1024}MB，已中止读取：请检查搜索端点是否返回异常内容"
+            )
+        }
+        return limited.text
     }
 
     @Serializable
