@@ -1,110 +1,80 @@
-# NA KAZE-SLAUNCHER — 项目计划（定稿 v1.0）
+# 项目计划与架构决策（历史记录）
 
-> 状态：**已定稿并实施**（2026-08-14）。M0–M6 全部完成，debug APK 构建通过。
-> 目标：Android 上驱动 **Minecraft Java 服务端**的前端，自包含 Linux 环境 + Java 自动安装 + eula 全自动 + 实时控制台，**双主题设计系统**，GPL-3.0 合规。
+> **文档状态：历史记录，不是当前路线图。** 本文主要记录 2026-08-14 的初始目标与决策；项目后来增加了多核心支持、AI 助手、备份、更新与截图测试等功能。当前功能以 [README](../README.md) 和[用户使用说明](使用说明.md)为准，版本变更以 [CHANGELOG](../CHANGELOG.md) 为准。
 
-## 0. 需求链路（用户拍板版）
+## 1. 初始目标
 
+在 Android 手机上运行 Minecraft Java 版服务端，让旧手机也能作为轻量服务端设备使用。初始设计的核心链路是：
+
+```text
+部署自包含 Linux 运行环境
+  → 按 Minecraft 版本安装 Java
+  → 下载或导入服务端核心
+  → 用户明确同意 EULA
+  → 首次启动并处理 eula.txt
+  → 启动服务端、查看实时控制台并输入命令
 ```
-[前端] 检测/部署 Linux 环境（自包含 proot + Ubuntu rootfs，无需 Termux）
-   → 按 MC 版本自动安装 Java（8 / 17 / 21）
-   → 下载/导入服务端（精简首发：Vanilla / Paper / 自定义 jar）
-   → 首次启动：服务端生成 eula.txt 后自动退出
-   → 前端自动改写 eula=false → true
-   → 再启动 → 正常运行
-   → 控制台实时日志 + 命令输入（stop / op / say…）
-```
 
-## 1. 已拍板决策（用户 2026-08-14 确认）
+初始目标强调：不要求 Root、不要求安装 Termux、运行环境随 APK 提供，并尽量减少用户手动配置。
 
-| 项 | 决策 |
-|---|---|
-| 运行环境 | **自包含 proot + Ubuntu 24.04 rootfs，沿用 v3**（不装 Termux） |
-| 许可证 | **GPL-3.0**（借鉴 FCL / Zalith copyleft 体系的必然要求） |
-| MVP 范围 | **精简首发**：Vanilla + Paper + 自定义导入 + eula 全自动 + 实时控制台 + 设置/许可证页（后端多核心能力保留、UI 不露出） |
-| 设计 | **两主题**：默认「简洁面板」（PiliPlus 式清爽卡片面板，跟随系统深浅色）；另有「Aurora 极光」（深色主导，深空极光 + 毛玻璃） |
-| 技术栈 | Kotlin 2.1 + Compose (M3, BOM 2024.12.01)、AGP 8.7.3、Gradle 8.11.1、minSdk 27 |
-| 包名 | `com.kaze.newage`（与旧版共存），应用名 "Kaze SLauncher" |
+## 2. 初始技术决策（2026-08-14）
 
-## 2. 架构（已实施）
+| 项目 | 当时的决策 | 说明 |
+|---|---|---|
+| 运行环境 | proot + Ubuntu 24.04 rootfs | 将 Linux 用户态环境封装在应用中，避免要求用户另装 Termux |
+| 技术栈 | Kotlin 2.1、Jetpack Compose、Gradle Wrapper | 使用 Android 原生 UI 与仓库锁定的构建工具链 |
+| 最低系统版本 | minSdk 27 | Android 8.1 及以上 |
+| 包名 | `com.kaze.newage` | 初始设计中希望与旧版共存 |
+| 许可证 | GPL-3.0 | 结合采用和改编的第三方组件及其许可证确定 |
+| 首发范围 | Vanilla、Paper、自定义 JAR | 当时的 MVP 范围；不是当前支持核心的完整清单 |
+| 初始界面 | 双主题、状态球、EULA 三步状态 | 后来经过 Material 3 Expressive 界面重构，部分设计已被替代 |
 
-```
+## 3. 当前架构入口
+
+以下目录用于帮助维护者定位代码。目录与功能会随开发演进，实际以仓库当前文件为准。
+
+```text
 app/src/main/java/com/kaze/newage/
-├── MainActivity.kt / NewAgeApp.kt    # 入口 + 手动 DI 容器
-├── ui/
-│   ├── theme/     # AppTheme(双主题枚举) + Theme(三套 ColorScheme) + Background(平面/极光)
-│   ├── components/# AppBackground / BackgroundCard(主题化描边圆角) / CheckChip / StatusOrb(签名元素)
-│   ├── screens/   # Home(Hero+EULA三步) / Server(实例列表) / Console(日志+命令) / Settings(主题选择+许可证)
-│   └── AppRoot.kt / AppViewModel.kt / ServerStateUi.kt
-├── core/          # env(ProotEnvironment) / java(RootfsJavaManager) / server(DefaultServerManager+EulaHandler)
-│                  # download(CoreSources 七源) / console(ConsoleStream)
-├── data/          # InstanceStore / ServerInstance / SettingsPrefs(theme_mode/force_dark)
-└── util/          # Downloader / TarExtractor
+├── ui/       # Compose 页面、导航、组件与主题
+├── core/     # 环境部署、Java、服务端生命周期、下载、更新与 AI
+├── data/     # 实例存储、设置与数据模型
+└── util/     # 下载、解压、存储等通用工具
+
+app/src/test/              # 单元测试与界面截图测试
+.github/workflows/         # CI、APK 构建与发版流程
 ```
 
-- **后端 100% 继承 v3**（已验证：proot 部署、tar 解压、Java apt 安装、eula 三段式、stdin 直连注入命令、日志双通道）。
-- **前端全新**：双主题设计系统 + 状态球签名元素 + eula 三步可视化。
+## 4. 设计演进与当前主线说明
 
-## 2.5 界面重构（2026-09，Material 3 Expressive）
+- **界面体系：** 初始的状态球设计后来演进为 Material 3 Expressive；当前界面和组件以 `ui/` 下的实际实现为准。
+- **液态玻璃：** 相关代码保留在仓库中，但已从主线构建中移除。需要可运行的液态玻璃实现时，请参阅 [LIQUIDGLASS_BRANCH.md](../LIQUIDGLASS_BRANCH.md)；不要仅凭本历史计划判断主线是否启用该主题。
+- **功能范围：** 当前功能比初始 MVP 更广，包括多种服务端核心、备份与恢复、插件/模组、控制台增强、应用内更新、AI 助手和离线界面截图测试等。具体细节请查阅 README 与用户手册。
+- **测试与发布：** 维护者应以当前 GitHub Actions workflow 的结果为准，并在真机验证无法由 JVM 单测覆盖的权限、后台保活与服务端安装流程。操作细节见 [维护笔记](MAINTENANCE.md)。
 
-> 签名元素与设计体系在本次重构中**换代**：状态球 StatusOrb 由 M3 Expressive 的
-> 形状变化加载指示器取代。设计不是手写的 —— 用 [M3E Canvas](https://github.com/lnkiai/m3e-canvas)
-> 在代码里构造画布文档、跑它自己的 prompt 引擎导出 9 屏设计稿，再据此重做界面。
-> 设计源与画布分享链接见 [docs/m3e](m3e/)。
+## 5. 历史设计参考
 
-| 项 | 取值 |
-|---|---|
-| 设计语言 | Material 3 Expressive（官方 baseline seed `#6750A4` + 动态取色，浅色与深色都做） |
-| 形状 | 卡片 20dp（corner-large-increased）、对话框 28dp、按钮全圆；相连列表首尾 28dp / 内侧 8dp |
-| 动效 | 官方 `MotionScheme.expressive()` 的 6 组 spring；可点组件带涟漪 + 轻微缩小反馈 |
-| 排版 | 强调字阶：15 个字阶的 size/lineHeight 不变，titleMedium 及以下提到 Bold |
-| 签名元素 | 形状变化加载指示器：7 形每 650ms 一变，兼作服务状态（运行中常速 / 启动中加速 / 停止定格） |
-| 进度 | 官方波浪形线性进度条（容器 10dp、波幅 3dp、波长 40/20dp） |
+初始计划中的部分设计与技术来源仍有追溯价值，但不应作为当前实现状态的依据：
 
-## 3. 设计系统（旧版：签名元素 状态球 StatusOrb）
+- **Java 与 Minecraft 版本对应：** [itzg/docker-minecraft-server 文档](https://docker-minecraft-server.readthedocs.io) 是版本推断逻辑的参考来源之一；当前行为以 `ServerInstance.kt` 中的实现与注释为准。
+- **Material 3 Expressive（M3E）：** 2026 年界面重构采用动态取色、较大圆角、Expressive 动效与波浪进度指示器等设计方向。生成过程与设计资产保存在 [`docs/m3e/`](m3e/)，这些记录用于追溯设计来源，不代表每项效果都仍在主线启用。
 
-> ⚠️ 本节描述的是 v1 的两主题设计系统，**已被 2.5 节的 M3 Expressive 体系取代**，
-> 保留在此仅供追溯。CLEAR / AURORA 两主题的**背景层与液态玻璃底栏仍然有效**。
+## 6. 初始里程碑（历史状态）
 
-| 主题 | 背景 | 卡片 | 状态球 |
-|---|---|---|---|
-| CLEAR 简洁面板（默认） | 冷灰平面渐变，跟随系统深浅色 | 纯白/深灰 + 发丝描边、14dp、无阴影 | 扁平圆环 + 实心点，启动中脉动 |
-| AURORA 极光 | 深空 + 星点 + 极光幕布（26s 正弦漂移，加法混合） | 白 6% 毛玻璃 + 白 10% 描边、20dp | 渐变球体 + 辉光，运行中呼吸 |
+以下是初始开发计划中的里程碑，表示它们在初始阶段完成，不代表项目当前只有这些功能，也不是当前待办列表。
 
-- 动效克制（每主题一个环境动画），尊重系统「动画时长缩放=0」（reducedMotion）。
-- 控制台日志面板两主题均为深色终端（仅底色微调），按级别着色。
-- 深浅色设置仅对 CLEAR 生效；AURORA 为深色主导主题。
+- [x] M0：仓库初始化与许可证文件
+- [x] M1：工程骨架与首次构建
+- [x] M2：proot、rootfs 与 Java 环境层
+- [x] M3：服务端下载/导入、EULA 与启停流程
+- [x] M4：实时控制台与命令输入
+- [x] M5：初始界面主题和组件
+- [x] M6：设置、许可证页面与打包
 
-## 4. 许可证合规清单（权重 0.8，全部完成）
+## 7. 相关文档
 
-- [x] LICENSE = GPL-3.0 全文（随发行）
-- [x] THIRD_PARTY_NOTICES.md：FCL / Zalith / PojavLauncher / Kaze v2 / proot / proot-distro / Ubuntu rootfs / OpenJDK / Paper 等来源与许可
-- [x] 改编自 Zalith 的组件/色板文件保留来源注释（GPL-3.0）
-- [x] UI「设置 → 关于与许可证」页：GPL-3.0 + 第三方摘要 + Minecraft EULA 声明
-- [x] 运行时下载的服务端 jar 不随 APK 再分发
-- [x] 内置 proot（GPL-2.0+）注明源码获取方式
-
-## 5. 里程碑（全部完成）
-
-- M0 仓库初始化（LICENSE / NOTICES / README / .gitignore）✅
-- M1 工程骨架 + 首次构建通过 ✅（基线 3m05s）
-- M2 环境层（沿用 v3：proot + rootfs + Java apt）✅
-- M3 服务端生命周期（下载/导入 → Java → eula 三段式 → 启停）✅
-- M4 实时控制台（着色 / 自动滚动 / 命令输入 / 清空）✅
-- M5 设计精修（双主题 + 状态球 + 图标）✅
-- M6 设置/关于/许可证 + 打包 ✅（app-debug.apk）
-
-## 6. 待办（后续）
-
-- 真机测试：双主题切换、eula 三段式、控制台着色与命令、低内存设备表现
-- 可选：AURORA 主题极光动画的帧率优化（低端机）、bionic JRE 直跑兜底
-- 发布：GitHub 开源（GPL-3.0）+ release 签名
-
-## 附：关键引用
-
-- FCL：https://github.com/FCL-Team/FoldCraftLauncher （GPL-3.0）
-- ZalithLauncher2：https://github.com/ZalithLauncher/ZalithLauncher2 （GPL-3.0）
-- PojavLauncher：https://github.com/PojavLauncherTeam/PojavLauncher （GPL-3.0）
-- proot：https://github.com/termux/proot （GPL-2.0+）
-- Paper 许可：https://github.com/PaperMC/Paper/blob/master/LICENSE.md
-- itzg（Java↔MC 对应）：https://docker-minecraft-server.readthedocs.io
+- [项目总览与构建](../README.md)
+- [用户使用说明与常见问题](使用说明.md)
+- [维护笔记与 CI 排查](MAINTENANCE.md)
+- [发布签名与密钥管理](RELEASE-SIGNING.md)
+- [变更日志](../CHANGELOG.md)
+- [第三方组件声明](../THIRD_PARTY_NOTICES.md)

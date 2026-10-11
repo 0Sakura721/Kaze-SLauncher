@@ -1,8 +1,12 @@
 # KAZE SLauncher 界面重构 · m3e-canvas 设计稿
 
-这一目录是本次界面重构的**设计源**。它不是手写的设计文档，而是用
+这一目录是 2026-09 界面重构的**历史设计源**。它不是手写的设计文档，而是用
 [m3e-canvas](https://github.com/lnkiai/m3e-canvas)（MIT，Material 3 Expressive 草图工具）
-**真正跑出来的产物**：`docs/m3e/kaze-redesign.prompt.md` 里的每一句话都由 m3e-canvas 自己的
+**真正跑出来的产物**。
+
+> **与当前功能状态的区别：** 本目录记录当时的设计生成与实现过程，不是当前主线的功能开关清单。液态玻璃相关代码后来从主线构建中移除，但设计资产与部分代码仍保留。当前使用方式见 [液态玻璃分支说明](../../LIQUIDGLASS_BRANCH.md)。
+
+原文中的 `docs/m3e/kaze-redesign.prompt.md` 里的每一句话都由 m3e-canvas 自己的
 prompt 引擎（`lib/prompt.ts` 的 `buildPrompt`）根据画布文档生成，不是我们代笔的。
 
 ## 怎么来的
