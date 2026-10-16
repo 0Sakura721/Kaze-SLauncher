@@ -597,10 +597,6 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             if (customDir.isNotBlank()) {
                 SettingNote("当前目录：${StorageDirUtil.displayPath(customDir)}")
             }
-            SettingNote(
-                "游戏实例默认存到应用外部目录；可自定义到其他目录（如大分区/SD 卡），" +
-                    "新实例存到所选目录，所选目录中已有的服务端也会被直接识别运行。"
-            )
 
             // ═══ Java 运行时 ═══
             GroupHeader(
@@ -665,11 +661,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     },
                 )
             }
-            SettingNote(
-                "Java 不随应用内置，按需下载所需版本；不同 MC 版本对 Java 的要求不同" +
-                    "（1.8–1.16.5→8 / 1.17–1.20.4→17 / ≥1.20.5→21 / ≥26.x→25），可在新建实例时手动指定。" +
-                    "下载支持断点续传，断网会自动重试；中断后可点击继续。"
-            )
+            SettingNote("MC 对应 Java：1.8–1.16.5→8 · 1.17–1.20.4→17 · ≥1.20.5→21 · ≥26.x→25")
             if (javaTask.running) {
                 // 旧版是行内 LinearProgressIndicator，这里换成 Expressive 波浪进度条
                 M3ECard(
@@ -708,7 +700,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             M3EConnectedList(count = 1) { _, shape ->
                 M3EListItem(
                     headline = "控制台 AI 入口",
-                    supporting = "在控制台命令输入行常驻显示 AI 助手按钮（默认关闭）",
+                    supporting = "在控制台命令输入行常驻显示 AI 助手按钮",
                     leadingIcon = Icons.Filled.SmartToy,
                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                     shape = shape,
@@ -723,9 +715,6 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     },
                 )
             }
-            SettingNote(
-                "打开后 AI 助手按钮会常驻在控制台命令输入行左侧；关闭时仍可从「服务端」页顶栏进入 AI 助手。"
-            )
 
             // ═══ MCP 服务 ═══
             GroupHeader(
@@ -740,7 +729,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 when (index) {
                     0 -> M3EListItem(
                         headline = "启用 MCP 服务",
-                        supporting = "开放本地接口供外部 AI 客户端控制服务端（默认关闭）",
+                        supporting = "开放本地接口，供外部 AI 客户端控制服务端",
                         leadingIcon = Icons.Filled.SmartToy,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -814,11 +803,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     }
                 }
             }
-            SettingNote(
-                "MCP（Model Context Protocol）在本机开放 HTTP 接口（POST /mcp），Claude / Cursor 等 " +
-                    "AI 客户端填入「连接地址 + 访问令牌」即可读控制台、发命令、启停服务端（工具清单见 tools/list）。" +
-                    "接口随应用运行存活，局域网内均可访问——务必保管好令牌，不用时关闭。"
-            )
+            SettingNote("Claude / Cursor 等客户端可通过连接地址与令牌控制服务端；局域网可访问，请妥善保管令牌，不用时关闭。")
 
             // ═══ 后台与更新 ═══
             GroupHeader(
@@ -829,7 +814,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 section = SettingsSection.BackgroundAndUpdate,
                 sectionOffsets = sectionOffsets,
             )
-            SettingNote("前台服务守护：服务端运行时会拉起前台服务，应用退到后台也不被系统回收。")
+            SettingNote("服务端运行时会拉起前台服务，退后台不被系统回收。")
             M3EConnectedList(count = 4) { index, shape ->
                 when (index) {
                     0 -> M3EListItem(
