@@ -6,6 +6,7 @@ import com.kaze.newage.core.server.ServerManager
 import com.kaze.newage.core.server.ServerProperties
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.ServerInstance
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -148,6 +149,30 @@ class McpServerTest {
     }
 
     @Test
+    fun `start_server 提交后台执行立即返回`() {
+        val port = startServer()
+        val i = addInstance("异步启动")
+        fake.startGate = CompletableDeferred()
+        try {
+            val t0 = System.currentTimeMillis()
+            val reply = toolsCall(port, "start_server", """{"instanceId":"${i.id}"}""")
+            // 启动链路在真实实现里要跑几分钟：HTTP 必须立即返回，否则客户端 30~60s 必超时
+            assertTrue(
+                "start_server 同步等了 ${System.currentTimeMillis() - t0}ms，应提交后立即返回",
+                System.currentTimeMillis() - t0 < 4000,
+            )
+            assertTrue(reply.body.contains("已提交启动"))
+            fake.startGate?.complete(Unit)
+            // 稍等后台协程收尾，启动应确实被执行过
+            val deadline = System.currentTimeMillis() + 2000
+            while (fake.started.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+            assertEquals(listOf(i.id), fake.started)
+        } finally {
+            fake.startGate?.complete(Unit)
+        }
+    }
+
+    @Test
     fun `发送命令转发到底层管理器`() {
         val port = startServer()
         val i = addInstance()
@@ -191,7 +216,12 @@ class McpServerTest {
         val i = addInstance()
         fake.setState(i.id, ServerState.Running)
         val reply = toolsCall(port, "restart_server", """{"instanceId":"${i.id}"}""")
-        assertTrue(reply.body.contains("已重启"))
+        assertTrue(reply.body.contains("已提交重启"))
+        // 后台链路：stop → 等停稳 → start（fake 里全是即时状态，稍等即完成）
+        val deadline = System.currentTimeMillis() + 2000
+        while ((fake.stopped.isEmpty() || fake.started.isEmpty()) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20)
+        }
         assertEquals(listOf(i.id), fake.stopped)
         assertEquals(listOf(i.id), fake.started)
     }
@@ -340,9 +370,13 @@ class McpServerTest {
 /** 假管理器：记录调用，状态直接置位（restart 的「等停稳」依赖状态流） */
 private class FakeServerManager : ServerManager {
 
-    val sentCommands = mutableListOf<Pair<String, String>>()
-    val started = mutableListOf<String>()
-    val stopped = mutableListOf<String>()
+    // 后台任务协程（taskScope）与测试线程跨线程读写：必须用并发集合
+    val sentCommands = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>()
+    val started = java.util.concurrent.CopyOnWriteArrayList<String>()
+    val stopped = java.util.concurrent.CopyOnWriteArrayList<String>()
+
+    /** 非空时 start() 先挂起等它：用于验证「提交即返回」语义 */
+    var startGate: CompletableDeferred<Unit>? = null
 
     private val consoles = mutableMapOf<String, ConsoleStream>()
     private val _states = MutableStateFlow<Map<String, ServerState>>(emptyMap())
@@ -361,6 +395,7 @@ private class FakeServerManager : ServerManager {
         _states.value[instanceId] == ServerState.Running
 
     override suspend fun start(instance: ServerInstance) {
+        startGate?.await()
         started += instance.id
         setState(instance.id, ServerState.Running)
     }

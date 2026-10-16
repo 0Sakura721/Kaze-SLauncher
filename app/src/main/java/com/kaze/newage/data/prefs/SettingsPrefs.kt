@@ -10,6 +10,7 @@ import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiSearch
+import com.kaze.newage.core.mcp.McpPorts
 import com.kaze.newage.core.mcp.McpServer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -207,6 +208,14 @@ emember(path) 缓存位图的话，
     val mcpPortRangeStart = mutableStateOf(prefs.getInt("mcp_port_range_start", McpServer.DEFAULT_RANGE_START))
     val mcpPortRangeEnd = mutableStateOf(prefs.getInt("mcp_port_range_end", McpServer.DEFAULT_RANGE_END))
 
+    /**
+     * 监听地址：0.0.0.0 = 所有网卡（局域网可访问，外部 AI 的默认用法）；
+     * 127.0.0.1 = 仅本机；也可以是某个具体网卡 IPv4。
+     */
+    val mcpBindAddress = mutableStateOf(
+        prefs.getString("mcp_bind_address", McpPorts.DEFAULT_BIND_ADDRESS) ?: McpPorts.DEFAULT_BIND_ADDRESS,
+    )
+
     /** 访问令牌（Bearer 认证；Keystore 加密存，首次启用前就生成好） */
     val mcpToken = mutableStateOf(loadMcpToken())
 
@@ -227,6 +236,13 @@ emember(path) 缓存位图的话，
         mcpPortRangeStart.value = start
         mcpPortRangeEnd.value = end
         prefs.edit().putInt("mcp_port_range_start", start).putInt("mcp_port_range_end", end).apply()
+    }
+
+    /** 监听地址（格式由设置页校验；这里只兜底空值，改完由 rebindMcp 生效） */
+    fun setMcpBindAddress(v: String) {
+        val a = v.trim().ifEmpty { McpPorts.DEFAULT_BIND_ADDRESS }
+        mcpBindAddress.value = a
+        prefs.edit().putString("mcp_bind_address", a).apply()
     }
 
     /** 重新生成访问令牌（旧令牌立即失效；服务端即时读取，不用重启） */

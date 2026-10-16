@@ -39,6 +39,9 @@ object McpPorts {
     const val PORT_MIN = 1024
     const val PORT_MAX = 65535
 
+    /** 默认监听地址：所有网卡（局域网可访问，外部 AI 的默认用法）；可改 127.0.0.1 仅本机 */
+    const val DEFAULT_BIND_ADDRESS = "0.0.0.0"
+
     /**
      * 绑定一个可用端口：先试 [preferred]，再按 [rangeStart]..[rangeEnd] 顺延。
      *
@@ -48,7 +51,7 @@ object McpPorts {
         preferred: Int,
         rangeStart: Int,
         rangeEnd: Int,
-        bindAddress: String = "0.0.0.0",
+        bindAddress: String = DEFAULT_BIND_ADDRESS,
     ): ServerSocket {
         val tried = linkedSetOf<Int>()
         if (preferred in PORT_MIN..PORT_MAX) tried += preferred
@@ -74,8 +77,9 @@ object McpPorts {
  * Minecraft 服务端 —— 读日志、发命令、启停实例、改配置。
  *
  * 安全边界只有一道：**访问令牌**（`Authorization: Bearer <token>`）。
- * 接口绑在所有网卡上（外部 AI 就是靠局域网进来的），同一 Wi-Fi 下没有令牌的请求
- * 一律 401；服务默认关闭，由用户在「设置 → MCP 服务」显式开启（见 [SettingsPrefs][com.kaze.newage.data.prefs.SettingsPrefs]）。
+ * 接口默认绑在所有网卡上（0.0.0.0，外部 AI 就是靠局域网进来的；也可改 127.0.0.1 仅本机），
+ * 同一 Wi-Fi 下没有令牌的请求一律 401；服务默认关闭，由用户在「设置 → MCP 服务」显式开启
+ * （见 [SettingsPrefs][com.kaze.newage.data.prefs.SettingsPrefs]）。
  *
  * 传输选 Streamable HTTP 而不是 stdio：外部客户端与本机是网络两端，且 stdio 服务
  * 需要客户端"拉起"进程 —— 手机上的应用进程由自己生命周期管理，做不了被拉起的一方。
@@ -88,7 +92,7 @@ class McpServer(
     private val serverVersion: String,
     /** 令牌即时读取：设置页重新生成令牌后无需重启服务 */
     private val tokenProvider: () -> String,
-    private val bindAddress: String = "0.0.0.0",
+    private val bindAddress: String = McpPorts.DEFAULT_BIND_ADDRESS,
 ) {
 
     private var serverSocket: ServerSocket? = null
@@ -114,10 +118,17 @@ class McpServer(
     /**
      * 启动服务：按 [McpPorts.bind] 的策略绑定端口并开始接受连接。
      *
+     * @param bindAddress 监听地址（0.0.0.0 全网卡 / 127.0.0.1 仅本机 / 具体 IPv4）；
+     *   缺省用构造时传入的地址。设置页改动后重绑时传入新值。
      * @return 实际绑定的端口；失败返回 null（原因在 [lastError]）。
      */
     @Synchronized
-    fun start(preferredPort: Int, rangeStart: Int, rangeEnd: Int): Int? {
+    fun start(
+        preferredPort: Int,
+        rangeStart: Int,
+        rangeEnd: Int,
+        bindAddress: String = this.bindAddress,
+    ): Int? {
         stop()
         val socket = try {
             McpPorts.bind(preferredPort, rangeStart, rangeEnd, bindAddress)
