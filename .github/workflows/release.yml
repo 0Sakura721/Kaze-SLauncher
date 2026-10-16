@@ -217,9 +217,10 @@ jobs:
             *-*) PRE_FLAG="--prerelease" ;;
           esac
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release edit "$TAG" $PRE_FLAG --notes-file out/RELEASE_NOTES.md
+            gh release edit "$TAG" --title "$TAG" $PRE_FLAG --notes-file out/RELEASE_NOTES.md
           else
-            gh release create "$TAG" --title "Kaze SLauncher $TAG" $PRE_FLAG --notes-file out/RELEASE_NOTES.md
+            # 标题就是 tag 本身（与历史 release 一致），不额外加产品名前缀
+            gh release create "$TAG" --title "$TAG" $PRE_FLAG --notes-file out/RELEASE_NOTES.md
           fi
           # 只上传真实存在的文件：补丁被跳过时 out/*.zip 不匹配任何文件，
           # 直接把 glob 传给 gh 会报 "no such file"（第一次真跑就是这么挂的）。
