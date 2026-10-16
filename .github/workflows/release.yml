@@ -210,10 +210,16 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ steps.t.outputs.tag }}"
+          # tag 里带连字符（beta / rc 等）视为预发布：GitHub 上标 Pre-release，
+          # 不会污染「Latest release」，也不会被当作稳定版推给所有用户。
+          PRE_FLAG=""
+          case "${{ steps.t.outputs.version }}" in
+            *-*) PRE_FLAG="--prerelease" ;;
+          esac
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file out/RELEASE_NOTES.md
+            gh release edit "$TAG" $PRE_FLAG --notes-file out/RELEASE_NOTES.md
           else
-            gh release create "$TAG" --title "Kaze SLauncher $TAG" --notes-file out/RELEASE_NOTES.md
+            gh release create "$TAG" --title "Kaze SLauncher $TAG" $PRE_FLAG --notes-file out/RELEASE_NOTES.md
           fi
           # 只上传真实存在的文件：补丁被跳过时 out/*.zip 不匹配任何文件，
           # 直接把 glob 传给 gh 会报 "no such file"（第一次真跑就是这么挂的）。

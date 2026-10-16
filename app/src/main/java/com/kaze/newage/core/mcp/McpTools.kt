@@ -7,7 +7,11 @@ import com.kaze.newage.core.server.ServerProperties
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.ServerInstance
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -34,6 +38,12 @@ class McpTools(
     private val serverManager: ServerManager,
     private val instanceById: (String) -> ServerInstance?,
     private val allInstances: () -> List<ServerInstance>,
+    /**
+     * 长任务（启动/停止/重启）的执行作用域，必须是**应用级**的（容器里的 appScope）：
+     * 启动链路动辄数分钟，若在 HTTP 请求线程上同步执行，外部客户端 30~60 秒就超时，
+     * 还会占死 worker 线程池让后续 get_server_status / read_console 也无响应。
+     */
+    private val taskScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
 
     /** 工具执行结果：文本直接回给模型（结构化数据用 JSON 文本） */
@@ -59,12 +69,12 @@ class McpTools(
         ) { args -> serverStatus(args) },
         Tool(
             name = "start_server",
-            description = "启动服务端实例（含自动装 Java、接受 EULA 等准备流程，可能耗时数分钟）。",
+            description = "启动服务端实例（异步：提交后立即返回；含自动装 Java、接受 EULA 等准备流程，可能耗时数分钟，用 get_server_status 跟进）。",
             inputSchema = objSchema(props(instanceIdProp()), listOf("instanceId")),
         ) { args -> startServer(args) },
         Tool(
             name = "stop_server",
-            description = "停止服务端实例。默认优雅停止（发 stop 等世界保存完）；force=true 立即强制终止。",
+            description = "停止服务端实例。默认优雅停止（发 stop 等世界保存完，异步提交立即返回）；force=true 立即强制终止（同步，约 5 秒）。",
             inputSchema = objSchema(
                 props(instanceIdProp(), "force" to boolProp("是否强制终止（默认 false 优雅停止）")),
                 listOf("instanceId"),
@@ -72,7 +82,7 @@ class McpTools(
         ) { args -> stopServer(args) },
         Tool(
             name = "restart_server",
-            description = "重启服务端实例：优雅停止并等它停稳后再启动（最多等 120 秒，超时则放弃本次启动）。",
+            description = "重启服务端实例（异步：提交后立即返回；先优雅停止，停稳后自动再启动，等停最多 120 秒）。用 get_server_status 跟进。",
             inputSchema = objSchema(props(instanceIdProp()), listOf("instanceId")),
         ) { args -> restartServer(args) },
         Tool(
@@ -157,43 +167,74 @@ class McpTools(
         return ToolResult(pretty(info) + "\nstate=${state.name}")
     }
 
-    private suspend fun startServer(args: JsonObject): ToolResult {
+    private fun startServer(args: JsonObject): ToolResult {
         val i = resolveInstance(args) ?: return instanceNotFound(args)
         val state = serverManager.states.value[i.id] ?: ServerState.Idle
         if (state == ServerState.Running || state.isStarting()) {
             return ToolResult("实例「${i.name}」已处于 ${state.name} 状态，忽略重复启动", true)
         }
-        serverManager.start(i)
-        val after = serverManager.states.value[i.id] ?: ServerState.Idle
-        return ToolResult("启动流程已执行：${i.name}（当前状态 ${after.name}）。启动是异步过程，可用 get_server_status / read_console 跟进")
+        // 启动链路（部署环境/装 Java/装核心）动辄数分钟，绝不能在 HTTP 请求线程上同步等：
+        // 外部客户端 30~60 秒就超时断开，还占死 worker 线程池，让后续 get_server_status /
+        // read_console 全部排队无响应 —— 表现就是"启动像没发生一样"。丢进应用级作用域跑，
+        // 失败原因会写进实例控制台（read_console 可见），状态也会落成 Error。
+        taskScope.launch {
+            try {
+                serverManager.start(i)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // 失败详情已由 DefaultServerManager 写进实例控制台并置 Error 状态
+            }
+        }
+        return ToolResult("已提交启动：${i.name}（后台执行中，完成前状态多为 Starting）。启动是异步过程，可用 get_server_status / read_console 跟进")
     }
 
-    private suspend fun stopServer(args: JsonObject): ToolResult {
+    private fun stopServer(args: JsonObject): ToolResult {
         val i = resolveInstance(args) ?: return instanceNotFound(args)
         val force = args.bool("force") == true
-        return if (force) {
+        if (force) {
+            // 强制终止最多 ~5 秒（SIGTERM → 5 秒 → SIGKILL），同步等没问题
             serverManager.forceStop(i)
-            ToolResult("已强制终止：${i.name}（SIGTERM → 5 秒 → SIGKILL）")
-        } else {
-            serverManager.stop(i)
-            ToolResult("已请求优雅停止：${i.name}（发 stop 命令，等世界保存完成后退出）")
+            return ToolResult("已强制终止：${i.name}（SIGTERM → 5 秒 → SIGKILL）")
         }
+        // 优雅停止要等世界保存完（大世界可能好几分钟），同样后台执行
+        taskScope.launch {
+            try {
+                serverManager.stop(i)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // 停止失败详情已写进实例控制台
+            }
+        }
+        return ToolResult("已请求优雅停止：${i.name}（发 stop 命令，等世界保存完成后退出）。可用 get_server_status 跟进")
     }
 
-    private suspend fun restartServer(args: JsonObject): ToolResult {
+    private fun restartServer(args: JsonObject): ToolResult {
         val i = resolveInstance(args) ?: return instanceNotFound(args)
-        serverManager.stop(i)
         // 与 AppViewModel.restartInstance 同一约定：等停稳再启，宁可这次不启也不硬启
-        // （硬启会在同一个世界目录上拉起第二个 java）。超时就放弃本次启动。
-        val stopped = withTimeoutOrNull(120_000) {
-            serverManager.states.first { m -> (m[i.id] ?: ServerState.Idle).isSettled() }
+        // （硬启会在同一个世界目录上拉起第二个 java）。整体后台执行，立即返回。
+        taskScope.launch {
+            try {
+                serverManager.stop(i)
+                val stopped = withTimeoutOrNull(120_000) {
+                    serverManager.states.first { m -> (m[i.id] ?: ServerState.Idle).isSettled() }
+                }
+                if (stopped == null) {
+                    serverManager.consoleFor(i.id).emit(
+                        "> 重启中断：等待停止超时（120 秒，多半还在保存世界），已取消本次重启",
+                        com.kaze.newage.core.console.LineType.Warn,
+                    )
+                    return@launch
+                }
+                serverManager.start(i)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // 失败详情已写进实例控制台
+            }
         }
-        if (stopped == null) {
-            return ToolResult("停止超时（120 秒，多半还在保存世界）：已取消本次重启。可稍后调 start_server", true)
-        }
-        serverManager.start(i)
-        val after = serverManager.states.value[i.id] ?: ServerState.Idle
-        return ToolResult("已重启：${i.name}（当前状态 ${after.name}）")
+        return ToolResult("已提交重启：${i.name}（先优雅停止，停稳后自动再启动）。可用 get_server_status / read_console 跟进")
     }
 
     private fun sendCommand(args: JsonObject): ToolResult {

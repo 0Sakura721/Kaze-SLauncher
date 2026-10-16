@@ -743,8 +743,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         },
                     )
                     1 -> M3EListItem(
-                        headline = "映射端口",
-                        supporting = "外部 AI 连接的入口端口（当前 ${uiPrefs.mcpPort.value}）",
+                        headline = "监听地址与端口",
+                        supporting = "${uiPrefs.mcpBindAddress.value} · 端口 ${uiPrefs.mcpPort.value}",
                         leadingIcon = Icons.Filled.Router,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -770,11 +770,17 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     4 -> {
-                        // 实际监听端口（映射端口被占用时是顺延后的）：外部 AI 配置以它为准
+                        // 实际监听端口（映射端口被占用时是顺延后的）：外部 AI 配置以它为准。
+                        // 地址按监听地址显示：仅本机绑定时局域网 IP 连不上，不能误导
                         val boundPort = viewModel.mcpServer.boundPort.collectAsStateWithLifecycle().value
                         val lastError = viewModel.mcpServer.lastError.collectAsStateWithLifecycle().value
                         val lanIp = remember { LanIp.lanIpv4() }
-                        val address = boundPort?.let { "http://${lanIp ?: "127.0.0.1"}:$it/mcp" }
+                        val displayHost = when (val bind = uiPrefs.mcpBindAddress.value) {
+                            "127.0.0.1" -> "127.0.0.1"
+                            "0.0.0.0" -> lanIp ?: "127.0.0.1"
+                            else -> bind // 绑了具体网卡 IP，直接显示它
+                        }
+                        val address = boundPort?.let { "http://$displayHost:$it/mcp" }
                         M3EListItem(
                             headline = "连接地址",
                             supporting = address
@@ -803,7 +809,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     }
                 }
             }
-            SettingNote("Claude / Cursor 等客户端可通过连接地址与令牌控制服务端；局域网可访问，请妥善保管令牌，不用时关闭。")
+            SettingNote("监听地址选 0.0.0.0 时局域网内设备均可访问；请妥善保管令牌，不用时关闭。")
 
             // ═══ 后台与更新 ═══
             GroupHeader(
@@ -1076,12 +1082,43 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             )
 
             SettingsDialog.McpPort -> {
+                // 三选一：0 = 0.0.0.0（全网卡）· 1 = 127.0.0.1（仅本机）· 2 = 自定义 IPv4
+                val current = uiPrefs.mcpBindAddress.value
+                var addrChoice by remember {
+                    mutableStateOf(if (current == "0.0.0.0") 0 else if (current == "127.0.0.1") 1 else 2)
+                }
+                var customAddr by remember { mutableStateOf(current) }
                 var text by remember { mutableStateOf(uiPrefs.mcpPort.value.toString()) }
                 AlertDialog(
                     onDismissRequest = { openDialog = null },
-                    title = { Text("映射端口") },
+                    title = { Text("监听地址与端口") },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(
+                                    selected = addrChoice == 0,
+                                    onClick = { addrChoice = 0 },
+                                    label = { Text("0.0.0.0") },
+                                )
+                                FilterChip(
+                                    selected = addrChoice == 1,
+                                    onClick = { addrChoice = 1 },
+                                    label = { Text("127.0.0.1") },
+                                )
+                                FilterChip(
+                                    selected = addrChoice == 2,
+                                    onClick = { addrChoice = 2 },
+                                    label = { Text("自定义") },
+                                )
+                            }
+                            if (addrChoice == 2) {
+                                OutlinedTextField(
+                                    value = customAddr,
+                                    onValueChange = { s -> customAddr = s.trim().take(15) },
+                                    label = { Text("IPv4 地址") },
+                                    singleLine = true,
+                                )
+                            }
                             OutlinedTextField(
                                 value = text,
                                 onValueChange = { s -> text = s.filter { it.isDigit() }.take(5) },
@@ -1090,8 +1127,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             )
                             Text(
-                                "外部 AI 客户端填的入口端口；被占用时按「自动分配范围」顺延，" +
-                                    "实际端口以「连接地址」为准。",
+                                "0.0.0.0 局域网内均可访问，127.0.0.1 仅本机；端口被占用时" +
+                                    "按「自动分配范围」顺延，实际以「连接地址」为准。",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1102,11 +1139,21 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                             val p = text.toIntOrNull()
                             if (p == null || p !in 1024..65535) {
                                 Toast.makeText(appContext, "端口需在 1024 ~ 65535", Toast.LENGTH_SHORT).show()
-                            } else {
-                                uiPrefs.setMcpPort(p)
-                                viewModel.rebindMcp()
-                                openDialog = null
+                                return@TextButton
                             }
+                            val addr = when (addrChoice) {
+                                0 -> "0.0.0.0"
+                                1 -> "127.0.0.1"
+                                else -> customAddr.trim()
+                            }
+                            if (!isValidIpv4(addr)) {
+                                Toast.makeText(appContext, "监听地址不是有效的 IPv4", Toast.LENGTH_SHORT).show()
+                                return@TextButton
+                            }
+                            uiPrefs.setMcpBindAddress(addr)
+                            uiPrefs.setMcpPort(p)
+                            viewModel.rebindMcp()
+                            openDialog = null
                         }) { Text("保存") }
                     },
                     dismissButton = { TextButton(onClick = { openDialog = null }) { Text("取消") } },
@@ -1295,6 +1342,15 @@ private fun SettingNote(text: String) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 4.dp),
     )
+}
+
+/** IPv4 格式校验（点分四段、每段 0–255）；MCP 监听地址弹窗用，不做 DNS 解析 */
+private fun isValidIpv4(s: String): Boolean {
+    val parts = s.split(".")
+    if (parts.size != 4) return false
+    return parts.all { p ->
+        p.isNotEmpty() && p.length <= 3 && p.all { it.isDigit() } && p.toInt() in 0..255
+    }
 }
 
 /** 互斥选择弹窗：分段选择即时生效（与旧版点 chip 一样，点完就写 prefs） */

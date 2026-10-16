@@ -80,6 +80,7 @@ class AppContainer(context: Context) {
             serverManager = serverManager,
             instanceById = { instanceStore.get(it) },
             allInstances = { instanceStore.instances.value },
+            taskScope = appScope,
         ),
         serverVersion = BuildConfig.VERSION_NAME,
         tokenProvider = { uiPrefs.mcpToken.value },
@@ -93,6 +94,7 @@ class AppContainer(context: Context) {
                 preferredPort = uiPrefs.mcpPort.value,
                 rangeStart = uiPrefs.mcpPortRangeStart.value,
                 rangeEnd = uiPrefs.mcpPortRangeEnd.value,
+                bindAddress = uiPrefs.mcpBindAddress.value,
             )
         }
     }

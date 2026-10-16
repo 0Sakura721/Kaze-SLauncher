@@ -529,6 +529,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             preferredPort = uiPrefs.mcpPort.value,
             rangeStart = uiPrefs.mcpPortRangeStart.value,
             rangeEnd = uiPrefs.mcpPortRangeEnd.value,
+            bindAddress = uiPrefs.mcpBindAddress.value,
         )
     }
 
