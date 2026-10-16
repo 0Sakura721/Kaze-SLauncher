@@ -803,7 +803,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     }
                 }
             }
-            SettingNote("Claude / Cursor 等客户端填入连接地址与令牌即可控制服务端；请保管好令牌。")
+            SettingNote("Claude / Cursor 等客户端可通过连接地址与令牌控制服务端；局域网可访问，请妥善保管令牌，不用时关闭。")
 
             // ═══ 后台与更新 ═══
             GroupHeader(
