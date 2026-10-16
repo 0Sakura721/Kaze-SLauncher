@@ -8,7 +8,7 @@
 ![minSdk](https://img.shields.io/badge/minSdk-27-orange)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
-当前开发版本：**v0.5.0-beta.1**。请从 [GitHub Releases](https://github.com/0Sakura721/Kaze-SLauncher/releases) 获取安装包；版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+请从 [GitHub Releases](https://github.com/0Sakura721/Kaze-SLauncher/releases) 获取安装包；版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 > **关于液态玻璃：** 液态玻璃主题已从主线构建中移除，但相关代码仍保留在仓库中。需要该主题时，请查看 [`liquidglassver` 分支说明](LIQUIDGLASS_BRANCH.md)，不要把该分支直接合并回主线。
 
