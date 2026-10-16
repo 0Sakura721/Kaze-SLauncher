@@ -167,7 +167,8 @@ fun InstanceDetailScreen(
     var propsRevision by remember { mutableIntStateOf(0) }
     // 删除备份：不可逆，且紧邻「恢复 / 导出」，必须二次确认（同页其它破坏性操作都有）
     var deleteTarget by remember { mutableStateOf<File?>(null) }
-    val backups = remember(instanceId, backupRefresh) { BackupManager.list(instance) }
+    // 传入全部实例：旧版平铺备份只写显示名，遇到同名实例时无法区分归属（见 BackupManager.isLegacyBackupOf）
+    val backups = remember(instanceId, backupRefresh, instances) { BackupManager.list(instance, instances) }
     val backupScope = rememberCoroutineScope()
     val appContext = LocalContext.current.applicationContext
 

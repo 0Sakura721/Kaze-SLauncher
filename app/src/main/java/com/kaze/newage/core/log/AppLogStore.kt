@@ -31,7 +31,13 @@ class AppLogStore(private val context: Context) {
         /** 单个文件上限（超出后轮转，不删旧文件内容） */
         const val MAX_BYTES = 2L * 1024 * 1024
         private const val TAG = "AppLogStore"
-        private val STAMP = SimpleDateFormat("yyyyMMdd", Locale.US)
+        /**
+         * 日期格式：用不可变、**线程安全**的 [java.time.format.DateTimeFormatter]。
+         * 原来是共享的 `SimpleDateFormat`，而 [currentFile] 是 public —— 界面线程读日志时
+         * 会与采集线程（`appendLine`）同时调 `format()`，同一实例上的并发调用会产出错乱的
+         * 日期串甚至抛异常（SimpleDateFormat 的经典坑）。
+         */
+        private val STAMP = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")
     }
 
     /**
@@ -58,7 +64,7 @@ class AppLogStore(private val context: Context) {
 
     /** 今天的日志文件 */
     fun currentFile(): File =
-        File(logDir, "app-${STAMP.format(Date())}.log")
+        File(logDir, "app-${java.time.LocalDate.now().format(STAMP)}.log")
 
     /** 目前保留的日志文件（新的在前） */
     fun files(): List<File> =

@@ -2007,7 +2007,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val chunk = ConsoleArchive.readOlder(dir, _olderCursor.value)
                 if (chunk.lines.isNotEmpty()) {
                     val older = chunk.lines.map { ConsoleLine(it, LineType.Info) }
-                    _consoleLines.value = (older + _consoleLines.value).takeLast(CONSOLE_DISPLAY_MAX)
+                    // 与实时发布（publishConsoleLocked）共用同一把锁：两处都是对 _consoleLines
+                    // 的「读-改-写」，不加锁会互相覆盖、丢行。
+                    synchronized(consoleLock) {
+                        _consoleLines.value = prependOlderLines(
+                            older = older,
+                            current = _consoleLines.value,
+                            max = CONSOLE_DISPLAY_MAX,
+                        )
+                    }
                 }
                 _olderCursor.value = chunk.cursor
                 _hasMoreOlder.value = chunk.hasMore
@@ -2029,7 +2037,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun clearConsole() {
         _currentInstanceId.value?.let { id -> serverManager.consoleFor(id).clear() }
-        _consoleLines.value = emptyList()
+        synchronized(consoleLock) {
+            _consoleLines.value = emptyList()
+            // 待发布的行也要一起丢：否则定时器下一拍就把它们补回列表，
+            // 用户看到"清空后日志自己又冒出来"，以为清空没生效。
+            consolePending.clear()
+        }
         _olderCursor.value = null
         _hasMoreOlder.value = false
     }
@@ -2114,7 +2127,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             // AI 的每实例长期记忆笔记在应用私有目录（不在实例目录里），一并清理防孤儿文件
             runCatching { File(container.appContext.filesDir, "ai_memory_${instance.id}.md").delete() }
             // 备份目录在实例目录之外，删除实例后无任何入口再能访问——一并清理防死数据
-            runCatching { com.kaze.newage.core.server.BackupManager.deleteAllBackups(instance) }
+            runCatching {
+                com.kaze.newage.core.server.BackupManager.deleteAllBackups(
+                    instance,
+                    instanceStore.instances.value,
+                )
+            }
             // 控制台缓冲 / 运行时长流 / 状态表条目都是按 id 长期持有的，实例没了就再没有任何
             // 入口能到达它们 —— 不回收就是纯泄漏（控制台缓冲是按实例上限存行的）
             runCatching { serverManager.release(instance.id) }
@@ -2654,3 +2672,24 @@ private const val AI_MAX_TOOL_ROUNDS = 6
 
 /** 保存的思考过程上限（reasoner 的推理可能非常长，展示端有滚动条，但不能无限占内存） */
 private const val AI_MAX_REASONING_CHARS = 20_000
+
+/**
+ * 把回读的更早历史**前插**到控制台显示列表。
+ *
+ * 列表已满（≥ [max]）时必须让**尾部**（实时最新）让位，而不是丢前插的历史：
+ * 旧实现用 `(older + current).takeLast(max)`，在满列表下丢掉的恰恰是排在最前面的、
+ * 刚读回来的那段历史 —— 用户点了「加载更早日志」却什么都没出现（游标还在推进，
+ * 所以反复点也一直"没反应"）。
+ *
+ * 抽成纯函数是为了能单测：AppViewModel 需要 Android 运行时，这条规则却不需要。
+ */
+internal fun prependOlderLines(
+    older: List<ConsoleLine>,
+    current: List<ConsoleLine>,
+    max: Int,
+): List<ConsoleLine> {
+    if (max <= 0) return emptyList()
+    val history = if (older.size > max) older.takeLast(max) else older
+    if (history.size >= max) return history
+    return history + current.takeLast(max - history.size)
+}
