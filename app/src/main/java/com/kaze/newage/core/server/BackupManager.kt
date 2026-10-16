@@ -45,9 +45,12 @@ object BackupManager {
             .replace(Regex("[\\\\/:*?\"<>|\\s\\u0000-\\u001f]+"), "_")
             .trim('.')
 
+    /** 名字键：净化后的显示名（空名统一为 `backup`）。用于判断两个实例"显示名相同" */
+    private fun nameKey(instance: ServerInstance): String =
+        sanitizeName(instance.name).ifBlank { "backup" }
+
     /** 文件名前缀：净化后的实例名（+ `_`），例：`生存_正式_` */
-    private fun namePrefix(instance: ServerInstance): String =
-        sanitizeName(instance.name).ifBlank { "backup" } + "_"
+    private fun namePrefix(instance: ServerInstance): String = nameKey(instance) + "_"
 
     /** 平铺布局里的文件名必须**以这个前缀开头**才算该实例的备份（见 [isLegacyBackupOf]） */
     private fun backupPrefix(instance: ServerInstance): String = namePrefix(instance)
@@ -70,10 +73,14 @@ object BackupManager {
      *
      * 所以判定分两路：
      *  1. 文件名里带 id 标记（`<名字>_<id>_<时间戳>.zip`，新版本写的）→ 只认 id，与名字无关；
-     *  2. 老备份没有 id → 退化成"前缀 + 时间戳形状"，再额外要求**目录名也不冲突**：
-     *     只有当目录里没有别的实例（同名实例）时才把它算作本实例的，宁可漏认也不串台。
+     *  2. 老备份没有 id → 退化成"前缀 + 时间戳形状"，再额外要求**没有同名兄弟实例**：
+     *     只有不存在显示名相同的其它实例时才把它算作本实例的，宁可漏认也不串台。
      */
-    private fun isLegacyBackupOf(instance: ServerInstance, f: File): Boolean {
+    private fun isLegacyBackupOf(
+        instance: ServerInstance,
+        others: List<ServerInstance>,
+        f: File,
+    ): Boolean {
         if (!f.isFile || !f.name.endsWith(".zip")) return false
         val named = namePrefix(instance)
         val marked = idMarkerAt(f.name, instance)
@@ -81,14 +88,24 @@ object BackupManager {
         if (!f.name.startsWith(named)) return false
         // 老备份：`<名字>_<8位日期>-<6位时间>.zip`（SimpleDateFormat("yyyyMMdd-HHmmss")）
         if (!Regex("^\\d{8}-\\d{6}\\.zip$").matches(f.name.removePrefix(named))) return false
-        // 同名实例（另一个实例的目录名 == 本实例的目录名是不可能的，但显示名可以相同）：
-        // 目录名不同、名字相同的两个实例，老备份无法区分 → 谁都不要认，避免恢复错存档
-        return !hasSiblingInstanceWithSameName(instance)
+        // 显示名相同的两个实例，老备份（文件名里只有名字）无法区分归属 → 谁都不要认，
+        // 宁可漏认，也不能把别人的存档恢复到当前实例上（那是直接的数据损失）。
+        return !hasSiblingInstanceWithSameName(instance, others)
     }
 
-    private fun hasSiblingInstanceWithSameName(instance: ServerInstance): Boolean =
-        backupParent(instance).listFiles()
-            ?.count { it.isDirectory && it.name == instance.dir.name } != 1
+    /**
+     * 是否存在**同名兄弟实例**（显示名净化后相同、但 id 不同）。
+     *
+     * 旧实现数的是 `backups/` 里的子目录、而且比的是**实例目录名** —— 目录名在文件系统里
+     * 天然唯一，数出来恒为 1，于是这个"防串台"守卫实际上从未生效过（恒返回 false）。
+     * 真正的歧义来自**显示名**（实例详情里可以改成与别人一样），旧版平铺备份的文件名里
+     * 只写了显示名，无法区分归属。所以这里按 [nameKey] 比对 id 不同的实例；
+     * 实例列表由调用方传入 —— BackupManager 自己读不到实例库。
+     */
+    private fun hasSiblingInstanceWithSameName(
+        instance: ServerInstance,
+        others: List<ServerInstance>,
+    ): Boolean = others.any { it.id != instance.id && nameKey(it) == nameKey(instance) }
 
     /**
      * 该实例专属的备份目录：`backups/<实例目录名>/`
@@ -120,11 +137,11 @@ object BackupManager {
      *（判定见 [isLegacyBackupOf]：新备份靠文件名里的实例 id 认，老备份靠"前缀 + 时间戳形状"，
      * 且只在没有同名实例时才认，宁可漏认也不串台）。
      */
-    fun list(instance: ServerInstance): List<File> {
+    fun list(instance: ServerInstance, otherInstances: List<ServerInstance> = emptyList()): List<File> {
         val own = backupsRoot(instance)
             .listFiles { f: File -> f.isFile && f.name.endsWith(".zip") }
         val legacy = backupParent(instance)
-            .listFiles { f: File -> isLegacyBackupOf(instance, f) }
+            .listFiles { f: File -> isLegacyBackupOf(instance, otherInstances, f) }
         return ((own ?: emptyArray()) + (legacy ?: emptyArray()))
             .distinct()
             .sortedByDescending { it.lastModified() }
@@ -326,9 +343,12 @@ object BackupManager {
      * 注意：旧实现是 `backupsRoot(instance).deleteRecursively()`，而 `backups/` 是**所有实例共享**的
      * 目录，于是删掉一个实例会连带清空其它实例的全部备份。现在只删除 `list(instance)` 命中的文件。
      */
-    fun deleteAllBackups(instance: ServerInstance): Boolean {
+    fun deleteAllBackups(
+        instance: ServerInstance,
+        otherInstances: List<ServerInstance> = emptyList(),
+    ): Boolean {
         var allDeleted = true
-        for (f in list(instance)) {
+        for (f in list(instance, otherInstances)) {
             if (!f.delete()) allDeleted = false
         }
         // 本实例专属目录空了就顺手删掉；非递归，目录非空时 delete 会失败——这正是期望行为

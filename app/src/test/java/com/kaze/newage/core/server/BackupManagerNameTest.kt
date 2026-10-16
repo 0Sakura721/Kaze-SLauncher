@@ -111,4 +111,41 @@ class BackupManagerNameTest {
             BackupManager.list(b).none { it.absolutePath == flat.absolutePath },
         )
     }
+
+    /**
+     * 同名实例之间，**没有 id 的旧版平铺备份**谁都不要认。
+     *
+     * 旧版备份文件名只有「显示名 + 时间戳」，两个显示名相同的实例根本无法区分它属于谁。
+     * 这条守卫此前是**失效**的（实现数的是备份目录、比的却是实例目录名，恒为 1 → 恒放行），
+     * 于是两个同名实例会同时列出同一条旧备份，恢复时可能把对方的存档盖到自己头上。
+     */
+    @Test
+    fun `同名实例下无法区分的旧版平铺备份谁都不要认`() {
+        val root = Files.createTempDirectory("kaze-backup-legacy-dup").toFile()
+        val dirA = File(root, "生存A").apply { mkdirs() }
+        val dirB = File(root, "生存B").apply { mkdirs() }
+        // id 故意不含在文件名里，模拟"没有 id 标记"的旧备份
+        val a = instanceWith("同名服", dirA, id = "idA")
+        val b = instanceWith("同名服", dirB, id = "idB")
+
+        val flat = File(root, "backups/同名服_20260101-120000.zip").apply {
+            parentFile?.mkdirs()
+            writeText("legacy")
+        }
+
+        val all = listOf(a, b)
+        assertTrue(
+            "存在同名实例时不该认领无法区分的旧备份",
+            BackupManager.list(a, all).none { it.absolutePath == flat.absolutePath },
+        )
+        assertTrue(
+            "存在同名实例时不该认领无法区分的旧备份",
+            BackupManager.list(b, all).none { it.absolutePath == flat.absolutePath },
+        )
+        // 没有同名兄弟时仍要认领 —— 否则正常用户的旧备份会平白在界面里消失
+        assertTrue(
+            "没有同名实例时应认得自己的旧备份",
+            BackupManager.list(a, listOf(a)).any { it.absolutePath == flat.absolutePath },
+        )
+    }
 }
