@@ -1,0 +1,48 @@
+# 版权与许可归属
+
+本文件说明 Kaze SLauncher 的版权归属与许可证适用方式。**GPL-3.0 正文本身不得修改**
+（FSF 明确禁止），因此版权声明放在这里，而不是塞进 `LICENSE`。
+
+## 本项目
+
+```
+Copyright (C) 2026 0Sakura721
+```
+
+Kaze SLauncher 整体以 **GNU General Public License v3.0** 发布，许可证正文见
+[LICENSE](LICENSE)。按 GPL-3.0 第 9 条，被许可方可以**选择**适用 GPL-3.0 或
+**任何更新的版本**（即 `GPL-3.0-or-later`）；本项目自身发布的意图是 GPL-3.0。
+
+## 为什么整体是 GPL-3.0 而不是更宽松的许可证
+
+本项目**改编了** GPL-3.0 项目的源代码（见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)）：
+
+- Fold Craft Launcher（FCL）— GPL-3.0
+- ZalithLauncher 2 — GPL-3.0
+- PojavLauncher — GPL-3.0
+- BiliPai — GPL-3.0
+
+GPL-3.0 具有传染性：**改编**这些代码形成的作品必须以 GPL-3.0 发布。
+所以"改成 MIT / Apache-2.0"是不可行的 —— 那会直接违反上游许可证。
+反过来，如果将来把改编自 GPL 代码的部分**全部移除并重写**，届时才可能考虑放宽。
+
+## 直接并入的 Apache-2.0 代码
+
+`util/StackBlur.java` 并入自 android-stackblur（Apache-2.0，原始算法作者
+Mario Klingemann，Java 移植 Enrique López Mañas），文件头保留了原始版权与许可声明。
+Apache-2.0 与 GPL-3.0 兼容，本项目以 GPL-3.0 分发整体，该文件仍保留其 Apache-2.0 声明。
+
+## 预编译二进制
+
+`app/src/main/jniLibs/arm64-v8a/libproot.so` 与 `libproot-loader.so` 来自
+[oonid/pr](https://github.com/oonid/pr)（proot fork，GPL-2.0-or-later），**未修改**。
+`app/src/{arm64,armhf}/assets/proot-*.tar.gz` 为 termux 静态 proot 运行时（GPL-2.0-or-later）。
+GPL-2.0 与 GPL-3.0 兼容，源码获取方式见第三方声明。
+
+## 素材与商标
+
+- 应用内「核心图标」（Paper / Purpur / Spigot / Fabric / Forge / NeoForge）是各项目的
+  **官方标识**，仅用于指代对应软件（nominative use），不代表项目方背书；著作权与商标
+  归各自项目所有。
+- "Minecraft" 是 Mojang Studios 的商标，本项目与 Mojang / Microsoft 无隶属关系。
+- 原版 Vanilla 图标为本项目自绘，刻意不含 Mojang 贴图素材。

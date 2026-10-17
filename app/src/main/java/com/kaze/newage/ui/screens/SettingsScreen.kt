@@ -1431,6 +1431,32 @@ private fun SliderDialog(
 /** 许可证全文：合规义务，完整可读（可滚动，不截断） */
 @Composable
 private fun AboutDialog(onDismiss: () -> Unit) {
+    // 许可证全文：GPL-3.0 第 4/5 条要求随程序提供许可证副本。
+    // 正文从 assets 读取（构建时由仓库根目录的 LICENSE / THIRD_PARTY_NOTICES.md 复制），
+    // 这样应用内看到的就是随发行提供的那一份，不会与仓库脱节。
+    var legalDoc by remember { mutableStateOf<String?>(null) }
+    val ctx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    if (legalDoc != null) {
+        AlertDialog(
+            onDismissRequest = { legalDoc = null },
+            title = { Text(if (legalDoc == "gpl") "GNU GPL-3.0 全文" else "第三方组件声明") },
+            text = {
+                val body = remember(legalDoc) {
+                    runCatching {
+                        ctx.assets.open(if (legalDoc == "gpl") "LICENSE-GPL-3.0.txt" else "THIRD_PARTY_NOTICES.md")
+                            .bufferedReader().use { it.readText() }
+                    }.getOrElse { "许可证文本读取失败：${it.message}" }
+                }
+                Text(
+                    body,
+                    Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                )
+            },
+            confirmButton = { TextButton(onClick = { legalDoc = null }) { Text("关闭") } },
+        )
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("关于与许可证") },

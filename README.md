@@ -115,7 +115,9 @@ CI 会运行单元测试和界面截图测试；Release 流水线还会检查正
 
 ## 许可证与致谢
 
-项目整体采用 **GPL-3.0**，见 [LICENSE](LICENSE)。第三方代码、素材、二进制及运行时组件清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+项目整体采用 **GPL-3.0**（按 GPL-3.0 第 9 条可选用任何更新版本），见 [LICENSE](LICENSE)；版权归属与许可证适用说明见 [COPYRIGHT](COPYRIGHT)；第三方代码、素材、二进制及运行时组件清单见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+> **为什么不能改成更宽松的许可证**：本项目改编了 GPL-3.0 项目的源代码（FCL / ZalithLauncher 2 / PojavLauncher / BiliPai），GPL 具有传染性，改编作品必须同样以 GPL-3.0 发布。许可证全文随 APK 内置，可在应用内「设置 → 关于与许可证」查看。
 
 本项目参考或改编了 [Fold Craft Launcher](https://github.com/FCL-Team/FoldCraftLauncher)、[ZalithLauncher 2](https://github.com/ZalithLauncher/ZalithLauncher2)、[PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher)、[Miuix](https://github.com/Miuix-Kotlin-Multiplatform/Miuix) 等项目。具体来源与许可证以第三方声明及对应上游许可证文本为准。
 

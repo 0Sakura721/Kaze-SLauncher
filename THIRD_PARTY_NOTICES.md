@@ -14,13 +14,13 @@
 | BiliPai | github.com/jay3-yy/BiliPai | GPL-3.0 | **主题设置体系与安卓原生液态玻璃**（Haze 背景模糊 + 折射 RuntimeShader 改编自其 LiquidGlassTuning / FullBarLiquidGlassModifier，参数照搬 BALANCED 档） |
 | **Miuix**（LiquidGlassNavigationBar） | github.com/Miuix-Kotlin-Multiplatform/Miuix | Apache-2.0 | 浮动胶囊底栏（IosLiquidGlassNavigationBar 三层结构：背景玻璃链 + 内容层 + 图标层） |
 | **android-stackblur（StackBlur 软件高斯）** | github.com/djun100/android-stackblur | Apache-2.0 | 底栏软件模糊核心（`util/StackBlur.java` 单文件并入，算法原作者 Mario Klingemann）；vivo 上 RenderEffect blur 不渲染时的真高斯替代（比降采样盒式模糊质量高） |
-| **Miuix miuix-blur / miuix-shader 模块（源码并入）** | github.com/Miuix-Kotlin-Multiplatform/Miuix（miuix-blur/、miuix-shader/） | Apache-2.0 | **底栏高斯模糊核心**：`app/src/main/java/com/kaze/newage/ui/theme/blur/` 与 `.../ui/theme/shader/` 为直接复制自该两模块（仅改包名 top.yukonga.miuix.kmp.blur→com.kaze.newage.ui.theme.blur、去除 KMP expect/actual 与 context receiver 以适配 Kotlin 2.1）。自建高斯 RuntimeShader（LMGauss 可分离 H/V + 降采样），不依赖 RenderEffect.createBlurEffect（vivo Android 16 上该 API 不渲染） |
+| **Miuix miuix-blur / miuix-shader 模块（源码并入）** | github.com/Miuix-Kotlin-Multiplatform/Miuix（miuix-blur/、miuix-shader/） | Apache-2.0 | **底栏高斯模糊核心**：（注：这两个目录在后续重构中已被删除，当前只剩 `ui/theme/LiquidGlassEffect.kt` 内联的等价实现，见该文件头注释）（仅改包名 top.yukonga.miuix.kmp.blur→com.kaze.newage.ui.theme.blur、去除 KMP expect/actual 与 context receiver 以适配 Kotlin 2.1）。自建高斯 RuntimeShader（LMGauss 可分离 H/V + 降采样），不依赖 RenderEffect.createBlurEffect（vivo Android 16 上该 API 不渲染） |
 | **Kyant0/AndroidLiquidGlass** | github.com/Kyant0/AndroidLiquidGlass | Apache-2.0 | 圆角矩形折射透镜 RuntimeShader（BiliPai 现役 lens 同款） |
 | **M3E Canvas** | github.com/lnkiai/m3e-canvas | MIT | **本次界面重构的设计工具与令牌来源**：`ui/theme/Expressive.kt` 的形状/动效/排版令牌、`ui/components/M3EComponents.kt` 的 Expressive 版式约定、`ui/components/WavyProgress.kt` 的波浪进度条画法与参数，均取自该项目的 token 表与实现（其自身亦为 material-components-android 的移植）。`docs/m3e/` 下的设计稿由该项目的 `buildPrompt()` 生成 |
 | **Material Design 形状资产（loading indicator shapes）** | m3.material.io/components/loading-indicator | Apache-2.0（Copyright (C) 2024 Google LLC） | `ui/components/LoadingShapes.kt` 里的 6 条 SVG 路径是官方形状资产；第 7 个形状（Oval）由代码生成。7 形的顺序、采样与互插值口径照搬 material-components-android 的 LoadingIndicatorDrawingDelegate，动画模型（650ms/形、弹簧 0.6/200、每形 50°+90° 旋转）照搬 LoadingIndicatorAnimatorDelegate |
 | Kaze SLauncher v2（本项目旧版，作者自有） | github.com/0Sakura721/Kaze-SLauncher | LGPL-3.0 | proot 环境部署、tar 解压、下载源、服务端生命周期、eula 处理（LGPL-3.0 → GPL-3.0 兼容） |
 | proot（内置运行时已替换，见下） | github.com/termux/proot | GPL-2.0+ | 原内置 proot 运行时（assets/bundled）——已由 oonid/pr 修补版替代 |
-| **oonid/pr（修补版 proot + loader）** | github.com/oonid/pr | **proot fork：GPL-2.0-or-later**（其余组件 MIT） | **现役内置 proot 运行时**：`app/src/main/jniLibs/arm64-v8a/libproot.so` + `libproot-loader.so`（预编译二进制直接采用）。解决 targetSdk≥29 应用在 Android 12+ 上的 W^X（禁止 exec app_data_file）、zygote seccomp（18+ 系统调用拦截，SIGSYS 用户态模拟）与 PROOT_LOADER（nativeLibraryDir）机制；基于 proot v5.4.0 + termux-proot 补丁 |
+| **oonid/pr（修补版 proot + loader）** | github.com/oonid/pr | **proot fork：GPL-2.0-or-later**（其余组件 MIT） | **现役内置 proot 运行时**：`app/src/main/jniLibs/arm64-v8a/libproot.so` + `libproot-loader.so`（arm64 预编译二进制直接采用）；**armhf 走另一条路**：`app/src/armhf/assets/proot-armhf.tar.gz` 是 termux 静态 proot 运行时，启动时解压到应用目录（见 `ProotEnvironment.kt`），因此 v7a 包里没有 `libproot.so`。解决 targetSdk≥29 应用在 Android 12+ 上的 W^X（禁止 exec app_data_file）、zygote seccomp（18+ 系统调用拦截，SIGSYS 用户态模拟）与 PROOT_LOADER（nativeLibraryDir）机制；基于 proot v5.4.0 + termux-proot 补丁 |
 | proot-distro | github.com/termux/proot-distro | GPL-3.0 | rootfs 部署方案参考 |
 
 ## 运行时与分发物
@@ -53,7 +53,7 @@
 
 ## 依赖库（AndroidX / Kotlin 生态）
 
-Jetpack Compose / AndroidX（Apache-2.0）、Kotlin & kotlinx（Apache-2.0）、Material Design Icons（Apache-2.0）、Navigation Compose（Apache-2.0）、**Haze**（github.com/chrisbanes/haze，Apache-2.0，安卓原生背景模糊）、**materialkolor**（github.com/jordond/materialkolor，Apache-2.0，动态取色/自定义种子色/取色风格）。
+Jetpack Compose / AndroidX（Apache-2.0）、Kotlin & kotlinx（Apache-2.0）、Material Design Icons（Apache-2.0）、Navigation Compose（Apache-2.0）、**Haze**（github.com/chrisbanes/haze，Apache-2.0，安卓原生背景模糊）、（`materialkolor` 与 `android-image-cropper` 曾出现在版本目录中，但**当前构建未使用**，故不列入。）
 
 ## 许可义务摘要（本项目合规清单）
 
@@ -63,6 +63,7 @@ Jetpack Compose / AndroidX（Apache-2.0）、Kotlin & kotlinx（Apache-2.0）、
 - [x] M3E Canvas 为 MIT：本项目取其设计令牌与版式约定（非整文件复制），来源与用途已记于上表，`docs/m3e/` 保留其生成的 prompt 原文。
 - [x] Material Design 形状资产为 Apache-2.0（Copyright (C) 2024 Google LLC）：`LoadingShapes.kt` 文件头与上表均标注来源；自 material-components-android 移植的动画/采样逻辑同为 Apache-2.0。
 - [x] 内置 proot 二进制按 GPL-2.0+ 提供其源码获取方式：https://github.com/termux/proot；现役修补版（GPL-2.0-or-later）源码获取方式：https://github.com/oonid/pr（`src/proot/`，二进制位于 `android/app/src/main/jniLibs/arm64-v8a/`，本项目 `app/src/main/jniLibs/arm64-v8a/` 下两份二进制与其一致，未修改）。
-- [x] 应用内「设置 → 关于与许可证」页展示许可证摘要与 EULA 声明。
+- [x] 应用内「设置 → 关于与许可证」页展示许可证摘要与 EULA 声明；**许可证全文与第三方组件声明随 APK 内置**（`app/src/main/assets/LICENSE-GPL-3.0.txt` 与 `THIRD_PARTY_NOTICES.md`，构建时从仓库根目录复制），界面可滚动查看全文 —— 满足 GPL-3.0 第 4/5 条「随程序提供许可证副本」的要求。
+- [x] 版权归属单独记于 [COPYRIGHT](COPYRIGHT)（GPL 正文不得修改，故不塞进 LICENSE）。
 - [x] 运行时下载的服务端 jar 不随 APK 再分发，仅提供下载入口与来源标注。
 - [x] 使用本项目即表示你同意 Minecraft EULA（https://aka.ms/MinecraftEULA），eula.txt 由应用在用户启动流程中自动接受（等同于用户确认）。

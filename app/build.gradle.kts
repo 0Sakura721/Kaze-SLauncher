@@ -29,6 +29,19 @@ val releaseKeyPass = secret("KAZE_KEY_PASS", "kaze.keyPassword")
 val hasReleaseKey = listOf(releaseStorePath, releaseStorePass, releaseKeyAlias, releaseKeyPass)
     .all { it != null }
 
+
+// ── 许可证全文随 APK 提供 ──
+// GPL-3.0 第 4/5 条要求向接收者提供许可证副本。文本放在仓库根目录（LICENSE /
+// THIRD_PARTY_NOTICES.md），构建时复制进 assets —— 这样只有一份真源，不会出现
+// "改了根目录忘了改 assets"导致 APK 里是旧文本的情况（这正是一次真实发生过的事）。
+val syncLicenseAssets by tasks.registering(Copy::class) {
+    from(rootProject.file("LICENSE")) { rename { "LICENSE-GPL-3.0.txt" } }
+    from(rootProject.file("THIRD_PARTY_NOTICES.md"))
+    into(layout.projectDirectory.dir("src/main/assets"))
+}
+
+tasks.named("preBuild") { dependsOn(syncLicenseAssets) }
+
 android {
     namespace = "com.kaze.newage"
     compileSdk = 35
