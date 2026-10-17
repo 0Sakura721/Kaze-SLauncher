@@ -396,7 +396,7 @@ private fun Material3NavBar(
                 icon = {
                     Icon(
                         if (selected) dest.iconSelected else dest.icon,
-                        contentDescription = null,
+                        contentDescription = dest.label,
                     )
                 },
                 label = { Text(dest.label) },
