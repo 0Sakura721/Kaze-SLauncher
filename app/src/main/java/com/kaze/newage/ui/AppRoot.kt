@@ -29,7 +29,6 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -42,12 +41,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -251,32 +244,14 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 }
-            // 常驻底栏：Material 3 NavigationBar，完整表面与系统导航栏 inset 由组件处理
+            // 主导航采用不透明的 Material 3 表面；各页面自己的滚动底部留白继续生效。
             if (showBottomBar) {
-                // 渐隐的落点色：用主题背景色，深色下接近页面底色
-                val scrimColor = com.kaze.newage.ui.theme.backgroundColor()
                 Box(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        // 同上：底栏也依赖 navigationBars inset，首帧会跳，一起门控
-                        .graphicsLayer { alpha = if (contentVisible) 1f else 0f }
-                        // 底栏上方加一层向上渐隐：滚过来的内容"淡出"，
-                        // 而不是被浮起的胶囊硬切一半（设置页的 chips 就出现过这种观感）。
-                        // 用 drawBehind 绘制，不参与布局，底栏尺寸不变。
-                        .drawBehind {
-                            val fadePx = 44.dp.toPx()
-                            drawRect(
-                                brush = Brush.verticalGradient(
-                                    0f to Color.Transparent,
-                                    1f to scrimColor,
-                                    startY = -fadePx,
-                                    endY = size.height * 0.62f,
-                                ),
-                                topLeft = Offset(0f, -fadePx),
-                                size = Size(size.width, size.height + fadePx),
-                            )
-                        }
+                        // 与主内容一起等待 system insets，避免启动首帧跳动。
+                        .graphicsLayer { alpha = if (contentVisible) 1f else 0f },
                 ) {
                     Material3NavBar(
                         currentRoute = currentRoute,
