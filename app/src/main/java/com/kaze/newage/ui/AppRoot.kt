@@ -1,23 +1,18 @@
 package com.kaze.newage.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Home
@@ -30,6 +25,9 @@ import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -44,25 +42,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -87,12 +79,6 @@ import com.kaze.newage.ui.screens.ServerScreen
 import com.kaze.newage.ui.screens.SettingsScreen
 import kotlinx.coroutines.launch
 import com.kaze.newage.ui.theme.AppThemeMode
-import com.kaze.newage.ui.theme.LocalAppTheme
-import com.kaze.newage.ui.theme.LocalGlassBlurEnabled
-import com.kaze.newage.ui.theme.LocalGlassIntensity
-import com.kaze.newage.ui.theme.LocalGlassMode
-import com.kaze.newage.ui.theme.glassBackdropBlur
-import com.kaze.newage.ui.theme.liquidGlassLensSafe
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
@@ -166,25 +152,9 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
         }
         val contentVisible = statusBarTop > 0.dp || insetsTimedOut
 
-        // 覆盖式布局（不用 Scaffold 的 bottomBar 预留位）：
-        // 内容全屏滚动，可以"穿过"常驻底栏——滚动中的文字/卡片经 hazeSource 进入模糊源，
-        // 被底栏的液态玻璃实时映射（模糊的字）
+        // 主内容采用全屏布局；底部导航使用标准 Material 3 surface，避免半透明胶囊与内容争夺注意力。
         Box(Modifier.fillMaxSize()) {
-            // 内容层录制进 GraphicsLayer：软件模糊从该层栅格化+降采样放大
-            //（vivo Android 16：RenderEffect blur 不渲染——Haze、自研 renderEffect、
-            //   Miuix 高斯 shader 均无效；软件降采样是真机唯一已验证生效的路径）
-            val contentLayer = rememberGraphicsLayer()
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .drawWithContent {
-                        contentLayer.record {
-                            this@drawWithContent.drawContent()
-                        }
-                        drawLayer(contentLayer)
-                    }
-            ) {
-                BackdropLayer(prefs = uiPrefs, modifier = Modifier.fillMaxSize())
+            BackdropLayer(prefs = uiPrefs, modifier = Modifier.fillMaxSize())
                 NavHost(
                     navController = navController,
                     startDestination = Dest.Home.route,
@@ -281,8 +251,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 }
-            }
-            // 常驻底栏：覆盖在内容之上（内容可滚动穿过，被液态玻璃模糊映射）
+            // 常驻底栏：Material 3 NavigationBar，完整表面与系统导航栏 inset 由组件处理
             if (showBottomBar) {
                 // 渐隐的落点色：用主题背景色，深色下接近页面底色
                 val scrimColor = com.kaze.newage.ui.theme.backgroundColor()
@@ -309,9 +278,8 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                             )
                         }
                 ) {
-                    LiquidGlassNavBar(
+                    Material3NavBar(
                         currentRoute = currentRoute,
-                        contentLayer = contentLayer,
                         onNavigate = { dest -> navigateTab(dest.route) },
                     )
                 }
@@ -430,114 +398,42 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
 }
 
 /**
- * 液态玻璃浮动胶囊底栏（照搬「现在的 BiliPai」= Miuix IosLiquidGlassNavigationBar 版式，
- * Miuix/AndroidLiquidGlass Apache-2.0，已记 NOTICES）：
- *  - 24dp 边距悬浮圆胶囊（64dp 高）+ 10dp 投影
- *  - 玻璃链：Haze 背景模糊 + vibrancy 饱和度 1.5 + Kyant0 圆角矩形折射透镜（24dp/24dp）
- *  - 容器：surfaceContainer alpha 0.4（模糊启用时）
- *  - 选中项：主色图标 + 标签
+ * 应用主导航：采用 Material 3 NavigationBar，让选中态、触控反馈与动态配色跟随主题。
+ * 标签始终可见，降低四个主要入口只靠图标识别的成本。
  */
 @Composable
-private fun LiquidGlassNavBar(
+private fun Material3NavBar(
     currentRoute: String?,
-    contentLayer: androidx.compose.ui.graphics.layer.GraphicsLayer,
     onNavigate: (Dest) -> Unit,
 ) {
-    // ⚠️ 液态玻璃已从**构建**中移除（代码保留，随时可接回）。
-    //
-    // 这里刻意写成编译期常量 false，而不是 `LocalAppTheme.current == GLASS`：
-    // 后者 R8 无法证明恒假，整条玻璃链（glassBackdropBlur / liquidGlassLensSafe /
-    // theme/blur/ + theme/shader/ 两个包 + LiquidGlassEffect.kt）就会因为"运行时可能可达"
-    // 而被打进 APK。写成常量后编译器直接常量折叠，那些类与它依赖的 shader 全部被剥离。
-    // 要恢复液态玻璃：把下面两行改回原来的读取，并把设置页的主题选项与玻璃分区加回来。
-    val isGlass = false
-    val blurEnabled = false
-    val density = LocalDensity.current
-    val navInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val pillShape = CircleShape
-    // 玻璃链只属于液态玻璃主题；M3 主题底栏保持原样式（不透明表面板，不参与模糊映射）
-    val glassActive = isGlass && blurEnabled
-    // 底栏背景：玻璃主题=极淡磨砂（自研 RenderEffect 模糊成型）；M3 主题=50% 透光表面
-    // （普通黑/AMOLED 纯黑两种深色样式统一起效：滚动内容可从底栏透出）
-    val containerColor = if (isGlass) {
-        // 0.12 极淡表面：折射与模糊主导"液态"观感，磨砂太厚会盖住折射弯曲
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.12f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f)
-    }
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 24.dp, end = 24.dp)
-            .padding(bottom = 8.dp + navInset),
+    NavigationBar(
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 2.dp,
+        windowInsets = WindowInsets.navigationBars,
     ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .shadow(10.dp, pillShape, clip = false)
-                .clip(pillShape)
-        ) {
-            // 层①：玻璃背景——软件模糊（vivo 唯一生效路径）+ Kyant0 折射透镜在外
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .then(
-                        if (glassActive) {
-                            val glassP = com.kaze.newage.ui.theme.glassParams(LocalGlassMode.current)
-                            val intensity = LocalGlassIntensity.current
-                            Modifier
-                                .glassBackdropBlur(
-                                    contentLayer = contentLayer,
-                                    // 更精细的源（0.4），真高斯交给 StackBlur 半径
-                                    sampleScale = 0.4f,
-                                    // 玻璃强度 → 高斯半径（越大越糊）
-                                    blurRadiusPx = (2f + 6f * (intensity - 0.5f)).coerceIn(1f, 9f),
-                                )
-                                .liquidGlassLensSafe(
-                                    refractionHeight = with(density) { 24.dp.toPx() },
-                                    refractionAmount = with(density) { 24.dp.toPx() } *
-                                        intensity * glassP.refractionScale,
-                                )
-                        } else Modifier
+        Dest.entries.forEach { dest ->
+            val selected = currentRoute == dest.route
+            NavigationBarItem(
+                selected = selected,
+                onClick = { onNavigate(dest) },
+                icon = {
+                    Icon(
+                        if (selected) dest.iconSelected else dest.icon,
+                        contentDescription = null,
                     )
+                },
+                label = { Text(dest.label) },
+                alwaysShowLabel = true,
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
             )
-            // 层②：表面色（BiliPai onDrawSurface 等效：container alpha 0.4）
-            Box(Modifier.fillMaxSize().background(containerColor))
-            // 层③：图标与标签（BiliPai tabsContent——始终在最上，不被折射）
-            Row(
-                Modifier.fillMaxSize().padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                Dest.entries.forEach { dest ->
-                    val selected = currentRoute == dest.route
-                    Column(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable { onNavigate(dest) },
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
-                    ) {
-                        Icon(
-                            if (selected) dest.iconSelected else dest.icon,
-                            contentDescription = dest.label,
-                            modifier = Modifier.size(22.dp),
-                            tint = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            dest.label,
-                            fontSize = 11.sp,
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
         }
     }
 }

@@ -46,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.core.env.ProotEnvironment
@@ -406,8 +407,8 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                HomeSecondaryAction(Icons.Filled.Terminal, "控制台") { onNavigate(Dest.Console.route) }
-                HomeSecondaryAction(Icons.Filled.FolderOpen, "实例目录") {
+                HomeSecondaryAction(Icons.Filled.Terminal, "控制台", modifier = Modifier.weight(1f)) { onNavigate(Dest.Console.route) }
+                HomeSecondaryAction(Icons.Filled.FolderOpen, "实例目录", modifier = Modifier.weight(1f)) {
                     // 必须走 FileProvider 的 content://：targetSdk≥24 传 file:// 会抛
                     // FileUriExposedException，异常一吞按钮就"点了没反应"（此处原样）。
                     // 自定义实例目录在 FileProvider 的根之外，打不开就提示真实路径。
@@ -420,10 +421,10 @@ fun HomeScreen(
                     }
                 }
                 // 走真正的重启：以前直接 startInstance，运行中会被 guard 挡掉、点了没反应
-                HomeSecondaryAction(Icons.Filled.RestartAlt, "重启") {
+                HomeSecondaryAction(Icons.Filled.RestartAlt, "重启", modifier = Modifier.weight(1f)) {
                     if (!busy) viewModel.restartInstance(current)
                 }
-                HomeSecondaryAction(Icons.Filled.MoreVert, "更多") { onNavigate(Dest.Server.route) }
+                HomeSecondaryAction(Icons.Filled.MoreVert, "更多", modifier = Modifier.weight(1f)) { onNavigate(Dest.Server.route) }
             }
         } else {
             Surface(
@@ -459,22 +460,54 @@ fun HomeScreen(
     }
 }
 
-/** 次要动作：圆底图标按钮（tonal / outlined / text 三种容器观感轮换） */
+/**
+ * 主页快捷操作：完整的文字标签 + tonal 图标容器，整张卡片都可点击。
+ * 四个入口在窄屏上等宽排列，避免仅靠图标猜测操作含义。
+ */
 @Composable
 private fun HomeSecondaryAction(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Surface(
-        modifier = Modifier.size(48.dp).clip(CircleShape),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(76.dp),
+        shape = M3Shape.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
         onClick = onClick,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(22.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 3.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.secondaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
