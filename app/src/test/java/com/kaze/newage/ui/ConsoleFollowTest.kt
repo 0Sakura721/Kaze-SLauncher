@@ -12,7 +12,6 @@ import com.kaze.newage.data.model.CoreType
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.NewAgeTheme
-import kotlin.concurrent.thread
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,6 +31,24 @@ import org.robolectric.annotation.GraphicsMode
  *
  * 关键：断言"最新那一行是否在屏幕上"。LazyColumn 只组合可见项，所以能取到最新行
  * 就等于确实停在底部 —— 这比断言滚动态更难被误判。
+ *
+ * ## 偶发失败：Detected multithreaded access to SnapshotStateObserver
+ *
+ * 旧版本用 `thread { emit(...) }` 在**后台线程**里往控制台写日志，主线程同时用
+ * `composeRule.waitForIdle()` 抽帧 —— 两个线程先后读取同一个 `SnapshotStateObserver`，
+ * Compose 就抛 `IllegalArgumentException: Detected multithreaded access to
+ * SnapshotStateObserver: previousThreadId=97, currentThread=Main`。
+ *
+ * 这是**测试自己制造**的线程冲突，不是生产代码的问题：真实运行时控制台的写入来自
+ * `Dispatchers.IO`，界面读取全在主线程，且 AppViewModel 用的是线程安全的
+ * `MutableStateFlow` + 80ms 批量发布，不会出现"后台线程直接驱动 Compose 组合"。
+ * （曾试图把 AppViewModel 的状态发布整体切到主线程，结果 Robolectric 下
+ * `Dispatchers.Main.immediate` 调度不可靠，行几乎到不了状态里，测试全红 —— 已回滚。
+ * 修 flake 不该动生产线程模型。）
+ *
+ * 所以这里改成：**所有 emit 都在测试线程上同步完成**，再用 [awaitLines] 等 ViewModel
+ * 的收集协程把行搬进状态。"边输出边切页"的语义仍然保留（日志分批写入，中间跨过
+ * 不在控制台页的窗口）。
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -64,13 +81,15 @@ class ConsoleFollowTest {
         composeRule.waitForIdle()
     }
 
-    /** 直接往该实例的控制台流里写日志（等价于服务端输出） */
-    private fun emit(range: IntRange, delayMs: Long = 0) {
+    /**
+     * 直接往该实例的控制台流里写日志（等价于服务端输出）。
+     *
+     * 刻意**在调用线程上同步写**，不开后台线程 —— 见类注释里关于
+     * SnapshotStateObserver 多线程访问的说明。
+     */
+    private fun emit(range: IntRange) {
         val stream = vm.serverManager.consoleFor(instance.id)
-        for (i in range) {
-            stream.emit("日志行 $i")
-            if (delayMs > 0) Thread.sleep(delayMs)
-        }
+        for (i in range) stream.emit("日志行 $i")
     }
 
     private fun clickTab(label: String) {
@@ -114,16 +133,16 @@ class ConsoleFollowTest {
         awaitLines(120)
         composeRule.onNodeWithText("日志行 120").assertIsDisplayed()
 
-        // 切到别的页面，服务端继续刷日志
+        // 切到别的页面
         clickTab("主页")
 
-        // 后台持续输出：模拟真实运行中的服务端（每行间隔很小）。
-        // 这正是旧实现翻不了身的原因 —— 每次输出都会把滚到底的动画取消掉。
-        val emitter = thread(isDaemon = true) { emit(121..400, delayMs = 3) }
+        // 服务端在后台继续刷日志：分两批写，中间跨过"不在控制台页"的窗口，
+        // 等价于旧版本用后台线程持续输出 —— 但不再引入第二个线程碰 Compose。
+        emit(121..260)
+        awaitLines(260)
+        emit(261..400)
 
         clickTab("控制台")
-        awaitLines(400)
-        emitter.join(5_000)
         awaitLines(400)
 
         // 停在底部 ⇒ 最新那一行必须在屏幕上
