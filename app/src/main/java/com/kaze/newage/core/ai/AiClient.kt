@@ -183,7 +183,11 @@ object AiClient {
 
     /** 取消的界面入口：把可能阻塞的 [cancelActive] 丢到独立守护线程，绝不让 UI 线程等它 */
     fun cancelActiveAsync() {
-        kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai-cancel") { cancelActive() }
+        kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai-cancel") {
+            // 守护线程的未捕获异常会直接 FATAL 掉整个应用（见 kaze-ai-watchdog 那次崩溃）。
+            // 取消本身是尽力而为：disconnect 抛错时最多是这轮没被立刻掐断。
+            runCatching { cancelActive() }
+        }
     }
 
     /**
@@ -267,12 +271,27 @@ object AiClient {
             // （取消/超时就停在这里）。看门狗轮询到停止条件就 disconnect，强制阻塞读立刻返回。
             val done = java.util.concurrent.atomic.AtomicBoolean(false)
             val watchdog = kotlin.concurrent.thread(isDaemon = true, name = "kaze-ai-watchdog") {
-                while (!done.get()) {
-                    if (shouldStop()) {
-                        runCatching { conn.disconnect() }
-                        break
+                try {
+                    while (!done.get()) {
+                        if (shouldStop()) {
+                            runCatching { conn.disconnect() }
+                            break
+                        }
+                        try {
+                            Thread.sleep(WATCHDOG_POLL_MS)
+                        } catch (_: InterruptedException) {
+                            // 正常收尾路径会 interrupt() 本线程（见下面的 done.set(true)/interrupt()）。
+                            // 旧实现没接这个异常：守护线程抛未捕获异常 = 整个进程 FATAL EXCEPTION，
+                            // 用户日志里的 "FATAL EXCEPTION: kaze-ai-watchdog / InterruptedException"
+                            // 就是这条路径，而且是必现的（每次流式请求正常结束都会走到）。
+                            // 中断即退出循环，不需要再判断 done。
+                            Thread.currentThread().interrupt()
+                            break
+                        }
                     }
-                    Thread.sleep(WATCHDOG_POLL_MS)
+                } catch (t: Throwable) {
+                    // 守护线程里的任何异常都不该把进程带走：这里是纯粹的辅助轮询，
+                    // 出错最多是"取消不即时生效"，主流程还有 shouldStop() 在行边界兜底。
                 }
             }
             // 流式也要有总量上限：不结束的流能让循环永远跑下去，单行还可能无限长（见 CappedStream）

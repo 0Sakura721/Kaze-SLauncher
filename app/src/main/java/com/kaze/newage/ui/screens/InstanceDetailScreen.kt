@@ -35,9 +35,11 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.ViewInAr
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -72,6 +74,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.core.addons.AddonKind
 import com.kaze.newage.core.addons.AddonManager
 import com.kaze.newage.core.server.BackupManager
+import com.kaze.newage.core.server.WhitelistFile
 import com.kaze.newage.core.server.ServerProperties
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.ServerInstance
@@ -704,7 +707,7 @@ private fun RunTab(
 
     PlayerManageCard(
         viewModel = viewModel,
-        instanceId = instance.id,
+        instance = instance,
         running = running,
     )
 }
@@ -882,45 +885,110 @@ private fun AddonsTab(
     )
 }
 
-/** 玩家管理：在线列表（list 命令解析 + 进出事件跟踪）+ OP/白名单/踢出快捷操作 */
+/**
+ * 玩家管理：在线列表 + 白名单。
+ *
+ * 白名单**不依赖服务端运行**：直接读写实例目录下的 whitelist.json（见 [WhitelistFile]）。
+ * 旧实现只有 `whitelist add/remove` 两个按钮且整块被 `if (running)` 包住 ——
+ * 于是「先把朋友加进白名单再开服」这个最正常的用法做不到，用户也看不到名单里到底有谁，
+ * 只能盲加盲删。
+ *
+ * 在线相关（OP / 踢出 / 刷新列表）仍然需要运行中，因为它们只能通过控制台命令完成。
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PlayerManageCard(
     viewModel: AppViewModel,
-    instanceId: String,
+    instance: ServerInstance,
     running: Boolean,
 ) {
     val players by viewModel.onlinePlayers.collectAsStateWithLifecycle()
-    var name by remember(instanceId) { mutableStateOf("") }
+    var name by remember(instance.id) { mutableStateOf("") }
+    var whitelist by remember(instance.id) { mutableStateOf(WhitelistFile.read(instance.dir)) }
+    var msg by remember(instance.id) { mutableStateOf<String?>(null) }
+    var confirmClear by remember(instance.id) { mutableStateOf(false) }
 
-    fun doCmd(cmd: String) {
-        val n = name.trim()
-        if (n.isEmpty()) return
-        viewModel.sendCommand("$cmd $n")
-        name = ""
+    // server.properties 的开关：white-list 决定"名单是否生效"，enforce-whitelist 决定
+    // "已在服里的人被踢出名单后是否立刻踢下线"。两个都要能改，否则开了名单却不知道有没有生效。
+    var props by remember(instance.id) { mutableStateOf(ServerProperties.load(instance.dir)) }
+    val whitelistOn = props["white-list"].equals("true", ignoreCase = true)
+    val enforceOn = props["enforce-whitelist"].equals("true", ignoreCase = true)
+
+    fun setProp(key: String, value: String) {
+        props = props.toMutableMap().apply { this[key] = value } as LinkedHashMap
+        runCatching { ServerProperties.save(instance.dir, props) }
+            .onFailure { msg = "保存失败：${it.message}" }
+    }
+
+    fun reload() {
+        whitelist = WhitelistFile.read(instance.dir)
+        props = ServerProperties.load(instance.dir)
     }
 
     M3ECard(
         variant = M3ECardVariant.Filled,
         title = "玩家管理",
-        supporting = if (running) null
-        else "服务端运行后可管理玩家：查看在线列表、设置 OP、白名单、踢出。",
+        supporting = "白名单直接改文件，开服前后都能用；OP / 踢出需要服务端运行中。",
         trailing = {
-            if (running) {
-                IconButton(onClick = { viewModel.refreshPlayers() }) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "刷新在线列表")
-                }
+            IconButton(onClick = {
+                reload()
+                if (running) viewModel.refreshPlayers()
+                msg = null
+            }) {
+                Icon(Icons.Filled.Refresh, contentDescription = "刷新")
             }
         },
         content = {
+            // ── 白名单开关 ──
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("启用白名单", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        if (whitelistOn) "只有名单内的玩家能进服"
+                        else "任何人都能进服（名单不生效）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = whitelistOn, onCheckedChange = { setProp("white-list", it.toString()) })
+            }
+            if (whitelistOn) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("移出名单立刻踢下线", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (enforceOn) "从名单移除的在线玩家会被踢出" else "已在线的人不受名单变更影响",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = enforceOn, onCheckedChange = { setProp("enforce-whitelist", it.toString()) })
+                }
+                if (running) {
+                    Text(
+                        "开关改动需要重启服务端或执行 whitelist reload 才生效",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+
+            // ── 在线玩家 ──
             if (running) {
                 Text(
                     if (players.isEmpty()) "在线玩家：暂无（点右上角刷新）"
                     else "在线玩家（点名字填入下方输入栏）：",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                // 每个名字一个可点标签：点一下就把名字填进下面的「玩家名」输入栏，
-                // 省掉手输（中文名、大小写、下划线都很容易打错），填完直接点 op / kick。
                 if (players.isNotEmpty()) {
                     FlowRow(
                         Modifier.padding(top = 6.dp),
@@ -944,30 +1012,169 @@ private fun PlayerManageCard(
                         }
                     }
                 }
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("玩家名") },
-                    placeholder = { Text("如 Steve") },
-                    singleLine = true,
-                    shape = M3Shape.large,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            } else {
+                Text(
+                    "服务端未运行：在线列表与 OP/踢出不可用，白名单仍可编辑。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // FlowRow 而不是两个 Row：字体放大时普通 Row 会把靠后的按钮压到 0 宽，
-                // FlowRow 自动换行；五条命令收进一个流式组也少占一行
+            }
+
+            // ── 白名单内容 ──
+            Text(
+                "白名单（${whitelist.size} 人）",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            if (whitelist.isEmpty()) {
+                Text(
+                    "名单为空。${if (whitelistOn) "白名单已启用 —— 现在没人能进服！" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (whitelistOn) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            } else {
                 FlowRow(
-                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                    Modifier.padding(top = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    OutlinedButton(onClick = { doCmd("op") }) { Text("设为 OP") }
-                    OutlinedButton(onClick = { doCmd("deop") }) { Text("取消 OP") }
-                    OutlinedButton(onClick = { doCmd("kick") }) { Text("踢出") }
-                    OutlinedButton(onClick = { doCmd("whitelist add") }) { Text("白名单 +") }
-                    OutlinedButton(onClick = { doCmd("whitelist remove") }) { Text("白名单 −") }
+                    whitelist.forEach { e ->
+                        // 每个名字一个 chip，点一下填进输入框，右侧 × 直接移除
+                        Surface(
+                            shape = M3Shape.large,
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    e.name,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier
+                                        .clickable { name = e.name }
+                                        .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                                )
+                                IconButton(
+                                    onClick = {
+                                        val removed = WhitelistFile.remove(instance.dir, e.name)
+                                        reload()
+                                        msg = if (removed) "已从白名单移除 ${e.name}" else "移除失败"
+                                    },
+                                    modifier = Modifier.size(32.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Close,
+                                        contentDescription = "从白名单移除 ${e.name}",
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
+            }
+
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it; msg = null },
+                label = { Text("玩家名") },
+                placeholder = { Text("如 Steve") },
+                singleLine = true,
+                shape = M3Shape.large,
+                isError = name.isNotBlank() && !WhitelistFile.isValidName(name),
+                supportingText = if (name.isNotBlank() && !WhitelistFile.isValidName(name)) {
+                    { Text("玩家名为 1~16 个字符，不能含空格或引号") }
+                } else null,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            )
+
+            // 白名单操作（不需要服务端运行）
+            FlowRow(
+                Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = {
+                        when (val r = WhitelistFile.add(instance.dir, name)) {
+                            is WhitelistFile.AddResult.Added -> {
+                                msg = "已加入白名单：${name.trim()}"
+                                name = ""
+                            }
+                            WhitelistFile.AddResult.AlreadyThere -> msg = "已经在白名单里了"
+                            WhitelistFile.AddResult.Invalid -> msg = "玩家名不合法"
+                            WhitelistFile.AddResult.TooLong -> msg = "玩家名超过 16 个字符"
+                        }
+                        reload()
+                    },
+                    enabled = WhitelistFile.isValidName(name),
+                ) { Text("加入白名单") }
+
+                OutlinedButton(
+                    onClick = {
+                        val n = name.trim()
+                        val removed = WhitelistFile.remove(instance.dir, n)
+                        reload()
+                        msg = if (removed) "已从白名单移除 $n" else "名单里没有 $n"
+                    },
+                    enabled = WhitelistFile.isValidName(name),
+                ) { Text("移出白名单") }
+
+                if (whitelist.isNotEmpty()) {
+                    TextButton(onClick = { confirmClear = true }) { Text("清空名单") }
+                }
+            }
+
+            // 在线操作（需要服务端运行）
+            if (running) {
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(onClick = { if (name.isNotBlank()) { viewModel.sendCommand("op ${name.trim()}") } }) {
+                        Text("设为 OP")
+                    }
+                    OutlinedButton(onClick = { if (name.isNotBlank()) { viewModel.sendCommand("deop ${name.trim()}") } }) {
+                        Text("取消 OP")
+                    }
+                    OutlinedButton(onClick = { if (name.isNotBlank()) { viewModel.sendCommand("kick ${name.trim()}") } }) {
+                        Text("踢出")
+                    }
+                }
+            }
+
+            msg?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
         },
     )
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("清空白名单？") },
+            text = {
+                Text(
+                    "将删除全部 ${whitelist.size} 条记录。" +
+                        if (whitelistOn) "白名单当前已启用 —— 清空后没人能进服。" else "",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    WhitelistFile.clear(instance.dir)
+                    reload()
+                    confirmClear = false
+                    msg = "白名单已清空"
+                }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } },
+        )
+    }
 }
 
 /**
