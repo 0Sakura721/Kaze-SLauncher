@@ -11,7 +11,19 @@ Copyright (C) 2026 0Sakura721
 
 Kaze SLauncher 整体以 **GNU General Public License v3.0** 发布，许可证正文见
 [LICENSE](LICENSE)。按 GPL-3.0 第 9 条，被许可方可以**选择**适用 GPL-3.0 或
-**任何更新的版本**（即 `GPL-3.0-or-later`）；本项目自身发布的意图是 GPL-3.0。
+**任何更新的版本**，即 **`GPL-3.0-or-later`**。
+
+为什么是 or-later 而不是锁死 `-only`：
+
+- **上游是 or-later**：本项目的预编译 proot 二进制来自 oonid/pr 与 termux，均为
+  `GPL-2.0-or-later`。锁成 `GPL-3.0-only` 会把「接收 GPL-2.0-or-later 的代码」这件事
+  表述得比实际更紧，反而容易让人误读许可证兼容性。
+- **兼容性更宽、维护成本更低**：or-later 是 GPL 项目最常见的写法，也是 FSF 推荐的做法；
+  将来若 GPL 出新版本，本项目不必改一次许可声明。
+- **不影响 copyleft 强度**：or-later 仍然要求衍生作品以 GPL 发布（不得闭源），
+  只是允许下游选择「v3.0 或更新版本」。对本项目的核心诉求（防止被闭源挪用）没有削弱。
+
+若将来确实需要锁死版本（例如出于审计要求），改动点只有这一节与 README 的许可证段。
 
 ## 为什么整体是 GPL-3.0 而不是更宽松的许可证
 
