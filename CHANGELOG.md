@@ -5,6 +5,19 @@
 
 ---
 
+## [0.5.2] - 2026-10-18
+
+### Added
+
+- **白名单功能**：玩家管理卡可直接查看/添加/移除/清空白名单，**不依赖服务端运行**（直接读写 `whitelist.json`）；离线服 UUID 按 `UUID.nameUUIDFromBytes("OfflinePlayer:<名>")` 生成，有 `usercache.json`/`ops.json` 时优先采用其中的正版 UUID；新增 `white-list` 与 `enforce-whitelist` 两个开关；名单为空且白名单已启用时红字警告（否则等于没人能进服）
+
+### Fixed
+
+- **崩溃**：`kaze-ai-watchdog` 线程的 `InterruptedException` 未捕获，导致每次流式对话正常结束都可能 `FATAL EXCEPTION` 掉整个应用（真机日志栈：`Thread.sleep` → `InterruptedException`）。看门狗改为捕获中断并退出循环，外层兜 `Throwable`；`cancelActiveAsync` 的守护线程同样包 `runCatching`
+- **测试 flake**：`ConsoleFollowTest` 用后台线程驱动 Compose，偶发 `Detected multithreaded access to SnapshotStateObserver`。改为在测试线程同步写入
+- 修测试 flake：ConsoleFollowTest 用后台线程驱动 Compose
+- 修崩溃：kaze-ai-watchdog 的 InterruptedException 把整个应用带崩
+
 ## [0.5.1-beta.2] - 2026-10-18
 
 ### Fixed
