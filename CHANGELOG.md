@@ -5,6 +5,25 @@
 
 ---
 
+## [0.5.1-beta.2] - 2026-10-18
+
+### Fixed
+
+- 文档：写明 or-later 的取舍理由
+- Merge branch 'chore/license-compliance': 许可证合规修正
+- 修编译：补 FontFamily 与 sp 的 import（CI 39041864995 / 39041950435 抓到）
+- 合规：许可证全文随 APK 提供、补版权归属、修正第三方声明
+- 更新 README.md
+- fix: 修复控制台日志与备份归属的四处逻辑缺陷 (#13)
+- chore: release 标题统一为 tag 本身 (#12)
+
+### 合规（许可证）
+
+- 许可证全文随 APK 提供：`assets/LICENSE-GPL-3.0.txt` 与 `THIRD_PARTY_NOTICES.md`，应用内「关于与许可证」可滚动查看全文（GPL-3.0 第 4/5 条要求）
+- 新增 `COPYRIGHT`：版权归属、`GPL-3.0-or-later` 的取舍理由、为何不能改成 MIT/Apache、预编译二进制与商标说明
+- 修正第三方声明三处失准：`materialkolor` 实际未使用、`ui/theme/blur|shader` 路径已删除、armhf 的 proot 实际来自 `app/src/armhf/assets/proot-armhf.tar.gz`
+- 构建新增 `syncLicenseAssets`（`preBuild` 依赖）：从仓库根目录自动复制许可证文本进 assets，避免根目录与 APK 内文本脱节
+
 ## [Unreleased]
 
 （暂无）
