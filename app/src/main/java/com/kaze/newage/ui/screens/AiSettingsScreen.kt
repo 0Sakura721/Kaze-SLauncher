@@ -25,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,6 +48,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
 import com.kaze.newage.core.ai.AiCommandPolicy
+import com.kaze.newage.core.ai.AiToolPolicy
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiSearch
@@ -120,6 +122,7 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             ProfileSection(viewModel, onEdit = { editing = it })
             Spacer(Modifier.height(8.dp))
             CommandModeSection(viewModel)
+    ToolPolicySection(viewModel)
             Spacer(Modifier.height(8.dp))
             SearchSection(viewModel)
         }
@@ -408,6 +411,54 @@ private fun CommandModeSection(viewModel: AppViewModel) {
             "已放开全部命令：AI 可能自行执行 stop 等影响服务端的命令（仍会先说明意图）。" +
                 "随时可切回「仅建议」。"
         )
+    }
+    Spacer(Modifier.height(4.dp))
+}
+
+// ── 每个工具的权限（借鉴 Operit：Allow automatically / Ask every time / Deny）──
+
+@Composable
+private fun ToolPolicySection(viewModel: AppViewModel) {
+    val prefs = viewModel.uiPrefs
+    SectionTitle("工具权限")
+    SectionNote(
+        "逐个工具决定 AI 能不能自己动手。自动＝需要时直接执行；每次询问＝执行前弹确认卡；" +
+            "禁止＝永不执行（并会告诉模型它被禁用了，免得反复重试）。" +
+            "读取敏感文件（凭据、ops.json、开了 rcon 的 server.properties）始终要确认，" +
+            "不受这里的「自动」放宽。控制台命令由上面的「控制台命令执行」单独管。"
+    )
+    Spacer(Modifier.height(8.dp))
+
+    AiToolPolicy.TOOLS.forEach { tool ->
+        val current = prefs.aiToolMode(tool.id)
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+            shape = M3Shape.largeIncreased,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Column(Modifier.padding(12.dp)) {
+                Text(tool.label, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    tool.desc,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(
+                    Modifier.padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    AiToolPolicy.Mode.entries.forEach { mode ->
+                        FilterChip(
+                            selected = mode == current,
+                            onClick = { prefs.setAiToolPolicy(tool.id, mode) },
+                            label = { Text(mode.label) },
+                        )
+                    }
+                }
+            }
+        }
     }
     Spacer(Modifier.height(4.dp))
 }
