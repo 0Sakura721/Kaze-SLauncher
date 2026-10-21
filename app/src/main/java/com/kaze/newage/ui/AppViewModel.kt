@@ -17,6 +17,9 @@ import com.kaze.newage.core.ai.AiAudit
 import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiContext
 import com.kaze.newage.core.ai.AiFileTools
+import com.kaze.newage.core.ai.AiHistoryTrim
+import com.kaze.newage.core.ai.AiToolPolicy
+import com.kaze.newage.core.ai.AiToolStep
 import com.kaze.newage.core.ai.AiMessage
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiPrompt
@@ -653,6 +656,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         /** 读取请求状态：0=待确认 1=已允许 2=已拒绝 */
         val readState: Int = 0,
         /**
+         * 本条消息的工具执行步骤（Operit 式"执行过程可见"）。
+         *
+         * 改造前工具执行只有一行 `· 读取 xxx ·` 小字，**成功与失败长得一样** ——
+         * 失败恰恰是最需要被看见的（否则用户会以为回答是基于数据给出的）。
+         * 空列表 = 这条消息不是工具执行结果。
+         */
+        val steps: List<AiToolStep> = emptyList(),
+        /**
          * 本条消息对应的实例。命令执行与文件写入都按这里记录的实例走，
          * 而不是"当前选中的实例" —— 用户在 AI 回答后切换实例再点按钮，
          * 不能把命令/写入落到另一个实例上。
@@ -1019,6 +1030,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 return
             }
             session.roundsLeft--
+            // 长对话裁剪：工具循环会持续往 apiMessages 里追加 assistant/tool 消息，
+            // 不裁必然超出模型上下文（严格服务端直接 400）。规则见 [AiHistoryTrim]：
+            // system 永不丢、最近 N 轮保底、按字符预算从旧到新丢、tool_calls 与结果同生共死。
+            applyHistoryTrim(session)
             val deadline = System.currentTimeMillis() +
                 if (session.config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS
             var deadlineFired = false
@@ -1111,24 +1126,57 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             when (tool.name) {
                 "read_file", "list_dir", "fetch_page" -> {
+                    // ── 每工具权限（Operit 式）──
+                    // 禁止档：换协议也不能绕过（与原生路径同一套判定）
+                    if (AiToolPolicy.isDenied(uiPrefs.aiToolPolicies.value, tool.name)) {
+                        val label = AiToolPolicy.toolById(tool.name)?.label ?: tool.name
+                        appendAiMessage(
+                            AiChatMessage(
+                                id = nextAiId(), isUser = false,
+                                text = "已按你的设置跳过「$label」\n${AiSanitize.displayOneLine(tool.path)}",
+                                toolNote = "已按设置跳过「$label」",
+                                isError = true,
+                                steps = listOf(
+                                    AiToolStep(
+                                        title = "$label ${AiSanitize.displayOneLine(tool.path)}",
+                                        detail = "你在 AI 设置里把该工具设成了「禁止」",
+                                        status = AiToolStep.Status.DENIED,
+                                    )
+                                ),
+                            )
+                        )
+                        session.apiMessages += AiMessage(
+                            AiMessage.ROLE_USER,
+                            "【工具结果】${tool.name} \"${tool.path}\" → 被用户设置拒绝：" +
+                                "该工具已被禁用，不要重试，请直接告诉用户需要什么。",
+                        )
+                        continue
+                    }
                     // 敏感文件（凭据类 / ops.json / 带 rcon 的 server.properties）读取也要确认：
-                    // 读取不改磁盘，但会把内容发到模型服务商那边，而诱导源是现成的（玩家聊天、网页）
-                    if (tool.name == "read_file") {
+                    // 读取不改磁盘，但会把内容发到模型服务商那边，而诱导源是现成的（玩家聊天、网页）。
+                    // 同样地，"每次询问"档也走这张卡 —— 两者只需一次确认。
+                    val askReason = if (aiToolMode(tool.name) == AiToolPolicy.Mode.ASK) {
+                        "你在 AI 设置里把「${AiToolPolicy.toolById(tool.name)?.label ?: tool.name}」设成了每次询问"
+                    } else {
+                        null
+                    }
+                    run {
                         val target = session.instanceId?.let { instanceStore.get(it) }
                         val policy = AiFileTools.readPolicyFor(target?.dir, tool.path)
-                        if (policy.sensitive != null) {
+                        val reason = policy.sensitive ?: askReason
+                        if (reason != null) {
                             aiSession = session
                             session.pendingToolCallId = null // JSON 夹带协议
                             appendAiMessage(
                                 AiChatMessage(
                                     id = nextAiId(),
                                     isUser = false,
-                                    text = parsed.analysis.ifBlank { "这个文件里可能有敏感内容，需要你先确认。" },
+                                    text = parsed.analysis.ifBlank { "这一步需要你先确认。" },
                                     readRequest = AiReadRequest(
                                         path = tool.path,
                                         absPath = policy.resolvedPath,
                                         instanceName = target?.name.orEmpty(),
-                                        reason = policy.sensitive,
+                                        reason = reason,
                                     ),
                                     instanceId = session.instanceId,
                                 )
@@ -1142,8 +1190,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         else -> "抓取网页 ${AiSanitize.displayOneLine(tool.path)}"
                     }
                     val advisory = repeatGuard(session, "${tool.name}|${tool.path}")
+                    val startedAt = System.currentTimeMillis()
                     val result = runCatching { executeAiReadTool(tool.name, tool.path, session.instanceId) }
                         .getOrElse { "工具执行失败：${it.message}" }
+                    val elapsed = System.currentTimeMillis() - startedAt
                     // 失败必须让**用户**看见，不能只回喂模型：否则界面上只有"读取 xxx"，
                     // 用户既不知道没读到，也不知道这轮回答是在缺数据的情况下给出的
                     val failure = aiReadFailureNote(note, result)
@@ -1154,6 +1204,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             text = failure ?: parsed.analysis.ifBlank { note },
                             toolNote = note,
                             isError = failure != null,
+                            steps = listOf(
+                                AiToolStep(
+                                    title = note,
+                                    detail = if (failure != null) failure.take(120) else "",
+                                    status = if (failure != null) AiToolStep.Status.FAILED
+                                    else AiToolStep.Status.OK,
+                                    elapsedMs = elapsed,
+                                )
+                            ),
                         )
                     )
                     session.apiMessages += AiMessage(
@@ -1184,6 +1243,33 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 "write_file" -> {
+                    // 每工具权限（Operit 式）：禁止档在两种协议下都必须生效
+                    if (AiToolPolicy.isDenied(uiPrefs.aiToolPolicies.value, "write_file")) {
+                        appendAiMessage(
+                            AiChatMessage(
+                                id = nextAiId(), isUser = false,
+                                text = "已按你的设置阻止了一次文件写入\n" +
+                                    AiSanitize.displayOneLine(tool.path) +
+                                    "\n原因：你在 AI 设置里把「写入文件」设成了「禁止」",
+                                toolNote = "已按设置阻止写入",
+                                isError = true,
+                                instanceId = session.instanceId,
+                                steps = listOf(
+                                    AiToolStep(
+                                        title = "写入 ${AiSanitize.displayOneLine(tool.path)}",
+                                        detail = "你在 AI 设置里把「写入文件」设成了「禁止」",
+                                        status = AiToolStep.Status.DENIED,
+                                    )
+                                ),
+                            )
+                        )
+                        session.apiMessages += AiMessage(
+                            AiMessage.ROLE_USER,
+                            "【工具结果】write_file \"${tool.path}\" → 被用户设置拒绝：" +
+                                "写入文件工具已被禁用，不要重试，请直接告诉用户需要自己改什么。",
+                        )
+                        continue
+                    }
                     if (tool.content.isEmpty()) {
                         session.apiMessages += AiMessage(
                             AiMessage.ROLE_USER,
@@ -1279,6 +1365,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             val name = tc.name.trim().lowercase()
             if (name == "write_file") {
+                // 每工具权限（Operit 式）：禁止档直接不执行，并明确告诉模型"被用户禁用了" ——
+                // 只静默丢弃的话它会以为工具坏了、反复重试同样的调用
+                if (AiToolPolicy.isDenied(uiPrefs.aiToolPolicies.value, "write_file")) {
+                    appendAiMessage(
+                        AiChatMessage(
+                            id = nextAiId(), isUser = false,
+                            text = "已按你的设置阻止了一次文件写入\n" +
+                                AiSanitize.displayOneLine(args.path) +
+                                "\n原因：你在 AI 设置里把「写入文件」设成了「禁止」",
+                            toolNote = "已按设置阻止写入",
+                            isError = true,
+                            instanceId = session.instanceId,
+                            steps = listOf(
+                                AiToolStep(
+                                    title = "写入 ${AiSanitize.displayOneLine(args.path)}",
+                                    detail = "你在 AI 设置里把「写入文件」设成了「禁止」",
+                                    status = AiToolStep.Status.DENIED,
+                                )
+                            ),
+                        )
+                    )
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_TOOL,
+                        "被用户设置拒绝：写入文件工具已被禁用。不要重试该工具，" +
+                            "请直接告诉用户需要自己修改什么。",
+                        toolCallId = tc.id,
+                    )
+                    continue
+                }
                 if (args.content.isEmpty()) {
                     session.apiMessages += AiMessage(
                         AiMessage.ROLE_TOOL,
@@ -1345,34 +1460,70 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             }
             // fetch_page 的参数名是 url，其余是 path
             val targetPath = if (name == "fetch_page") args.url.ifBlank { args.path } else args.path
-            // 敏感读取确认：与 JSON 协议共用同一套判定（见上方同分支的说明）
-            if (name == "read_file") {
+            // ── 每工具权限（Operit 式）──
+            // 禁止档：不执行，并明确告知模型（否则它会反复重试）
+            val toolMode = uiPrefs.aiToolMode(name)
+            if (toolMode == AiToolPolicy.Mode.DENY) {
+                val label = AiToolPolicy.toolById(name)?.label ?: name
+                appendAiMessage(
+                    AiChatMessage(
+                        id = nextAiId(), isUser = false,
+                        text = "已按你的设置跳过「$label」\n${AiSanitize.displayOneLine(targetPath)}",
+                        toolNote = "已按设置跳过「$label」",
+                        isError = true,
+                        steps = listOf(
+                            AiToolStep(
+                                title = "$label ${AiSanitize.displayOneLine(targetPath)}",
+                                detail = "你在 AI 设置里把该工具设成了「禁止」",
+                                status = AiToolStep.Status.DENIED,
+                            )
+                        ),
+                    )
+                )
+                session.apiMessages += AiMessage(
+                    AiMessage.ROLE_TOOL,
+                    "被用户设置拒绝：「$label」工具已被禁用。不要重试该工具，请直接告诉用户需要什么。",
+                    toolCallId = tc.id,
+                )
+                continue
+            }
+            // 询问档：复用敏感文件那张确认卡（同一个挂起/恢复机制），
+            // 理由换成"你在设置里把该工具设成了每次询问"，用户才知道自己在批准什么
+            val askReason = if (toolMode == AiToolPolicy.Mode.ASK) {
+                "你在 AI 设置里把「${AiToolPolicy.toolById(name)?.label ?: name}」设成了每次询问"
+            } else {
+                null
+            }
+            run {
                 val target = session.instanceId?.let { instanceStore.get(it) }
                 val policy = AiFileTools.readPolicyFor(target?.dir, targetPath)
-                if (policy.sensitive != null && pause == null) {
+                val needAsk = askReason != null || policy.sensitive != null
+                if (!needAsk) return@run
+                val reason = policy.sensitive ?: askReason
+                if (pause == null) {
                     pause = tc
                     pauseArgs = args
-                    pauseReadPolicy = policy
+                    pauseReadPolicy = policy.copy(sensitive = reason)
                     pauseKind = "read"
-                    continue
-                }
-                if (policy.sensitive != null) {
+                } else {
                     session.apiMessages += AiMessage(
                         AiMessage.ROLE_TOOL,
                         "已跳过：一次只处理一个待确认读取，请等当前确认完成后再重新发起",
                         toolCallId = tc.id,
                     )
-                    continue
                 }
             }
+            if (pause === tc) continue
             val advisory = repeatGuard(session, "$name|$targetPath")
             val note = when (name) {
                 "read_file" -> "读取 ${AiSanitize.displayOneLine(targetPath)}"
                 "list_dir" -> "列出 ${AiSanitize.displayOneLine(targetPath)}"
                 else -> "抓取网页 ${AiSanitize.displayOneLine(targetPath)}"
             }
+            val startedAt = System.currentTimeMillis()
             val result = runCatching { executeAiReadTool(name, targetPath, session.instanceId) }
                 .getOrElse { "工具执行失败：${it.message}" }
+            val elapsed = System.currentTimeMillis() - startedAt
             val failure = aiReadFailureNote(note, result)
             appendAiMessage(
                 AiChatMessage(
@@ -1380,6 +1531,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     text = failure ?: note,
                     toolNote = note,
                     isError = failure != null,
+                    steps = listOf(
+                        AiToolStep(
+                            title = note,
+                            detail = if (failure != null) failure.take(120) else "",
+                            status = if (failure != null) AiToolStep.Status.FAILED
+                            else AiToolStep.Status.OK,
+                            elapsedMs = elapsed,
+                        )
+                    ),
                 )
             )
             session.apiMessages += AiMessage(
@@ -1423,6 +1583,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         return true
+    }
+
+    /**
+     * 每次请求前就地裁剪 [AiTurnSession.apiMessages]。
+     *
+     * 会话持有的是同一个 MutableList（挂起恢复的路径也引用它），所以只能清空后回填，
+     * 不能换成新对象。纯逻辑在 [AiHistoryTrim]（可单测）：这里只负责搬运。
+     */
+    /** 某工具当前的权限档位（未配置回落默认；见 [AiToolPolicy]） */
+    private fun aiToolMode(toolId: String): AiToolPolicy.Mode =
+        AiToolPolicy.modeOf(uiPrefs.aiToolPolicies.value, toolId)
+
+    private fun applyHistoryTrim(session: AiTurnSession) {
+        val trimmed = AiHistoryTrim.trim(session.apiMessages)
+        if (trimmed == session.apiMessages) return
+        session.apiMessages.clear()
+        session.apiMessages.addAll(trimmed)
     }
 
     private fun appendFinalAiMessage(

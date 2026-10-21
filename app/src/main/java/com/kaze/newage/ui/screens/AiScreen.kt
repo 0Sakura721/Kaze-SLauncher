@@ -90,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.kaze.newage.core.ai.AiSanitize
 import com.kaze.newage.core.ai.AiSuggestion
+import com.kaze.newage.core.ai.AiToolStep
 import com.kaze.newage.core.console.LineType
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
@@ -673,9 +674,61 @@ private fun ThinkingPanel(reasoning: String) {
     }
 }
 
+/**
+ * 工具执行时间线（Operit 式「执行过程可见」）：一步一行 ——
+ * 状态点（成功/进行中/失败；失败与拒绝上红）+ 做了什么 + 状态与耗时。
+ *
+ * 与 [ToolNoteRow] 的单行提示相比，关键差别是**失败不再伪装成成功**：
+ * 用户看到红点和「失败 · 320ms」，才知道这轮回答可能是缺数据给出的。
+ */
+@Composable
+private fun ToolStepsRow(steps: List<AiToolStep>) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = M3Spacing.screenMargin, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        steps.forEach { step ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val tone = when {
+                    step.status == AiToolStep.Status.OK -> MaterialTheme.colorScheme.primary
+                    step.status == AiToolStep.Status.RUNNING -> MaterialTheme.colorScheme.tertiary
+                    else -> MaterialTheme.colorScheme.error
+                }
+                Text("●", style = MaterialTheme.typography.labelSmall, color = tone)
+                Column(Modifier.weight(1f).padding(start = 6.dp)) {
+                    Text(
+                        AiSanitize.displayOneLine(step.title),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (step.isBad) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (step.detail.isNotBlank()) {
+                        Text(
+                            AiSanitize.displayOneLine(step.detail),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Text(
+                    step.statusText(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (step.isBad) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
 /** 工具动作行：轻量居中提示（读取/列出/写入了哪个文件），不占气泡 */
 @Composable
 private fun ToolNoteRow(msg: AppViewModel.AiChatMessage) {
+    // 有步骤就画时间线：状态与耗时都看得见
+    if (msg.steps.isNotEmpty()) {
+        ToolStepsRow(msg.steps)
+        return
+    }
     Text(
         "· ${AiSanitize.displayOneLine(msg.toolNote ?: "")} ·",
         style = MaterialTheme.typography.labelSmall,

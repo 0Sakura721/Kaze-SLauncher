@@ -10,6 +10,7 @@ import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiSearch
+import com.kaze.newage.core.ai.AiToolPolicy
 import com.kaze.newage.core.mcp.McpPorts
 import com.kaze.newage.core.mcp.McpServer
 import kotlinx.serialization.decodeFromString
@@ -306,6 +307,25 @@ emember(path) 缓存位图的话，
     fun setAiCommandMode(v: String) {
         aiCommandMode.value = v
         prefs.edit().putString("ai_command_mode", v).apply()
+    }
+
+    /**
+     * **每个工具**的权限档位（借鉴 Operit：Allow automatically / Ask every time / Deny）。
+     *
+     * 存的是一个字符串（`toolId=modeId;…`，见 [AiToolPolicy]）而不是每个工具一个键：
+     * 工具清单还会增长，用一条串可以让"读坏一个键"只影响策略本身、不影响别的设置。
+     * 只存被改动过的项 —— 默认值留在代码里，这样以后调整默认值对老用户同样生效。
+     */
+    val aiToolPolicies = mutableStateOf(prefs.getString("ai_tool_policies", "") ?: "")
+
+    /** 读某工具当前档位（未配置回落 [AiToolPolicy.defaultMode]） */
+    fun aiToolMode(toolId: String): AiToolPolicy.Mode =
+        AiToolPolicy.modeOf(aiToolPolicies.value, toolId)
+
+    fun setAiToolPolicy(toolId: String, mode: AiToolPolicy.Mode) {
+        val next = AiToolPolicy.encode(aiToolPolicies.value, toolId, mode)
+        aiToolPolicies.value = next
+        prefs.edit().putString("ai_tool_policies", next).apply()
     }
 
     // ── 联网搜索 ──
