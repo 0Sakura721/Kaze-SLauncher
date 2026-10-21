@@ -19,6 +19,7 @@ import com.kaze.newage.core.ai.AiContext
 import com.kaze.newage.core.ai.AiFileTools
 import com.kaze.newage.core.ai.AiHistoryTrim
 import com.kaze.newage.core.ai.AiToolPolicy
+import com.kaze.newage.core.ai.AiToolStep
 import com.kaze.newage.core.ai.AiMessage
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiPrompt
@@ -655,6 +656,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         /** 读取请求状态：0=待确认 1=已允许 2=已拒绝 */
         val readState: Int = 0,
         /**
+         * 本条消息的工具执行步骤（Operit 式"执行过程可见"）。
+         *
+         * 改造前工具执行只有一行 `· 读取 xxx ·` 小字，**成功与失败长得一样** ——
+         * 失败恰恰是最需要被看见的（否则用户会以为回答是基于数据给出的）。
+         * 空列表 = 这条消息不是工具执行结果。
+         */
+        val steps: List<AiToolStep> = emptyList(),
+        /**
          * 本条消息对应的实例。命令执行与文件写入都按这里记录的实例走，
          * 而不是"当前选中的实例" —— 用户在 AI 回答后切换实例再点按钮，
          * 不能把命令/写入落到另一个实例上。
@@ -1127,6 +1136,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 text = "已按你的设置跳过「$label」\n${AiSanitize.displayOneLine(tool.path)}",
                                 toolNote = "已按设置跳过「$label」",
                                 isError = true,
+                                steps = listOf(
+                                    AiToolStep(
+                                        title = "$label ${AiSanitize.displayOneLine(tool.path)}",
+                                        detail = "你在 AI 设置里把该工具设成了「禁止」",
+                                        status = AiToolStep.Status.DENIED,
+                                    )
+                                ),
                             )
                         )
                         session.apiMessages += AiMessage(
@@ -1174,8 +1190,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         else -> "抓取网页 ${AiSanitize.displayOneLine(tool.path)}"
                     }
                     val advisory = repeatGuard(session, "${tool.name}|${tool.path}")
+                    val startedAt = System.currentTimeMillis()
                     val result = runCatching { executeAiReadTool(tool.name, tool.path, session.instanceId) }
                         .getOrElse { "工具执行失败：${it.message}" }
+                    val elapsed = System.currentTimeMillis() - startedAt
                     // 失败必须让**用户**看见，不能只回喂模型：否则界面上只有"读取 xxx"，
                     // 用户既不知道没读到，也不知道这轮回答是在缺数据的情况下给出的
                     val failure = aiReadFailureNote(note, result)
@@ -1186,6 +1204,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             text = failure ?: parsed.analysis.ifBlank { note },
                             toolNote = note,
                             isError = failure != null,
+                            steps = listOf(
+                                AiToolStep(
+                                    title = note,
+                                    detail = if (failure != null) failure.take(120) else "",
+                                    status = if (failure != null) AiToolStep.Status.FAILED
+                                    else AiToolStep.Status.OK,
+                                    elapsedMs = elapsed,
+                                )
+                            ),
                         )
                     )
                     session.apiMessages += AiMessage(
@@ -1227,6 +1254,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                                 toolNote = "已按设置阻止写入",
                                 isError = true,
                                 instanceId = session.instanceId,
+                                steps = listOf(
+                                    AiToolStep(
+                                        title = "写入 ${AiSanitize.displayOneLine(tool.path)}",
+                                        detail = "你在 AI 设置里把「写入文件」设成了「禁止」",
+                                        status = AiToolStep.Status.DENIED,
+                                    )
+                                ),
                             )
                         )
                         session.apiMessages += AiMessage(
@@ -1343,6 +1377,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                             toolNote = "已按设置阻止写入",
                             isError = true,
                             instanceId = session.instanceId,
+                            steps = listOf(
+                                AiToolStep(
+                                    title = "写入 ${AiSanitize.displayOneLine(args.path)}",
+                                    detail = "你在 AI 设置里把「写入文件」设成了「禁止」",
+                                    status = AiToolStep.Status.DENIED,
+                                )
+                            ),
                         )
                     )
                     session.apiMessages += AiMessage(
@@ -1430,6 +1471,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                         text = "已按你的设置跳过「$label」\n${AiSanitize.displayOneLine(targetPath)}",
                         toolNote = "已按设置跳过「$label」",
                         isError = true,
+                        steps = listOf(
+                            AiToolStep(
+                                title = "$label ${AiSanitize.displayOneLine(targetPath)}",
+                                detail = "你在 AI 设置里把该工具设成了「禁止」",
+                                status = AiToolStep.Status.DENIED,
+                            )
+                        ),
                     )
                 )
                 session.apiMessages += AiMessage(
@@ -1472,8 +1520,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 "list_dir" -> "列出 ${AiSanitize.displayOneLine(targetPath)}"
                 else -> "抓取网页 ${AiSanitize.displayOneLine(targetPath)}"
             }
+            val startedAt = System.currentTimeMillis()
             val result = runCatching { executeAiReadTool(name, targetPath, session.instanceId) }
                 .getOrElse { "工具执行失败：${it.message}" }
+            val elapsed = System.currentTimeMillis() - startedAt
             val failure = aiReadFailureNote(note, result)
             appendAiMessage(
                 AiChatMessage(
@@ -1481,6 +1531,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                     text = failure ?: note,
                     toolNote = note,
                     isError = failure != null,
+                    steps = listOf(
+                        AiToolStep(
+                            title = note,
+                            detail = if (failure != null) failure.take(120) else "",
+                            status = if (failure != null) AiToolStep.Status.FAILED
+                            else AiToolStep.Status.OK,
+                            elapsedMs = elapsed,
+                        )
+                    ),
                 )
             )
             session.apiMessages += AiMessage(
