@@ -17,6 +17,7 @@ import com.kaze.newage.core.ai.AiAudit
 import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiContext
 import com.kaze.newage.core.ai.AiFileTools
+import com.kaze.newage.core.ai.AiHistoryTrim
 import com.kaze.newage.core.ai.AiMessage
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiPrompt
@@ -1019,6 +1020,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 return
             }
             session.roundsLeft--
+            // 长对话裁剪：工具循环会持续往 apiMessages 里追加 assistant/tool 消息，
+            // 不裁必然超出模型上下文（严格服务端直接 400）。规则见 [AiHistoryTrim]：
+            // system 永不丢、最近 N 轮保底、按字符预算从旧到新丢、tool_calls 与结果同生共死。
+            applyHistoryTrim(session)
             val deadline = System.currentTimeMillis() +
                 if (session.config.thinking) AI_THINKING_REPLY_TIMEOUT_MS else AI_REPLY_TIMEOUT_MS
             var deadlineFired = false
@@ -1423,6 +1428,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         return true
+    }
+
+    /**
+     * 每次请求前就地裁剪 [AiTurnSession.apiMessages]。
+     *
+     * 会话持有的是同一个 MutableList（挂起恢复的路径也引用它），所以只能清空后回填，
+     * 不能换成新对象。纯逻辑在 [AiHistoryTrim]（可单测）：这里只负责搬运。
+     */
+    private fun applyHistoryTrim(session: AiTurnSession) {
+        val trimmed = AiHistoryTrim.trim(session.apiMessages)
+        if (trimmed == session.apiMessages) return
+        session.apiMessages.clear()
+        session.apiMessages.addAll(trimmed)
     }
 
     private fun appendFinalAiMessage(

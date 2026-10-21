@@ -217,6 +217,12 @@ object AiClient {
      * SSE 行协议：`data: {chunk}` / `data: [DONE]`；`:` 开头的 keep-alive 注释跳过。
      * [shouldStop] 在每行边界检查（取消 / 整体超时），命中时**停止读取**并返回
      * 已累积的半成品（[AiReply.aborted] = true）—— socket 由 finally 关闭。
+     *
+     * 思考内容有两个来源，都会实时走 `onDelta(reasoningDelta=…)`：
+     *  1. 官方协议的独立字段 `reasoning_content`；
+     *  2. 把推理混在正文里的服务商 —— 正文增量由 [AiThinkParser] 流式剥离
+     *     `<think>` / `<thinking>` 段（支持标签跨 chunk 切断），正文保持干净。
+     * 结束时两条来源合并进 [AiReply.reasoning]，不会互相覆盖或重复。
      */
     fun chatStream(
         config: AiConfig,
@@ -245,8 +251,19 @@ object AiClient {
         // 登记在飞连接：取消/离开页面时才能真的把它掐断（见 [activeCall]）。
         // 用 CAS 清理而不是 set(null)：两轮请求交错时，后结束的那个不该把新登记的那条抹掉。
         activeCall.set(conn)
-        val reasoning = StringBuilder()
+        val nativeReasoning = StringBuilder()
+        val inlineReasoning = StringBuilder()
         val content = StringBuilder()
+        // 正文增量先过 <think> 状态机：思考段的文本进 reasoning，其余进正文
+        val think = AiThinkParser { isThinking, text ->
+            if (isThinking) {
+                inlineReasoning.append(text)
+                onDelta(text, null)
+            } else {
+                content.append(text)
+                onDelta(null, text)
+            }
+        }
         var usage: AiUsage? = null
         val toolCallsById = LinkedHashMap<Int, StringBuilder>()          // arguments 分片
         val toolCallNames = LinkedHashMap<Int, String>()
@@ -313,12 +330,13 @@ object AiClient {
                     chunk.usage?.let { usage = it.toAiUsage() }
                     val delta = chunk.choices.firstOrNull()?.delta ?: continue
                     delta.reasoning_content?.takeIf { it.isNotEmpty() }?.let {
-                        reasoning.append(it)
+                        nativeReasoning.append(it)
                         onDelta(it, null)
                     }
-                    delta.content?.takeIf { it.isNotEmpty() }?.let {
-                        content.append(it)
-                        onDelta(null, it)
+                    // 正文交给状态机分流；一个 chunk 里可能同时包含正文与思考段，
+                    // 也可能只包含半个标签（此时不会有任何回调，等下一个 chunk）
+                    delta.content?.takeIf { it.isNotEmpty() }?.let { chunkText ->
+                        think.accept(chunkText)
                     }
                     for (tc in delta.tool_calls) {
                         tc.id?.let { toolCallIds[tc.index] = it }
@@ -333,6 +351,8 @@ object AiClient {
                 // 看门狗 disconnect 后 readLine 可能返回 null（流被关）而不是抛异常：
                 // 出循环后再确认一次停止条件，别把被中止的半成品当完整回答
                 if (!aborted && shouldStop()) aborted = true
+                // 收尾：未闭合的思考段内容已经实时进 reasoning，残留的半个标签丢弃
+                think.finish()
             }
             done.set(true)
             watchdog.interrupt()
@@ -347,7 +367,7 @@ object AiClient {
                 )
             }
             return AiReply(
-                reasoning = reasoning.toString().takeIf { it.isNotBlank() },
+                reasoning = mergeReasoning(nativeReasoning.toString(), inlineReasoning.toString()),
                 content = content.toString(),
                 usage = usage,
                 toolCalls = toolCalls,
@@ -356,10 +376,11 @@ object AiClient {
                 aborted = aborted,
             )
         } catch (e: IOException) {
+            think.finish()
             // 半成品也保得住：流中断时已有内容的场景，交给调用方决定展示或报错
-            if (content.isNotEmpty() || reasoning.isNotEmpty()) {
+            if (content.isNotEmpty() || nativeReasoning.isNotEmpty() || inlineReasoning.isNotEmpty()) {
                 return AiReply(
-                    reasoning = reasoning.toString().takeIf { it.isNotBlank() },
+                    reasoning = mergeReasoning(nativeReasoning.toString(), inlineReasoning.toString()),
                     content = content.toString(),
                     usage = usage,
                     aborted = true,
