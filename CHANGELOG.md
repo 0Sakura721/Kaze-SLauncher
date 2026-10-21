@@ -5,6 +5,26 @@
 
 ---
 
+## [0.5.3] - 2026-10-21
+
+### Added
+
+- **流式输出思考过程**：正文里内联的 ` thinking` / `<thinking>` 段现在也**实时**分流进「思考过程」（此前只有原生 `reasoning_content` 字段会流式；内联那批要等整轮结束才被事后拆出来，观感是「思考先出现在正文、结束时又突然跳进折叠面板」）。标签被切在两个流式分片之间（`<thi` + `nk>`）也不会漏出半截标签；原生与内联两条来源合并去重
+- **每个工具可单独设权限**（借鉴 Operit 的 Allow automatically / Ask every time / Deny）：读取文件、列目录、抓取网页默认「自动」；写入文件默认「每次询问」；也可设为「禁止」（永不执行，并会告诉模型它被禁用了，免得反复重试）。设置页新增「工具权限」分组。**两种工具协议都拦**，换协议绕不过去；读取敏感文件（凭据、ops.json、开了 rcon 的 server.properties）始终要确认，不随「自动」放宽
+- **工具执行时间线**：每次工具执行显示状态与耗时（成功/进行中/失败/已拒绝/已跳过），失败与拒绝上红 —— 此前只有一行小字，成功与失败长得一样
+- **长对话自动裁剪**：历史按字符预算丢弃更早的消息，但保证工具调用与其结果同生共死、system 提示与最近若干轮保底 —— 此前历史只增不减，长对话必然超出模型上下文
+
+### Fixed
+
+- 修崩溃：`kaze-ai-watchdog` 线程的 `InterruptedException` 未捕获，导致每次流式对话正常结束都可能 `FATAL EXCEPTION` 掉整个应用
+- 修测试 flake：`ConsoleFollowTest` 用后台线程驱动 Compose，偶发 `Detected multithreaded access to SnapshotStateObserver`
+
+### 合规（许可证）
+
+- 许可证全文随 APK 提供（GPL-3.0 第 4/5 条），应用内可滚动查看
+- 新增 `COPYRIGHT`：版权归属、`GPL-3.0-or-later` 的取舍理由、为何不能改成 MIT/Apache
+- 构建新增 `syncLicenseAssets`：从仓库根目录自动同步许可证文本进 assets，避免脱节
+
 ## [0.5.2] - 2026-10-18
 
 ### Added
