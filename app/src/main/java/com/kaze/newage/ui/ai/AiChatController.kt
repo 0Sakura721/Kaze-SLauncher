@@ -631,6 +631,46 @@ class AiChatController(private val host: AiChatHost) {
                     // 而不是被迫在"允许"和"放弃"之间二选一）。
                     val target = session.instanceId?.let { host.instanceStore.get(it) }
                     val policy = AiFileTools.writePolicyFor(target?.dir, tool.path)
+                    // 每工具权限的第三档：**AUTO 直接写**。
+                    // 旧实现只在上面拦了 DENY，之后无条件挂起确认 —— 于是把「写入文件」设成
+                    // 「自动」也照样弹卡，三档里的 AUTO 形同虚设（用户明确选的档位必须生效）。
+                    // 结构性禁止与 DENY 仍在其前拦下，所以 AUTO 只是"跳过人工确认"，不是给后门。
+                    if (AiToolPolicy.modeOf(host.uiPrefs.aiToolPolicies.value, "write_file")
+                        == AiToolPolicy.Mode.AUTO && policy.forbidden == null
+                    ) {
+                        val startedAt = System.currentTimeMillis()
+                        val written = runCatching {
+                            AiFileTools.writeFile(target!!.dir, tool.path, tool.content)
+                        }
+                        val elapsed = System.currentTimeMillis() - startedAt
+                        val ok = written.isSuccess
+                        val detail = written.getOrElse { "失败：${it.message}" }
+                        appendAiMessage(
+                            AiChatMessage(
+                                id = nextAiId(), isUser = false,
+                                text = if (ok) "已按设置自动写入 ${tool.path}\n$detail"
+                                else "自动写入失败：${tool.path}\n$detail",
+                                toolNote = if (ok) "已自动写入 ${tool.path}" else "自动写入失败",
+                                isError = !ok,
+                                instanceId = session.instanceId,
+                                steps = listOf(
+                                    AiToolStep(
+                                        title = "写入 ${AiSanitize.displayOneLine(tool.path)}",
+                                        detail = if (ok) "已按你的设置自动写入（无需确认）" else detail,
+                                        status = if (ok) AiToolStep.Status.OK else AiToolStep.Status.FAILED,
+                                        elapsedMs = elapsed,
+                                    )
+                                ),
+                            )
+                        )
+                        session.apiMessages += AiMessage(
+                            AiMessage.ROLE_USER,
+                            "【工具结果】write_file \"${tool.path}\" → " +
+                                if (ok) "已写入（用户已把该工具设为自动）：$detail"
+                                else "失败：$detail",
+                        )
+                        continue
+                    }
                     if (policy.forbidden != null) {
                         appendAiMessage(
                             AiChatMessage(
@@ -752,6 +792,43 @@ class AiChatController(private val host: AiChatHost) {
                 }
                 val target = session.instanceId?.let { host.instanceStore.get(it) }
                 val policy = AiFileTools.writePolicyFor(target?.dir, args.path)
+                // 每工具权限的第三档：AUTO 直接写（与 JSON 协议同一套语义，
+                // 否则换个协议就能绕过用户的档位设置）。结构性禁止与 DENY 仍在其前拦下。
+                if (AiToolPolicy.modeOf(host.uiPrefs.aiToolPolicies.value, "write_file")
+                    == AiToolPolicy.Mode.AUTO && policy.forbidden == null
+                ) {
+                    val startedAt = System.currentTimeMillis()
+                    val written = runCatching {
+                        AiFileTools.writeFile(target!!.dir, args.path, args.content)
+                    }
+                    val elapsed = System.currentTimeMillis() - startedAt
+                    val ok = written.isSuccess
+                    val detail = written.getOrElse { "失败：${it.message}" }
+                    appendAiMessage(
+                        AiChatMessage(
+                            id = nextAiId(), isUser = false,
+                            text = if (ok) "已按设置自动写入 ${args.path}\n$detail"
+                            else "自动写入失败：${args.path}\n$detail",
+                            toolNote = if (ok) "已自动写入 ${args.path}" else "自动写入失败",
+                            isError = !ok,
+                            instanceId = session.instanceId,
+                            steps = listOf(
+                                AiToolStep(
+                                    title = "写入 ${AiSanitize.displayOneLine(args.path)}",
+                                    detail = if (ok) "已按你的设置自动写入（无需确认）" else detail,
+                                    status = if (ok) AiToolStep.Status.OK else AiToolStep.Status.FAILED,
+                                    elapsedMs = elapsed,
+                                )
+                            ),
+                        )
+                    )
+                    session.apiMessages += AiMessage(
+                        AiMessage.ROLE_TOOL,
+                        if (ok) "已写入（用户已把该工具设为自动）：$detail" else "失败：$detail",
+                        toolCallId = tc.id,
+                    )
+                    continue
+                }
                 if (policy.forbidden != null) {
                     appendAiMessage(
                         AiChatMessage(
