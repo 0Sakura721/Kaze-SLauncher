@@ -53,19 +53,35 @@ internal object AiHistoryTrim {
 
         // "最近 N 轮"的起点：倒数第 N 个真实用户消息
         val roundStarts = body.indices.filter { isRoundStart(body[it]) }
-        val keepFrom = if (roundStarts.size > maxRounds) roundStarts[roundStarts.size - maxRounds] else 0
+        val keepFromMsg = if (roundStarts.size > maxRounds) roundStarts[roundStarts.size - maxRounds] else 0
 
         val units = buildUnits(body)
         val systemChars = system?.let(::charCount) ?: 0
         var total = systemChars + units.sumOf { it.chars }
-        val kept = ArrayList<Unit>(units.size)
-        for (unit in units) {
-            // 只在"整段都在最近 N 轮之前"时才允许丢；旧到新扫，预算够了就停
-            if (unit.last < keepFrom && total > charBudget) {
-                total -= unit.chars
-            } else {
-                kept += unit
+
+        // 最近 N 轮的单元下标（units 里从哪一条开始不能再丢）：
+        // 注意**不能**用 "unit.last < keepFromMsg" 直接判定 —— 单轮工具循环里全轮只有 1 条
+        // 真实用户消息（其余 role=tool 会被 isToolResultUser 排除），此时 keepFromMsg 恒为 0，
+        // 条件 `unit.last < 0` 永远为假，预算分支就**一次都不会触发**，长对话实际上不会被裁剪。
+        // 正确做法：先算出"最近 N 轮从哪个 unit 开始"，再对**它之前**的单元按预算从旧到新丢。
+        val keepFromUnit = units.indexOfFirst { it.last >= keepFromMsg }.let {
+            if (it < 0) units.size else it
+        }
+
+        // 第一遍：最近 N 轮的单元一律保留（这是保底，不受预算影响）
+        // 第二遍：更早的单元按"从旧到新丢、丢了就够预算就停"处理
+        val kept = ArrayDeque<Unit>(units.size)
+        var keptChars = systemChars
+        // 从最新往旧扫，攒够预算就停（等价于"旧到新丢"，但从新往旧扫更直观）
+        val protectedStart = keepFromUnit
+        for (i in units.indices.reversed()) {
+            val u = units[i]
+            val protected = i >= protectedStart
+            if (protected || keptChars + u.chars <= charBudget) {
+                kept.addFirst(u)
+                keptChars += u.chars
             }
+            // 否则就是被丢掉（超出预算且不在保底范围内）
         }
 
         val keptMessages = kept.flatMap { it.messages }
