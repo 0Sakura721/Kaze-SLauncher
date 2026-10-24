@@ -162,7 +162,7 @@ object Downloader {
                 }
                 try {
                     out.fd.sync() // 强制落盘
-                } catch (_: Exception) { }
+                } catch (e: Exception) { android.util.Log.w("KazeDL", "fsync 失败：数据可能未完全落盘", e) }
             }
             if (downloaded == 0L && dest.length() == 0L && total != 0L) {
                 throw RuntimeException("下载内容为空（Content-Length=$total）")

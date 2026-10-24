@@ -449,7 +449,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 android.net.Uri.parse("package:${container.appContext.packageName}"),
             ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             container.appContext.startActivity(intent)
-        } catch (_: Exception) { }
+        } catch (e: Exception) { android.util.Log.w("KazeApp", "请求忽略电池优化失败", e) }
     }
 
     /**
@@ -2245,7 +2245,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 container.appContext.contentResolver.openOutputStream(uri)?.use { out ->
                     out.write(text.toByteArray(Charsets.UTF_8))
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                android.util.Log.w("KazeApp", "导出控制台日志失败", e)
+                // 静默失败会让用户以为"已经保存了"。导出是明确的一次用户操作，失败必须说出来
+                viewModelScope.launch(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        container.appContext,
+                        "保存失败：${e.message ?: e.javaClass.simpleName}",
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
         }
     }
 
@@ -2264,7 +2274,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 ) as android.content.ClipboardManager
                 cm.setPrimaryClip(android.content.ClipData.newPlainText("Kaze 日志", text))
                 android.widget.Toast.makeText(ctx, "已复制完整日志", android.widget.Toast.LENGTH_SHORT).show()
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                android.util.Log.w("KazeApp", "复制日志到剪贴板失败", e)
+                // 本协程已在 Main 上，可直接弹提示：复制失败却提示"已复制"是明确的错误反馈
+                android.widget.Toast.makeText(
+                    ctx,
+                    "复制失败：${e.message ?: e.javaClass.simpleName}",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 

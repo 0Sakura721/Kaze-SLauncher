@@ -193,7 +193,15 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 // 选图即用：解码压缩保存（显示端自适应铺满 + 模糊/遮罩），无需手动裁剪
                 uiPrefs.saveBackgroundImage(uri)
                 uiPrefs.setBgEnabled(true)
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                android.util.Log.w("KazeSettings", "设置背景图失败", e)
+                // 选图即用却什么都不发生，用户只会重复试。必须给出可见原因
+                android.widget.Toast.makeText(
+                    appContext,
+                    "背景图设置失败：${e.message ?: e.javaClass.simpleName}",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 
@@ -299,7 +307,10 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     Uri.parse("package:${appContext.packageName}"),
                 )
             )
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+                android.util.Log.w("KazeSettings", "请求忽略电池优化失败", e)
+                android.widget.Toast.makeText(appContext, "系统未提供该设置入口（部分机型会屏蔽）", android.widget.Toast.LENGTH_SHORT).show()
+            }
     }
 
     // ── 检查更新：状态与下载都在 ViewModel 里（见 AppUpdateState）──

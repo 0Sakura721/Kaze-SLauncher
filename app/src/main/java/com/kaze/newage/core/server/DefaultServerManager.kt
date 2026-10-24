@@ -506,7 +506,7 @@ class DefaultServerManager(
                     val id = Regex(""""id"\s*:\s*"([^"]+)"""").find(text)?.groupValues?.get(1)
                     if (!id.isNullOrBlank()) return id
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) { android.util.Log.w("KazeServer", "读取 jar 内 version.json 失败，回退到实例记录的版本", e) }
         }
         return instance.mcVersion
     }
@@ -627,7 +627,7 @@ class DefaultServerManager(
                     }
                     if (sb.isNotEmpty()) flushLine(replace = false)
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) { android.util.Log.w("KazeServer", "控制台输出读取异常，该行已跳过", e) }
         }
 
         // 退出监控

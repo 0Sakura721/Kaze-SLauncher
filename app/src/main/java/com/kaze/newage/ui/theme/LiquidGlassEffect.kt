@@ -83,6 +83,8 @@ fun Modifier.glassBackdropBlur(
                 try {
                     val raw = smallLayer.toImageBitmap().asAndroidBitmap()
                     cached = com.kaze.newage.util.StackBlur.blur(raw, blurRadiusPx).asImageBitmap()
+                // 刻意吞掉：离屏模糊每帧都可能失败（GPU 资源紧张），失败就沿用上一帧缓存；
+                // 这里刷日志会把日志文件写爆，也会拖慢动画
                 } catch (_: Exception) { }
             }
         }

@@ -137,7 +137,7 @@ class ProotEnvironment(
                     }
                 }
                 f.setExecutable(true)
-            } catch (_: Exception) { }
+            } catch (e: Exception) { android.util.Log.w("KazeProot", "从 APK 抽取 libproot 失败：proot 将无法运行", e) }
         }
         return f
     }
@@ -211,7 +211,7 @@ class ProotEnvironment(
                     }
                 }
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) { android.util.Log.w("KazeProot", "复制系统 lib 失败（回退到内置版本）", e) }
     }
 
     private val isAarch64: Boolean
@@ -275,6 +275,7 @@ class ProotEnvironment(
                     }
                 }
             }
+        // 刻意吞掉：符号链接失败有上层兜底（proot -b 绑定同一份目录），这里不打扰用户
         } catch (_: Exception) { }
     }
 
@@ -291,6 +292,7 @@ class ProotEnvironment(
                     "armv7\tarmhf\narmv7l\tarmhf\narmv7b\tarmhf\narmv6\tarmhf\n" +
                         "aarch64\tarm64\narmv8\tarm64\narmv8l\tarm64\n"
                 )
+            // 刻意吞掉：cpu-table 只是给 apt 认架构用的兼容性小文件，写不进也不影响运行
             } catch (_: Exception) { }
         }
     }
@@ -1031,6 +1033,7 @@ class ProotEnvironment(
             override fun write(b: ByteArray, off: Int, len: Int) {}
         }
         Thread {
+            // 刻意吞掉：这里只是把 tar 的输出流读空防止管道写满，内容本来就丢弃（见上方注释）
             try { proc.inputStream.use { it.copyTo(sink) } } catch (_: Exception) { }
         }.apply { isDaemon = true; name = "tar-sink" }.start()
         // 老设备/坏归档可能极慢：超时强杀，避免部署界面无限挂起

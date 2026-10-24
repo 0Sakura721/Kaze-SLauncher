@@ -167,7 +167,7 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                 } catch (e: InterruptedException) {
                     runCatching { targetDir.deleteRecursively() }
                     return@withContext null
-                } catch (_: Exception) { }
+                } catch (e: Exception) { android.util.Log.w("KazeJava", "迁移已有 JDK 失败（将退回重新安装）", e) }
                 if (File(targetDir, "bin/java").exists()) {
                     File(targetDir, "bin/java").setExecutable(true)
                     return@withContext JavaRuntime(majorVersion.toString(), targetDir, archSuffix())
@@ -195,7 +195,7 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
                 val pkg = bin.optJSONObject("package") ?: org.json.JSONObject()
                 fileName = pkg.optString("name").takeIf { it.isNotBlank() } ?: fileName
                 githubLink = pkg.optString("link").takeIf { it.isNotBlank() }
-            } catch (_: Exception) { }
+            } catch (e: Exception) { android.util.Log.w("KazeJava", "解析 JDK 下载信息失败，改用兜底来源", e) }
             if (fileName.isNullOrBlank()) {
                 // 兜底：华为目录页（格式与 TUNA 不同，仅解析文件名）
                 fileName = runCatching {

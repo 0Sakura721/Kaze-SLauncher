@@ -62,6 +62,7 @@ class ServerGuardService : Service() {
     override fun onDestroy() {
         try {
             wakeLock?.takeIf { it.isHeld }?.release()
+        // 刻意吞掉：onDestroy 里释放唤醒锁，失败也无补救手段（进程即将退出）
         } catch (_: Exception) { }
         wakeLock = null
         super.onDestroy()
