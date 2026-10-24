@@ -265,6 +265,7 @@ object TarExtractor {
                                 }
                             }
                         }
+                    // 刻意吞掉：目录型链接交上层修复（见上方说明），不算解压失败
                     } catch (_: Exception) { }
                 }
             }
@@ -276,6 +277,7 @@ object TarExtractor {
             try {
                 val p = Runtime.getRuntime().exec(arrayOf("sync"))
                 p.waitFor()
+            // 刻意吞掉：sync 只是尽力回刷 FUSE，失败不该影响解压结果判定
             } catch (_: Exception) { }
         } finally {
             rawInput.close()
