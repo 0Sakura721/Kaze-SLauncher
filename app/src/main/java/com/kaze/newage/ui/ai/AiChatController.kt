@@ -1304,7 +1304,8 @@ class AiChatController(private val host: AiChatHost) {
             ?: AiMessage(AiMessage.ROLE_USER, text)
 
     /**
-     * 执行 AI 建议的命令：与用户手输命令完全同一条路（[sendCommand] → 服务端 stdin）。
+     * 执行 AI 建议的命令：与用户手输命令完全同一条路（走宿主的 ServerManager.sendCommand →
+     * 服务端 stdin；原先这里写成 KDoc 链接 `[sendCommand]`，但该成员不在本类里，链接是悬空的）。
      *
      * P0 的安全边界：命令在解析时已清洗（单条、无换行），这里**再清洗一次**防绕过；
      * 服务端未运行时直接拒绝（stdin 不存在，发了也没人收，界面上按钮同样禁用）。

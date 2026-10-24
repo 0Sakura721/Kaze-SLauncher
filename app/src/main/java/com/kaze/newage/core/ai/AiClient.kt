@@ -517,7 +517,8 @@ object AiClient {
 
     /**
      * 同步发起一轮对话，返回 assistant 文本。**阻塞调用**：必须在 IO 线程跑
-     * （调用方负责放独立线程 + 界面可见超时，见 AppViewModel.askAi）。
+     * （调用方负责放独立线程 + 界面可见超时，见 ui/ai/AiChatController.askAi ——
+     * 该方法原先在 AppViewModel 里，重构后已搬进 AiChatController）。
      */
     fun chat(config: AiConfig, messages: List<AiMessage>, maxTokens: Int = 1024): AiReply {
         val endpoint = config.endpoint
