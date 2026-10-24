@@ -111,21 +111,44 @@ class AiCommandGateLoopTest {
     }
 
     @Test
-    fun `仅建议档不会把 execute_command 交给模型`() {
-        val suggest = AiLoopHarness(listOf(Sse.final("好的")), model = JSON_MODEL)
+    fun `原生协议的工具清单随命令档位增减 execute_command`() {
+        // 默认 model = deepseek-flash：命中 AiClient.supportsNativeThinkingParam → 原生工具协议
+        val suggest = AiLoopHarness(listOf(Sse.final("好的")))
         try {
             suggest.ask()
-            // 说明：原生工具清单只对**官方 DeepSeek 端点**下发
-            // （AiClient.supportsNativeThinkingParam 判定）。这个 harness 用的是 JSON 夹带
-            // 协议的本地假端点，请求体里本来就没有 tools 字段 —— 拿 toolNames(0) 断言
-            // 必然失败。这里断言真正成立的事实：请求体里不出现 execute_command。
-            // （原生协议下"工具清单随档位增减"由 AiToolPermissionLoopTest 的原生用例覆盖。）
+            val tools = suggest.toolNames(0)
+            assertTrue("原生协议应当拿到文件工具清单，否则这个断言没有意义", tools.contains("read_file"))
             assertFalse(
-                "仅建议档不该把 execute_command 交给模型",
-                suggest.requestBodyText(0).contains("\"execute_command\""),
+                "仅建议档不该把 execute_command 交给模型（工具列表里没有 = 模型不会调用）",
+                tools.contains("execute_command"),
             )
         } finally {
             suggest.close()
+        }
+
+        val all = AiLoopHarness(listOf(Sse.final("好的")))
+        try {
+            all.prefs.setAiCommandMode(AiCommandPolicy.Mode.ALL.id)
+            all.ask()
+            assertTrue(
+                "全部自动档才把 execute_command 并入工具清单",
+                all.toolNames(0).contains("execute_command"),
+            )
+        } finally {
+            all.close()
+        }
+    }
+
+    @Test
+    fun `JSON 夹带协议不下发原生工具清单`() {
+        val h = AiLoopHarness(listOf(Sse.final("好的")), model = JSON_MODEL)
+        try {
+            h.ask()
+            assertTrue("JSON 夹带协议没有 tools 字段", h.toolNames(0).isEmpty())
+            // 第三方模型只能靠正文里的 JSON 夹带请求工具，工具清单本身绝不出现
+            assertFalse(h.requestBodyText(0).contains("\"execute_command\""))
+        } finally {
+            h.close()
         }
     }
 

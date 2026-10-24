@@ -407,11 +407,18 @@ internal class AiLoopHarness(
             arr.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.content }
         }.toSet()
 
-    fun toolNames(index: Int): List<String> =
-        requestMessages(index).flatMap { el ->
-            val arr = el.jsonObject["tools"]?.jsonArray ?: return@flatMap emptyList()
-            arr.mapNotNull { it.jsonObject["function"]?.jsonObject?.get("name")?.jsonPrimitive?.content }
+    /**
+     * 第 [index] 轮请求里下发给模型的工具名清单。
+     *
+     * `tools` 是**请求体顶层字段**（不是 messages 里的一项）—— 原生 function calling 才下发；
+     * JSON 夹带协议下这个列表恒为空，所以只能用在原生协议的场景里。
+     */
+    fun toolNames(index: Int): List<String> {
+        val arr = endpoint.requests[index]["tools"] as? JsonArray ?: return emptyList()
+        return arr.mapNotNull {
+            it.jsonObject["function"]?.jsonObject?.get("name")?.jsonPrimitive?.content
         }
+    }
 
     /** 第 [index] 轮请求里有原生工具调用的 assistant 消息全文（含 tool_calls 原样回喂） */
     fun assistantToolCallMessages(index: Int): List<JsonObject> =
