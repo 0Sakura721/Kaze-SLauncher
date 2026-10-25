@@ -151,6 +151,9 @@ signingConfig = if (hasReleaseKey) signingConfigs.getByName("release") else null
    单测本身不能替代的两类东西（真机 UI / 真机权限流程）要单独标注"需真机验证"。
 
 6. **AI 模块的测试不要连真实端点。** 网络路径用手写 `ServerSocket` 的本地假端点
+   （见 `AiToolLoopHarness`）；工具循环用假宿主（`AiChatHost`）驱动，不要为了测试去改生产代码的线程模型或可见性。
+7. **技能（skills）只是文档，不是插件。** `AiSkills` 负责扫描实例目录下 `skills/<名字>/SKILL.md` 并把**清单**拼进系统提示；正文由模型按需 `read_file`。不要给它加「执行脚本」能力 —— 那会把一个纯文档目录变成执行入口。
+8. **编译与测试交给 GitHub 工作流，本地不跑 Gradle。** 本机跑完整构建既慢又占资源，而且本地环境与 CI 不同（历史上出现过「CI 抓到本地没抓到的编译错」）。本地只做 `git` 与文件编辑，验证一律 dispatch `ci.yml` / `apk-build.yml`（见 `ci_verify.py` 的用法）。
    （`AiBodyLimitTest`，单测 bootclasspath 是 android.jar，没有 `com.sun.net.httpserver`）；
    加解密走 Keystore 的路径在 Robolectric 上必然降级为明文兜底，只能验证槽位/迁移逻辑，
    加密本身需真机验证。
