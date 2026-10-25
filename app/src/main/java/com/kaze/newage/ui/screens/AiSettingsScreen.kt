@@ -430,7 +430,9 @@ private fun CommandModeSection(viewModel: AppViewModel) {
  */
 @Composable
 private fun SkillsSection(viewModel: AppViewModel) {
-    val disabled by viewModel.uiPrefs.aiDisabledSkills.collectAsStateWithLifecycle()
+    // aiDisabledSkills 是 Compose 的 mutableStateOf（State），本身就可观察；
+    // 不要用 collectAsStateWithLifecycle（那是给 StateFlow 的）
+    val disabled = viewModel.uiPrefs.aiDisabledSkills.value
     // 每次进入设置页重新扫一次：用户可能刚把技能目录拷进 /sdcard
     var scan by remember { mutableStateOf(viewModel.installedSkills()) }
 
