@@ -1,5 +1,7 @@
 package com.kaze.newage.ui.screens
 
+import androidx.compose.material.icons.filled.Refresh
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
+import androidx.compose.material3.Switch
+import com.kaze.newage.core.ai.AiSkills
 import com.kaze.newage.core.ai.AiCommandPolicy
 import com.kaze.newage.core.ai.AiToolPolicy
 import com.kaze.newage.core.ai.AiProfile
@@ -122,6 +126,7 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             CommandModeSection(viewModel)
     ToolPolicySection(viewModel)
+    SkillsSection(viewModel)
             Spacer(Modifier.height(8.dp))
         }
         Spacer(Modifier.height(32.dp))
@@ -414,6 +419,100 @@ private fun CommandModeSection(viewModel: AppViewModel) {
 }
 
 // ── 每个工具的权限（借鉴 Operit：Allow automatically / Ask every time / Deny）──
+
+// ── 技能（本地 md）──
+
+/**
+ * 技能：用户放在 `<实例目录>/skills/<名字>/SKILL.md` 的本地文档。
+ *
+ * 这里只展示"当前实例"的（技能是跟着实例走的：一个整合包的玩法说明对另一个服没用）。
+ * 开关状态存在 prefs 的「禁用名单」里 —— 新拷进来的技能默认启用。
+ */
+@Composable
+private fun SkillsSection(viewModel: AppViewModel) {
+    // aiDisabledSkills 是 Compose 的 mutableStateOf（State），本身就可观察；
+    // 不要用 collectAsStateWithLifecycle（那是给 StateFlow 的）
+    val disabled = viewModel.uiPrefs.aiDisabledSkills.value
+    // 每次进入设置页重新扫一次：用户可能刚把技能目录拷进 /sdcard
+    var scan by remember { mutableStateOf(viewModel.installedSkills()) }
+
+    SectionTitle("技能")
+    SectionNote(
+        "把技能放进实例目录的 skills/<名字>/SKILL.md，AI 就会知道它、需要时自己读取。" +
+            "技能是你自己的本地文件（不联网、不下载）；这里可以逐个关掉，" +
+            "关掉的技能不会出现在 AI 的清单里。"
+    )
+    Spacer(Modifier.height(8.dp))
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = M3Spacing.screenMargin),
+        shape = M3Shape.largeIncreased,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        onClick = { scan = viewModel.installedSkills() },
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("刷新技能列表", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "当前实例：${scan.skills.size} 个技能" +
+                        if (scan.warnings.isNotEmpty()) "，${scan.warnings.size} 个有问题" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.Filled.Refresh,
+                contentDescription = "刷新",
+                modifier = Modifier.padding(4.dp),
+            )
+        }
+    }
+
+    if (scan.skills.isEmpty()) {
+        SectionNote("还没有技能。在实例目录下建 skills/<名字>/SKILL.md 即可（可以从别处拷）。")
+    }
+    scan.skills.forEach { skill ->
+        val enabled = skill.id !in disabled
+        Surface(
+            modifier = Modifier.fillMaxWidth()
+                .padding(horizontal = M3Spacing.screenMargin, vertical = 4.dp),
+            shape = M3Shape.largeIncreased,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Row(
+                Modifier.padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(skill.name, style = MaterialTheme.typography.titleSmall)
+                    if (skill.description.isNotBlank()) {
+                        Text(
+                            skill.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text(
+                        skill.relativePath,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                Switch(
+                    checked = enabled,
+                    onCheckedChange = { viewModel.setSkillEnabled(skill.id, it) },
+                )
+            }
+        }
+    }
+    scan.warnings.forEach { w ->
+        SectionNote("⚠ $w")
+    }
+    Spacer(Modifier.height(4.dp))
+}
 
 @Composable
 private fun ToolPolicySection(viewModel: AppViewModel) {

@@ -282,7 +282,14 @@ class AiChatController(private val host: AiChatHost) {
                     .takeLast(AI_HISTORY_MESSAGES)
                 val session = AiTurnSession(
                     config = config,
-                    apiMessages = mutableListOf(AiMessage(AiMessage.ROLE_SYSTEM, AiPrompt.rules())).also {
+                    apiMessages = mutableListOf(
+                        AiMessage(
+                            AiMessage.ROLE_SYSTEM,
+                            // 技能清单拼在规则之后：它是用户自己写的操作指南，只列名字/
+                            // 描述/路径，正文由模型按需 read_file（见 AiSkills）
+                            AiPrompt.rules() + host.skillsPromptBlock(),
+                        ),
+                    ).also {
                         it += history
                         it += AiMessage(AiMessage.ROLE_USER, snapshot)
                     },

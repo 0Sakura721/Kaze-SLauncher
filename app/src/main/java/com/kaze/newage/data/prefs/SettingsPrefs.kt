@@ -307,6 +307,23 @@ emember(path) 缓存位图的话，
      */
     val aiProfilesCorrupt = mutableStateOf(aiProfilesDamaged)
 
+    /**
+     * 被用户**关掉**的技能 id 集合（实例目录 skills/ 下的目录名）。
+     *
+     * 存"禁用名单"而不是"启用名单"：新放进来的技能默认就是启用的 ——
+     * 用户拷贝一个技能目录进来，期望的是"立刻能用"，而不是还要去设置页勾一下。
+     * 存成一条 `a|b|c` 字符串：技能是用户文件，可能随时被删；一条串读坏了顶多全部回默认启用。
+     */
+    val aiDisabledSkills = mutableStateOf(
+        (prefs.getString("ai_disabled_skills", "") ?: "").split('|').filter { it.isNotBlank() }.toSet()
+    )
+
+    fun setAiSkillEnabled(skillId: String, enabled: Boolean) {
+        val next = if (enabled) aiDisabledSkills.value - skillId else aiDisabledSkills.value + skillId
+        aiDisabledSkills.value = next
+        prefs.edit().putString("ai_disabled_skills", next.joinToString("|")).apply()
+    }
+
     /** 思考强度：false = 标准（快），true = 深度思考（更聪明也更慢） */
     val aiThinking = mutableStateOf(prefs.getBoolean("ai_thinking", false))
 
