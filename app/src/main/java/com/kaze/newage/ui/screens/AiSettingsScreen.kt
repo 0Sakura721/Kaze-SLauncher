@@ -1,5 +1,7 @@
 package com.kaze.newage.ui.screens
 
+import androidx.compose.material.icons.filled.Refresh
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -460,7 +462,7 @@ private fun SkillsSection(viewModel: AppViewModel) {
                 )
             }
             Icon(
-                androidx.compose.material.icons.Icons.Filled.Refresh,
+                Icons.Filled.Refresh,
                 contentDescription = "刷新",
                 modifier = Modifier.padding(4.dp),
             )
