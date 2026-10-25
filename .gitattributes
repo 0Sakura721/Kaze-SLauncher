@@ -1,0 +1,20 @@
+# 统一换行符：文本文件在仓库里一律 LF。
+#
+# 为什么需要这个文件：Windows 上的脚本/编辑器把 LF 写成 CRLF 时，git 会把**整个文件**
+# 记成改动（几千行的 diff），严重污染历史、也看不清真正的改动。这次就踩过一次
+# （AppViewModel.kt 被整体转成 CRLF，diff 显示 3491 行）。
+* text=auto eol=lf
+
+# 二进制文件不要做换行符转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.apk binary
+*.jar binary
+*.zip binary
+*.jks binary
+*.keystore binary
+*.ttf binary
+*.otf binary
+*.so binary

@@ -33,6 +33,7 @@ import com.kaze.newage.ui.ai.AiChatHost
 import com.kaze.newage.util.Downloader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -274,7 +275,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     }
                     ConsoleParser.parseOnlinePlayers(line.text)?.let { _onlinePlayers.value = it }
                     ConsoleParser.parseJoin(line.text)?.let { name ->
-                        if (name !in _onlinePlayers.value) _onlinePlayers.value = _onlinePlayers.value + name
+                        // update{} 而不是读-改-写：控制台行是并发喂进来的，
+                    // 两个人几乎同时进服时旧写法会丢掉其中一个
+                    _onlinePlayers.update { cur -> if (name in cur) cur else cur + name }
                     }
                     ConsoleParser.parseLeave(line.text)?.let { name ->
                         _onlinePlayers.value = _onlinePlayers.value - name

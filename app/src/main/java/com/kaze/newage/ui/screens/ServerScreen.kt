@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -105,6 +106,7 @@ fun ServerScreen(
     val states by viewModel.serverStates.collectAsStateWithLifecycle()
     val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()
     val runningCount by viewModel.runningCount.collectAsStateWithLifecycle()
+    val importProgress by viewModel.importJarProgress.collectAsStateWithLifecycle()
 
     // 分类筛选（Zalith VersionCategory）：全部 = 不过滤
     var filter by remember { mutableStateOf(InstanceFilter.ALL) }
@@ -210,11 +212,42 @@ fun ServerScreen(
                 enabled = true,
                 // 用系统文件选择器挑一个已有的 server.jar 导入
                 onClick = {
+                    // MIME 只是"建议筛选项"：有的文件管理器把 .jar 报成 octet-stream，
+                    // 所以不能只写一项（会看不到可选项）；但也不要一上来就给 */*
+                    // 把用户丢进"所有文件"里。真正的把关在 JarInspector 的体检。
                     importLauncher.launch(
-                        arrayOf("application/java-archive", "application/octet-stream", "*/*")
+                        arrayOf("application/java-archive", "application/x-java-archive", "application/octet-stream")
                     )
                 },
             )
+        }
+
+        // ── 导入进度（仅在导入进行中显示）──
+        // 几十 MB 的 jar 复制要好几秒，没有反馈用户会以为卡死而强退（强退会留下半截目录）。
+        // 用 determinate 进度条 + 已复制大小；SAF 流给不出总大小时（fraction<0）
+        // 退化成不确定进度条，仍然显示"复制中… 12 MB"，不会是一个永远 0% 的死条。
+        (importProgress as? AppViewModel.ImportJarProgress.Running)?.let { st ->
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = M3Spacing.screenMargin)
+                    .padding(bottom = M3Spacing.betweenGroups),
+            ) {
+                if (st.fraction >= 0f) {
+                    LinearProgressIndicator(
+                        progress = { st.fraction },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                Text(
+                    st.detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
         }
 
         // ── 分类筛选（每一档都带数量，选中的一档用容器色填充）──

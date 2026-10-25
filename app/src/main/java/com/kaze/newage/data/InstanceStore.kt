@@ -3,6 +3,7 @@ package com.kaze.newage.data
 import android.content.Context
 import com.kaze.newage.data.model.CoreType
 import com.kaze.newage.data.model.ServerInstance
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -292,7 +293,9 @@ class InstanceStore(
 
     @Synchronized
     fun add(instance: ServerInstance) {
-        _instances.value = _instances.value + instance
+        // update{} 而不是 value = value + x：并发 add（下载与导入同时完成）时
+        // 读-改-写会互相覆盖，丢掉其中一个实例
+        _instances.update { it + instance }
         save()
     }
 

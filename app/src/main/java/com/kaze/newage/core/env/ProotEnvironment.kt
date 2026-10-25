@@ -7,6 +7,7 @@ import com.kaze.newage.util.Downloader
 import com.kaze.newage.util.TarExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,8 +53,30 @@ class ProotEnvironment(
     private val _items = MutableStateFlow<List<SetupItem>>(emptyList())
     val items: StateFlow<List<SetupItem>> = _items.asStateFlow()
 
+    /**
+     * 部署日志（界面「环境部署」页逐行显示）。
+     *
+     * ## 为什么必须 update{} 而不是 `appendEnvLog(msg`)
+     * `appendEnvLog(msg` 每次都会**拷贝整个列表**（O(N)）。部署过程要打)
+     * 几百上千行（解压 rootfs 时 tar 的每一行、自检的每一条），于是这一步从 O(1) 变成
+     * O(N)，整体退化到 O(N²) —— 真机上那 10 分钟的安装时间有一部分就是喂给了它。
+     * 同时 `value = value + x` 的读-改-写不是原子的，并发 log 会丢行。
+     *
+     * 上限：部署日志只用于排障，保留最近 [LOG_KEEP] 行足够；不设上限时长任务会一路涨到
+     * 十几万行（每行都参与上面的拷贝）。
+     */
     private val _log = MutableStateFlow<List<String>>(emptyList())
     val log: StateFlow<List<String>> = _log.asStateFlow()
+
+    /** 部署日志保留行数（超出丢最旧；界面上也会说明） */
+    private val LOG_KEEP = 2_000
+
+    /** 追加一行部署日志（原子、带上限）。 */
+    internal fun appendEnvLog(msg: String) {
+        _log.update { cur ->
+            if (cur.size >= LOG_KEEP) (cur + msg).takeLast(LOG_KEEP) else cur + msg
+        }
+    }
 
     private val isSetupRunning = AtomicBoolean(false)
 
@@ -328,7 +351,7 @@ class ProotEnvironment(
             Log.w("KazeEnv", "repairExecPermissions 失败", e)
         }
         if (fixed > 0) {
-            _log.value = _log.value + "  ✓ 补齐 $fixed 个文件的执行位（老版本解压缺 x）"
+            appendEnvLog("  ✓ 补齐 $fixed 个文件的执行位（老版本解压缺 x）")
             Log.w("KazeSLauncher", "repairExecPermissions: fixed=$fixed")
         }
     }
@@ -547,7 +570,7 @@ class ProotEnvironment(
         }
         _state.value = State.SETTING_UP
 
-        fun log(msg: String) { _log.value = _log.value + msg }
+        fun log(msg: String) = appendEnvLog(msg)
 
         try {
             // 阶段 1：proot 运行时（jniLibs 内置，无需解压）
@@ -812,7 +835,9 @@ class ProotEnvironment(
         val out = File(context.getExternalFilesDir(null) ?: context.filesDir, "diagnostics.txt")
         out.parentFile?.mkdirs()
         runCatching { out.writeText(sb.toString()) }
-        sb.toString().trimEnd().lines().forEach { _log.value = _log.value + "[自检] $it" }
+        // 批量一次提交：自检可能有几十行，逐行 update 会触发同样多次重组
+        val selfCheckLines = sb.toString().trimEnd().lines().map { "[自检] $it" }
+        _log.update { cur -> (cur + selfCheckLines).takeLast(LOG_KEEP) }
         out
     }
     suspend fun runCommand(command: String, timeoutMs: Long = 900_000): Result<String> =
@@ -1062,10 +1087,10 @@ class ProotEnvironment(
                 if (sh.isDirectory) sh.deleteRecursively()
                 dash.copyTo(sh, overwrite = true)
                 sh.setExecutable(true)
-                _log.value = _log.value + "  ✓ 修复 usr/bin/sh → dash"
+                appendEnvLog("  ✓ 修复 usr/bin/sh → dash")
             }
         } catch (e: Exception) {
-            _log.value = _log.value + "  ! usr/bin/sh 修复失败：${e.message}"
+            appendEnvLog("  ! usr/bin/sh 修复失败：${e.message}")
         }
 
         // 2) usrmerge 顶层目录：真符号链接（失败则 runtime 由 -b 绑定兜底，见 buildProotCommand）
@@ -1081,10 +1106,10 @@ class ProotEnvironment(
             try {
                 if (link.exists()) link.deleteRecursively()
                 android.system.Os.symlink(relTarget, link.absolutePath)
-                _log.value = _log.value + "  ✓ 符号链接 $name → $relTarget"
+                appendEnvLog("  ✓ 符号链接 $name → $relTarget")
             } catch (e: Exception) {
                 // 建不出链接不是致命错误：buildProotCommand 会把 usr/ 目标绑定到 /<name>
-                _log.value = _log.value + "  · $name 无法建符号链接（${e.message}），改用绑定映射"
+                appendEnvLog("  · $name 无法建符号链接（${e.message}），改用绑定映射")
             }
         }
 
