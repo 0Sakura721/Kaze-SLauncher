@@ -270,7 +270,6 @@ class AiChatController(private val host: AiChatHost) {
                 val snapshot = buildString {
                     append("【现场快照（启动器采集，可信）】\n")
                     append(buildAiContext())
-                    if (searchBlock.isNotEmpty()) append("\n\n").append(searchBlock)
                     append("\n\n【问题】").append(q)
                 }
                 val history = _aiMessages.value
@@ -291,9 +290,6 @@ class AiChatController(private val host: AiChatHost) {
                         it += AiMessage(AiMessage.ROLE_USER, snapshot)
                     },
                     roundsLeft = AI_MAX_TOOL_ROUNDS,
-                    searchQuery = searchQuery,
-                    searchCount = searchCount,
-                    searchError = searchError,
                     instanceId = host.currentInstanceId.value,
                 )
                 // 工具多轮循环：读/列自动执行回喂，写挂起等用户确认（见 runTurn）

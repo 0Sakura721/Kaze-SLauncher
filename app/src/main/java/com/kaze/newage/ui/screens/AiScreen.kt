@@ -342,13 +342,7 @@ fun AiScreen(
         InputDock(
             viewModel = viewModel,
             thinking = thinking,
-            searchOn = searchOn,
             busy = busy,
-                    onToggleSearch = {
-                        val needsSetup = (prov.needsKey || prov.needsUrl) &&
-                            prefs.searchKeyFor(prov.id).isBlank()
-                        if (needsSetup) onOpenSettings()
-                    },
         )
     }
 }
@@ -1091,9 +1085,7 @@ private fun AiSuggestionCard(
 private fun InputDock(
     viewModel: AppViewModel,
     thinking: Boolean,
-    searchOn: Boolean,
     busy: Boolean,
-    onToggleSearch: () -> Unit,
 ) {
     val prefs = viewModel.uiPrefs
     val input by viewModel.aiDraft.collectAsStateWithLifecycle()
@@ -1125,8 +1117,6 @@ private fun InputDock(
                     label = { Text("深度思考") },
                 )
                 FilterChip(
-                    selected = searchOn,
-                    onClick = onToggleSearch,
                     label = { Text("联网") },
                 )
                 Spacer(Modifier.weight(1f))
