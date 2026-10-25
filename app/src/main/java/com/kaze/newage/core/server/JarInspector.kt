@@ -200,23 +200,43 @@ object JarInspector {
      * UnsupportedClassVersionError 好。
      */
     private fun inferJavaMajor(zip: ZipFile, names: List<String>, mcVersion: String): Int {
-        // 优先：确有 MC 服务端 class 时按它判
+        // ① 知道 MC 版本时**以它为准**。
+        //    paperclip / bundler 这类 jar 本身只是启动器（常用较低版本 javac 编），
+        //    真正要跑的是它下载下来的服务端 —— 那个才决定 Java 版本。
+        //    只按包内 class 版本判，1.21.4 的 Paper 会被判成 Java 17，
+        //    启动时直接 UnsupportedClassVersionError。
+        if (mcVersion.isNotEmpty()) {
+            val byMc = javaForMc(mcVersion)
+            // MC 版本给出的结论不会低于 jar 内 class 版本（启动器本身也要能跑），取较大者
+            val classMajor = jarClassMajor(zip, names)
+            val byClass = when {
+                classMajor >= 69 -> 25
+                classMajor >= 65 -> 21
+                classMajor >= 61 -> 17
+                else -> 8
+            }
+            return maxOf(byMc, byClass)
+        }
+        // ② 不知道 MC 版本：只能按包内 class 版本判
+        val major = jarClassMajor(zip, names)
+        return when {
+            major >= 69 -> 25
+            major >= 65 -> 21
+            major >= 61 -> 17
+            major > 0 -> 8
+            else -> 17
+        }
+    }
+
+    /** 包内"最相关"的 class 版本（优先 MC/Bukkit/加载器包路径，否则任意一个 class） */
+    private fun jarClassMajor(zip: ZipFile, names: List<String>): Int {
         val cls = names.firstOrNull {
             it.endsWith(".class") && !it.startsWith("META-INF/") &&
                 (it.startsWith("net/minecraft/") || it.startsWith("org/bukkit/") ||
                     it.startsWith("io/papermc/") || it.startsWith("net/fabricmc/") ||
                     it.startsWith("net/minecraftforge/") || it.startsWith("net/neoforged/"))
         } ?: names.firstOrNull { it.endsWith(".class") && !it.startsWith("META-INF/") }
-        val major = cls?.let { classMajorOf(zip, it) } ?: 0
-        return when {
-            major >= 69 -> 25
-            major >= 65 -> 21
-            major >= 61 -> 17
-            major > 0 -> 8
-            // 没有 class（纯启动器 jar）：按 MC 版本推
-            mcVersion.isNotEmpty() -> javaForMc(mcVersion)
-            else -> 17
-        }
+        return cls?.let { classMajorOf(zip, it) } ?: 0
     }
 
     /** MC 版本 → 官方要求的 Java 大版本（1.20.5+ 要 21，1.18–1.20.4 要 17，更早 8） */
