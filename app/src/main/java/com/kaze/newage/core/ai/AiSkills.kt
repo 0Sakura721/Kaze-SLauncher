@@ -143,9 +143,22 @@ object AiSkills {
             } else {
                 normalized
             }
+            // 跳过：空行、标题、代码块内部（``` 之间的内容不是说明文字）
+            var inFence = false
             description = body.split('\n')
                 .map { it.trim() }
-                .firstOrNull { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith("```") }
+                .firstOrNull { line ->
+                    when {
+                        line.startsWith("```") -> {
+                            inFence = !inFence
+                            false
+                        }
+                        inFence -> false
+                        line.isEmpty() -> false
+                        line.startsWith("#") -> false
+                        else -> true
+                    }
+                }
                 .orEmpty()
         }
 
