@@ -1116,9 +1116,6 @@ private fun InputDock(
                     onClick = { viewModel.setAiThinking(!thinking) },
                     label = { Text("深度思考") },
                 )
-                FilterChip(
-                    label = { Text("联网") },
-                )
                 Spacer(Modifier.weight(1f))
                 profileName?.let {
                     Text(

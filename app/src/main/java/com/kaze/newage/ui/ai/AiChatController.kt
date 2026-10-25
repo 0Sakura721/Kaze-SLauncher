@@ -116,9 +116,6 @@ class AiChatController(private val host: AiChatHost) {
         val config: AiConfig,
         val apiMessages: MutableList<AiMessage>,
         var roundsLeft: Int,
-        val searchQuery: String?,
-        val searchCount: Int,
-        val searchError: String?,
         /** 本轮提问发起时的实例：命令/写入绑定到它（见 [AiChatMessage.instanceId]） */
         val instanceId: String?,
     ) {
