@@ -11,14 +11,12 @@ import com.kaze.newage.core.ai.AiMessage
 import com.kaze.newage.core.ai.AiPrompt
 import com.kaze.newage.core.ai.AiReply
 import com.kaze.newage.core.ai.AiSanitize
-import com.kaze.newage.core.ai.AiSearch
 import com.kaze.newage.core.ai.AiSuggestion
 import com.kaze.newage.core.ai.AiSuggestion.NativeArgs
 import com.kaze.newage.core.ai.AiToolPolicy
 import com.kaze.newage.core.ai.AiToolStep
 import com.kaze.newage.core.ai.AiUsage
 import com.kaze.newage.core.ai.AiWebPage
-import com.kaze.newage.core.ai.BrowserSearch
 import com.kaze.newage.core.ai.NativeToolCall
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.ui.AppViewModel.AiChatMessage
@@ -267,48 +265,6 @@ class AiChatController(private val host: AiChatHost) {
         aiCancelRequested = false
         host.scope.launch(Dispatchers.IO) {
             try {
-                // ── 联网搜索（开启才走；API 源需已配 Key，本机浏览器源零 Key）──
-                // 失败只降级不阻塞：搜不到就按本地信息回答，气泡上注明原因
-                var searchQuery: String? = null
-                var searchCount = 0
-                var searchError: String? = null
-                var searchBlock = ""
-                val provider = AiSearch.Provider.byId(host.uiPrefs.aiSearchProviderId.value)
-                // 按源取凭据：切换搜索源不会把上一家的 Key 发给这一家（见 AiSearch.keyFor）
-                val searchKey = host.uiPrefs.searchKeyFor(provider.id)
-                if (host.uiPrefs.aiSearchOn.value && (!provider.needsKey || searchKey.isNotBlank())) {
-                    try {
-                        // 生成查询词是小事：强制用标准模型（省掉思考模式的等待），小 max_tokens
-                        val queryRaw = callAiWithTimeout(
-                            config.copy(thinking = false),
-                            listOf(
-                                AiMessage(AiMessage.ROLE_SYSTEM, AiPrompt.searchQuerySystem()),
-                                AiMessage(AiMessage.ROLE_USER, q),
-                            ),
-                            AI_QUERY_TIMEOUT_MS,
-                            maxTokens = 128,
-                        )
-                        val query = AiSearch.extractQuery(queryRaw.content)
-                        if (query.isNotEmpty()) {
-                            val results = when (provider) {
-                                // 本机浏览器：WebView 在主线程自起自收，结果解析是纯函数
-                                AiSearch.Provider.BING_LOCAL ->
-                                    BrowserSearch.searchBing(host.appContext, query)
-                                else -> AiSearch.searchCached(provider, searchKey, query)
-                            }
-                            if (results.isNotEmpty()) {
-                                searchQuery = query
-                                searchCount = results.size
-                                searchBlock = AiSearch.formatResults(query, results)
-                            } else {
-                                searchError = "搜索没有返回结果"
-                            }
-                        }
-                    } catch (e: Exception) {
-                        searchError = e.message ?: "未知错误"
-                    }
-                }
-
                 // 前缀缓存优化：system 只放不变规则，每轮变化的现场快照走独立用户消息，
                 // 多轮对话的稳定前缀才能命中 DeepSeek 的自动上下文缓存
                 val snapshot = buildString {
