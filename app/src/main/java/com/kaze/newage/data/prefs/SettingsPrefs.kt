@@ -280,6 +280,21 @@ emember(path) 缓存位图的话，
     private val rawAiProfiles = secretPrefs.getString("ai_profiles", "") ?: ""
     val aiProfiles = mutableStateOf(decProfiles(rawAiProfiles))
 
+    /**
+     * 档案 JSON 一旦损坏，**立刻**把原文转存到 [CORRUPT_BACKUP_KEY]（写入在 init 块里做，
+     * 因为这里还没到可以用语句的位置）。见 [aiProfilesCorrupt] 的说明：
+     * 覆盖前转存是底线 —— 下一次保存就会把整份配置顶掉，那时再转存已经晚了。
+     */
+    private val aiProfilesDamaged = AiProfileStore.decodeChecked(rawAiProfiles).corrupt
+
+    init {
+        if (aiProfilesDamaged && rawAiProfiles.isNotEmpty() &&
+            !secretPrefs.contains(CORRUPT_BACKUP_KEY)
+        ) {
+            secretPrefs.edit().putString(CORRUPT_BACKUP_KEY, rawAiProfiles).apply()
+        }
+    }
+
     /** 「对话」功能分配到的档案 id */
     val aiChatProfileId = mutableStateOf(prefs.getString("ai_chat_profile_id", "") ?: "")
 
@@ -290,7 +305,7 @@ emember(path) 缓存位图的话，
      * 原文已在 init 里转存到 [CORRUPT_BACKUP_KEY]，用户有机会人工救回里面的 Key。
      * 覆盖前转存是关键 —— 原来 decode 直接返回 emptyList()，下一次保存就把整份配置静默顶掉了。
      */
-    val aiProfilesCorrupt = mutableStateOf(AiProfileStore.decodeChecked(rawAiProfiles).corrupt)
+    val aiProfilesCorrupt = mutableStateOf(aiProfilesDamaged)
 
     /** 思考强度：false = 标准（快），true = 深度思考（更聪明也更慢） */
     val aiThinking = mutableStateOf(prefs.getBoolean("ai_thinking", false))
