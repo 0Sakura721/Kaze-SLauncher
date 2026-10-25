@@ -11,6 +11,7 @@ import com.kaze.newage.core.addons.AddonManager
 import com.kaze.newage.core.addons.ModrinthApi
 import com.kaze.newage.core.addons.ModrinthSearchHit
 import com.kaze.newage.core.ai.AiToolStep
+import com.kaze.newage.core.ai.AiSkills
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.console.ConsoleLine
 import com.kaze.newage.core.console.CONSOLE_MAX_LINES
@@ -285,6 +286,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
             }        }
         refreshJava()
     }
+
+    // ── 技能（本地 md，用户放在 <实例目录>/skills/<名字>/SKILL.md）──
+
+    /**
+     * 当前实例可用技能的提示词段（只含清单，不含全文）。
+     *
+     * 技能是用户放在实例目录 `skills/<名字>/SKILL.md` 的本地 md 文档；
+     * AI 需要时用 read_file 自己去读全文（不新增工具，读文件仍受既有策略约束）。
+     */
+    override fun skillsPromptBlock(): String =
+        AiSkills.promptBlock(installedSkills(), uiPrefs.aiDisabledSkills.value)
+
+    /** 当前实例已安装的技能 */
+    fun installedSkills(): AiSkills.Scan =
+        AiSkills.scan(currentInstanceId.value?.let { instanceStore.get(it) }?.dir)
+
+    /** 指定实例的技能（详情页用：不一定等于当前选中实例） */
+    fun skillsOf(instanceId: String): AiSkills.Scan =
+        AiSkills.scan(instanceStore.get(instanceId)?.dir)
+
+    fun setSkillEnabled(skillId: String, enabled: Boolean) = uiPrefs.setAiSkillEnabled(skillId, enabled)
+
+    fun isSkillEnabled(skillId: String): Boolean = skillId !in uiPrefs.aiDisabledSkills.value
 
     fun refreshJava() {
         // 扫描 rootfs 的 usr/lib/jvm 得出实际安装情况（装了什么就报什么，

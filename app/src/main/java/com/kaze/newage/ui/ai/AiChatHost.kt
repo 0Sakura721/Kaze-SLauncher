@@ -55,4 +55,11 @@ interface AiChatHost {
 
     /** 控制台显示窗口（快照里的日志） */
     val consoleLines: StateFlow<List<ConsoleLine>>
+    /**
+     * 当前实例可用技能的提示词段（清单，不含全文）。空串 = 没有技能。
+     *
+     * 给默认实现：skills 是可选能力，测试里的假宿主不必都实现它。
+     */
+    fun skillsPromptBlock(): String = ""
+
 }
