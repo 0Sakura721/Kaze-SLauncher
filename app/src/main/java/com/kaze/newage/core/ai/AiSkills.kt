@@ -134,10 +134,14 @@ object AiSkills {
         }
 
         if (description.isEmpty()) {
-            // 取正文第一段非空、非标题、非代码围栏的行
-            val body = normalized.removePrefix("---").let { t ->
-                val end = t.indexOf("\n---")
-                if (end > 0) t.substring(end + 4) else t
+            // 取正文第一段非空、非标题、非代码围栏的行。
+            // 只有**确实以 frontmatter 开头**时才跳过它的结束标记 —— 否则正文里的
+            // markdown 分隔线（`---`）会被误当成 frontmatter 结束，把前半截正文切掉。
+            val body = if (normalized.startsWith("---")) {
+                val end = normalized.indexOf("\n---", startIndex = 3)
+                if (end > 0) normalized.substring(end + 4) else normalized
+            } else {
+                normalized
             }
             description = body.split('\n')
                 .map { it.trim() }
