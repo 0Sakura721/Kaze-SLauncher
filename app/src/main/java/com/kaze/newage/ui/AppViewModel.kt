@@ -20,6 +20,7 @@ import com.kaze.newage.core.download.CoreBuild
 import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.server.ServerProperties
+import com.kaze.newage.core.server.JarInspector
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.CoreType
 import com.kaze.newage.data.model.GameVersion
@@ -1487,6 +1488,18 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         updatePostponed = true
     }
 
+    /** 导入 jar 的进度（界面显示用；Idle = 没有进行中的导入） */
+    sealed interface ImportJarProgress {
+        data object Idle : ImportJarProgress
+        /** [fraction] < 0 表示总量未知（SAF 流常见），界面只显示已复制大小 */
+        data class Running(val fraction: Float, val detail: String) : ImportJarProgress
+        data class Done(val instanceId: String, val name: String) : ImportJarProgress
+        data class Failed(val reason: String) : ImportJarProgress
+    }
+
+    private val _importJarProgress = MutableStateFlow<ImportJarProgress>(ImportJarProgress.Idle)
+    val importJarProgress: StateFlow<ImportJarProgress> = _importJarProgress.asStateFlow()
+
     /** 导入 jar 的连点守卫（见 [importJar]） */
     @Volatile
     private var importJarRunning = false
@@ -1494,58 +1507,184 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     /**
      * 导入 jar：把用户选中的文件复制进一个新实例目录并登记实例。
      *
-     * 复制必须在这里（IO）做，不能让调用方在主线程 `copyTo`：几十 MB 的 jar 会阻塞 UI（ANR 风险），
-     * 而且调用方原来用 `catch (_: Exception) { }` 把失败全吞了——用户选完文件毫无反应，
-     * 目录里可能留下半截 server.jar。
+     * ## 这个流程里最要紧的四件事（都是"做错了用户很难自己发现"的）
+     * 1. **复制前先体检**：选错文件（插件 jar、世界 zip、随便一个文档）如果等到复制完
+     *    几十 MB 之后再报错，用户只会觉得"导入坏了"。这里先用 [JarInspector.quickCheck]
+     *    读 zip 目录（不读全包，很快）判断它到底像不像服务端，不像就直接拒绝并说明原因。
+     * 2. **自动填好名字与版本**：原来一律叫「导入-MMdd-HHmmss」、版本空着、核心一律 CUSTOM
+     *    —— 实例列表里根本认不出是哪个服。现在用识别结果拼「Paper 1.21.4」这样的名字
+     *    （重名自动加序号），MC 版本与核心类型一并写进实例。
+     * 3. **进度要看得见**：几十 MB 的 copyTo 期间界面必须显示进度 [importJarProgress]，
+     *    否则用户会以为卡死而强退（强退会留下半截目录）。
+     * 4. **失败说清原因**：Toast 只给一行，够用但不该是「未知错误」——异常信息里通常
+     *    已有可读原因（空间不足、SAF 授权失效、文件被删），保留它而不是吞掉。
      *
-     * Toast 一律回到主线程发：`Toast.show()` 需要当前线程有 Looper，
-     * 在 Dispatchers.IO 上直接调用会抛 "Can't create handler inside thread that has not called Looper.prepare()"
-     * ——导入成功/失败两条路径都会走到 Toast，等于每次导入都崩。
-     *
-     * 连点守卫与 [downloadAndCreate] 同理：两个并发导入会各自 createInstanceDir + add，
-     * 复制几十 MB 的期间界面上的按钮还是可点的（enabled 要等重组）。
+     * 复制必须在 IO 线程做：几十 MB 的 jar 在主线程 copy 会 ANR。
+     * Toast 一律回主线程发：`Toast.show()` 需要当前线程有 Looper，
+     * 在 Dispatchers.IO 上直接调用会抛 "Can't create handler inside thread that has not
+     * called Looper.prepare()" —— 成功/失败两条路径都会走到 Toast，等于每次导入都崩。
+     * 连点守卫与 [downloadAndCreate] 同理：复制期间按钮仍是可点的（enabled 要等重组）。
      */
     fun importJar(uri: android.net.Uri, name: String, memoryMb: Int) {
         if (importJarRunning) return
         importJarRunning = true
+        _importJarProgress.value = ImportJarProgress.Running(0f, "准备导入…")
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = container.appContext
             var dir: File? = null
             try {
-                dir = instanceStore.createInstanceDir(name)
+                // ── ① 先落到临时文件，体检通过才建实例目录 ──
+                // 直接往实例目录写的话，被拒绝的文件也会留下一个半成品目录
+                val tmpJar = File(ctx.cacheDir, "import-probe-${System.currentTimeMillis()}.jar")
+                _importJarProgress.value = ImportJarProgress.Running(0f, "读取所选文件…")
+                copyWithProgress(ctx, uri, tmpJar) { done, total ->
+                    _importJarProgress.value = ImportJarProgress.Running(
+                        if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f,
+                        "复制中… ${done / 1024 / 1024} MB" +
+                            if (total > 0) " / ${total / 1024 / 1024} MB" else "",
+                    )
+                }
+                if (!tmpJar.isFile || tmpJar.length() == 0L) {
+                    throw RuntimeException("所选文件为空，或没有被真正读取（授权可能已失效）")
+                }
+
+                _importJarProgress.value = ImportJarProgress.Running(1f, "检查文件…")
+                val info = JarInspector.quickCheck(tmpJar)
+                if (!info.looksLikeServerJar) {
+                    // 体检不通过：明确告诉用户"为什么不是"，而不是让他导入之后再撞墙
+                    throw RuntimeException(
+                        "选择的文件看起来不是 Minecraft 服务端（${info.evidence}）。" +
+                            "请选 server.jar 本身：Paper/Purpur 选 paper-x.jar，Forge 选安装器生成的 " +
+                            "forge-*-universal.jar 或 run.jar。",
+                    )
+                }
+
+                // ── ② 名字与版本：尽量取有意义的信息 ──
+                val finalName = importNameOf(name, info, instanceStore.instances.value.map { it.name }.toSet())
+                dir = instanceStore.createInstanceDir(finalName)
                 val target = File(dir, "server.jar")
-                ctx.contentResolver.openInputStream(uri)?.use { ins ->
-                    target.outputStream().use { outs -> ins.copyTo(outs) }
-                } ?: throw RuntimeException("无法读取所选文件")
-                if (!target.isFile || target.length() == 0L) throw RuntimeException("所选文件为空")
+                tmpJar.renameTo(target)
+                if (!target.isFile) {
+                    // rename 失败（跨分区/被占用）就退回复制
+                    tmpJar.copyTo(target, overwrite = true)
+                    tmpJar.delete()
+                }
+                if (!target.isFile || target.length() == 0L) {
+                    throw RuntimeException("把文件放进实例目录失败（可用空间不足？）")
+                }
+
+                val coreType = runCatching { CoreType.valueOf(info.coreTypeName) }
+                    .getOrDefault(CoreType.CUSTOM)
                 val instance = ServerInstance(
-                    name = name,
-                    coreType = CoreType.CUSTOM,
-                    // 按 jar 内 class 文件版本推断（导入路径没法从 MC 版本号推）：
-                    // 原来硬编码 17，导入 1.20.5+ 的服务端会在启动时 UnsupportedClassVersionError
-                    javaMajor = inferJavaFromJar(target),
+                    name = finalName,
+                    coreType = coreType,
+                    // 优先用识别到的 MC 版本；识别不到就留空（界面显示"未知"），
+                    // 绝不编一个 —— 版本填错会让插件过滤与备份命名全错
+                    mcVersion = info.mcVersion,
+                    javaMajor = info.javaMajor,
                     memoryMb = memoryMb,
                     dir = dir,
                 )
                 instanceStore.add(instance)
                 ServerProperties.ensureInitial(instance, instanceStore.instances.value)
                 _currentInstanceId.value = instance.id
+                _importJarProgress.value = ImportJarProgress.Done(instance.id, instance.name)
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(ctx, "已导入：${instance.name}", android.widget.Toast.LENGTH_SHORT).show()
+                    android.widget.Toast.makeText(
+                        ctx,
+                        "已导入：${instance.name}" +
+                            if (info.mcVersion.isNotEmpty()) "（MC ${info.mcVersion}）" else "",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
                 }
             } catch (e: Exception) {
                 // 只清理本次新建的半成品目录；用户的源文件是 SAF 只读流，不会被改动
                 runCatching { dir?.deleteRecursively() }
+                val reason = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                _importJarProgress.value = ImportJarProgress.Failed(reason)
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(
-                        ctx, "导入失败：${e.message ?: "未知错误"}", android.widget.Toast.LENGTH_LONG
-                    ).show()
+                    android.widget.Toast.makeText(ctx, "导入失败：$reason", android.widget.Toast.LENGTH_LONG).show()
                 }
             } finally {
                 importJarRunning = false
+                // 临时文件无论成败都清掉（体检用的副本没有保留价值）
+                runCatching {
+                    ctx.cacheDir.listFiles()
+                        ?.filter { it.name.startsWith("import-probe-") && it.name.endsWith(".jar") }
+                        ?.forEach { it.delete() }
+                }
             }
         }
     }
+
+    /**
+     * 带进度的复制。
+     *
+     * SAF 的流通常给不出长度（total=0），这时 [onProgress] 只报已复制字节数（分母留空），
+     * 界面显示「复制中… 12 MB」而不是一个永远 0% 的进度条。
+     */
+    private fun copyWithProgress(
+        ctx: android.content.Context,
+        uri: android.net.Uri,
+        dest: File,
+        onProgress: (done: Long, total: Long) -> Unit,
+    ) {
+        val total = runCatching {
+            ctx.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
+        }.getOrNull() ?: -1L
+        val ins = ctx.contentResolver.openInputStream(uri)
+            ?: throw RuntimeException("无法打开所选文件（授权可能已失效，请重新选择）")
+        ins.use { input ->
+            dest.outputStream().use { out ->
+                val buf = ByteArray(256 * 1024)
+                var done = 0L
+                var lastReport = 0L
+                while (true) {
+                    val n = input.read(buf)
+                    if (n <= 0) break
+                    out.write(buf, 0, n)
+                    done += n
+                    // 限流：每 512 KB 报一次，避免高频状态更新把主线程刷爆
+                    if (done - lastReport >= 512 * 1024) {
+                        lastReport = done
+                        onProgress(done, total)
+                    }
+                }
+                onProgress(done, total)
+            }
+        }
+    }
+
+    /**
+     * 生成有意义的实例名：
+     *  - 用户自己填了名字（下载流程会传）就用；
+     *  - 导入流程传的是「导入-MMdd-HHmmss」这种占位，改用识别到的「核心 + MC 版本」；
+     *  - 重名自动加序号（`Paper 1.21.4`、`Paper 1.21.4 (2)`）。
+     */
+    private fun importNameOf(rawName: String, info: JarInspector.Info, existing: Set<String>): String {
+        val placeholder = rawName.startsWith("导入-")
+        val coreLabel = runCatching { CoreType.valueOf(info.coreTypeName).displayName }
+            .getOrDefault("服务端")
+        val base = if (!placeholder) {
+            rawName
+        } else {
+            buildString {
+                append(coreLabel)
+                if (info.mcVersion.isNotEmpty()) append(' ').append(info.mcVersion)
+            }
+        }
+        if (base !in existing) return base
+        var i = 2
+        while ("$base ($i)" in existing) i++
+        return "$base ($i)"
+    }
+
+    /** 取消/忽略导入进度（界面消费完调用，避免下次进来还看到上次的结果） */
+    fun clearImportJarProgress() {
+        _importJarProgress.value = ImportJarProgress.Idle
+    }
+
+
 
     /**
      * 从 jar 内的 class 文件推断所需 Java 主版本（导入自定义核心用）。
