@@ -9,7 +9,6 @@ import com.kaze.newage.core.ai.AiCommandPolicy
 import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
-import com.kaze.newage.core.ai.AiSearch
 import com.kaze.newage.core.ai.AiToolPolicy
 import com.kaze.newage.core.mcp.McpPorts
 import com.kaze.newage.core.mcp.McpServer
@@ -281,6 +280,21 @@ emember(path) 缓存位图的话，
     private val rawAiProfiles = secretPrefs.getString("ai_profiles", "") ?: ""
     val aiProfiles = mutableStateOf(decProfiles(rawAiProfiles))
 
+    /**
+     * 档案 JSON 一旦损坏，**立刻**把原文转存到 [CORRUPT_BACKUP_KEY]（写入在 init 块里做，
+     * 因为这里还没到可以用语句的位置）。见 [aiProfilesCorrupt] 的说明：
+     * 覆盖前转存是底线 —— 下一次保存就会把整份配置顶掉，那时再转存已经晚了。
+     */
+    private val aiProfilesDamaged = AiProfileStore.decodeChecked(rawAiProfiles).corrupt
+
+    init {
+        if (aiProfilesDamaged && rawAiProfiles.isNotEmpty() &&
+            !secretPrefs.contains(CORRUPT_BACKUP_KEY)
+        ) {
+            secretPrefs.edit().putString(CORRUPT_BACKUP_KEY, rawAiProfiles).apply()
+        }
+    }
+
     /** 「对话」功能分配到的档案 id */
     val aiChatProfileId = mutableStateOf(prefs.getString("ai_chat_profile_id", "") ?: "")
 
@@ -291,7 +305,7 @@ emember(path) 缓存位图的话，
      * 原文已在 init 里转存到 [CORRUPT_BACKUP_KEY]，用户有机会人工救回里面的 Key。
      * 覆盖前转存是关键 —— 原来 decode 直接返回 emptyList()，下一次保存就把整份配置静默顶掉了。
      */
-    val aiProfilesCorrupt = mutableStateOf(AiProfileStore.decodeChecked(rawAiProfiles).corrupt)
+    val aiProfilesCorrupt = mutableStateOf(aiProfilesDamaged)
 
     /** 思考强度：false = 标准（快），true = 深度思考（更聪明也更慢） */
     val aiThinking = mutableStateOf(prefs.getBoolean("ai_thinking", false))
@@ -328,126 +342,6 @@ emember(path) 缓存位图的话，
         prefs.edit().putString("ai_tool_policies", next).apply()
     }
 
-    // ── 联网搜索 ──
-    val aiSearchOn = mutableStateOf(prefs.getBoolean("ai_search_on", false))
-    val aiSearchProviderId = mutableStateOf(
-        prefs.getString("ai_search_provider", AiSearch.Provider.TAVILY.id) ?: AiSearch.Provider.TAVILY.id
-    )
-
-    /**
-     * 各搜索源的凭据（provider id → Key / SearXNG 实例地址），**按源分槽**。
-     *
-     * 分槽的理由：只有一个全局 Key 时，切换搜索源会把 A 家的 Key 原样发给 B 家。
-     * 内存里是解密后的值，落盘时逐槽加密到专用 prefs（见 [setAiSearch]）。
-     */
-    val aiSearchKeys = mutableStateOf(loadSearchKeys())
-
-    /** 某个搜索源当前的凭据（免凭据源恒为空；SearXNG 返回的是实例地址） */
-    fun searchKeyFor(providerId: String): String = AiSearch.keyFor(providerId, aiSearchKeys.value)
-
-    private fun loadSearchKeys(): Map<String, String> {
-        val out = LinkedHashMap<String, String>()
-        AiSearch.Provider.entries.forEach { p ->
-            val slot = AiSearch.Provider.keySlot(p.id)
-            val raw = secretPrefs.getString(slot, "")?.trim().orEmpty()
-            if (raw.isNotEmpty()) {
-                val plain = decryptAiSecret(raw).orEmpty()
-                if (plain.isNotEmpty()) {
-                    out[p.id] = plain
-                    // Upgrade legacy plaintext values after migration whenever Keystore is available.
-                    if (!raw.startsWith("enc1:")) {
-                        val encrypted = encryptAiSecret(plain)
-                        if (encrypted != null && secretPrefs.edit().putString(slot, encrypted).commit()) {
-                            aiSecretStorageError.value = false
-                        } else {
-                            aiSecretStorageError.value = true
-                        }
-                    }
-                }
-            }
-        }
-        return out
-    }
-
-    init {
-        // 损坏检测放在最前面：后面那段"旧单配置 → 档案"的迁移会覆写 ai_profiles，
-        // 必须先把原文转存出去（用户还可能人工救回里面的 Key）
-        val rawProfiles = rawAiProfiles
-        if (aiProfilesCorrupt.value && rawProfiles.isNotEmpty()) {
-            secretPrefs.edit().putString(CORRUPT_BACKUP_KEY, rawProfiles).commit()
-        }
-        // 旧单配置 → 档案：P0/P1 存的是散键（ai_api_key + ai_base_url + ai_model_standard/thinking，
-        // 更早还有 ai_model）。只要填过 Key 就拼成一个「DeepSeek」档案并设为对话配置，绝不丢 Key。
-        // 放在 aiProfiles 等声明之后：属性按声明顺序初始化。
-        val legacyKey = prefs.getString("ai_api_key", "")?.trim().orEmpty()
-        if (!aiProfilesCorrupt.value && legacyKey.isNotBlank() &&
-            aiProfiles.value.none { it.apiKey.trim() == legacyKey }
-        ) {
-            val standard = prefs.getString("ai_model_standard", null)
-                ?: prefs.getString("ai_model", null)
-                ?: AiConfig.DEFAULT_MODEL
-            val thinking = prefs.getString("ai_model_thinking", null).orEmpty()
-            val baseUrl = prefs.getString("ai_base_url", "")?.trim().orEmpty()
-                .ifBlank { AiConfig.DEFAULT_BASE_URL }
-            val models = normalizeProfileModels(
-                listOf(standard.trim(), thinking.trim()).filter { it.isNotEmpty() }
-                    .ifEmpty { listOf(AiConfig.DEFAULT_MODEL) },
-                baseUrl,
-            )
-            val legacy = AiProfile(
-                name = if (aiProfiles.value.isEmpty()) "DeepSeek" else "DeepSeek（旧配置）",
-                baseUrl = baseUrl,
-                apiKey = legacyKey,
-                models = models,
-            )
-            val migratedProfiles = aiProfiles.value + legacy
-            if (aiProfiles.value.isEmpty() && aiChatProfileId.value.isBlank()) {
-                aiChatProfileId.value = legacy.id
-            }
-            // If Keystore or storage is unavailable, keep the source key untouched for a later retry.
-            if (persistProfiles(migratedProfiles)) {
-                aiProfiles.value = migratedProfiles
-                if (aiProfiles.value.size == 1) {
-                    prefs.edit().putString("ai_chat_profile_id", legacy.id).commit()
-                }
-            } else {
-                // Keep it available in this process, but never write an unencrypted copy.
-                aiProfiles.value = migratedProfiles
-            }
-        }
-        // 存量档案里的旧模型名归一：deepseek-chat / deepseek-reasoner 在官方端点已停用
-        // （2026-07-24），deepseek.com 的档案统一为 deepseek-flash，避免界面继续显示旧名
-        // 让人误以为配置没问题（请求侧还有一层 requestModel 归一兜底）。
-        // 第三方端点不改写（那里 deepseek-chat 可能仍是有效模型名）。
-        val normalized = aiProfiles.value.map {
-            it.copy(models = normalizeProfileModels(it.models, it.baseUrl))
-        }
-        if (normalized != aiProfiles.value) {
-            if (persistProfiles(normalized)) aiProfiles.value = normalized
-            else aiProfiles.value = normalized
-        }
-        // Remove the historical scattered Key only after a copy is confirmed in the dedicated store.
-        if (legacyKey.isNotBlank()) {
-            val storedProfiles = decProfiles(secretPrefs.getString("ai_profiles", "") ?: "")
-            if (storedProfiles.any { it.apiKey.trim() == legacyKey }) {
-                prefs.edit()
-                    .remove("ai_api_key")
-                    .remove("ai_base_url")
-                    .remove("ai_model")
-                    .remove("ai_model_standard")
-                    .remove("ai_model_thinking")
-                    .commit()
-            }
-        }
-        // 分配指向的档案被删/损坏时回退到第一个（或空 = 未配置，界面会引导新增）
-        if (aiChatProfileId.value.isNotBlank() &&
-            aiProfiles.value.none { it.id == aiChatProfileId.value }
-        ) {
-            aiChatProfileId.value = aiProfiles.value.firstOrNull()?.id.orEmpty()
-        }
-    }
-
-    /** 模型名列表归一：官方端点上旧名映射到现行名，去重去空（归一后 chat/reasoner 会合并为一条） */
     private fun normalizeProfileModels(models: List<String>, baseUrl: String): List<String> =
         models.map { AiConfig.normalizeLegacyModel(it, baseUrl) }
             .filter { it.isNotEmpty() }
@@ -557,48 +451,6 @@ emember(path) 缓存位图的话，
         prefs.edit().putBoolean("ai_thinking", v).apply()
     }
 
-    /**
-     * 保存联网搜索配置（源 + 该源的凭据）。
-     *
-     * 只写**当前源这一格**：切源不再覆盖别家的 Key，也不会把上一家的 Key 带过去。
-     */
-    fun setAiSearch(providerId: String, key: String): Boolean {
-        val p = AiSearch.Provider.byId(providerId.trim()).id
-        val k = key.trim()
-        val slot = AiSearch.Provider.keySlot(p)
-        val edit = secretPrefs.edit()
-        if (k.isEmpty()) edit.remove(slot)
-        else {
-            val encrypted = encryptAiSecret(k)
-            if (encrypted == null) {
-                aiSecretStorageError.value = true
-                return false
-            }
-            edit.putString(slot, encrypted)
-        }
-        if (!edit.commit()) {
-            aiSecretStorageError.value = true
-            return false
-        }
-        prefs.edit().putString("ai_search_provider", p).commit()
-        aiSearchProviderId.value = p
-        val next = LinkedHashMap(aiSearchKeys.value)
-        if (k.isEmpty()) next.remove(p) else next[p] = k
-        aiSearchKeys.value = next
-        aiSecretStorageError.value = false
-        return true
-    }
-
-    /** 联网搜索开关（聊天面板随时可切） */
-    fun setAiSearchOn(v: Boolean) {
-        aiSearchOn.value = v
-        prefs.edit().putBoolean("ai_search_on", v).apply()
-    }
-
-    /**
-     * 当前对话配置快照：解析分配到的档案 → [AiConfig]。
-     * 没有任何档案时返回 DeepSeek 默认值（Key 为空 → isConfigured=false，界面会引导配置）。
-     */
     fun aiConfig(): AiConfig {
         val p = aiProfiles.value.firstOrNull { it.id == aiChatProfileId.value }
             ?: aiProfiles.value.firstOrNull()
@@ -780,14 +632,6 @@ emember(path) 缓存位图的话，
                 }
             }
             copyIfMissing("ai_profiles")
-            AiSearch.Provider.entries.forEach { provider -> copyIfMissing(AiSearch.Provider.keySlot(provider.id)) }
-            if (legacy.contains("ai_search_key")) {
-                val provider = AiSearch.Provider.byId(legacy.getString("ai_search_provider", "") ?: "")
-                val slot = AiSearch.Provider.keySlot(provider.id)
-                if (!secret.contains(slot) && !pending.containsKey(slot)) {
-                    legacy.getString("ai_search_key", null)?.let { pending[slot] = it }
-                }
-            }
             if (!secret.contains(CORRUPT_BACKUP_KEY) && legacy.contains(OLD_CORRUPT_BACKUP_KEY)) {
                 legacy.getString(OLD_CORRUPT_BACKUP_KEY, null)?.let { pending[CORRUPT_BACKUP_KEY] = it }
             }
@@ -798,9 +642,7 @@ emember(path) 缓存位图的话，
             }
             val cleanup = legacy.edit()
                 .remove("ai_profiles")
-                .remove("ai_search_key")
                 .remove(OLD_CORRUPT_BACKUP_KEY)
-            AiSearch.Provider.entries.forEach { provider -> cleanup.remove(AiSearch.Provider.keySlot(provider.id)) }
             cleanup.commit()
         }
 

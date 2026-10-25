@@ -139,7 +139,6 @@ fun AiScreen(
     val current = instances.firstOrNull { it.id == currentId }
     val prefs = viewModel.uiPrefs
     val thinking = prefs.aiThinking.value
-    val searchOn = prefs.aiSearchOn.value
     val serverStates by viewModel.serverStates.collectAsStateWithLifecycle()
     val live by viewModel.aiLiveStream.collectAsStateWithLifecycle()
 
@@ -343,16 +342,7 @@ fun AiScreen(
         InputDock(
             viewModel = viewModel,
             thinking = thinking,
-            searchOn = searchOn,
             busy = busy,
-                    onToggleSearch = {
-                        // API 源需要 Key、SearXNG 需要实例地址 —— 没配就带去设置页；本机浏览器零配置直接开
-                        val prov = com.kaze.newage.core.ai.AiSearch.Provider.byId(prefs.aiSearchProviderId.value)
-                        val needsSetup = (prov.needsKey || prov.needsUrl) &&
-                            prefs.searchKeyFor(prov.id).isBlank()
-                        if (needsSetup) onOpenSettings()
-                        else viewModel.setAiSearchOn(!prefs.aiSearchOn.value)
-                    },
         )
     }
 }
@@ -1095,9 +1085,7 @@ private fun AiSuggestionCard(
 private fun InputDock(
     viewModel: AppViewModel,
     thinking: Boolean,
-    searchOn: Boolean,
     busy: Boolean,
-    onToggleSearch: () -> Unit,
 ) {
     val prefs = viewModel.uiPrefs
     val input by viewModel.aiDraft.collectAsStateWithLifecycle()
@@ -1127,11 +1115,6 @@ private fun InputDock(
                     selected = thinking,
                     onClick = { viewModel.setAiThinking(!thinking) },
                     label = { Text("深度思考") },
-                )
-                FilterChip(
-                    selected = searchOn,
-                    onClick = onToggleSearch,
-                    label = { Text("联网") },
                 )
                 Spacer(Modifier.weight(1f))
                 profileName?.let {

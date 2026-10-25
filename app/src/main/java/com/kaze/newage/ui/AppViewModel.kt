@@ -732,12 +732,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     /** 功能分配：把「对话」指向某个档案 */
     fun setChatAiProfile(id: String) = uiPrefs.setChatAiProfile(id)
 
-    fun setAiSearch(providerId: String, key: String) = uiPrefs.setAiSearch(providerId, key)
 
     /** 设置页的「清除损坏提示」入口（原文转存一并清掉，见 SettingsPrefs.aiProfilesCorrupt） */
     fun clearCorruptAiProfiles() = uiPrefs.clearCorruptAiProfiles()
 
-    fun setAiSearchOn(v: Boolean) = uiPrefs.setAiSearchOn(v)
 
     /** 思考强度开关（面板头部随时可切；DeepSeek = chat/reasoner 模型切换） */
     fun setAiThinking(v: Boolean) {
@@ -747,27 +745,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     /** 控制台命令执行档位（仅建议 / 白名单自动 / 全部自动） */
     fun setAiCommandMode(modeId: String) = uiPrefs.setAiCommandMode(modeId)
 
-    /** 是否已授予悬浮窗权限（本机浏览器搜索走真实窗口的前提） */
-    fun canDrawOverlays(): Boolean = android.provider.Settings.canDrawOverlays(container.appContext)
 
-    /**
-     * 引导去系统设置授予悬浮窗权限（一次性手动操作，与电池白名单同一套做法）。
-     *
-     * 返回 null = 已经拉起系统页面；非 null = 失败原因，**必须**由界面显示出来 ——
-     * 原来这里是个空 catch：部分 ROM 没有这个设置页（或 Activity 被禁用）时，用户点了
-     * 卡片什么都不会发生，只能以为"点了没用"。引导卡是死端比没有引导卡更糟。
-     */
-    fun requestOverlayPermission(): String? = try {
-        val intent = android.content.Intent(
-            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            android.net.Uri.parse("package:${container.appContext.packageName}"),
-        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        container.appContext.startActivity(intent)
-        null
-    } catch (e: Exception) {
-        "无法打开系统权限页（${e.message ?: e.javaClass.simpleName}）——" +
-            "请手动进入：系统设置 → 应用 → 本应用 → 显示在其他应用上层"
-    }
 
     // ── 服务端进程的 CPU / 内存占用 ──
     private val _procStats = MutableStateFlow<ProcessStats.Reading?>(null)

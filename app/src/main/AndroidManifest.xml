@@ -30,7 +30,6 @@
       不声明它的话，代码里那条真窗口分支永远走不到（Settings.canDrawOverlays 恒为 false），
       设置页的"去授权"引导也变成死端。
     -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:name=".NewAgeApp"

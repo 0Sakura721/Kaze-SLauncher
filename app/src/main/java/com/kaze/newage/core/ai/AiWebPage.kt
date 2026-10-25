@@ -30,7 +30,7 @@ object AiWebPage {
             throw IllegalArgumentException("只支持 http(s) 链接")
         }
         // 必应重定向链接解出真实地址，省一跳也避免引用语义丢失
-        val target = AiSearch.unwrapBingRedirect(url)
+        val target = unwrapBingRedirect(url)
         val conn = URL(target).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 10_000
@@ -110,4 +110,23 @@ object AiWebPage {
     /** 供测试/诊断使用：确认 URL 结构合法 */
     internal fun hostOf(url: String): String =
         runCatching { URI(url).host ?: url }.getOrDefault(url).take(60)
+    /**
+     * 必应重定向链接（bing.com/ck?...&uddg=<真实地址>）解出真实地址；非重定向链接原样返回。
+     *
+     * 联网搜索模块已整体移除（用户要求），但 `fetch_page` 工具仍需要它 ——
+     * 直接给模型重定向链接会多一跳、还丢失引用语义。这里内联保留，避免为一个小工具
+     * 重新引入整个搜索模块。
+     */
+    internal fun unwrapBingRedirect(url: String): String {
+        if (!url.contains("bing.com/ck/")) return url
+        return runCatching {
+            val rawQuery = java.net.URI(url).rawQuery.orEmpty()
+            rawQuery.split('&')
+                .firstOrNull { it.startsWith("uddg=") }
+                ?.let { java.net.URLDecoder.decode(it.removePrefix("uddg="), "UTF-8") }
+                ?.takeIf { it.startsWith("http") }
+                ?: url
+        }.getOrDefault(url)
+    }
+
 }
