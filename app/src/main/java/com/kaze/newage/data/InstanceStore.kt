@@ -507,6 +507,20 @@ class InstanceStore(
         save()
     }
 
+    /**
+     * 改实例使用的 Java 大版本（8 / 17 / 21 / 25）。
+     *
+     * 只落盘，不改正在跑的进程 —— 生效时机由调用方在控制台说明（"重启后生效"）。
+     * 允许用户覆盖自动推断值，是因为同一台设备可能装了多个 Java，也有整合包明确要求特定版本。
+     */
+    fun setJavaMajor(id: String, javaMajor: Int) {
+        if (javaMajor <= 0) return
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(javaMajor = javaMajor) else it }
+        }
+        save()
+    }
+
     /** 停服自动备份开关（见 BackupManager.autoBackup：进程退出收尾处调用） */
     fun setAutoBackup(id: String, enabled: Boolean) {
         _instances.value = _instances.value.map {

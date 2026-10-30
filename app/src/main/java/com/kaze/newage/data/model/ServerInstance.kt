@@ -134,12 +134,15 @@ object JavaVersionInference {
         // 于是 2024 年之后的快照（需要 Java 21/25）会被配上一个跑不起来的 Java：
         // 实例能建出来、一启动就 UnsupportedClassVersionError。按年份映射。
         Regex("""(\d{2})w\d{2}[a-z]""").find(mcVersion.trim())?.let { m ->
+            // 完整年份（20xx）。比较基准必须是 2026/2024/2021 ——
+            // 原来写成 `year >= 26`，而 year 是 2020 这样的四位数，恒为真，
+            // 于是**所有快照都被判成 Java 25**（连 20w45a 这种 Java 8 的都算）。
             val year = 2000 + m.groupValues[1].toInt()
             return when {
-                year >= 26 -> 25   // 与正式版 26.x 对齐
-                year >= 24 -> 21   // 1.20.5 起需要 21
-                year >= 21 -> 17   // 1.17–1.20.4
-                else -> 8          // 1.16 及更早
+                year >= 2026 -> 25   // 与正式版 26.x 对齐
+                year >= 2024 -> 21   // 1.20.5 起需要 21
+                year >= 2021 -> 17   // 1.17–1.20.4
+                else -> 8            // 1.16 及更早
             }
         }
         val m = Regex("""(\d+)\.(\d+)(?:\.(\d+))?""").find(mcVersion) ?: return 17
@@ -149,7 +152,13 @@ object JavaVersionInference {
             major >= 26 -> 25
             major >= 24 -> 21
             major == 1 && minor <= 16 -> 8
-            major == 1 && minor <= 20 && (minor < 20 || (minor == 20 && m.groupValues[3].toIntOrNull() ?: 0 < 5)) -> 17
+            // 1.17 ~ 1.20.4 → Java 17。
+            // 这里曾写成 `-> 1`（漏了一个 7），于是这段版本区间会返回"Java 1"——
+            // 界面上显示"自动适配 Java 1"，真正拿去选运行时时会找不到。
+            // 之所以一直没被发现：autoJava 只用于展示，实际创建时 downloadAndCreate 走的是
+            // 自己的推断；现在配置页允许用户手选、详情页会用它算"推荐值"，必须是对的。
+            major == 1 && minor <= 20 &&
+                (minor < 20 || (minor == 20 && (m.groupValues[3].toIntOrNull() ?: 0) < 5)) -> 17
             else -> 21
         }
     }
