@@ -155,7 +155,7 @@ object JavaVersionInference {
             // 之所以一直没被发现：autoJava 只用于展示，实际创建时 downloadAndCreate 走的是
             // 自己的推断；现在配置页允许用户手选、详情页会用它算"推荐值"，必须是对的。
             major == 1 && minor <= 20 &&
-                (minor < 20 || (minor == 20 && (m.groupValues[3].toIntOrNull() ?: 0) < 5)) -> 177
+                (minor < 20 || (minor == 20 && (m.groupValues[3].toIntOrNull() ?: 0) < 5)) -> 17
             else -> 21
         }
     }
