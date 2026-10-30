@@ -580,6 +580,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         )
     }
 
+    /**
+     * 改实例的 Java 大版本。
+     *
+     * 说明生效时机（与内存/参数一致）：正在跑的服务端仍用旧 Java，重启才换。
+     * 顺带提示"该版本 Java 是否已安装"由界面负责，这里只管落盘。
+     */
+    fun setInstanceJava(instance: ServerInstance, javaMajor: Int) {
+        instanceStore.setJavaMajor(instance.id, javaMajor)
+        val running = serverManager.states.value[instance.id] == ServerState.Running
+        serverManager.consoleFor(instance.id).emit(
+            "> Java 版本已改为 Java $javaMajor" +
+                if (running) "（当前进程仍按旧版本运行，重启后生效）" else "（下次启动生效）",
+            LineType.System,
+        )
+    }
+
     /** nogui 开关（启动参数，同上只落盘） */
     fun setNogui(instance: ServerInstance, nogui: Boolean) {
         instanceStore.setNogui(instance.id, nogui)

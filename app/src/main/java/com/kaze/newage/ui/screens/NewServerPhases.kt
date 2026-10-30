@@ -323,6 +323,8 @@ internal fun VersionConfigPhase(
     var gameMode by rememberSaveable { mutableStateOf("survival") }
     // EULA 必须显式同意：此前是首次启动时静默写入 eula=true
     var eulaAgreed by rememberSaveable { mutableStateOf(false) }
+    // Java 大版本：0 = 自动（按 MC 版本推断，与旧版一致）；>0 = 用户指定
+    var javaOverride by rememberSaveable { mutableStateOf(0) }
 
     // 设备内存信息（GB）：/proc/meminfo 实读（真机实测 ActivityManager.getMemoryInfo().availMem 返回异常=totalMem）
     val mem = remember {
@@ -442,6 +444,8 @@ internal fun VersionConfigPhase(
                 onGameModeChange = { gameMode = it },
                 eulaAgreed = eulaAgreed,
                 onEulaAgreedChange = { eulaAgreed = it },
+                javaOverride = javaOverride,
+                onJavaOverride = { javaOverride = it },
                 builds = builds,
                 buildsLoading = buildsLoading,
                 buildId = buildId,
@@ -455,7 +459,8 @@ internal fun VersionConfigPhase(
                         type = coreType,
                         mcVersion = current.id,
                         memoryMb = effectiveMb.toInt(),
-                        // Java 不给用户选择：javaMajorOverride 保持 0，downloadAndCreate 内自动推断最优版本
+                        // 0 = 自动（downloadAndCreate 内按 MC 版本推断）；>0 = 用户在配置页选的
+                        javaMajorOverride = javaOverride,
                         propsOverride = mapOf(
                             "server-port" to port.toString(),
                             "max-players" to maxPlayers.toString(),
@@ -747,6 +752,9 @@ internal fun VersionRow(
 // 页面 B：配置（实例名 / 内存 / Java / 构建 / 服务器设置 / EULA / 下载）
 // ───────────────────────────────────────────────
 
+/** 可选 Java 大版本（0 = 自动）。只列 LTS/常用档：8 / 17 / 21 / 25 */
+internal val JavaChoices: List<Int> = listOf(0, 8, 17, 21, 25)
+
 @Composable
 internal fun ConfigPage(
     version: GameVersion,
@@ -776,6 +784,9 @@ internal fun ConfigPage(
     onGameModeChange: (String) -> Unit,
     eulaAgreed: Boolean,
     onEulaAgreedChange: (Boolean) -> Unit,
+    /** 用户选的 Java 大版本；0 = 自动（按 MC 版本推断） */
+    javaOverride: Int,
+    onJavaOverride: (Int) -> Unit,
     builds: List<CoreBuild>,
     buildsLoading: Boolean,
     buildId: String,
@@ -787,8 +798,11 @@ internal fun ConfigPage(
     // 滑块显示值：自动模式显示系统建议值（只读），手动模式显示滑块值
     val sliderMb = if (autoMemory) suggestMb else memoryMb
     val fmtGb: (Float) -> String = { java.lang.String.format(Locale.US, "%.1f GB", it / 1024f) }
-    // Java 不给用户选择：按 MC 版本自动推断最优版本
+    // 自动推断的最优版本（用户选「自动」时用它）
     val autoJava = JavaVersionInference.infer(version.id)
+    val effectiveJava = if (javaOverride > 0) javaOverride else autoJava
+    // 用户手选的版本比推荐值低时提醒一句：低版本 Java 跑新服务端会 UnsupportedClassVersionError
+    val javaTooLow = javaOverride > 0 && javaOverride < autoJava
     val exceeded = effectiveMb > totalMemGb * 1024f * 0.8f
     // EULA 未同意时不允许创建（此前是首次启动静默写入 eula=true）；
     // 端口冲突/越界同样阻断——只给红字提示却照样能点，会建出两个抢同一端口的实例，
@@ -913,14 +927,44 @@ internal fun ConfigPage(
                 }
             }
 
-            // ── 节③ Java（只读：自动适配最优版本，不给用户选择）──
-            M3EListItem(
-                headline = "Java 版本",
-                supporting = "自动适配 Java $autoJava · 按 MC 版本推荐，无需手动选择",
-                leadingIcon = Icons.Filled.Build,
-                iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                shape = M3Shape.listSingle,
-            )
+            // ── 节③ Java（默认自动推断，也可以自己选）──
+            // 为什么要给选择权：同一台设备上可能装了多个 Java；有的整合包/插件明确要求
+            // 特定版本；也有人想用更高版本 Java（如 21）跑 1.20.4 以获得更好的 GC。
+            // 默认仍是「自动」，所以不关心的人什么都不用做。
+            M3ECard(
+                variant = M3ECardVariant.Outlined,
+                title = "Java 版本",
+                supporting = if (javaOverride > 0) {
+                    "已指定 Java $javaOverride（推荐 $autoJava）"
+                } else {
+                    "自动：按 MC 版本推荐 Java $autoJava"
+                },
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    M3ESegmentedRow(
+                        options = JavaChoices,
+                        selected = javaOverride,
+                        label = { v -> if (v == 0) "自动" else "Java $v" },
+                        onSelect = onJavaOverride,
+                        height = 40.dp,
+                    )
+                    if (javaTooLow) {
+                        Text(
+                            "Java $javaOverride 低于该版本推荐的 Java $autoJava，" +
+                                "启动时可能报 UnsupportedClassVersionError。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (javaOverride == 0) {
+                        Text(
+                            "选「自动」时按 MC 版本推断，与旧版行为一致。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
 
             // ── 节④ 核心构建 / 加载器（有列表的核心才出现；FCL「加载器版本」的对应物）──
             if (buildsLoading || builds.isNotEmpty()) {

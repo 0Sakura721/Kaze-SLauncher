@@ -80,6 +80,7 @@ import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.util.LanIp
 import com.kaze.newage.ui.AppViewModel
+import com.kaze.newage.ui.components.M3ESegmentedRow
 import com.kaze.newage.ui.components.ForceStopConfirmDialog
 import com.kaze.newage.core.server.MemoryLimits
 import com.kaze.newage.ui.components.MemorySliderRow
@@ -912,6 +913,9 @@ internal fun EditMemoryDialog(
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
+/** 实例可选的 Java 大版本（已创建的实例只有确定值，没有"自动"这一档） */
+internal val JAVA_MAJORS: List<Int> = listOf(8, 17, 21, 25)
+
 internal fun AdvancedSettingsCard(
     viewModel: AppViewModel,
     instance: ServerInstance,
@@ -919,6 +923,7 @@ internal fun AdvancedSettingsCard(
 ) {
     var args by remember(instance.id, instance.extraJvmArgs) { mutableStateOf(instance.extraJvmArgs) }
     var nogui by remember(instance.id, instance.nogui) { mutableStateOf(instance.nogui) }
+    var javaMajor by remember(instance.id, instance.javaMajor) { mutableStateOf(instance.javaMajor) }
 
     M3ECard(
         variant = M3ECardVariant.Filled,
@@ -933,6 +938,35 @@ internal fun AdvancedSettingsCard(
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         )
+        // ── Java 版本 ──
+        // 允许改：同一台设备可能装了多个 Java；整合包/插件常要求特定版本；
+        // 也有人想用更高版本 Java 跑旧服务端来获得更好的 GC。
+        Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Text(
+                "Java 版本",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "当前 Java ${instance.javaMajor}" +
+                    (if (instance.mcVersion.isNotEmpty()) {
+                        " · MC ${instance.mcVersion} 推荐 Java ${
+                            com.kaze.newage.data.model.JavaVersionInference.infer(instance.mcVersion)
+                        }"
+                    } else {
+                        ""
+                    }),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(6.dp))
+            M3ESegmentedRow(
+                options = JAVA_MAJORS,
+                selected = javaMajor,
+                label = { "Java $it" },
+                onSelect = { javaMajor = it },
+                height = 38.dp,
+            )
+        }
         Row(
             Modifier.fillMaxWidth().padding(top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -949,8 +983,10 @@ internal fun AdvancedSettingsCard(
             onClick = {
                 viewModel.setExtraJvmArgs(instance, args)
                 viewModel.setNogui(instance, nogui)
+                if (javaMajor != instance.javaMajor) viewModel.setInstanceJava(instance, javaMajor)
             },
-            enabled = (args != instance.extraJvmArgs) || (nogui != instance.nogui),
+            enabled = (args != instance.extraJvmArgs) || (nogui != instance.nogui) ||
+                (javaMajor != instance.javaMajor),
         ) {
             Text(if (isRunning) "保存（重启后生效）" else "保存")
         }

@@ -149,7 +149,13 @@ object JavaVersionInference {
             major >= 26 -> 25
             major >= 24 -> 21
             major == 1 && minor <= 16 -> 8
-            major == 1 && minor <= 20 && (minor < 20 || (minor == 20 && m.groupValues[3].toIntOrNull() ?: 0 < 5)) -> 17
+            // 1.17 ~ 1.20.4 → Java 17。
+            // 这里曾写成 `-> 1`（漏了一个 7），于是这段版本区间会返回"Java 1"——
+            // 界面上显示"自动适配 Java 1"，真正拿去选运行时时会找不到。
+            // 之所以一直没被发现：autoJava 只用于展示，实际创建时 downloadAndCreate 走的是
+            // 自己的推断；现在配置页允许用户手选、详情页会用它算"推荐值"，必须是对的。
+            major == 1 && minor <= 20 &&
+                (minor < 20 || (minor == 20 && (m.groupValues[3].toIntOrNull() ?: 0) < 5)) -> 177
             else -> 21
         }
     }
