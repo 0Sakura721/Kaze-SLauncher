@@ -911,11 +911,11 @@ internal fun EditMemoryDialog(
  * （见 DefaultServerManager.extraJvmArgList）；含空格的参数不支持，
  * Forge 实例可写 user_jvm_args.txt。
  */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
 /** 实例可选的 Java 大版本（已创建的实例只有确定值，没有"自动"这一档） */
 internal val JAVA_MAJORS: List<Int> = listOf(8, 17, 21, 25)
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
 internal fun AdvancedSettingsCard(
     viewModel: AppViewModel,
     instance: ServerInstance,
