@@ -134,12 +134,15 @@ object JavaVersionInference {
         // 于是 2024 年之后的快照（需要 Java 21/25）会被配上一个跑不起来的 Java：
         // 实例能建出来、一启动就 UnsupportedClassVersionError。按年份映射。
         Regex("""(\d{2})w\d{2}[a-z]""").find(mcVersion.trim())?.let { m ->
+            // 完整年份（20xx）。比较基准必须是 2026/2024/2021 ——
+            // 原来写成 `year >= 26`，而 year 是 2020 这样的四位数，恒为真，
+            // 于是**所有快照都被判成 Java 25**（连 20w45a 这种 Java 8 的都算）。
             val year = 2000 + m.groupValues[1].toInt()
             return when {
-                year >= 26 -> 25   // 与正式版 26.x 对齐
-                year >= 24 -> 21   // 1.20.5 起需要 21
-                year >= 21 -> 17   // 1.17–1.20.4
-                else -> 8          // 1.16 及更早
+                year >= 2026 -> 25   // 与正式版 26.x 对齐
+                year >= 2024 -> 21   // 1.20.5 起需要 21
+                year >= 2021 -> 17   // 1.17–1.20.4
+                else -> 8            // 1.16 及更早
             }
         }
         val m = Regex("""(\d+)\.(\d+)(?:\.(\d+))?""").find(mcVersion) ?: return 17
