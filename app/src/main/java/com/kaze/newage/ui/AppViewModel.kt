@@ -1669,13 +1669,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         ?: throw RuntimeException("无法打开所选文件（授权可能已失效，请重新选择）")
                     _importJarProgress.value = ImportJarProgress.Running(0f, "解压中…")
                     val result = input.use {
-                        ModpackImporter.extract(it, tmpDir) { done ->
-                            _importJarProgress.value = ImportJarProgress.Running(
-                                // 压缩包总大小未知（SAF 常常给不出），只报已解压字节
-                                -1f,
-                                "解压中… ${done / 1024 / 1024} MB",
-                            )
-                        }
+                        // 必须用具名参数：extract 的最后一个参数是 shouldCancel，
+                        // 尾随 lambda 会被绑到它上面（报 "actual type is Function1<..., Boolean>"）
+                        ModpackImporter.extract(
+                            input = it,
+                            dest = tmpDir,
+                            onProgress = { done ->
+                                _importJarProgress.value = ImportJarProgress.Running(
+                                    // 压缩包总大小未知（SAF 常常给不出），只报已解压字节
+                                    -1f,
+                                    "解压中… ${done / 1024 / 1024} MB",
+                                )
+                            },
+                        )
                     }
                     if (result.entryCount == 0) {
                         throw RuntimeException("压缩包里没有任何文件")
