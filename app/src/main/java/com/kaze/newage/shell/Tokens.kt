@@ -305,10 +305,15 @@ fun Context.hairline(insetStart: Float = 0f, insetEnd: Float = 0f): View = View(
  * 自绘控件全都用 OnClickListener，而列表行 + 底部弹层叠在一起时，
  * 一次 tap 很容易既命中行又命中刚弹出来的按钮（动画期间两层都在窗口里），
  * 于是"点一下删掉两个实例"这类事故就会发生。600ms 内同 View 只认一次。
+ *
+ * `last` 的初值必须是**负值**，不能是 0：`elapsedRealtime()` 是"开机以来的
+ * 毫秒数"，设备刚启动（或 Robolectric 沙箱里时钟从 0 起算）时它可能小于
+ * interval，于是首次点击会被 `now - last < interval` 判成连击而丢弃 ——
+ * 表现是"这个按钮第一次点没反应"。取 `-interval` 之后首击必过。
  */
 fun View.clickOnce(intervalMs: Long = 600L, action: () -> Unit) {
     setOnClickListener(object : View.OnClickListener {
-        private var last = 0L
+        private var last = -intervalMs
         override fun onClick(v: View) {
             val now = android.os.SystemClock.elapsedRealtime()
             if (now - last < intervalMs) return
