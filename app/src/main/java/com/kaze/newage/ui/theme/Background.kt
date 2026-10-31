@@ -86,6 +86,8 @@ fun ThemeBackdrop(modifier: Modifier = Modifier) {
         // View 构建，Compose 的背板根本不存在。分支留着只为 when 穷尽 ——
         // 万一将来有人把 SHELL 接进 Compose，回退到 M3 背板也比崩溃好。
         AppThemeMode.SHELL -> ClearBackdrop(modifier)
+        // Miuix：沿用 M3 背板（分组灰底/纯黑已由 ColorScheme 表达）
+        AppThemeMode.MIUIX -> ClearBackdrop(modifier)
     }
 }
 

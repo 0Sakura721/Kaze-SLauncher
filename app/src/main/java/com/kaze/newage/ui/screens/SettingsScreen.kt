@@ -969,7 +969,9 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 title = "主题样式",
                 // 液态玻璃已从构建中移除：主题列表里不再出现该选项
                 //（相关代码保留在 ui/theme/LiquidGlassEffect.kt 与 blur/shader 目录，未接入）
-                options = AppThemeMode.entries.filter { it != AppThemeMode.GLASS },
+                // GLASS（液态玻璃）暂不在选择器里展示：它是背景图+模糊的组合呈现，
+        // 单列一项容易与「背景图」设置重复（历史遗留，见 GLASS 条目注释）。
+        options = AppThemeMode.entries.filter { it != AppThemeMode.GLASS },
                 selected = AppThemeMode.fromId(uiPrefs.themeMode.value),
                 label = { it.label },
                 note = AppThemeMode.fromId(uiPrefs.themeMode.value).desc,

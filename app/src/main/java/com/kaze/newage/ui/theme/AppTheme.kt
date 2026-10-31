@@ -7,6 +7,8 @@ import dev.chrisbanes.haze.HazeState
  *  - M3：Material 3 动态取色（Material You，跟随系统深浅色）
  *  - GLASS：液态玻璃（Haze 原生背景模糊 + 折射，跟随系统深浅色）
  *  - SHELL：「岚」手写视图界面（纸感 / 墨夜两套配色，自绘控件）
+ *  - MIUIX：HyperOS 风组件主题（Miuix 组件库；配色映射到 M3 ColorScheme，
+ *    使现有 M3 组件与 22 处 LocalAppTheme 分支无需改写即可获得正确颜色）
  *
  * 三者都是**用户可见的界面样式**，所以在同一个选择器里并列，而不是拆成
  * 「主题样式」+「界面外壳」两个概念 —— 用户要的是"我的应用长什么样"，
@@ -20,6 +22,7 @@ enum class AppThemeMode(val id: String, val label: String, val desc: String) {
     M3("m3", "Material 3", "动态取色（Material You）"),
     GLASS("glass", "液态玻璃", "原生背景模糊 + 折射"),
     SHELL("shell", "岚", "纸感 / 墨夜 · 自绘视图"),
+    MIUIX("miuix", "Miuix", "HyperOS 风组件"),
     ;
 
     /** 该样式是否由手写视图层实现（需要整壳切换，而非 Compose 内换主题） */
@@ -30,6 +33,7 @@ enum class AppThemeMode(val id: String, val label: String, val desc: String) {
             "glass" -> GLASS
             "aurora" -> GLASS // 旧版「极光」迁移
             "shell" -> SHELL
+            "miuix" -> MIUIX
             "clear" -> M3    // 旧版「简洁面板」迁移为 Material 3
             else -> M3
         }
