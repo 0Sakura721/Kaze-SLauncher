@@ -171,8 +171,6 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.haze)
     implementation(libs.miuix)
-    implementation(libs.miuix)
-    implementation(libs.miuix)
     debugImplementation(libs.androidx.ui.tooling)
     testImplementation(libs.junit)
     // ── Roborazzi 截图测试（纯 JVM，无需模拟器/安装 APK）──
