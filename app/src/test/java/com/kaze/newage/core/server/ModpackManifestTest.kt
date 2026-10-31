@@ -1,6 +1,7 @@
 package com.kaze.newage.core.server
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -404,5 +405,67 @@ class ModpackManifestTest {
         val plan = ModpackImporter.inspect(d)
         assertTrue(plan.format is ModpackManifest.Format.Plain)
         assertEquals(ModpackManifest.Loader.UNKNOWN, plan.loader)
+    }
+
+// ══════════ 已有文件能否复用（防"长度相同的损坏文件被永久复用"）══════════
+
+    @Test
+    fun `有哈希时必须以哈希为准，长度相同也不能复用`() {
+        val root = dir("reuse")
+        val f = File(root, "mods/x.jar")
+        f.parentFile!!.mkdirs()
+        f.writeBytes(ByteArray(100) { 1 })   // 长度与清单一致，但内容损坏
+
+        val remote = ModpackManifest.RemoteFile(
+            path = "mods/x.jar",
+            urls = listOf("https://cdn/x.jar"),
+            sha512 = "expected-sha512",
+            sha1 = null,
+            size = 100L,                     // 大小**恰好**一致
+            side = ModpackManifest.Side.SERVER_OK,
+        )
+
+        // 哈希不匹配 → 必须重新下载（这正是"只看大小"会漏掉的情形）
+        assertFalse(
+            "长度一致但哈希不符的文件绝不能复用",
+            ModpackImporter.canReuseExisting(f, remote) { false },
+        )
+        // 哈希匹配 → 可以复用（不重复下载）
+        assertTrue(
+            "哈希正确时应当复用，避免每次导入都重下几百 MB",
+            ModpackImporter.canReuseExisting(f, remote) { true },
+        )
+    }
+
+    @Test
+    fun `清单没给哈希时才退回比大小`() {
+        val root = dir("reuse")
+        val f = File(root, "mods/y.jar")
+        f.parentFile!!.mkdirs()
+        f.writeBytes(ByteArray(50))
+
+        fun remote(size: Long) = ModpackManifest.RemoteFile(
+            path = "mods/y.jar", urls = listOf("https://cdn/y.jar"),
+            sha512 = null, sha1 = null, size = size, side = ModpackManifest.Side.SERVER_OK,
+        )
+
+        // 没有哈希 → 哈希校验器永远返回 false，但不该因此每次都重下
+        assertTrue("无哈希 + 大小一致 → 复用", ModpackImporter.canReuseExisting(f, remote(50)) { false })
+        assertFalse("无哈希 + 大小不一致 → 重下", ModpackImporter.canReuseExisting(f, remote(9999)) { false })
+        assertTrue("清单 size=0（没给）→ 认任何非空文件", ModpackImporter.canReuseExisting(f, remote(0)) { false })
+    }
+
+    @Test
+    fun `文件不存在或为空时都要重新下载`() {
+        val root = dir("reuse")
+        val remote = ModpackManifest.RemoteFile(
+            path = "mods/z.jar", urls = listOf("https://cdn/z.jar"),
+            sha512 = "sha", sha1 = null, size = 10, side = ModpackManifest.Side.SERVER_OK,
+        )
+        assertFalse("文件不存在 → 重下", ModpackImporter.canReuseExisting(null, remote) { true })
+        assertFalse(
+            "路径指向目录 → 不能当文件复用",
+            ModpackImporter.canReuseExisting(root, remote) { true },
+        )
     }
 }

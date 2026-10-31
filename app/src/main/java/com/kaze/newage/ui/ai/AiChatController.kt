@@ -594,9 +594,22 @@ class AiChatController(private val host: AiChatHost) {
                     if (AiToolPolicy.modeOf(host.uiPrefs.aiToolPolicies.value, "write_file")
                         == AiToolPolicy.Mode.AUTO && policy.forbidden == null
                     ) {
+                        // 实例可能在提问之后被删掉（或本轮提问时本来就没选中实例）→ target 为 null。
+                        // 原实现写 `target!!.dir`，NPE 被下面这层 runCatching 吞掉后只回喂
+                        // 「失败：null」（`!!` 抛出的 NPE 没有 message），用户和模型都不知道怎么了。
+                        // 提前拦下并给出可行动的理由，模型才能改方案而不是反复重试。
+                        if (target == null) {
+                            session.apiMessages += AiMessage(
+                                AiMessage.ROLE_USER,
+                                "【工具结果】write_file \"${tool.path}\" → 失败：" +
+                                    "当前没有可写入的实例（实例可能已被删除，或本轮提问时未选中实例）。" +
+                                    "请告诉用户先选中一个实例。",
+                            )
+                            continue
+                        }
                         val startedAt = System.currentTimeMillis()
                         val written = runCatching {
-                            AiFileTools.writeFile(target!!.dir, tool.path, tool.content)
+                            AiFileTools.writeFile(target.dir, tool.path, tool.content)
                         }
                         val elapsed = System.currentTimeMillis() - startedAt
                         val ok = written.isSuccess
@@ -753,9 +766,21 @@ class AiChatController(private val host: AiChatHost) {
                 if (AiToolPolicy.modeOf(host.uiPrefs.aiToolPolicies.value, "write_file")
                     == AiToolPolicy.Mode.AUTO && policy.forbidden == null
                 ) {
+                    // 与 JSON 协议分支同样的空值处理：`target!!` 的 NPE 只会变成
+                    // 一句没有信息的「失败：null」。原生协议必须回 role=tool + 同一个 tool_call_id，
+                    // 否则这一轮的配对就断了。
+                    if (target == null) {
+                        session.apiMessages += AiMessage(
+                            AiMessage.ROLE_TOOL,
+                            "失败：当前没有可写入的实例（实例可能已被删除，或本轮提问时未选中实例）。" +
+                                "请告诉用户先选中一个实例。",
+                            toolCallId = tc.id,
+                        )
+                        continue
+                    }
                     val startedAt = System.currentTimeMillis()
                     val written = runCatching {
-                        AiFileTools.writeFile(target!!.dir, args.path, args.content)
+                        AiFileTools.writeFile(target.dir, args.path, args.content)
                     }
                     val elapsed = System.currentTimeMillis() - startedAt
                     val ok = written.isSuccess

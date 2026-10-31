@@ -285,6 +285,27 @@ object ModpackImporter {
     }
 
     /**
+     * 已有文件能不能直接复用（= 不必重新下载）。
+     *
+     * **有哈希时必须以哈希为准。** 只比大小会放过"长度恰好相同的损坏文件"
+     * （下载中断后残留、写盘丢块都可能造成），而且它会被**永久**复用 ——
+     * 之后每次导入都判定"已经下好了"，模组一直跑不起来却查不出原因。
+     * 清单没给哈希时才只能比大小（那种文件本来就没法验证内容）。
+     *
+     * [hashOk] 由调用方注入（sha512 优先、退 sha1），这样这条判定可以单测。
+     */
+    fun canReuseExisting(
+        existing: File?,
+        remote: ModpackManifest.RemoteFile,
+        hashOk: (File) -> Boolean,
+    ): Boolean {
+        if (existing == null || !existing.isFile) return false
+        if (remote.sha512 != null || remote.sha1 != null) return hashOk(existing)
+        // 没有哈希可比：只能认大小（size 为 0 说明清单没给，那就接受任何非空文件）
+        return remote.size <= 0 || existing.length() == remote.size
+    }
+
+    /**
      * 把清单里的相对路径解析成实例目录内的目标文件；越界或非法返回 null。
      *
      * **远端清单是不可信数据**：`path` 完全由整合包作者（或伪造的包）决定，

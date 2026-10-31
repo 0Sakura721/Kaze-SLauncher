@@ -1553,6 +1553,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = container.appContext
             var dir: File? = null
+            // 同 importModpack：登记之后就不能再删这个目录了（见那里的说明）
+            var registered = false
             try {
                 // ── ① 先落到临时文件，体检通过才建实例目录 ──
                 // 直接往实例目录写的话，被拒绝的文件也会留下一个半成品目录
@@ -1607,6 +1609,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     dir = dir,
                 )
                 instanceStore.add(instance)
+                registered = true
                 ServerProperties.ensureInitial(instance, instanceStore.instances.value)
                 _currentInstanceId.value = instance.id
                 _importJarProgress.value = ImportJarProgress.Done(instance.id, instance.name)
@@ -1619,8 +1622,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     ).show()
                 }
             } catch (e: Exception) {
-                // 只清理本次新建的半成品目录；用户的源文件是 SAF 只读流，不会被改动
-                runCatching { dir?.deleteRecursively() }
+                // 只清理**本次新建的半成品目录**；用户的源文件是 SAF 只读流，不会被改动。
+                // 已经登记过的实例绝不能删目录（那是用户的数据）。
+                if (!registered) runCatching { dir?.deleteRecursively() }
                 val reason = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                 _importJarProgress.value = ImportJarProgress.Failed(reason)
                 withContext(Dispatchers.Main) {
@@ -1662,6 +1666,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = container.appContext
             var dir: File? = null
+            // 实例一旦登记进列表，就**不能再删它的目录** —— 删了会留下"列表里有这个实例、
+            // 目录却没了"的空壳（用户点进去处处报错，而数据已经没了）。
+            // 这个标记用来区分"本次新建的半成品目录（该清）"与"已登记的实例目录（不能动）"。
+            var registered = false
             try {
                 // ① 解压到临时目录（不直接往实例目录解，失败时不留半成品）
                 val tmpDir = File(ctx.cacheDir, "modpack-${System.currentTimeMillis()}").apply { mkdirs() }
@@ -1767,7 +1775,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                             .getOrDefault(CoreType.CUSTOM),
                         mcVersion = plan.mcVersion,
                         javaMajor = plan.javaMajor,
-                        memoryMb = 2048,   // 整合包通常比原版吃内存；用户可在详情页改
+                        memoryMb = suggestedModpackMemoryMb(),   // 见该函数：整合包给得多，但不能超过设备可用内存
                         dir = dir,
                     )
                     if (plan.launch == ModpackImporter.Launch.FORGE_ARGS &&
@@ -1777,6 +1785,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         runCatching { instance.forgeMarker.writeText(instance.javaMajor.toString()) }
                     }
                     instanceStore.add(instance)
+                    registered = true
                     ServerProperties.ensureInitial(instance, instanceStore.instances.value)
                     _currentInstanceId.value = instance.id
 
@@ -1830,7 +1839,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     runCatching { tmpDir.deleteRecursively() }
                 }
             } catch (e: Exception) {
-                runCatching { dir?.deleteRecursively() }
+                // 只清理**本次新建的半成品目录**。实例一旦登记进列表就不能再删它的目录 ——
+                // 删了会留下"列表里有这个实例、目录却没了"的空壳（用户点进去处处报错，
+                // 而数据已经没了）。跟 importJar 同一套处理。
+                if (!registered) runCatching { dir?.deleteRecursively() }
                 val reason = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
                 _importJarProgress.value = ImportJarProgress.Failed(reason)
                 withContext(Dispatchers.Main) {
@@ -1992,21 +2004,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 continue
             }
             onProgress(done, files.size, "下载模组 ${done + 1}/${files.size}：${dest.name}")
-            if (dest.isFile && f.size > 0 && dest.length() == f.size) {
-                done++
-                continue
-            }
-            if (f.urls.isEmpty()) {
-                failed++
-                continue
-            }
-            val validate: (File) -> Boolean = { candidate ->
+            // 清单给了哈希时**必须校验哈希**才能复用：只看"大小一致"会永久放过
+            // 长度恰好相同的损坏文件（见 ModpackImporter.canReuseExisting 的说明）。
+            val hashOk: (File) -> Boolean = { candidate ->
                 when {
                     f.sha512 != null -> Downloader.sha512Of(candidate)?.equals(f.sha512, ignoreCase = true) == true
                     f.sha1 != null -> Downloader.sha1Of(candidate)?.equals(f.sha1, ignoreCase = true) == true
                     else -> candidate.length() > 0
                 }
             }
+            if (ModpackImporter.canReuseExisting(dest, f, hashOk)) {
+                done++
+                continue
+            }
+            // 复用了但校验没过：把坏文件删掉，避免"下载失败"之后它还留着被下次复用
+            if (dest.isFile) runCatching { dest.delete() }
+            if (f.urls.isEmpty()) {
+                failed++
+                continue
+            }
+            val validate = hashOk
             val used = Downloader.downloadFromSources(f.urls, dest, validate = validate)
             if (used == null) {
                 failed++
@@ -2027,6 +2044,29 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     /** 包里是否已经有实体的模组文件（用来判断 CurseForge 包是不是"服务端包"形态） */
     private fun hasPhysicalMods(root: File): Boolean =
         File(root, "mods").listFiles()?.any { it.isFile && it.name.endsWith(".jar", ignoreCase = true) } == true
+
+    /**
+     * 整合包实例的初始内存上限。
+     *
+     * 整合包通常比原版吃内存（mod 多、加载期峰值高），所以想给得多一点；
+     * 但**不能写死 2048** —— 2GB 机型上刚建好实例就会 OOM，比"内存小一点"更糟。
+     * 所以走与「新建」页同一套建议逻辑（可用内存的一半，下限 1024），
+     * 只在设备确实宽裕（可用 ≥ 4GB）时才抬到 2048；最后统一 clamp 到合法区间。
+     *
+     * 读不到 /proc/meminfo 时按 0 处理 → 建议值落到下限 1024，仍是安全的选择。
+     */
+    private fun suggestedModpackMemoryMb(): Int {
+        val availMb = runCatching {
+            java.io.File("/proc/meminfo").useLines { lines ->
+                lines.firstOrNull { it.startsWith("MemAvailable") }
+                    ?.split(Regex("\\s+"))?.getOrNull(1)?.toLongOrNull()?.div(1024f)
+                    ?: 0f
+            }
+        }.getOrDefault(0f)
+        val suggested = com.kaze.newage.core.server.MemoryLimits.suggestFrom(availMb)
+        val desired = if (availMb >= 4096f) 2048f else suggested
+        return com.kaze.newage.core.server.MemoryLimits.clamp(maxOf(suggested, desired).toInt())
+    }
 
     /**
      * 整合包实例名：用户可在导入对话框里填，留空就用识别到的「核心 + MC 版本」。
