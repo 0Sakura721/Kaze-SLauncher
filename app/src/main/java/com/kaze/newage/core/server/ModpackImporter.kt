@@ -58,6 +58,16 @@ object ModpackImporter {
         val warnings: List<String>,
         /** 为什么这么判（写进控制台，便于用户核对） */
         val evidence: String,
+        /**
+         * 识别出的整合包格式（Modrinth .mrpack / CurseForge .zip / 通用懒人包）。
+         *
+         * 三者决定了「还要不要联网下载」：通用懒人包的文件已经实体在包里，
+         * Modrinth 只有引用清单（必须按 URL 下载），CurseForge 只有平台 ID
+         * （免密钥拿不到下载地址，见 [ModpackManifest] 的说明）。
+         */
+        val format: ModpackManifest.Format = ModpackManifest.Format.Plain,
+        val loader: ModpackManifest.Loader = ModpackManifest.Loader.UNKNOWN,
+        val loaderVersion: String = "",
     )
 
     // ── 限额：外部 zip 是不可信输入 ──
@@ -227,15 +237,77 @@ object ModpackImporter {
             }
         }
 
-        // ② overrides/ 摊平（CurseForge）
-        val overrides = File(root, "overrides")
-        if (overrides.isDirectory) {
-            if (moveChildren(overrides, root)) {
-                runCatching { overrides.delete() }
+        // ② overrides/ 与 server-overrides/ 摊平
+        //    CurseForge 用 overrides；Modrinth 的服务端包还会额外带 server-overrides/
+        for (name in listOf("overrides", "server-overrides")) {
+            val d = File(root, name)
+            if (!d.isDirectory) continue
+            if (moveChildren(d, root)) {
+                runCatching { d.delete() }
                 changed = true
             }
         }
         return changed
+    }
+
+    // ── 联网安装所需的两个纯函数（都可单测，不碰网络） ──
+
+    /**
+     * 加载器安装器（Forge/NeoForge）的下载地址与建议文件名。
+     *
+     * 用的是 [com.kaze.newage.core.download.CoreSources] 里**同一套 maven 路径**
+     * （应用本来就从这两个 maven 下 Forge/NeoForge 安装器），只是这里按清单给的
+     * **确切版本**构造，而不是取最新 —— 整合包的 mod 与加载器版本是绑定的。
+     *
+     * Fabric 不走这里：它没有 installer，用 `CoreSources.getFabricDownload()` 直接取
+     * 现成的服务端启动器 jar。Quilt 本项目暂不支持（返回 null，由调用方给明确说明）。
+     */
+    fun loaderInstallerUrl(
+        loader: ModpackManifest.Loader,
+        mcVersion: String,
+        loaderVersion: String,
+    ): Pair<String, String>? {
+        if (loaderVersion.isBlank()) return null
+        return when (loader) {
+            ModpackManifest.Loader.FORGE -> {
+                if (mcVersion.isBlank()) return null
+                val match = "$mcVersion-$loaderVersion"
+                // `to` 必须与左值在同一表达式里：换行写会让 Kotlin 把两行当两条语句
+                "https://maven.minecraftforge.net/net/minecraftforge/forge/$match/forge-$match-installer.jar" to
+                    "forge-$match-installer.jar"
+            }
+            ModpackManifest.Loader.NEOFORGE -> {
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/$loaderVersion/neoforge-$loaderVersion-installer.jar" to
+                    "neoforge-$loaderVersion-installer.jar"
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * 把清单里的相对路径解析成实例目录内的目标文件；越界或非法返回 null。
+     *
+     * **远端清单是不可信数据**：`path` 完全由整合包作者（或伪造的包）决定，
+     * `../../foo` 这类值直接拼进 File 就会写到实例目录之外。这里做与解压同一套
+     * canonical 前缀校验。
+     *
+     * 关于"看起来像绝对路径"的输入（`/mods/x.jar`、`C:/x.dll`）：**不拒绝，而是规范化**
+     * —— 前导 `/` 去掉、`\` 换成 `/`，然后当作实例目录内的相对路径。理由有两个：
+     *  1. 很多整合包（尤其从其他启动器导出的）就是这么写路径的，拒绝会让它们装不上；
+     *  2. 真正的安全属性是"**最终落在实例目录内**"，规范化之后这一点仍然成立 ——
+     *     `/etc/passwd` 会变成实例目录里的 `etc/passwd`，不是系统的 `/etc/passwd`。
+     * 所以真正必须拒绝的只有 `..` 段（它会跳出目录）。
+     */
+    fun resolveRemoteDest(root: File, path: String): File? {
+        val clean = path.replace('\\', '/').trimStart('/')
+        if (clean.isEmpty()) return null
+        // 逐段检查：不允许任何 `..` 段（哪怕最终 canonical 恰好落在目录内）
+        if (clean.split('/').any { it == ".." }) return null
+        val dest = File(root, clean)
+        val ok = runCatching {
+            dest.canonicalPath.startsWith(root.canonicalPath + File.separator)
+        }.getOrDefault(false)
+        return dest.takeIf { ok }
     }
 
     /** 把 [from] 下的子项移到 [to]（同名已存在时**保留 [to] 的**，不覆盖用户已放的文件） */
@@ -260,7 +332,71 @@ object ModpackImporter {
     /** 从 Forge 库目录名里抽 MC 版本：`libraries/net/minecraftforge/forge/1.20.1-47.2.0/` */
     private val FORGE_DIR_MC = Regex("""^(\d+\.\d+(?:\.\d+)?)-""")
 
-    fun inspect(root: File): Plan {
+    fun inspect(root: File): Plan = withManifest(inspectBody(root), ModpackManifest.detect(root))
+
+    /**
+     * 把清单信息填进识别结果。
+     *
+     * 单独一层是为了让 [inspectBody] 专注"目录里有什么"，清单解析交给
+     * [ModpackManifest]（两者都能独立测）。清单给出的信息**优先于**目录推断：
+     * 目录里可能只有一个 mods/（认不出核心），但清单明确写着 forge 47.2.0。
+     */
+    private fun withManifest(plan: Plan, format: ModpackManifest.Format): Plan {
+        val (loader, loaderVersion, mcFromManifest) = when (format) {
+            is ModpackManifest.Format.Mrpack -> Triple(
+                format.manifest.loader, format.manifest.loaderVersion, format.manifest.mcVersion,
+            )
+            is ModpackManifest.Format.Curse -> Triple(
+                format.manifest.loader, format.manifest.loaderVersion, format.manifest.mcVersion,
+            )
+            ModpackManifest.Format.Plain -> Triple(
+                ModpackManifest.Loader.UNKNOWN, "", "",
+            )
+        }
+        if (loader == ModpackManifest.Loader.UNKNOWN && mcFromManifest.isEmpty()) {
+            return plan.copy(format = format)
+        }
+        // 清单给了 MC 版本就以它为准（比从 mods 文件名猜可靠得多）
+        val mc = mcFromManifest.ifEmpty { plan.mcVersion }
+        val coreFromLoader = when (loader) {
+            ModpackManifest.Loader.FORGE -> "FORGE"
+            ModpackManifest.Loader.NEOFORGE -> "NEOFORGE"
+            ModpackManifest.Loader.FABRIC -> "FABRIC"
+            ModpackManifest.Loader.QUILT -> "CUSTOM"   // CoreType 里没有 Quilt
+            else -> plan.coreTypeName
+        }
+        // 清单明确写了加载器时，以它的 Java 推断为准（mc 变量已优先取清单版本）
+        val java = if (mc.isNotEmpty() && mc != plan.mcVersion) {
+            com.kaze.newage.data.model.JavaVersionInference.infer(mc)
+        } else {
+            plan.javaMajor
+        }
+        val warnings = if (plan.launch == Launch.MODS_ONLY &&
+            loader != ModpackManifest.Loader.UNKNOWN && loader != ModpackManifest.Loader.VANILLA
+        ) {
+            // 清单说了要装哪个加载器 → 不再是"缺核心"，交给导入流程自动装
+            plan.warnings.filterNot { it.contains("没有服务端核心") }
+        } else {
+            plan.warnings
+        }
+        return plan.copy(
+            coreTypeName = if (coreFromLoader != "CUSTOM") coreFromLoader else plan.coreTypeName,
+            mcVersion = mc,
+            javaMajor = java,
+            warnings = warnings,
+            format = format,
+            loader = loader,
+            loaderVersion = loaderVersion,
+            evidence = plan.evidence +
+                if (loader != ModpackManifest.Loader.UNKNOWN) {
+                    (if (plan.evidence.isEmpty()) "" else "; ") + "清单声明加载器 ${loader.name}"
+                } else {
+                    ""
+                },
+        )
+    }
+
+    private fun inspectBody(root: File): Plan {
         val warnings = mutableListOf<String>()
         val evidence = StringBuilder()
 

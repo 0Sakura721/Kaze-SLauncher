@@ -289,7 +289,19 @@ fun ServerScreen(
                 container = MaterialTheme.colorScheme.secondaryContainer,
                 content = MaterialTheme.colorScheme.onSecondaryContainer,
                 enabled = !importing,
-                onClick = { modpackLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
+                // MIME 只是"建议筛选项"：.mrpack / .zip 在不同 ROM 上可能被报成
+                // application/zip、application/x-zip-compressed 或 octet-stream，
+                // 少写一项就会出现"文件在选择器里看不到"。真正的把关在 ModpackImporter。
+                onClick = {
+                    modpackLauncher.launch(
+                        arrayOf(
+                            "application/zip",
+                            "application/x-zip-compressed",
+                            "application/x-modrinth-modpack+zip",
+                            "application/octet-stream",
+                        )
+                    )
+                },
             )
         }
 
