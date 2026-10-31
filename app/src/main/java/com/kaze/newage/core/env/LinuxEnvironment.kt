@@ -31,6 +31,18 @@ interface LinuxEnvironment {
     ): Process?
 
     /**
+     * rootfs 内 `java` 可执行文件的环境内路径（如 `/usr/lib/jvm/java-17-openjdk-arm64/bin/java`）。
+     *
+     * 必须走这个方法，**不要在调用方拼目录名**：JDK 的目录名并不统一 ——
+     * apt 装出来是 `java-1.17.0-openjdk-arm64`，Adoptium 解压出来是 `java-17-openjdk-arm64`。
+     * 拼错路径的后果是启动时找不到 java（表现为一启动就退出，而不是一句明确的错误）。
+     *
+     * @param version 期望的 Java 大版本（8/17/21/25）
+     * @return 环境内绝对路径；没检测到时返回按传统命名的兜底路径
+     */
+    fun getJavaPath(version: Int): String
+
+    /**
      * 在环境内执行命令并实时回调 stdout/stderr 行（便捷方法）。
      * @return 进程退出码；null 表示未能启动
      */

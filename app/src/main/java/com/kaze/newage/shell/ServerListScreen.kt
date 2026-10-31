@@ -380,7 +380,20 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         sheet.show()
     }
 
+    /**
+     * 渲染导入进度。
+     *
+     * ## 两个容易忽略的点
+     * 1. **终态必须清回 Idle**（`clearImportJarProgress`），不能只把控件隐藏掉。
+     *    这个屏是**缓存的**：detach/attach 会重新渲染一次当前状态。如果 VM 里一直留着
+     *    `Done`/`Failed`，那么每次重新进入服务端页都会再用旧状态渲染一遍 ——
+     *    结果是「已导入 X」的 Toast 反复弹、失败横幅常挂不走，像卡住了一样。
+     * 2. **颜色每次都要复位**：`Failed` 会把标签染成 danger，不复位的话，
+     *    失败过一次之后后面每次「导入中 / 导入完成」也一直是红的。
+     */
     private fun renderImport(progress: ImportJarProgress) {
+        // 先复位颜色再按状态上色（见上面第 2 点）
+        importLabel.setTextColor(ShellTheme.current.ink3)
         when (progress) {
             is ImportJarProgress.Idle -> {
                 importProgress.visibility = View.GONE
@@ -403,10 +416,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 importLabel.visibility = View.VISIBLE
                 importLabel.text = "导入完成 · ${progress.name}"
                 host.toast("已导入 ${progress.name}")
-                importProgress.postDelayed({
-                    importProgress.visibility = View.GONE
-                    importLabel.visibility = View.GONE
-                }, 2500L)
+                scheduleImportReset(progress, 2500L)
             }
             is ImportJarProgress.Failed -> {
                 importProgress.indeterminate = false
@@ -415,8 +425,27 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 importLabel.setTextColor(ShellTheme.current.danger)
                 importLabel.text = "导入失败 · ${progress.reason}"
                 host.toast("导入失败：${progress.reason}", error = true)
+                // 失败给长一点让用户看清原因，然后同样清回 Idle
+                scheduleImportReset(progress, 6000L)
             }
         }
+    }
+
+    /**
+     * 延迟把终态清回 Idle（顺带隐藏控件）。
+     *
+     * **只有当前状态仍然是这一个终态时才清** —— 否则用户在提示消失前又发起了一次导入，
+     * 这几行延迟代码会把**新开始的导入进度**清掉（进度条突然消失、状态错乱）。
+     * 用引用相等判断"还是那一个状态对象"，比比较内容更严格。
+     */
+    private fun scheduleImportReset(terminal: ImportJarProgress, delayMs: Long) {
+        importProgress.postDelayed({
+            if (host.vm.importJarProgress.value === terminal) {
+                importProgress.visibility = View.GONE
+                importLabel.visibility = View.GONE
+                host.vm.clearImportJarProgress()
+            }
+        }, delayMs)
     }
 
     private fun toneOf(state: ServerState): Int = when (state) {

@@ -480,8 +480,14 @@ class ProotEnvironment(
     /** 实际检测到的版本（不再写死 8/11/17/21/25，装了什么就报什么） */
     fun installedJdkVersions(): List<Int> = installedJdks().keys.sorted()
 
-    /** rootfs 内 java 路径（供启动脚本使用）；未检测到时退回传统命名 */
-    fun getJavaPath(version: Int): String =
+    /**
+     * rootfs 内 java 路径：**按实际检测到的目录名**拼，未检测到时退回传统命名。
+     *
+     * 为什么不能由调用方自己拼：apt 装出来是 `java-1.17.0-openjdk-arm64`，
+     * Adoptium 解压出来是 `java-17-openjdk-arm64`（见 [installedJdks] 的说明）。
+     * 32 位设备上 Adoptium 没有官方包、必然走 apt，拼错就完全找不到 java。
+     */
+    override fun getJavaPath(version: Int): String =
         installedJdks()[version]?.let { "/usr/lib/jvm/$it/bin/java" }
             ?: "/usr/lib/jvm/java-$version-openjdk-$rootfsArch/bin/java"
 
