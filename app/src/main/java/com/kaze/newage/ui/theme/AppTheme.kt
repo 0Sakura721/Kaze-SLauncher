@@ -6,16 +6,30 @@ import dev.chrisbanes.haze.HazeState
  * 主题模式（照搬 BiliPai 主题设置思路，GPL-3.0）：
  *  - M3：Material 3 动态取色（Material You，跟随系统深浅色）
  *  - GLASS：液态玻璃（Haze 原生背景模糊 + 折射，跟随系统深浅色）
+ *  - SHELL：「岚」手写视图界面（纸感 / 墨夜两套配色，自绘控件）
+ *
+ * 三者都是**用户可见的界面样式**，所以在同一个选择器里并列，而不是拆成
+ * 「主题样式」+「界面外壳」两个概念 —— 用户要的是"我的应用长什么样"，
+ * 不该关心内部是用 Compose 还是手写 View 实现的。
+ *
+ * 实现上 SHELL 与另两者不同：它换的是整个 Activity（见 ShellSwitch），
+ * 因为手写视图与 Compose 各自持有独立的主题体系，塞进一棵树里会互相污染。
+ * 但这个差异**只存在于实现层**，选择器上它们平等。
  */
 enum class AppThemeMode(val id: String, val label: String, val desc: String) {
     M3("m3", "Material 3", "动态取色（Material You）"),
     GLASS("glass", "液态玻璃", "原生背景模糊 + 折射"),
+    SHELL("shell", "岚", "纸感 / 墨夜 · 自绘视图"),
     ;
+
+    /** 该样式是否由手写视图层实现（需要整壳切换，而非 Compose 内换主题） */
+    val isViewShell: Boolean get() = this == SHELL
 
     companion object {
         fun fromId(id: String?): AppThemeMode = when (id) {
             "glass" -> GLASS
             "aurora" -> GLASS // 旧版「极光」迁移
+            "shell" -> SHELL
             "clear" -> M3    // 旧版「简洁面板」迁移为 Material 3
             else -> M3
         }

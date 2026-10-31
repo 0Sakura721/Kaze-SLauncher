@@ -44,15 +44,25 @@
         android:extractNativeLibs="true"
         android:theme="@style/Theme.KazeSLauncher">
 
+        <!-- 岚壳：自绘原生 View 的界面层（新主题样式），作为桌面入口 -->
         <activity
-            android:name=".MainActivity"
+            android:name=".shell.ShellActivity"
             android:exported="true"
+            android:theme="@style/Theme.KazeShell"
             android:windowSoftInputMode="adjustNothing"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode|screenLayout|smallestScreenSize|fontScale|locale|layoutDirection|density">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <!-- 原 Compose 界面：不再挂 LAUNCHER，保留可被显式启动（对照/回退用） -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustNothing"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode|screenLayout|smallestScreenSize|fontScale|locale|layoutDirection|density">
         </activity>
 
         <!-- 服务端守护前台服务：specialUse 类型（无 6 小时时限）+ 显式子类型属性（缺一即 SecurityException） -->

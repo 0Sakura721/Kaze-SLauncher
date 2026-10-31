@@ -973,7 +973,24 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 selected = AppThemeMode.fromId(uiPrefs.themeMode.value),
                 label = { it.label },
                 note = AppThemeMode.fromId(uiPrefs.themeMode.value).desc,
-                onSelect = { mode -> uiPrefs.setThemeMode(mode.id) },
+                onSelect = { mode ->
+                    if (mode.isViewShell) {
+                        // 「岚」由手写视图层实现：写同一个键（themeMode）+ 整壳重启。
+                        // 它与 M3 的差别只在这一步的实现方式上 —— 对用户来说
+                        // 都是「主题样式」，只是岚不使用 Compose 绘制而已。
+                        uiPrefs.setThemeMode(mode.id)
+                        openDialog = null
+                        com.kaze.newage.shell.ShellSwitch.restart(
+                            context = appContext,
+                            shell = com.kaze.newage.shell.ShellSwitch.SHELL,
+                        )
+                    } else {
+                        // 当前就在 Compose 侧，直接换主题即可，无需重启。
+                        // （若用户在岚里选了 Compose，那次点击发生在 ShellActivity，
+                        // 走的是 shell/SettingsScreen.kt 的 switchToComposeTheme。）
+                        uiPrefs.setThemeMode(mode.id)
+                    }
+                },
                 onDismiss = { openDialog = null },
             )
 

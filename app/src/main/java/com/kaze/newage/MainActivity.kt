@@ -26,6 +26,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 界面样式选择权在用户手里（设置 → 外观 → 主题样式）。
+        // 「岚」由手写视图层实现、跑在 ShellActivity 里；若用户当前选的是它，
+        // 入口 Activity 被外部（桌面图标 / 通知 / 深链）拉起时不能还停在这套
+        // Compose 界面上，否则用户点了图标却看到另一套界面。
+        val mode = AppThemeMode.fromId((applicationContext as NewAgeApp).container.uiPrefs.themeMode.value)
+        if (mode.isViewShell) {
+            startActivity(
+                android.content.Intent()
+                    .setClassName(packageName, "com.kaze.newage.shell.ShellActivity")
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                        android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK),
+            )
+            finish()
+            return
+        }
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {

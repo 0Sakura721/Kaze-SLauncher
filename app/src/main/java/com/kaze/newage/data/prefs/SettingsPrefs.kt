@@ -50,10 +50,22 @@ emember(path) 缓存位图的话，
     /** 是否启用背景图 */
     val bgEnabled = mutableStateOf(prefs.getBoolean("bg_enabled", false))
 
-    /** 主题模式：m3（Material 3 动态取色，默认）/ glass（液态玻璃，已封锁） */
+    /** 主题模式：m3（Material 3 动态取色，默认）/ glass（液态玻璃，已封锁）/ shell（岚，手写视图） */
     val themeMode = mutableStateOf(prefs.getString("theme_mode", "clear") ?: "clear")
 
     init {
+        // 「界面外壳」并进「主题样式」的一次性迁移：上一版用过独立的 ui_shell 键
+        //（"shell"/"m3"），把它折算成 themeMode 后删掉，避免留下第二个事实来源。
+        // 只在 themeMode 还是出厂默认时才采纳旧值 —— 用户后来手动改过主题的话，
+        // 那才是最新意图，旧键必须让位。
+        if (prefs.contains("ui_shell")) {
+            if (!prefs.contains("theme_mode") || themeMode.value == "clear") {
+                val migrated = if (prefs.getString("ui_shell", null) == "m3") "m3" else "shell"
+                themeMode.value = migrated
+                prefs.edit().putString("theme_mode", migrated).apply()
+            }
+            prefs.edit().remove("ui_shell").apply()
+        }
         // 液态玻璃功能封锁：旧档若处于 glass 主题，强制回退 m3（点击入口已弹提示）
         if (themeMode.value == "glass") {
             themeMode.value = "m3"
