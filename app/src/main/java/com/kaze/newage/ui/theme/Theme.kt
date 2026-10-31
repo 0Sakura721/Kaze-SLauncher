@@ -326,6 +326,7 @@ fun NewAgeTheme(
         }
         AppThemeMode.GLASS -> if (darkTheme) GlassDark else GlassLight
         AppThemeMode.SHELL -> if (darkTheme) ShellDark else ShellLight
+        AppThemeMode.MIUIX -> if (darkTheme) MiuixTheme.dark() else MiuixTheme.light()
     }
 
     // AMOLED 纯黑：深色时将背景/表面系压到纯黑
