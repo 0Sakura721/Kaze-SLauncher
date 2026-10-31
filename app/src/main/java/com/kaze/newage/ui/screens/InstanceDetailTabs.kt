@@ -262,7 +262,10 @@ internal fun RunTab(
                 // lanRefresh 只用来强制重算：LanIp 内部不缓存，每次调用都是实时探测。
                 // 进页面时自动取一次（LaunchedEffect），之后用户可点刷新重取。
                 var lanRefresh by remember { mutableStateOf(0) }
-                val lan by remember(port, lanRefresh) { LanIp.snapshot() }
+                // 注意这里不能用 `by`：remember { ... } 返回的是值本身而不是 State，
+                // 写 `val lan by remember { LanIp.snapshot() }` 会报
+                // "Property delegate must have a 'getValue' method"。
+                val lan = remember(port, lanRefresh) { LanIp.snapshot() }
                 LaunchedEffect(port) {
                     // 让首帧先画出来，再补一次（有些设备进页面瞬间 Wi-Fi 还在连接中）
                     kotlinx.coroutines.delay(600)

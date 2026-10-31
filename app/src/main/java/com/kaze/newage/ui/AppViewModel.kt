@@ -1642,7 +1642,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
      *
      * ## 为什么不能只"解压完就完事"
      * 整合包有三个坑，任意一个没处理好，用户得到的都是一个**启动不起来**的实例：
-     *  1. **多一层壳 / overrides/**：`server.jar` 不在实例根目录 → 启动器找不到它；
+     *  1. **多一层壳 或 overrides 目录**：`server.jar` 不在实例根目录 → 启动器找不到它；
      *  2. **Forge 库可能不全**：这种包装完直接启动会报 `Missing required libraries`，
      *     而且一旦被误标成"已安装"就永远跳过安装（见 ServerInstance.forgeInstalled 注释）；
      *  3. **只有 mods、没有核心**：必须明确告诉用户去补核心，不能假装导入成功。

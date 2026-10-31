@@ -349,7 +349,7 @@ object ModpackImporter {
         )
     }
 
-    /** 找 `libraries/**/unix_args.txt`（深度受限：正常是 6~8 层） */
+    /** 找 `libraries/<核心>/<版本>/unix_args.txt`（深度受限：正常是 6~8 层） */
     private fun findArgsFile(root: File): File? {
         val libs = File(root, "libraries")
         if (!libs.isDirectory) return null
