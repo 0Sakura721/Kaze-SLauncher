@@ -272,12 +272,13 @@ object ModpackImporter {
             ModpackManifest.Loader.FORGE -> {
                 if (mcVersion.isBlank()) return null
                 val match = "$mcVersion-$loaderVersion"
-                "https://maven.minecraftforge.net/net/minecraftforge/forge/$match/forge-$match-installer.jar"
-                    to "forge-$match-installer.jar"
+                // `to` 必须与左值在同一表达式里：换行写会让 Kotlin 把两行当两条语句
+                "https://maven.minecraftforge.net/net/minecraftforge/forge/$match/forge-$match-installer.jar" to
+                    "forge-$match-installer.jar"
             }
             ModpackManifest.Loader.NEOFORGE -> {
-                "https://maven.neoforged.net/releases/net/neoforged/neoforge/$loaderVersion/neoforge-$loaderVersion-installer.jar"
-                    to "neoforge-$loaderVersion-installer.jar"
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/$loaderVersion/neoforge-$loaderVersion-installer.jar" to
+                    "neoforge-$loaderVersion-installer.jar"
             }
             else -> null
         }

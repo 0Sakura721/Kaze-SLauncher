@@ -20,7 +20,6 @@ import com.kaze.newage.core.download.CoreBuild
 import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.server.ServerProperties
-import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.server.ModpackImporter
 import com.kaze.newage.core.server.ModpackManifest
 import com.kaze.newage.core.server.JarInspector
