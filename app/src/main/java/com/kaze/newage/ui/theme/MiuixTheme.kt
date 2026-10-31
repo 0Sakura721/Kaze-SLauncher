@@ -1,6 +1,10 @@
 package com.kaze.newage.ui.theme
 
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
 /**
@@ -39,7 +43,7 @@ object MiuixTheme {
     private val DarkOutline = Color(0xFF3A3A3C)
     private val DarkContainer = Color(0xFF2C2C2E)
 
-    fun light(): ColorScheme = ColorScheme(
+    fun light(): ColorScheme = lightColorScheme(
         primary = Blue,
         onPrimary = Color.White,
         primaryContainer = Color(0xFFD6E9FF),
@@ -77,7 +81,7 @@ object MiuixTheme {
         surfaceContainerHighest = Color(0xFFE5E5EA),
     )
 
-    fun dark(): ColorScheme = ColorScheme(
+    fun dark(): ColorScheme = darkColorScheme(
         primary = Color(0xFF409CFF),
         onPrimary = Color.Black,
         primaryContainer = Color(0xFF004971),

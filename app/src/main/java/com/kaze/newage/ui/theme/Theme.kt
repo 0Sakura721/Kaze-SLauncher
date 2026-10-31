@@ -496,6 +496,18 @@ fun statusPalette(): StatusPalette = when (LocalAppTheme.current) {
         idle = Color(0xFF8A93A6),
         error = Color(0xFFD64545),
     )
+    // HyperOS 语义色（Miuix 观感）
+    AppThemeMode.MIUIX -> if (LocalDarkTheme.current) StatusPalette(
+        running = Color(0xFF30D158),
+        busy = Color(0xFFFFB340),
+        idle = Color(0xFF9E9EA4),
+        error = Color(0xFFFF6961),
+    ) else StatusPalette(
+        running = Color(0xFF34C759),
+        busy = Color(0xFFC9821A),
+        idle = Color(0xFF8E8E93),
+        error = Color(0xFFFA5151),
+    )
     // 与 PaperTokens/InkTokens 的 good/warn/danger/ink3 对齐
     AppThemeMode.SHELL -> if (LocalDarkTheme.current) StatusPalette(
         running = Color(0xFF62C08D),
@@ -515,6 +527,8 @@ fun statusPalette(): StatusPalette = when (LocalAppTheme.current) {
 @ReadOnlyComposable
 fun consoleBackgroundColor(): Color = when (LocalAppTheme.current) {
     AppThemeMode.M3 -> Color(0xFF10141C)
+    // Miuix：与它的深色卡片同源（浅色下终端仍用深底，与 M3 一致）
+    AppThemeMode.MIUIX -> Color(0xFF101418)
     AppThemeMode.GLASS -> if (LocalDarkTheme.current) Color(0xFF060B16) else Color(0xFF111A2C)
     // 岚的日志面板：纸底用浅暖白，墨夜用最深的那张贴面色
     AppThemeMode.SHELL -> if (LocalDarkTheme.current) Color(0xFF111518) else Color(0xFFF8F5F0)
@@ -529,6 +543,13 @@ fun consoleLineColor(type: LineType): Color = when (LocalAppTheme.current) {
         LineType.Warn -> Color(0xFFFFD166)
         LineType.Command -> Color(0xFF7CB8FF)
         LineType.System -> Color(0xFFAEB8CC) // 提亮：深色终端上系统行可见
+        LineType.Info -> Color(0xFFDDE3EC)
+    }
+    AppThemeMode.MIUIX -> when (type) {
+        LineType.Error -> Color(0xFFFF6961)
+        LineType.Warn -> Color(0xFFFFB340)
+        LineType.Command -> Color(0xFF409CFF)
+        LineType.System -> Color(0xFF9E9EA4)
         LineType.Info -> Color(0xFFDDE3EC)
     }
     AppThemeMode.GLASS -> when (type) {
