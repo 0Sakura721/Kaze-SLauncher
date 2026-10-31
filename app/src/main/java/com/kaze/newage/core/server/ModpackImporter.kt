@@ -296,7 +296,7 @@ object ModpackImporter {
      */
     fun canReuseExisting(
         existing: File?,
-        remote: RemoteFile,
+        remote: ModpackManifest.RemoteFile,
         hashOk: (File) -> Boolean,
     ): Boolean {
         if (existing == null || !existing.isFile) return false
