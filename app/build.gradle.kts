@@ -108,7 +108,7 @@ android {
         //
         // 这里只禁用那一个 detector，保留 release 的其余全部 lint 检查 ——
         // 比 checkReleaseBuilds=false（一刀切关掉所有 release 检查）紧得多。
-        disable += "NonNullableMutableLiveData"
+        disable += "NullSafeMutableLiveData"
     }
     buildTypes {
         release {
