@@ -23,15 +23,15 @@ import androidx.compose.ui.unit.dp
 import com.kaze.newage.core.console.LineType
 
 // ══════════════════════════════════════════════════════════════
-// 主题系统（照搬 BiliPai 主题设置体系，GPL-3.0）：
+// 主题系统：
 //  - 主题模式：跟随系统 / 浅色 / 深色（AppThemeMode）
 //  - 深色样式：普通黑 / AMOLED 纯黑（DarkThemeStyle）
 //  - 主题样式：Material 3（壁纸动态取色 / 自定义二级色生成）
 //  - 液态玻璃模式：清晰 CLEAR / 均衡 BALANCED / 磨砂 FROSTED
-//    （参数照搬 BiliPai LiquidGlassTuning 的 progress 线性映射）
+//    （参数按 progress 线性映射）
 // ══════════════════════════════════════════════════════════════
 
-/** 液态玻璃模式（照搬 BiliPai LiquidGlassMode 三档） */
+/** 液态玻璃模式（三档） */
 enum class GlassMode(val id: String, val label: String, val progress: Float) {
     CLEAR("clear", "清晰", 0.2f),
     BALANCED("balanced", "均衡", 0.5f),
@@ -43,7 +43,7 @@ enum class GlassMode(val id: String, val label: String, val progress: Float) {
     }
 }
 
-/** 玻璃参数（照搬 BiliPai LiquidGlassTuning 的 lerp 映射） */
+/** 玻璃参数（按 progress lerp） */
 data class GlassParams(
     val blurRadius: Dp,
     val surfaceAlpha: Float,
@@ -58,7 +58,7 @@ private fun lerpF(start: Float, stop: Float, fraction: Float): Float =
 fun glassParams(mode: GlassMode): GlassParams {
     val p = mode.progress
     return GlassParams(
-        // BiliPai 原参数 3→30 在真实壁纸上成立；无壁纸的渐变底需要更强的糊化才能看出玻璃
+        // 常规参数 3→30 在真实壁纸上成立；无壁纸的渐变底需要更强的糊化才能看出玻璃
         blurRadius = lerpF(10f, 38f, p).dp,
         surfaceAlpha = lerpF(0.10f, 0.34f, p),
         whiteOverlayAlpha = lerpF(0.02f, 0.14f, p),
@@ -294,8 +294,8 @@ private fun seedColorScheme(seed: Int, isDark: Boolean): ColorScheme {
 /**
  * 主题入口。
  * @param darkTheme 是否深色（由「主题模式」与系统共同解析）
- * @param amoledDark AMOLED 纯黑深色样式（照搬 BiliPai DarkThemeStyle）
- * @param colorSource MD3 颜色来源：wallpaper / custom（照搬 BiliPai Md3ColorSource）
+ * @param amoledDark AMOLED 纯黑深色样式
+ * @param colorSource MD3 颜色来源：wallpaper / custom
  * @param customColorHex 自定义主色（hex）
  * @param glassMode 液态玻璃模式（clear/balanced/frosted）
  */
@@ -421,7 +421,7 @@ fun backgroundColor(): Color = MaterialTheme.colorScheme.surfaceContainer
 fun onBackgroundColor(): Color = MaterialTheme.colorScheme.onSurfaceVariant
 
 /**
- * 玻璃表面的 Haze 样式（BiliPai LiquidGlassTuning 参数基础上强化：
+ * 玻璃表面的 Haze 样式（在常规参数基础上强化：
  * 白色雾化 tint + 蓝色 Plus 增色 + 细噪点，让模糊后的色斑更有玻璃质感）。
  */
 @Composable
@@ -440,7 +440,7 @@ fun glassHazeStyle(): dev.chrisbanes.haze.HazeStyle {
 }
 
 /**
- * 底栏专用 Haze 样式（照搬 BiliPai LiquidGlassTuning：blur 3→30dp）：
+ * 底栏专用 Haze 样式（blur 3→30dp）：
  * 文字透过时明显模糊但仍可辨形态，边缘折射弯曲可见；强度滑杆缩放模糊。
  */
 @Composable

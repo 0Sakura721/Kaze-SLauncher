@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
             val glassIntensity by prefs.glassIntensity
             val fgColorModeId by prefs.fgColorMode
 
-            // 主题模式（照搬 BiliPai AppThemeMode）：0=跟随系统 1=浅色 2=深色
+            // 主题模式：0=跟随系统 1=浅色 2=深色
             val darkTheme = when (modeValue) {
                 1 -> false
                 2 -> true

@@ -78,7 +78,7 @@ emember(path) 缓存位图的话，
         if (prefs.contains("force_dark")) prefs.getBoolean("force_dark", false) else null
     )
 
-    /** 主题模式（照搬 BiliPai AppThemeMode）：0=跟随系统 1=浅色 2=深色 */
+    /** 主题模式：0=跟随系统 1=浅色 2=深色 */
     val themeModeValue = mutableStateOf(
         when {
             prefs.contains("theme_mode_value") -> prefs.getInt("theme_mode_value", 0)
@@ -87,16 +87,16 @@ emember(path) 缓存位图的话，
         }
     )
 
-    /** 深色样式（照搬 BiliPai DarkThemeStyle）：0=普通黑 1=AMOLED纯黑 */
+    /** 深色样式：0=普通黑 1=AMOLED纯黑 */
     val darkStyle = mutableStateOf(prefs.getInt("dark_style", 0))
 
-    /** MD3 颜色来源（照搬 BiliPai Md3ColorSource）：wallpaper=跟随系统壁纸 / custom=自定义颜色 */
+    /** MD3 颜色来源：wallpaper=跟随系统壁纸 / custom=自定义颜色 */
     val md3ColorSource = mutableStateOf(prefs.getString("md3_color_source", "wallpaper") ?: "wallpaper")
 
     /** MD3 自定义种子色（hex，默认 #00FFFF 青色） */
     val md3CustomColor = mutableStateOf(prefs.getString("md3_custom_color", "#00FFFF") ?: "#00FFFF")
 
-    /** 液态玻璃模式（照搬 BiliPai LiquidGlassMode）：clear/balanced/frosted */
+    /** 液态玻璃模式：clear/balanced/frosted */
     val glassMode = mutableStateOf(prefs.getString("glass_mode", "balanced") ?: "balanced")
 
     /** Linux 环境存放到外部存储（内部空间不足时；切换后需重新部署） */
