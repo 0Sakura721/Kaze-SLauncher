@@ -411,7 +411,7 @@ class ModpackManifestTest {
 
     @Test
     fun `有哈希时必须以哈希为准，长度相同也不能复用`() {
-        val root = newDir()
+        val root = dir("reuse")
         val f = File(root, "mods/x.jar")
         f.parentFile!!.mkdirs()
         f.writeBytes(ByteArray(100) { 1 })   // 长度与清单一致，但内容损坏
@@ -439,7 +439,7 @@ class ModpackManifestTest {
 
     @Test
     fun `清单没给哈希时才退回比大小`() {
-        val root = newDir()
+        val root = dir("reuse")
         val f = File(root, "mods/y.jar")
         f.parentFile!!.mkdirs()
         f.writeBytes(ByteArray(50))
@@ -457,7 +457,7 @@ class ModpackManifestTest {
 
     @Test
     fun `文件不存在或为空时都要重新下载`() {
-        val root = newDir()
+        val root = dir("reuse")
         val remote = ModpackManifest.RemoteFile(
             path = "mods/z.jar", urls = listOf("https://cdn/z.jar"),
             sha512 = "sha", sha1 = null, size = 10, side = ModpackManifest.Side.SERVER_OK,
