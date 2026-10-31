@@ -126,6 +126,61 @@ private val M3Dark = darkColorScheme(
     onError = Color(0xFF3B0606),
 )
 
+// ── SHELL · 岚（浅色/素纸）──
+// 与 shell/Tokens.kt 的 PaperTokens 保持一致：纸底 + 黛蓝强调 + 朱红危险。
+// 严格说 SHELL 走的是另一个 Activity，Compose 这边用不到；但一旦有人把「岚」
+// 接进 Compose（或截图测试里切到 SHELL），配色也该是同一个人做的，不该是默认蓝。
+private val ShellLight = lightColorScheme(
+    primary = Color(0xFF2C4A63),
+    onPrimary = Color(0xFFFDFEFF),
+    primaryContainer = Color(0xFFE6EDF3),
+    onPrimaryContainer = Color(0xFF1D3547),
+    secondary = Color(0xFF54504A),
+    onSecondary = Color(0xFFFFFFFF),
+    tertiary = Color(0xFF3B6E8F),
+    background = Color(0xFFF4F1EC),
+    onBackground = Color(0xFF191714),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF191714),
+    surfaceVariant = Color(0xFFF8F5F0),
+    onSurfaceVariant = Color(0xFF54504A),
+    outline = Color(0xFFCBC1B2),
+    outlineVariant = Color(0xFFE1DACF),
+    surfaceContainer = Color(0xFFF4F1EC),
+    surfaceContainerHigh = Color(0xFFF8F5F0),
+    surfaceContainerLow = Color(0xFFF8F5F0),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceBright = Color(0xFFFFFFFF),
+    error = Color(0xFFA83524),
+    onError = Color(0xFFFFFFFF),
+)
+
+// ── SHELL · 岚（深色/墨夜）──
+private val ShellDark = darkColorScheme(
+    primary = Color(0xFFE7AE4C),
+    onPrimary = Color(0xFF16181A),
+    primaryContainer = Color(0xFF2B2317),
+    onPrimaryContainer = Color(0xFFE7AE4C),
+    secondary = Color(0xFFB2ACA2),
+    onSecondary = Color(0xFF16181A),
+    tertiary = Color(0xFF6FA8D6),
+    background = Color(0xFF0E1114),
+    onBackground = Color(0xFFF2EEE7),
+    surface = Color(0xFF171B1F),
+    onSurface = Color(0xFFF2EEE7),
+    surfaceVariant = Color(0xFF1E2327),
+    onSurfaceVariant = Color(0xFFB2ACA2),
+    outline = Color(0xFF3E464C),
+    outlineVariant = Color(0xFF2A3136),
+    surfaceContainer = Color(0xFF111518),
+    surfaceContainerHigh = Color(0xFF1E2327),
+    surfaceContainerLow = Color(0xFF111518),
+    surfaceContainerLowest = Color(0xFF06080A),
+    surfaceBright = Color(0xFF2A3136),
+    error = Color(0xFFE46A4F),
+    onError = Color(0xFF16181A),
+)
+
 // ── GLASS · 液态玻璃（浅色）──
 private val GlassLight = lightColorScheme(
     primary = Color(0xFF2B6BE4),
@@ -270,6 +325,7 @@ fun NewAgeTheme(
             }
         }
         AppThemeMode.GLASS -> if (darkTheme) GlassDark else GlassLight
+        AppThemeMode.SHELL -> if (darkTheme) ShellDark else ShellLight
     }
 
     // AMOLED 纯黑：深色时将背景/表面系压到纯黑
@@ -439,6 +495,18 @@ fun statusPalette(): StatusPalette = when (LocalAppTheme.current) {
         idle = Color(0xFF8A93A6),
         error = Color(0xFFD64545),
     )
+    // 与 PaperTokens/InkTokens 的 good/warn/danger/ink3 对齐
+    AppThemeMode.SHELL -> if (LocalDarkTheme.current) StatusPalette(
+        running = Color(0xFF62C08D),
+        busy = Color(0xFFD9A54B),
+        idle = Color(0xFF79838B),
+        error = Color(0xFFE46A4F),
+    ) else StatusPalette(
+        running = Color(0xFF2F6B48),
+        busy = Color(0xFF9A6A14),
+        idle = Color(0xFF8A8277),
+        error = Color(0xFFA83524),
+    )
 }
 
 /** 控制台日志面板背景 */
@@ -447,6 +515,8 @@ fun statusPalette(): StatusPalette = when (LocalAppTheme.current) {
 fun consoleBackgroundColor(): Color = when (LocalAppTheme.current) {
     AppThemeMode.M3 -> Color(0xFF10141C)
     AppThemeMode.GLASS -> if (LocalDarkTheme.current) Color(0xFF060B16) else Color(0xFF111A2C)
+    // 岚的日志面板：纸底用浅暖白，墨夜用最深的那张贴面色
+    AppThemeMode.SHELL -> if (LocalDarkTheme.current) Color(0xFF111518) else Color(0xFFF8F5F0)
 }
 
 /** 控制台日志行颜色 */
@@ -466,5 +536,13 @@ fun consoleLineColor(type: LineType): Color = when (LocalAppTheme.current) {
         LineType.Command -> Color(0xFF8AB9FF)
         LineType.System -> if (LocalDarkTheme.current) Color(0xFFA9B3C8) else Color(0xFF93A1B8)
         LineType.Info -> if (LocalDarkTheme.current) Color(0xFFC9D4E8) else Color(0xFFE2E9F4)
+    }
+    // 与 shell/ShellHost.lineColor 同源：浅底用深墨，深底用亮墨
+    AppThemeMode.SHELL -> when (type) {
+        LineType.Error -> Color(0xFFA83524)
+        LineType.Warn -> Color(0xFF9A6A14)
+        LineType.Command -> Color(0xFF2C4A63)
+        LineType.System -> Color(0xFF8A8277)
+        LineType.Info -> Color(0xFF54504A)
     }
 }

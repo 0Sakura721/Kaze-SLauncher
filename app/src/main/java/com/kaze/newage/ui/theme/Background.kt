@@ -82,6 +82,10 @@ fun ThemeBackdrop(modifier: Modifier = Modifier) {
     when (LocalAppTheme.current) {
         AppThemeMode.M3 -> ClearBackdrop(modifier)
         AppThemeMode.GLASS -> GlassBackdrop(modifier)
+        // SHELL 下不会走到这里：那是另一个 Activity（ShellActivity），整棵树都由手写
+        // View 构建，Compose 的背板根本不存在。分支留着只为 when 穷尽 ——
+        // 万一将来有人把 SHELL 接进 Compose，回退到 M3 背板也比崩溃好。
+        AppThemeMode.SHELL -> ClearBackdrop(modifier)
     }
 }
 
