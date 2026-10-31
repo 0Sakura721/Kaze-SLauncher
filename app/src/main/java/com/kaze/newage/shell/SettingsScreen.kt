@@ -498,6 +498,24 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         val sheet = Sheet(c, "Java 运行时", "服务端按游戏版本选择需要的 Java")
         val box = c.col()
 
+        // 装/卸 Java 是异步的，这里靠延时重建列表来反映结果。
+        // 用可取消的 Handler 而不是 `box.postDelayed`：后者挂在 Dialog 的视图上，
+        // 弹层一 dismiss，post 的 runnable 会进 RunQueue 且**永不执行**，
+        // 同时把 sheet/box 的引用挂到 GC 上（延迟队列持有）。
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        sheet.setOnDismissListener { handler.removeCallbacksAndMessages(null) }
+
+        // 局部函数在 Kotlin 里不能前向引用，而 scheduleRebuild 需要调 rebuild，
+        // 所以用一个可赋值的函数变量中转（rebuild 定义在下面）。
+        var rebuildRef: () -> Unit = {}
+
+        fun scheduleRebuild(delayMs: Long) {
+            handler.postDelayed({
+                // 弹层已关就不再碰视图
+                if (sheet.isShowing) rebuildRef()
+            }, delayMs)
+        }
+
         fun rebuild() {
             box.removeAllViews()
             val installed = runCatching { host.vm.env.installedJdkVersions() }.getOrDefault(emptyList())
@@ -522,7 +540,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                         ) {
                             host.vm.uninstallJava(major)
                             host.toast("正在卸载 Java $major")
-                            box.postDelayed({ rebuild() }, 800L)
+                            scheduleRebuild(800L)
                         },
                     )
                 }
@@ -546,11 +564,14 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                     ) {
                         host.vm.installJava(major)
                         host.toast("开始安装 Java $major")
-                        box.postDelayed({ rebuild() }, 1200L)
+                        scheduleRebuild(1200L)
                     },
                 )
             }
         }
+
+        // 把 rebuild 接到中转变量上（scheduleRebuild 里用的是 rebuildRef）
+        rebuildRef = ::rebuild
 
         rebuild()
         sheet.add(box)
@@ -621,8 +642,12 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             sheet.dismiss()
         }, secondaryLabel = "关闭", onSecondary = { sheet.dismiss() })
 
-        // tail() 是挂起函数（读磁盘）：先显示"读取中"，回来再替换内容
+        // tail() 是挂起函数（读磁盘）：先显示"读取中"，回来再替换内容。
+        // 回调必须判 sheet.isShowing：读盘可能比用户关弹层慢，
+        // 不判的话会往已 dismiss 的 Dialog 里 addView 上百个 TextView
+        //（视图树已脱离窗口，纯浪费且拖住 GC）。
         host.readLogTail(120) { lines ->
+            if (!sheet.isShowing) return@readLogTail
             box.removeAllViews()
             if (lines.isEmpty()) {
                 box.addView(c.txt("暂无日志", Type.micro, ShellTheme.current.ink3))

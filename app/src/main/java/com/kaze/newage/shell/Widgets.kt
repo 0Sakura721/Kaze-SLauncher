@@ -55,17 +55,27 @@ class GaugeView @JvmOverloads constructor(
         set(value) {
             if (field == value) return
             field = value
-            if (value) startSpin() else {
+            if (value) {
+                startSpin()
+            } else {
                 stopSpin()
                 progressAnim?.cancel()
-                progressAnim = ValueAnimator.ofFloat(shown, 1f).apply {
+                // 目标必须是**当前的 progress**，不能写死 1f。
+                // 写死 1f 时：renderOverview 先 `active = false`（启动 0.82→1.0 的动画），
+                // 紧接着 `progress = 0.1f`（setter 里 !active 直接把 shown 写成 0.1），
+                // 但动画仍在跑、每帧把 shown 覆盖回 0.82→1.0，320ms 后停在 1.0 ——
+                // 一个**已停止**的实例盘面显示成满环（36 根刻度全亮 + 274° 弧）。
+                progressAnim = ValueAnimator.ofFloat(shown, progress).apply {
                     duration = 320L
                     interpolator = AccelerateDecelerateInterpolator()
                     addUpdateListener {
                         shown = it.animatedValue as Float
                         invalidate()
                     }
-                    start()
+                    // 已 detach 时不启动：同文件 startSpin/RibbonProgress.start 都有这个判断。
+                    // 漏了它的后果是切页时（ShellActivity 会无条件刷新所有缓存屏，
+                    // 含不在窗口里的 HomeScreen）在已脱离窗口的 View 上跑动画。
+                    if (attached) start()
                 }
             }
             invalidate()
@@ -75,7 +85,13 @@ class GaugeView @JvmOverloads constructor(
     var progress: Float = 0f
         set(value) {
             field = value.coerceIn(0f, 1f)
-            if (!active) shown = field
+            if (!active) {
+                // 先停掉收尾动画再写值：否则两个写者抢 shown，
+                // 动画每帧覆盖、320ms 后把刚设的值冲掉（见 active setter 的说明）。
+                progressAnim?.cancel()
+                progressAnim = null
+                shown = field
+            }
             invalidate()
         }
 
@@ -138,6 +154,15 @@ class GaugeView @JvmOverloads constructor(
         setMeasuredDimension(
             resolveSize(want, widthMeasureSpec),
             resolveSize(want, heightMeasureSpec),
+        )
+        // 必须手动量子项：本类继承 FrameLayout 却绕过了 FrameLayout.onMeasure，
+        // 子 View 会永远停在 0×0。类注释写着"中心留给调用方塞文字"，
+        // 但照那个注释去 addView 什么都看不见，而且不报错。
+        // 量的时候把父给的高度/宽度 spec 换成已确定的本控件尺寸，
+        // 子项按 MATCH_PARENT 才会真正铺满盘心。
+        measureChildren(
+            MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
         )
     }
 
@@ -269,6 +294,19 @@ class TogglePill @JvmOverloads constructor(
             resolveSize(context.dp(40f), widthMeasureSpec),
             resolveSize(context.dp(24f), heightMeasureSpec),
         )
+    }
+
+    /**
+     * 移出窗口时停掉过渡动画。
+     *
+     * 170ms 的有限动画不会一直转，所以不是崩溃风险；但设置页反复切页时，
+     * 旧动画会继续跑完并把 fraction 写回一个已不在窗口里的 View。
+     * 与 GaugeView/RibbonProgress/BreathDot 保持一致的收尾习惯。
+     */
+    override fun onDetachedFromWindow() {
+        anim?.cancel()
+        anim = null
+        super.onDetachedFromWindow()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -573,6 +611,19 @@ class EdgeStripe @JvmOverloads constructor(
 
     init { setWillNotDraw(false) }
 
+    /**
+     * 自带尺寸。当前所有调用点都传了固定 LP（`2.6dp × 36~38dp`），
+     * 但它是"看起来像分隔线"的东西 —— 一旦有人把它放进 WRAP_CONTENT 槽位
+     * 或套上 stackMargin，裸 View 在 AT_MOST 下会返回父容器剩余全高，
+     * 立刻复现"整块灰板"那个 bug。有 onMeasure 就有了兜底。
+     */
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        setMeasuredDimension(
+            resolveSize(context.dp(3f), widthMeasureSpec),
+            resolveSize(context.dp(36f), heightMeasureSpec),
+        )
+    }
+
     override fun onDraw(canvas: Canvas) {
         val t = ShellTheme.current
         paint.color = when (tone) {
@@ -635,8 +686,17 @@ class SliderBar @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        // 宽度：AT_MOST（被 addView 到竖容器且没给 LP）时**铺满可用宽度**。
+        // 用 resolveSize(160dp, AT_MOST) 只会得到 160dp —— 设置页里滑块只占
+        // 卡片一半、右边空一大块，而同屏文字是满宽的，错位很明显。
+        // EXACTLY（有明确 LP）时尊重调用方；UNSPECIFIED（测量探针）时退回自然宽。
+        val width = when (MeasureSpec.getMode(widthMeasureSpec)) {
+            MeasureSpec.EXACTLY -> MeasureSpec.getSize(widthMeasureSpec)
+            MeasureSpec.AT_MOST -> MeasureSpec.getSize(widthMeasureSpec)
+            else -> context.dp(160f)
+        }
         setMeasuredDimension(
-            resolveSize(context.dp(160f), widthMeasureSpec),
+            width,
             resolveSize(context.dp(34f), heightMeasureSpec),
         )
     }
@@ -868,10 +928,7 @@ class ShellNavBar @JvmOverloads constructor(
     }
 }
 
-// ── Widgets.kt 内部的通用构造器（只在壳内用） ──────────────────────────
-
-internal fun Context.centered(block: LinearLayout.() -> Unit): LinearLayout =
-    col().apply {
-        gravity = Gravity.CENTER
-        block()
-    }
+// ── 说明：曾有一个 internal fun Context.centered {} 便捷构造器 ──
+// 已删除：全仓零引用。死代码不只是占地方 —— 它用的正是 Gravity.CENTER，
+// 而那个写法在 LinearLayout 里横向位会被 layoutVertical() 抹掉
+//（见 ShellNavBar 的注释）。留着会让人以为它是推荐写法，照抄就复发同一个 bug。

@@ -17,6 +17,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -81,8 +82,9 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         body.addView(importProgress, c.stackMargin(top = 4f))
     }
 
-    /** 导入进度的订阅（随屏存活，attach/detach 里管） */
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    /** 导入进度的订阅（随屏存活，attach/detach 里管）。scope 同样可重建，见 detach。 */
+    private var scope = newScope()
+    private fun newScope() = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var importJob: Job? = null
 
     private fun buildTitle(): LinearLayout = c.row().apply {
@@ -436,6 +438,10 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
     override fun detach() {
         importJob?.cancel()
         importJob = null
+        // scope 一并取消并重建：屏是缓存的，旧 scope 若留着会随 Activity 活到底，
+        // 且 SupervisorJob 始终 isActive（detach 后误 launch 不会报错，只会静默泄漏）。
+        scope.cancel()
+        scope = newScope()
     }
 }
 

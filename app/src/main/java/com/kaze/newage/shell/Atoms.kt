@@ -165,6 +165,19 @@ fun Context.chip(
 }
 
 /** 状态标签：圆点 + 文字，比单个色点信息量足 */
+/**
+ * 状态胶囊：圆点 + 文字。
+ *
+ * 标签必须有**宽度上界**（maxWidth + 单行 + 省略）。
+ * 它常与 `weight=1` 的名称列并排，而 LinearLayout 的第一遍测量会先按自然宽
+ * 量所有 WRAP 子项、第二遍才把剩余宽度分给 weight 列 —— 胶囊没有上界时，
+ * 长文案（如 "首次启动 · 生成 eula.txt"）会先把宽度吃光，名称列被压到
+ * 十几像素：名称折成三行、副标题逐字竖排。320dp 屏实测名称列只剩 10px。
+ *
+ * 上界取 96dp：它现在与副标题同排（副标题是 weight=1），132dp 的胶囊在 320dp 屏
+ * 上仍会把副标题挤成 0 宽 —— 实测副标题文本区为 0。96dp 够放"启动中""运行中"
+ * 这类常见状态，更长的由省略号收尾；完整状态在控制台页与实例详情里都能看到。
+ */
 fun Context.statusTag(label: String, tone: Int): LinearLayout {
     val c = this
     return c.row().apply {
@@ -181,7 +194,14 @@ fun Context.statusTag(label: String, tone: Int): LinearLayout {
                 marginEnd = c.dp(5f)
             }
         })
-        addView(c.txt(label, Type.micro, tone, medium = true))
+        addView(
+            c.txt(label, Type.micro, tone, medium = true).apply {
+                maxLines = 1
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                maxWidth = c.dp(96f)
+            },
+        )
     }
 }
 
@@ -218,10 +238,21 @@ fun Context.settingRow(
         setPadding(c.dp(Dim.cardPad), c.dp(12f), c.dp(Dim.cardPad), c.dp(12f))
         minimumHeight = c.dp(Dim.row)
         val texts = c.col().apply {
-            addView(c.txt(title, Type.body, ShellTheme.current.ink, medium = true))
+            // 标题列是 weight=1，宽度取决于同行 trailing 有多宽。
+            // 目前 trailing 都很窄（chevron 18dp / 开关 40dp / 短文本），
+            // 但一旦换成宽内容（版本串、时间戳），这一列会被压到几十 dp，
+            // 中文会逐字竖排。给标题/副标题都设行数上限，让它们自己收尾。
+            addView(
+                c.txt(title, Type.body, ShellTheme.current.ink, medium = true).apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                },
+            )
             if (subtitle != null) {
                 addView(
                     c.txt(subtitle, Type.micro, ShellTheme.current.ink3).apply {
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
                         setPadding(0, c.dp(3f), 0, 0)
                     },
                 )
@@ -474,6 +505,10 @@ fun Context.scrollBody(padBottom: Float = 26f): Pair<ScrollView, LinearLayout> {
     }
     return scroll to content
 }
+
+// 注：曾有一个 gutterMargin(extra) 便捷函数，与 stackMargin(horizontal=) 完全重复
+//（都返回 MATCH_PARENT × WRAP_CONTENT + 左右 margin），且全仓零引用，已删除。
+// 需要"只有左右留白、上下不限"时直接用 stackMargin(top=0, bottom=0)。
 
 /** 统一左右页边距 */
 fun Context.gutterMargin(extra: Float = 0f): LinearLayout.LayoutParams =

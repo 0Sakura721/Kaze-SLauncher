@@ -22,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -63,18 +64,56 @@ class ShellHost(
 
     val themePrefs get() = prefs
 
+    /**
+     * 登记一个 job 并保证它在完成后自动出列。
+     *
+     * 原先所有调用点都是 `jobs += scope.launch { ... }`：Job 完成后**仍留在列表里**。
+     * 一次性操作（awaitVersions / watchDownload / readLogTail / startSequentially）
+     * 每次调用都会往列表追加一条已完成的 Job，而列表只在 stop() 时清空 ——
+     * 一屏里反复打开弹层、反复导入，列表就无限增长，且每个 Job 都还持有
+     * 捕获的闭包（进而持有弹层/Screen）。这是纯粹的泄漏。
+     *
+     * 用 invokeOnCompletion 在完成时移除：完成即释放，不必等 stop()。
+     */
+    private fun launchTracked(block: suspend CoroutineScope.() -> Unit): Job {
+        val job = scope.launch(block = block)
+        jobs += job
+        job.invokeOnCompletion { jobs.remove(job) }
+        return job
+    }
+
     fun start() {
-        jobs += scope.launch {
+        launchTracked {
             vm.instances.collect { list -> onInstances?.invoke(sorted(list)) }
         }
-        jobs += scope.launch {
+        launchTracked {
             vm.serverStates.collect { map -> onStates?.invoke(map) }
         }
     }
 
     fun stop() {
-        jobs.forEach { it.cancel() }
+        // 必须先取快照再取消：launchTracked 在 job 完成时 `jobs.remove(job)`，
+        // 而 scope 是 Dispatchers.Main.immediate —— cancel() 会在**当前线程**同步
+        // 恢复挂起点并让 job 完成，于是 remove 立刻发生。边遍历边删 → 下一次
+        // next() 抛 ConcurrentModificationException，而这个 stop() 是在 onDestroy
+        // 里调的：任何常规退出（返回键、主题 recreate、系统回收）都会闪退。
+        val snapshot = jobs.toList()
         jobs.clear()
+        snapshot.forEach { it.cancel() }
+        // 取消宿主 scope 本身：否则 stop() 之后仍能 launchTracked 出新 job，
+        // 而它们登记进的列表已经清空、再没人会取消它们。
+        scope.cancel()
+
+        // 断开所有回调：它们分别持有 Activity（showToast/recreate/startActivity）
+        // 与各个 Screen。不置 null 的话，即使 scope 已取消，ShellHost 实例
+        // （被 ViewModel 级容器间接引用时）仍会把整棵视图树钉在内存里。
+        onInstances = null
+        onStates = null
+        onToast = null
+        onThemeChanged = null
+        onPickJar = null
+        onCreateRequested = null
+        openConsoleHook = null
     }
 
     /**
@@ -145,7 +184,7 @@ class ShellHost(
             return
         }
         toast("开始依次启动 ${todo.size} 个实例")
-        jobs += scope.launch {
+        launchTracked {
             todo.forEach { inst ->
                 vm.startInstance(inst)
                 // 等到它离开 Starting 阶段（或超时 3 分钟）再启动下一个
@@ -229,14 +268,27 @@ class ShellHost(
 
     // ── 环境 / 依赖 ─────────────────────────────────────────────────────
 
+    /**
+     * 部署环境，可选在就绪后回调一次。
+     *
+     * `envState` 是 StateFlow —— **collect 永不结束**。原来的写法一旦环境就绪
+     * 就永远停在收集里：job 不会完成、不会出列，而且每次点"部署"都再挂一个。
+     * 这里用 `first { ... }` 取到就绪那一次就返回，job 自然结束。
+     */
     fun setupEnvironment(onDone: (() -> Unit)? = null) {
         vm.setupEnv()
         if (onDone != null) {
-            jobs += scope.launch {
-                vm.envState.collect { state ->
-                    if (state == com.kaze.newage.core.env.ProotEnvironment.State.READY) {
-                        withContext(Dispatchers.Main) { onDone() }
-                    }
+            launchTracked {
+                // withTimeoutOrNull 超时会返回 null —— 必须判空再回调，
+                // 否则 30 分钟没就绪也会执行 onDone()，界面同时显示
+                // "环境未就绪" 并弹 "环境已就绪"，自相矛盾。
+                val ready = withTimeoutOrNull(30 * 60_000L) {
+                    vm.envState.first { it == com.kaze.newage.core.env.ProotEnvironment.State.READY }
+                }
+                if (ready != null) {
+                    withContext(Dispatchers.Main) { onDone() }
+                } else {
+                    withContext(Dispatchers.Main) { toast("环境部署超时，请查看诊断日志", error = true) }
                 }
             }
         }
@@ -328,7 +380,7 @@ class ShellHost(
 
     /** 等待版本列表；超时回调空列表 */
     fun awaitVersions(onResult: (List<GameVersion>) -> Unit) {
-        jobs += scope.launch {
+        launchTracked {
             val list = withTimeoutOrNull(20_000) {
                 vm.versions.first { it.isNotEmpty() }
             }
@@ -338,7 +390,7 @@ class ShellHost(
 
     /** 等待构建列表（Paper / Fabric） */
     fun awaitBuilds(onResult: (List<CoreBuild>) -> Unit) {
-        jobs += scope.launch {
+        launchTracked {
             val list = withTimeoutOrNull(20_000) {
                 vm.builds.first { it.isNotEmpty() }
             }
@@ -347,17 +399,19 @@ class ShellHost(
     }
 
     /**
-     * 跟踪下载进度。
+     * 跟踪下载进度，返回的 Job 由调用方在弹层关闭时 cancel。
      *
-     * 只在这个弹层活着的时候订阅：下载本身跑在 appScope 里，
-     * 关掉弹层不会中断下载，只是不再刷新这一屏。
+     * 注释原先写着"只在这个弹层活着的时候订阅"，但实现只是把 Job 塞进 jobs 列表、
+     * 从不取消 —— `vm.download` 是 StateFlow，collect 永不结束，于是每打开一次
+     * 新建向导就永久多一个订阅者，而且它捕获着**已经关掉的弹层**（进而捕获整棵
+     * 视图树）。下载进行中反复开关弹层，回调会同时打到多个已关闭的弹层上。
+     *
+     * 改成返回 Job：调用方（CreateWizard）在 dismiss 时 cancel，语义与注释一致。
      */
-    fun watchDownload(onProgress: (DownloadState) -> Unit) {
-        val job = scope.launch {
+    fun watchDownload(onProgress: (DownloadState) -> Unit): Job =
+        launchTracked {
             vm.download.collect { st -> onProgress(st) }
         }
-        jobs += job
-    }
 
     /** 打开控制台页并切到该实例（由 ShellActivity 注入具体实现） */
     var openConsoleHook: ((ServerInstance) -> Unit)? = null
@@ -369,7 +423,7 @@ class ShellHost(
 
     /** 读应用日志尾部若干行（挂起函数在 IO 上跑，回调回主线程） */
     fun readLogTail(maxLines: Int, onDone: (List<String>) -> Unit) {
-        jobs += scope.launch {
+        launchTracked {
             val text = runCatching { vm.appLog.tail(maxLines) }.getOrElse { "" }
             onDone(text.lines().filter { it.isNotBlank() })
         }

@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -38,7 +39,18 @@ import kotlinx.coroutines.launch
 class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scrollable = false) {
 
     private val c: Context get() = context
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * 订阅用的 scope。
+     *
+     * **每次 attach 重建、detach 时 cancel**：屏被 Activity 缓存、从不重建，
+     * 所以一个 val scope 会跟着 Activity 活到底；detach 只 cancel 子 job 的话
+     * SupervisorJob 永远 isActive，日后误用（比如在 detach 后仍 launch）
+     * 会静默留下活着的协程。用可重建的 var 让"生命周期"这件事显式化。
+     */
+    private var scope = newScope()
+    private fun newScope() = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     private var jobs: MutableList<Job> = mutableListOf()
 
     private lateinit var switcherValue: TextView
@@ -549,6 +561,10 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
     override fun detach() {
         jobs.forEach { it.cancel() }
         jobs.clear()
+        // 连同 scope 一起取消，并换一个新的给下次 attach 用。
+        // 只 cancel 子 job 的话 SupervisorJob 仍是 active，且旧 scope 引用不释放。
+        scope.cancel()
+        scope = newScope()
     }
 
     fun renderStates(map: Map<String, ServerState>) {

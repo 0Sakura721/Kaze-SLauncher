@@ -101,11 +101,16 @@ class ShellActivity : ComponentActivity() {
         host.onInstances = { list ->
             home?.renderInstances(list)
             serverList?.renderInstances(list)
+            // 设置页的「当前实例」卡片也要跟着刷新：它显示内存/Java/状态，
+            // 用户在设置页里改内存、或在别处改名，回来时必须看到新值。
+            // 漏了这一句的表现是"停在设置页时改完没反应"，只有切页才更新。
+            settings?.renderInstances(list)
         }
         host.onStates = { map ->
             home?.renderStates(map)
             serverList?.renderStates(map)
             console?.renderStates(map)
+            settings?.renderStates(map)
         }
         host.onToast = { msg, error -> showToast(msg, error) }
         host.onThemeChanged = { recreate() }
@@ -276,7 +281,14 @@ class ShellActivity : ComponentActivity() {
     private fun selectTab(index: Int) {
         tab = index
         navBar.selected = index
+
+        // 切页前先让**当前**那屏停掉订阅。
+        // 原来只有 openConsole() 里手动 detach 控制台，从设置/服务端页切走时
+        // 旧屏的 collect 全都还活着：它的回调继续往已经不在窗口里的视图写，
+        // 而且每切一次就多留一组 job（屏是缓存的、不重建，所以永不释放）。
+        (contentHost.getChildAt(0) as? ScreenRoot)?.detach()
         contentHost.removeAllViews()
+
         val screen: ScreenRoot = when (index) {
             TAB_SERVER -> (serverList ?: ServerListScreen(host).also { serverList = it }).also { it.attach() }
             TAB_CONSOLE -> (console ?: ConsoleScreen(host).also { console = it }).also { it.attach() }
@@ -293,12 +305,16 @@ class ShellActivity : ComponentActivity() {
         serverList?.renderInstances(vm.instances.value)
         serverList?.renderStates(vm.serverStates.value)
         console?.renderStates(vm.serverStates.value)
+        settings?.renderInstances(vm.instances.value)
+        settings?.renderStates(vm.serverStates.value)
         root.requestApplyInsets()
     }
 
     fun openConsole(instance: ServerInstance) {
         host.select(instance)
-        console?.let { it.detach() }
+        // 丢弃缓存的控制台实例，让它以新实例重建（并重新 attach 到当前实例）。
+        // 不用手动 detach：selectTab 会在移除旧视图前统一 detach 当前那屏，
+        // 这里只要把引用置空、迫使下次重建即可。
         console = null
         // 控制台现在是第 3 个页签（实例 / 服务端 / 控制台 / 设置）。
         // 用常量而不是字面量：加页签时这类下标最容易漏改，漏了的表现是
@@ -344,6 +360,21 @@ class ShellActivity : ComponentActivity() {
         //（真机实测：切到 Material 3 后按返回，进程直接 FATAL）。
         // 用 ::host.isInitialized 判断，而不是加一个布尔标志 —— 标志会和
         // 真实的初始化状态脱节，lateinit 自己就知道。
+        // 先让当前屏停订阅，再停 host。
+        // selectTab 里的 detach 只在**切页**时执行；停在某一页直接退出（按返回、
+        // 主题 recreate、系统回收）时它不会跑，于是那屏的 collect 全部存活 ——
+        // 控制台有 6 个（日志/状态/时长/占用/玩家/实例），它们跑在屏自建的 scope 上，
+        // 不受 host.stop 影响，会持续往已销毁的视图写 text，并把整棵视图树连同
+        // Activity context 永久钉在内存里。
+        (contentHost.getChildAt(0) as? ScreenRoot)?.detach()
+        // 屏缓存的引用也一并断开，避免 Activity 回收后仍被 Screen 反向持有。
+        home = null
+        serverList = null
+        console = null
+        settings = null
+        // 清掉所有待执行的延时 UI 动作（toast 淡出等），它们捕获了 toastLayer
+        uiHandler.removeCallbacksAndMessages(null)
+
         if (::host.isInitialized) host.stop()
         super.onDestroy()
     }
@@ -376,7 +407,11 @@ class ShellActivity : ComponentActivity() {
         view.alpha = 0f
         view.translationY = dp(10f).toFloat()
         view.animate().alpha(1f).translationY(0f).setDuration(150L).withEndAction {
-            view.postDelayed({
+            // 用本 Activity 的 handler 而不是 view.postDelayed：view 挂在 toastLayer 上，
+            // 它的 post 会随视图树一起持有 Activity；Activity 在 2.2 秒内被销毁时，
+            // 回调仍会触发并操作已销毁的视图。handler 在 onDestroy 里统一清空。
+            uiHandler.postDelayed({
+                if (isFinishing || isDestroyed) return@postDelayed
                 view.animate().alpha(0f).setDuration(180L).withEndAction {
                     toastLayer.removeView(view)
                     if (toastView === view) toastView = null
@@ -384,6 +419,9 @@ class ShellActivity : ComponentActivity() {
             }, 2200L)
         }.start()
     }
+
+    /** 主线程 handler：只用于可取消的延时 UI 动作（toast 淡出等） */
+    private val uiHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private fun dp(v: Float): Int = (resources.displayMetrics.density * v + 0.5f).toInt()
 

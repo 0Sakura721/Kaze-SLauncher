@@ -110,7 +110,10 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             addView(overviewSub)
             overviewHint = c.txt("点右上角 ＋ 新建", Type.micro, ShellTheme.current.ink3).apply {
                 setPadding(0, dp(7f), 0, 0)
+                // 只限行数不给省略号的话，第三行会被硬切，读起来像句子断了
+                //（同一块的 overviewSub 就是对的：maxLines + TruncateAt.END）。
                 maxLines = 2
+                ellipsize = TextUtils.TruncateAt.END
             }
             addView(overviewHint)
         }
@@ -293,23 +296,44 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                     )
                 }
                 addView(nameRow)
-                addView(
+                // 状态胶囊放在**名称列内部**的第二行，与副标题同排。
+                // 之前它和名称列并排占行宽：胶囊按内容自然宽（"首次启动 · 生成
+                // eula.txt" 要 129px），LinearLayout 先量完所有非 weight 子项，
+                // 剩给名称列的只有十几像素 —— 名称折三行、副标题逐字竖排，
+                // 320dp 屏实测名称区宽度为 0。挪进来之后胶囊只和副标题争，
+                // 副标题本身有 2 行上限，最坏情况是它省略，名称永远完整。
+                val subRow = c.row()
+                // 副标题与胶囊按 weight 分配剩余宽度（3:2）。
+                // 不给 weight 的话，胶囊按自然宽先量完，副标题的 weight 列只剩
+                // 被压剩的零头（320dp 屏实测副标题宽 0）。两个都用 weight 之后
+                // 宽度按比例切，双方都有下限保障；内容超长各自省略。
+                subRow.addView(
                     c.txt(
                         "${instance.coreType.displayName} · ${instance.mcVersion.ifBlank { "自定义" }}" +
                             if (running) " · ${instance.memoryMb} MB" else "",
                         Type.micro, ShellTheme.current.ink3,
-                    ).apply { setPadding(0, dp(4f), 0, 0) },
+                    ).apply {
+                        maxLines = 1
+                        ellipsize = TextUtils.TruncateAt.END
+                    },
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 3f),
                 )
+                subRow.addView(
+                    c.statusTag(state.toLabel(), tone),
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2f).apply {
+                        marginStart = dp(6f)
+                    },
+                )
+                addView(subRow, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ).apply { topMargin = dp(4f) })
             }
+            // 名称列：weight=1 分到"剩余宽度"，剩余量 = 行宽 - 同行其它所有固定宽。
+            // 注意 minimumWidth 在这里**无效** —— LinearLayout 分配权重时直接
+            // 用剩余量，不看 minimumWidth（实测 320dp 屏仍是 10px）。所以真正的
+            // 保障是把同行的状态胶囊挪到别处（见下面），让名称列至少有半行可用。
             addView(meta, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-
-            addView(
-                c.statusTag(state.toLabel(), tone),
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { marginEnd = dp(8f) },
-            )
 
             addView(
                 buildActionButton(instance, state, busy, running),
@@ -776,7 +800,11 @@ internal class CreateWizard(
             }
         }
 
-        host.watchDownload { st ->
+        // 订阅下载进度。返回的 Job 必须随弹层一起结束：vm.download 是 StateFlow，
+        // collect 永不返回，不取消就会在每次打开向导后永久留下一个订阅者，
+        // 且它捕获着已关闭的弹层与整棵视图树（见 ShellHost.watchDownload 的说明）。
+        downloadJob?.cancel()
+        downloadJob = host.watchDownload { st ->
             if (st.progress > 0f) {
                 progress.indeterminate = false
                 progress.fraction = st.progress
@@ -789,6 +817,15 @@ internal class CreateWizard(
                 setPrimaryBusy(false, "重试下载")
             }
         }
+    }
+
+    /** 下载进度订阅；弹层关闭时取消，避免泄漏 */
+    private var downloadJob: kotlinx.coroutines.Job? = null
+
+    override fun dismiss() {
+        downloadJob?.cancel()
+        downloadJob = null
+        super.dismiss()
     }
 
     private fun setStatus(text: String, color: Int) {

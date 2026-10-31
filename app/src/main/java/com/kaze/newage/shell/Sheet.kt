@@ -32,7 +32,19 @@ import com.kaze.newage.R
 //     用户看不到"这是什么弹层"。
 // ══════════════════════════════════════════════════════════════════════════
 
-/** 带最大高度的 ScrollView：不设上限时它会按内容想多高就多高 */
+/**
+ * 带最大高度的 ScrollView。
+ *
+ * 两个坑都在 onMeasure 里：
+ *  1. **不能丢弃父容器给的 heightMeasureSpec**。原实现直接
+ *     `makeMeasureSpec(maxHeight, AT_MOST)` 覆盖掉父 spec，于是弹层永远按
+ *     "整块屏幕高"去量；而 root 在 overlay 里是 `WRAP_CONTENT + Gravity.BOTTOM`，
+ *     内容一旦高过窗口，溢出方向是**顶部** —— 拖拽把手、标题、关闭键全被顶出屏幕，
+ *     既看不见也点不到，还没有滚动可救。
+ *  2. `maxHeight` 的来源是 `displayMetrics.heightPixels`（整屏，不是弹层窗口的
+ *     可见框）。分屏/横屏下它比窗口大得多，同样失效。
+ * 所以这里取「父给的可用高」与「maxHeight」的较小值，两者都不越界。
+ */
 class CappedScrollView @JvmOverloads constructor(
     context: Context,
     attrs: android.util.AttributeSet? = null,
@@ -41,7 +53,16 @@ class CappedScrollView @JvmOverloads constructor(
     var maxHeight: Int = Int.MAX_VALUE
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val spec = MeasureSpec.makeMeasureSpec(maxHeight, MeasureSpec.AT_MOST)
+        val parentSize = MeasureSpec.getSize(heightMeasureSpec)
+        val parentMode = MeasureSpec.getMode(heightMeasureSpec)
+        // 父给的是 UNSPECIFIED（外层滚动容器）时才只能信 maxHeight；
+        // 其余情况必须以父的可用高度为上界。
+        val limit = if (parentMode == MeasureSpec.UNSPECIFIED) {
+            maxHeight
+        } else {
+            minOf(maxHeight, parentSize)
+        }
+        val spec = MeasureSpec.makeMeasureSpec(limit, MeasureSpec.AT_MOST)
         super.onMeasure(widthMeasureSpec, spec)
     }
 }
@@ -187,14 +208,24 @@ open class Sheet(
         }
     }
 
+    /**
+     * 往弹层正文追加一个视图。
+     *
+     * 不传 [params] 时**优先沿用 view 自带的 LayoutParams**，而不是一律给
+     * `MATCH_PARENT × WRAP_CONTENT`。原因：`splitter()` 返回的裸 View 自己把高度
+     * 设成 1px，被覆盖成 WRAP_CONTENT 后，在 CappedScrollView（给子项 UNSPECIFIED）
+     * 里裸 View.onMeasure 会返回 0 —— 弹层里所有分隔线高度 0、一条都看不见。
+     * 更糟的是把它放进 `scrollable = false` 的弹层（父给 AT_MOST）时会返回
+     * 父容器剩余全高，变成一整块灰板。沿用自带 LP 就把这一族问题一次堵住。
+     */
     fun add(view: View, params: LinearLayout.LayoutParams? = null): Sheet {
-        body.addView(
-            view,
-            params ?: LinearLayout.LayoutParams(
+        val lp = params
+            ?: (view.layoutParams as? LinearLayout.LayoutParams)
+            ?: LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT,
-            ),
-        )
+            )
+        body.addView(view, lp)
         return this
     }
 

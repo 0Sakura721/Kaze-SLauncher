@@ -263,6 +263,14 @@ fun Context.gradient(
     cornerRadius = dp(radius).toFloat()
 }
 
+/**
+ * 圆角 + 涟漪。
+ *
+ * 第三个参数是 **mask**，传 `null` 表示不裁剪 —— 涟漪会按 View 的矩形 bounds
+ * 绘制，于是胶囊按钮（radius=40）按下时，圆角之外的四角会冒出一层方角色块，
+ * 压在父容器底色上，半径越大越明显。传一个同形状的纯色 drawable 当 mask
+ * （只取它的 alpha 通道，颜色无所谓）就能让涟漪跟着圆角走。
+ */
 fun Context.rip(
     fill: Int,
     radius: Float,
@@ -272,7 +280,7 @@ fun Context.rip(
 ): RippleDrawable = RippleDrawable(
     ColorStateList.valueOf(rippleColor),
     rounded(fill, radius, stroke, strokeWidth),
-    null,
+    rounded(Color.WHITE, radius),
 )
 
 fun Context.col(): LinearLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
