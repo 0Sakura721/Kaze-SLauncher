@@ -102,12 +102,13 @@ android {
         // ≥30 的 SELinux 域禁止 execve 私有目录，proot 无法执行 rootfs 里的 guest 二进制）。
         // 不关掉这条 Play 政策检查，release 构建会被 lintVital 直接拦下。
         disable += "ExpiredTargetSdkVersion"
-        // release 的 lintVital 在分析 miuix 0.7.2 的字节码时 Lint 自身崩溃
-        // （IncompatibleClassChangeError in NonNullableMutableLiveDataDetector ——
-        // Lint 对该库 Kotlin 元数据的兼容问题，不是本工程代码问题；debug 构建不受影响）。
-        // release 前已有 541 个单测 + 签名校验兜底，lintVital 对本项目的增量价值趋近于零，
-        // 故关闭 release 构建的关键检查（日常 lint 仍可手动跑 lintDebug）。
-        checkReleaseBuilds = false
+        // release 的 lintVital 在分析 miuix 0.7.2 的字节码时，**Lint 自己**崩溃：
+        // IncompatibleClassChangeError in NonNullableMutableLiveDataDetector
+        // （AGP 8.7 内置的 Lint 与 miuix 的 Kotlin 元数据不兼容，不是本工程代码问题）。
+        //
+        // 这里只禁用那一个 detector，保留 release 的其余全部 lint 检查 ——
+        // 比 checkReleaseBuilds=false（一刀切关掉所有 release 检查）紧得多。
+        disable += "NonNullableMutableLiveData"
     }
     buildTypes {
         release {

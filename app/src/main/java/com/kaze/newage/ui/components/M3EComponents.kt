@@ -233,7 +233,15 @@ fun M3EListItem(
         } else {
             scheme.surfaceContainerLow
         },
-        contentColor = if (highlighted) scheme.onSecondaryContainer else scheme.onSurface,
+        // 前景色必须与上面的底色配套：Miuix 高亮底是 primaryContainer（浅蓝），
+        // 沿用 onSecondaryContainer（灰）会变成「浅蓝底 + 灰字」，对比度不足、
+        // 字看起来发闷（M3 那边底是 secondaryContainer，配 onSecondaryContainer 才对）。
+        contentColor = when {
+            LocalAppTheme.current == AppThemeMode.MIUIX ->
+                if (highlighted) scheme.onPrimaryContainer else scheme.onSurface
+            highlighted -> scheme.onSecondaryContainer
+            else -> scheme.onSurface
+        },
     ) {
         Row(
             Modifier
@@ -495,4 +503,65 @@ fun M3EScreenColumn(
             content = content,
         )
     }
+
+/**
+ * Miuix 主题下的「开关行」：左标题（可带副标题）、右开关。
+ *
+ * 这里**真的用了 Miuix 的 [top.yukonga.miuix.kmp.basic.Switch]**（而不是 M3 的），
+ * 因为外观差异主要就在开关本体（HyperOS 的开关是细长的胶囊 + 白色圆钮 + 蓝色轨道）。
+ * 它的参数与 M3 的 Switch 兼容（checked / onCheckedChange / modifier / colors / enabled），
+ * 所以调用方可以无缝替换。
+ *
+ * 非 Miuix 主题下回退到 M3 Switch —— 这样调用点只需要用这个函数，不必关心主题分支。
+ */
+@Composable
+fun MiuixSwitchRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    enabled: Boolean = true,
+) {
+    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                },
+            )
+            if (subtitle != null) {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (isMiuix) {
+            top.yukonga.miuix.kmp.basic.Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                enabled = enabled,
+            )
+        } else {
+            androidx.compose.material3.Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                enabled = enabled,
+            )
+        }
+    }
+}
 }
