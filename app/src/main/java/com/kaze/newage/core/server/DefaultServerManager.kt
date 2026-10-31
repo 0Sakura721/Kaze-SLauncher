@@ -942,7 +942,11 @@ class DefaultServerManager(
      * 返回 null 表示找不到可启动入口（核心缺失或未安装完成）。
      */
     private fun serverArgs(instance: ServerInstance, javaVersion: String): List<String>? {
-        val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
+        // 走 env.getJavaPath：**不能在这里拼目录名**。apt 装出来是
+        // `java-1.17.0-openjdk-arm64`、Adoptium 解压出来是 `java-17-openjdk-arm64`，
+        // 硬编码拼错时表现为「一启动就退出」，很难定位。
+        // （32 位设备上 Adoptium 没有官方包、必然走 apt，所以这条路径是真会踩到的。）
+        val javaBin = env.getJavaPath(javaVersion.toIntOrNull() ?: 17)
         val isForgeLike = instance.coreType == CoreType.FORGE || instance.coreType == CoreType.NEOFORGE
         return if (isForgeLike) {
             forgeArgs(instance, javaBin)
@@ -1013,7 +1017,8 @@ class DefaultServerManager(
             },
             LineType.System,
         )
-        val javaBin = "/usr/lib/jvm/java-$javaVersion-openjdk-${archSuffix()}/bin/java"
+        // 同上：必须走 env.getJavaPath（安装器也要用这个 java 才能跑起来）
+        val javaBin = env.getJavaPath(javaVersion.toIntOrNull() ?: 17)
         // ── 安装期间的实时进度行 ──
         // Forge 安装最后一步是 binarypatcher 对 ~50MB 的 srg.jar 做 LZMA 解压 + 二进制差分，
         // **全程一行输出都没有**，手机上要跑好几分钟 —— 真机反馈的"卡在这"就是这个阶段。
