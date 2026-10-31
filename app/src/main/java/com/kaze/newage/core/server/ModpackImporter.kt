@@ -191,7 +191,7 @@ object ModpackImporter {
                     runCatching { target.delete() }
                 }
                 if (overflow) {
-                    skipped += "$name（单文件超过 ${maxEntryBytes / 1024} KB 上限）"
+                    skipped += "$name（单文件超限：超过 ${maxEntryBytes / 1024} KB）"
                     runCatching { target.delete() }
                 }
                 zin.closeEntry()
