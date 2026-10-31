@@ -153,11 +153,24 @@ object ModpackImporter {
                     continue
                 }
                 target.parentFile?.mkdirs()
+                // 单文件限额**不能只看 entry.size**：流式读取（SAF 打开 zip 就是流式，
+                // ZipInputStream 也是）时本地文件头里的 size 常常是 0 或 -1，真正的长度
+                // 在数据描述符里。只信它的话单文件限额就形同虚设 ——
+                // 测试「单个超大文件被跳过而不是整包失败」抓到的正是这一点。
+                // 所以：declared 只做"能提前拒绝就拒绝"，真限额在读取循环里边读边算。
+                var entryBytes = 0L
+                var overflow = false
                 try {
                     target.outputStream().use { out ->
                         while (true) {
                             val n = zin.read(buf)
                             if (n <= 0) break
+                            entryBytes += n
+                            if (entryBytes > maxEntryBytes) {
+                                // 超限即停：已写出的部分稍后删除，剩余字节交给 closeEntry 丢弃
+                                overflow = true
+                                break
+                            }
                             total += n
                             if (total > maxTotalBytes) {
                                 throw IllegalStateException(
@@ -175,6 +188,10 @@ object ModpackImporter {
                 } catch (e: Exception) {
                     // 单个文件写不出来（名字过长、磁盘满前的个别错误）→ 记下来继续
                     skipped += "$name（写入失败：${e.message}）"
+                    runCatching { target.delete() }
+                }
+                if (overflow) {
+                    skipped += "$name（单文件超过 ${maxEntryBytes / 1024} KB 上限）"
                     runCatching { target.delete() }
                 }
                 zin.closeEntry()
