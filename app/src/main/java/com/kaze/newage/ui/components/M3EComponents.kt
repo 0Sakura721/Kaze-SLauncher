@@ -337,7 +337,6 @@ fun M3EConnectedList(
  * 屏幕顶部：大标题 +（可选）副标题 + 右侧动作。
  * m3e-canvas 的草图里每屏顶部就是一个「粗体文本 + 若干按钮」，这里是它的实现。
  */
-@Composable
 /**
  * 主题感知开关：Miuix 主题下用 Miuix 的 Switch（HyperOS 的细长胶囊 + 白钮 + 蓝轨），
  * 其它主题用 M3 Switch。
@@ -371,6 +370,7 @@ fun M3ESwitch(
     }
 }
 
+@Composable
 fun M3EScreenHeader(
     title: String,
     modifier: Modifier = Modifier,
