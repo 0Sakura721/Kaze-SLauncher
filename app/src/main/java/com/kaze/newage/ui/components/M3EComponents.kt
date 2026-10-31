@@ -338,6 +338,39 @@ fun M3EConnectedList(
  * m3e-canvas 的草图里每屏顶部就是一个「粗体文本 + 若干按钮」，这里是它的实现。
  */
 @Composable
+/**
+ * 主题感知开关：Miuix 主题下用 Miuix 的 Switch（HyperOS 的细长胶囊 + 白钮 + 蓝轨），
+ * 其它主题用 M3 Switch。
+ *
+ * **只替换开关本体，不碰行的点击语义** —— 现有列表项的写法是「整行 onClick 负责切换、
+ * Switch 的 onCheckedChange = null」（两个都设会让点一下被切两次再弹回原位，见
+ * SettingsScreen 里那几处注释）。所以这里保留 [onCheckedChange] 可为 null 的签名，
+ * 调用方一行不用改。
+ */
+@Composable
+fun M3ESwitch(
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    onCheckedChange: ((Boolean) -> Unit)? = null,
+    enabled: Boolean = true,
+) {
+    if (LocalAppTheme.current == AppThemeMode.MIUIX) {
+        top.yukonga.miuix.kmp.basic.Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = modifier,
+            enabled = enabled,
+        )
+    } else {
+        androidx.compose.material3.Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = modifier,
+            enabled = enabled,
+        )
+    }
+}
+
 fun M3EScreenHeader(
     title: String,
     modifier: Modifier = Modifier,
@@ -504,64 +537,4 @@ fun M3EScreenColumn(
         )
     }
 
-/**
- * Miuix 主题下的「开关行」：左标题（可带副标题）、右开关。
- *
- * 这里**真的用了 Miuix 的 [top.yukonga.miuix.kmp.basic.Switch]**（而不是 M3 的），
- * 因为外观差异主要就在开关本体（HyperOS 的开关是细长的胶囊 + 白色圆钮 + 蓝色轨道）。
- * 它的参数与 M3 的 Switch 兼容（checked / onCheckedChange / modifier / colors / enabled），
- * 所以调用方可以无缝替换。
- *
- * 非 Miuix 主题下回退到 M3 Switch —— 这样调用点只需要用这个函数，不必关心主题分支。
- */
-@Composable
-fun MiuixSwitchRow(
-    title: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier,
-    subtitle: String? = null,
-    enabled: Boolean = true,
-) {
-    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
-    Row(
-        modifier
-            .fillMaxWidth()
-            .heightIn(min = 56.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (enabled) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                },
-            )
-            if (subtitle != null) {
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        if (isMiuix) {
-            top.yukonga.miuix.kmp.basic.Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                enabled = enabled,
-            )
-        } else {
-            androidx.compose.material3.Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                enabled = enabled,
-            )
-        }
-    }
-}
 }

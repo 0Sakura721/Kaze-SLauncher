@@ -104,6 +104,7 @@ import com.kaze.newage.core.update.UpdateChecker
 import com.kaze.newage.ui.AppUpdateState
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
+import com.kaze.newage.ui.components.M3ESwitch
 import com.kaze.newage.ui.components.M3ECard
 import com.kaze.newage.ui.components.M3ECardVariant
 import com.kaze.newage.ui.components.M3EConnectedList
@@ -519,7 +520,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                             // onCheckedChange 必须是 null：整行的 onClick 已经负责切换。
                             // 两个都设 = 同一个动作有两条触发路径（开关自身的 toggleable +
                             // 行的 clickable），点一下开关会被切换两次、又弹回原位。
-                            Switch(
+                            M3ESwitch(
                                 checked = uiPrefs.bgEnabled.value,
                                 onCheckedChange = null,
                             )
@@ -721,7 +722,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     trailing = {
                         // onCheckedChange 必须是 null：整行的 onClick 已经负责切换，
                         // 两条触发路径会让开关点一下被切两次、又弹回原位
-                        Switch(
+                        M3ESwitch(
                             checked = uiPrefs.consoleAiEntry.value,
                             onCheckedChange = null,
                         )
@@ -749,7 +750,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         onClick = { viewModel.setMcpEnabled(!uiPrefs.mcpEnabled.value) },
                         trailing = {
                             // onCheckedChange 必须是 null：整行 onClick 已负责切换，双路径会切两次弹回
-                            Switch(
+                            M3ESwitch(
                                 checked = uiPrefs.mcpEnabled.value,
                                 onCheckedChange = null,
                             )
@@ -871,7 +872,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = {
                             // 同上：切换只由整行的 onClick 负责，Switch 不再单独绑定，
                             // 否则两条触发路径互相抵消，开关看起来"按不动"
-                            Switch(
+                            M3ESwitch(
                                 checked = uiPrefs.autoUpdate.value,
                                 onCheckedChange = null,
                             )
