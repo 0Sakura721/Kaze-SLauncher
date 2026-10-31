@@ -355,18 +355,20 @@ class ShellActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        // host 是 lateinit：onCreate 里"转交 Compose"的那条分支会提前 return，
-        // 什么都没初始化就结束了。此时系统仍会走 onDestroy，无条件访问就是崩溃
-        //（真机实测：切到 Material 3 后按返回，进程直接 FATAL）。
-        // 用 ::host.isInitialized 判断，而不是加一个布尔标志 —— 标志会和
-        // 真实的初始化状态脱节，lateinit 自己就知道。
+        // onCreate 里"转交 Compose"的那条分支会提前 return，界面树与 host 都没建；
+        // 系统仍会走 onDestroy。这里所有 lateinit 都必须先判初始化，否则崩溃
+        //（真机实测两次：先是 host，补了 host 判断后又轮到 contentHost）。
+        // 用 ::x.isInitialized 而不是另加布尔标志 —— 标志会和真实初始化状态脱节。
+        //
         // 先让当前屏停订阅，再停 host。
         // selectTab 里的 detach 只在**切页**时执行；停在某一页直接退出（按返回、
         // 主题 recreate、系统回收）时它不会跑，于是那屏的 collect 全部存活 ——
         // 控制台有 6 个（日志/状态/时长/占用/玩家/实例），它们跑在屏自建的 scope 上，
         // 不受 host.stop 影响，会持续往已销毁的视图写 text，并把整棵视图树连同
         // Activity context 永久钉在内存里。
-        (contentHost.getChildAt(0) as? ScreenRoot)?.detach()
+        if (::contentHost.isInitialized) {
+            (contentHost.getChildAt(0) as? ScreenRoot)?.detach()
+        }
         // 屏缓存的引用也一并断开，避免 Activity 回收后仍被 Screen 反向持有。
         home = null
         serverList = null
@@ -380,6 +382,10 @@ class ShellActivity : ComponentActivity() {
     }
 
     private fun showToast(message: String, error: Boolean) {
+        // 转交分支下界面树没建（toastLayer 未初始化），而 host 的回调仍可能被
+        // 触发（例如 scope 取消过程中的收尾回调）。这里直接吞掉 ——
+        // 界面都要交出去了，弹一个提示既无处显示也没意义。
+        if (!::toastLayer.isInitialized) return
         val c = this
         toastView?.let { toastLayer.removeView(it) }
         val tone = if (error) ShellTheme.current.danger else ShellTheme.current.ink
