@@ -297,8 +297,20 @@ class ModpackManifestTest {
         val root = dir()
         assertNull("必须拦住 ../", ModpackImporter.resolveRemoteDest(root, "../../evil.txt"))
         assertNull("嵌套的 ../ 也要拦", ModpackImporter.resolveRemoteDest(root, "mods/../../evil.txt"))
-        assertNull("绝对路径要拦", ModpackImporter.resolveRemoteDest(root, "/etc/passwd"))
         assertNull("空路径要拦", ModpackImporter.resolveRemoteDest(root, ""))
+
+        // 关于"看起来像绝对路径"的输入：这里**不拒绝**，而是把前导 `/` 规范化成
+        // 实例目录内的相对路径。理由：很多整合包清单把路径写成 `/mods/x.jar`，
+        // 直接拒绝会让这些包装不上；而规范化之后它仍然落在实例目录内，
+        // 真正的安全属性（**不能写到实例目录之外**）没有被破坏。
+        // 所以断言的是"落在了实例里"，而不是"返回 null"。
+        for (raw in listOf("/etc/passwd", "C:/Windows/system32/x.dll", "//weird//double.txt")) {
+            val dest = ModpackImporter.resolveRemoteDest(root, raw)
+            assertTrue(
+                "「$raw」规范化后仍必须落在实例目录内",
+                dest != null && dest.canonicalPath.startsWith(root.canonicalPath + File.separator),
+            )
+        }
     }
 
     @Test

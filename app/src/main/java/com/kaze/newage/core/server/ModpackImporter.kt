@@ -290,6 +290,13 @@ object ModpackImporter {
      * **远端清单是不可信数据**：`path` 完全由整合包作者（或伪造的包）决定，
      * `../../foo` 这类值直接拼进 File 就会写到实例目录之外。这里做与解压同一套
      * canonical 前缀校验。
+     *
+     * 关于"看起来像绝对路径"的输入（`/mods/x.jar`、`C:/x.dll`）：**不拒绝，而是规范化**
+     * —— 前导 `/` 去掉、`\` 换成 `/`，然后当作实例目录内的相对路径。理由有两个：
+     *  1. 很多整合包（尤其从其他启动器导出的）就是这么写路径的，拒绝会让它们装不上；
+     *  2. 真正的安全属性是"**最终落在实例目录内**"，规范化之后这一点仍然成立 ——
+     *     `/etc/passwd` 会变成实例目录里的 `etc/passwd`，不是系统的 `/etc/passwd`。
+     * 所以真正必须拒绝的只有 `..` 段（它会跳出目录）。
      */
     fun resolveRemoteDest(root: File, path: String): File? {
         val clean = path.replace('\\', '/').trimStart('/')
