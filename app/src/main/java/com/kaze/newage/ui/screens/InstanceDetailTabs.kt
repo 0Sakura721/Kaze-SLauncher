@@ -1,5 +1,6 @@
 package com.kaze.newage.ui.screens
 
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -242,6 +243,11 @@ internal fun RunTab(
             // 手机开服最高频的动作就是把地址填进 MC 客户端 / 发给同 Wi-Fi 的朋友；
             // 让用户自己拼 127.0.0.1:端口、再手动去系统设置里抄局域网 IP，门槛太高。
             // 端口读不到（server.properties 还没生成）就不渲染这一段。
+            //
+            // issue #15「IP 地址好像不太好找」：原来这里把地址 `remember(port)` 住了 ——
+            // 进页面时没连 Wi-Fi 就永远取不到，之后连上也补不出来，局域网那行压根不显示。
+            // 现在：地址可手动刷新（刷新会重新探测），并且**取不到时也显示说明**，
+            // 而不是把整块藏掉（藏掉让用户以为「这应用不支持局域网」）。
             if (port != "—") {
                 val clipboard = LocalClipboardManager.current
                 val ctx = LocalContext.current
@@ -250,19 +256,60 @@ internal fun RunTab(
                     android.widget.Toast.makeText(
                         ctx,
                         "已复制${label}地址 $addr",
-                        android.widget.Toast.LENGTH_SHORT,
+                        Toast.LENGTH_SHORT,
                     ).show()
                 }
-                val lanIp = remember(port) { LanIp.lanIpv4() }
+                // lanRefresh 只用来强制重算：LanIp 内部不缓存，每次调用都是实时探测。
+                // 进页面时自动取一次（LaunchedEffect），之后用户可点刷新重取。
+                var lanRefresh by remember { mutableStateOf(0) }
+                // 注意这里不能用 `by`：remember { ... } 返回的是值本身而不是 State，
+                // 写 `val lan by remember { LanIp.snapshot() }` 会报
+                // "Property delegate must have a 'getValue' method"。
+                val lan = remember(port, lanRefresh) { LanIp.snapshot() }
+                LaunchedEffect(port) {
+                    // 让首帧先画出来，再补一次（有些设备进页面瞬间 Wi-Fi 还在连接中）
+                    kotlinx.coroutines.delay(600)
+                    lanRefresh++
+                }
                 Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                    Text(
-                        "连接地址（MC 客户端「多人游戏 → 直接连接」粘贴）",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "连接地址（MC 客户端「多人游戏 → 直接连接」粘贴）",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { lanRefresh++ }) {
+                            Text("刷新", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
                     AddressCopyRow("本机", "127.0.0.1:$port") { copyAddress("本机", "127.0.0.1:$port") }
-                    if (lanIp != null) {
-                        AddressCopyRow("局域网", "$lanIp:$port") { copyAddress("局域网", "$lanIp:$port") }
+                    val primary = lan.primary
+                    if (primary != null) {
+                        AddressCopyRow("局域网", "$primary:$port") { copyAddress("局域网", "$primary:$port") }
+                        // 同 Wi-Fi 的朋友用局域网地址；离开 Wi-Fi 就要靠公网/端口转发
+                        Text(
+                            "同 Wi-Fi 的朋友用「局域网」这条。手机流量下连不上 —— 那是网络环境限制，不是应用问题。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    } else {
+                        Text(
+                            "没取到局域网地址：确认已连 Wi-Fi 或开了热点，然后点「刷新」。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
+                    }
+                    // 其它候选（同时开热点 + Wi-Fi、或有多张网卡时让用户自己挑）
+                    if (lan.others.isNotEmpty()) {
+                        Text(
+                            "其它可用地址：" + lan.others.joinToString("、") { it.address },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.padding(top = 2.dp),
+                        )
                     }
                 }
             }
