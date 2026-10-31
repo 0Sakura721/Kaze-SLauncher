@@ -300,14 +300,18 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 // 之前它和名称列并排占行宽：胶囊按内容自然宽（"首次启动 · 生成
                 // eula.txt" 要 129px），LinearLayout 先量完所有非 weight 子项，
                 // 剩给名称列的只有十几像素 —— 名称折三行、副标题逐字竖排，
-                // 320dp 屏实测名称区宽度为 0。挪进来之后胶囊只和副标题争，
-                // 副标题本身有 2 行上限，最坏情况是它省略，名称永远完整。
-                val subRow = c.row()
-                // 副标题与胶囊按 weight 分配剩余宽度（3:2）。
-                // 不给 weight 的话，胶囊按自然宽先量完，副标题的 weight 列只剩
-                // 被压剩的零头（320dp 屏实测副标题宽 0）。两个都用 weight 之后
-                // 宽度按比例切，双方都有下限保障；内容超长各自省略。
-                subRow.addView(
+                // 320dp 屏实测名称区宽度为 0。
+                //
+                // 副标题与状态胶囊：**分两行**，不挤在同一行。
+                // 同一行上试遍了都不行（320dp 实测）：
+                //  a) 胶囊 WRAP + 副标题 weight=1 → 胶囊按自然宽先量，副标题被压成 0
+                //  b) 两者 weight 3:2 / 1:1       → 胶囊只拿 50-75px，状态截成"首…"
+                //  c) 胶囊 WRAP(≤96dp)            → 胶囊吃满 96dp，副标题只剩 "."
+                // 根因是 LinearLayout 先量完所有非 weight 子项再分剩余，而长文案的
+                // "自然宽"本身没有意义 —— 谁先被量谁就吃亏。
+                // 分行之后两者都有完整行宽，代价只是卡片高 ~18dp，
+                // 换来状态与版本都可读 —— 这是扫列表时真正要判断的两件事。
+                addView(
                     c.txt(
                         "${instance.coreType.displayName} · ${instance.mcVersion.ifBlank { "自定义" }}" +
                             if (running) " · ${instance.memoryMb} MB" else "",
@@ -315,24 +319,21 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                     ).apply {
                         maxLines = 1
                         ellipsize = TextUtils.TruncateAt.END
+                        setPadding(0, dp(4f), 0, 0)
                     },
-                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 3f),
                 )
-                subRow.addView(
+                addView(
                     c.statusTag(state.toLabel(), tone),
-                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 2f).apply {
-                        marginStart = dp(6f)
-                    },
+                    LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                    ).apply { topMargin = dp(5f) },
                 )
-                addView(subRow, LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(4f) })
             }
             // 名称列：weight=1 分到"剩余宽度"，剩余量 = 行宽 - 同行其它所有固定宽。
             // 注意 minimumWidth 在这里**无效** —— LinearLayout 分配权重时直接
-            // 用剩余量，不看 minimumWidth（实测 320dp 屏仍是 10px）。所以真正的
-            // 保障是把同行的状态胶囊挪到别处（见下面），让名称列至少有半行可用。
+            // 用剩余量，不看 minimumWidth（实测 320dp 屏仍是 10px）。真正的保障是
+            // 把状态胶囊挪进名称列内部（见上面），让这一列不再和胶囊抢行宽。
             addView(meta, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
             addView(
