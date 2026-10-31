@@ -20,6 +20,7 @@ import com.kaze.newage.core.download.CoreBuild
 import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.server.ServerProperties
+import com.kaze.newage.core.server.ModpackImporter
 import com.kaze.newage.core.server.JarInspector
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.CoreType
@@ -1632,6 +1633,180 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         ?.filter { it.name.startsWith("import-probe-") && it.name.endsWith(".jar") }
                         ?.forEach { it.delete() }
                 }
+            }
+        }
+    }
+
+    /**
+     * 导入整合包 zip：解压 → 摊平目录 → 识别启动方式 → 登记实例（issue #15）。
+     *
+     * ## 为什么不能只"解压完就完事"
+     * 整合包有三个坑，任意一个没处理好，用户得到的都是一个**启动不起来**的实例：
+     *  1. **多一层壳 / overrides/**：`server.jar` 不在实例根目录 → 启动器找不到它；
+     *  2. **Forge 库可能不全**：这种包装完直接启动会报 `Missing required libraries`，
+     *     而且一旦被误标成"已安装"就永远跳过安装（见 ServerInstance.forgeInstalled 注释）；
+     *  3. **只有 mods、没有核心**：必须明确告诉用户去补核心，不能假装导入成功。
+     *
+     * 这些都交给 [ModpackImporter] 判断（纯逻辑，可单测），这里只负责：
+     * IO 线程解压 + 进度上报 + 落库 + Toast。
+     *
+     * ## 与 importJar 的关系
+     * 共用同一套进度状态 [ImportJarProgress]（界面上是同一块进度条），也共用连点守卫
+     * —— 两者都是"往新实例目录里写东西"，并发跑会争用同一块磁盘与同一个实例列表。
+     */
+    fun importModpack(uri: android.net.Uri, name: String) {
+        if (importJarRunning) return
+        importJarRunning = true
+        _importJarProgress.value = ImportJarProgress.Running(0f, "准备导入整合包…")
+        viewModelScope.launch(Dispatchers.IO) {
+            val ctx = container.appContext
+            var dir: File? = null
+            try {
+                // ① 解压到临时目录（不直接往实例目录解，失败时不留半成品）
+                val tmpDir = File(ctx.cacheDir, "modpack-${System.currentTimeMillis()}").apply { mkdirs() }
+                try {
+                    val input = ctx.contentResolver.openInputStream(uri)
+                        ?: throw RuntimeException("无法打开所选文件（授权可能已失效，请重新选择）")
+                    _importJarProgress.value = ImportJarProgress.Running(0f, "解压中…")
+                    val result = input.use {
+                        ModpackImporter.extract(it, tmpDir) { done ->
+                            _importJarProgress.value = ImportJarProgress.Running(
+                                // 压缩包总大小未知（SAF 常常给不出），只报已解压字节
+                                -1f,
+                                "解压中… ${done / 1024 / 1024} MB",
+                            )
+                        }
+                    }
+                    if (result.entryCount == 0) {
+                        throw RuntimeException("压缩包里没有任何文件")
+                    }
+
+                    // ② 摊平 + 识别
+                    _importJarProgress.value = ImportJarProgress.Running(1f, "整理目录…")
+                    val flattened = ModpackImporter.flatten(tmpDir)
+                    val plan = ModpackImporter.inspect(tmpDir)
+                    if (plan.launch == ModpackImporter.Launch.MODS_ONLY) {
+                        // 只有 mods（没有核心）：不建立实例 —— 否则用户会得到一个必然启动失败的实例，
+                        // 还以为是自己操作错了。把该怎么做直接说清楚。
+                        throw RuntimeException(plan.warnings.firstOrNull() ?: "整合包里没有可用的服务端核心")
+                    }
+
+                    // ③ 搬到实例目录
+                    val existing = instanceStore.instances.value.map { it.name }.toSet()
+                    val finalName = uniqueName(modpackNameOf(name, plan), existing)
+                    dir = instanceStore.createInstanceDir(finalName)
+                    _importJarProgress.value = ImportJarProgress.Running(1f, "写入实例目录…")
+                    if (!tmpDir.renameTo(dir)) {
+                        // 跨分区（cacheDir 与实例目录可能不同卷）→ 退回逐文件搬
+                        moveDirChecked(tmpDir, dir)
+                    }
+
+                    // ④ 登记。Forge 系：库齐全才写安装标记，否则留给启动时补
+                    val instance = ServerInstance(
+                        name = finalName,
+                        coreType = runCatching { CoreType.valueOf(plan.coreTypeName) }
+                            .getOrDefault(CoreType.CUSTOM),
+                        mcVersion = plan.mcVersion,
+                        javaMajor = plan.javaMajor,
+                        memoryMb = 2048,   // 整合包通常比原版吃内存；用户可在详情页改
+                        dir = dir,
+                    )
+                    if (plan.launch == ModpackImporter.Launch.FORGE_ARGS &&
+                        plan.missingForgeLibs.isEmpty()
+                    ) {
+                        // 库是齐的：直接认作"已安装"，首次启动不必再跑一遍安装器
+                        runCatching { instance.forgeMarker.writeText(instance.javaMajor.toString()) }
+                    }
+                    instanceStore.add(instance)
+                    ServerProperties.ensureInitial(instance, instanceStore.instances.value)
+                    _currentInstanceId.value = instance.id
+
+                    // ⑤ 说明性日志：让用户在控制台就能看懂这个包被抓成了什么
+                    val console = serverManager.consoleFor(instance.id)
+                    console.emit(
+                        "> 已导入整合包（${result.entryCount} 个条目，" +
+                            "${result.totalBytes / 1024 / 1024} MB" +
+                            if (flattened) "，已摊平目录" else "" + "）",
+                        LineType.System,
+                    )
+                    if (plan.evidence.isNotEmpty()) {
+                        console.emit("> 识别依据：${plan.evidence}", LineType.System)
+                    }
+                    when (plan.launch) {
+                        ModpackImporter.Launch.FORGE_ARGS -> console.emit(
+                            "> 启动方式：Forge/NeoForge（@unix_args.txt）" +
+                                if (plan.missingForgeLibs.isEmpty()) {
+                                    "；依赖库齐全"
+                                } else {
+                                    "；依赖库缺 ${plan.missingForgeLibs.size} 个，首次启动会自动补齐"
+                                },
+                            LineType.System,
+                        )
+                        ModpackImporter.Launch.JAR -> console.emit(
+                            "> 启动方式：java -jar ${plan.launchJar?.name ?: "server.jar"}",
+                            LineType.System,
+                        )
+                        else -> Unit
+                    }
+                    plan.warnings.forEach { console.emit("> 注意：$it", LineType.Warn) }
+                    if (result.skipped.isNotEmpty()) {
+                        console.emit(
+                            "> 有 ${result.skipped.size} 个条目被跳过（路径非法或超限），" +
+                                "例如：${result.skipped.first()}",
+                            LineType.Warn,
+                        )
+                    }
+
+                    _importJarProgress.value = ImportJarProgress.Done(instance.id, instance.name)
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(
+                            ctx,
+                            "已导入整合包：${instance.name}" +
+                                if (plan.warnings.isNotEmpty()) "（有 ${plan.warnings.size} 条提示，见控制台）" else "",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                } finally {
+                    runCatching { tmpDir.deleteRecursively() }
+                }
+            } catch (e: Exception) {
+                runCatching { dir?.deleteRecursively() }
+                val reason = e.message?.takeIf { it.isNotBlank() } ?: e.javaClass.simpleName
+                _importJarProgress.value = ImportJarProgress.Failed(reason)
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(ctx, "导入失败：$reason", android.widget.Toast.LENGTH_LONG).show()
+                }
+            } finally {
+                importJarRunning = false
+            }
+        }
+    }
+
+    /**
+     * 整合包实例名：用户可在导入对话框里填，留空就用识别到的「核心 + MC 版本」。
+     */
+    private fun modpackNameOf(rawName: String, plan: ModpackImporter.Plan): String {
+        if (rawName.isNotBlank()) return rawName.trim()
+        val core = runCatching { CoreType.valueOf(plan.coreTypeName).displayName }
+            .getOrDefault("整合包")
+        return if (plan.mcVersion.isNotEmpty()) "$core ${plan.mcVersion} 整合包" else "$core 整合包"
+    }
+
+    /** 重名自动加序号（与 importNameOf 同一套规则） */
+    private fun uniqueName(base: String, existing: Set<String>): String {
+        if (base !in existing) return base
+        var i = 2
+        while ("$base ($i)" in existing) i++
+        return "$base ($i)"
+    }
+
+    /** 跨分区搬目录（rename 失败时用）：逐文件 copy，可中断 */
+    private fun moveDirChecked(src: File, dst: File) {
+        src.walkTopDown().forEach { f ->
+            val out = File(dst, f.relativeTo(src).path)
+            if (f.isDirectory) out.mkdirs() else {
+                out.parentFile?.mkdirs()
+                f.copyTo(out, overwrite = true)
             }
         }
     }

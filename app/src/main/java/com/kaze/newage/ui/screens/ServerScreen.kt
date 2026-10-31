@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
@@ -35,6 +36,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -150,6 +152,62 @@ fun ServerScreen(
         }
     }
 
+    // 整合包导入（issue #15）：先选 zip，再让用户确认实例名（默认留空 = 用识别结果）
+    var modpackUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var modpackName by remember { mutableStateOf("") }
+    val modpackLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        // 只记下 uri 并弹命名框：真正的解压交给 ViewModel 的 IO 协程
+        //（zip 可能有几百 MB，主线程碰一下就会 ANR）
+        if (uri != null) {
+            modpackName = ""
+            modpackUri = uri
+        }
+    }
+    // 解压/复制期间禁止再点导入：两个并发导入会争用同一块磁盘，也会各自 createInstanceDir
+    val importing = importProgress is AppViewModel.ImportJarProgress.Running
+    // 整合包命名对话框：留空就用识别出来的「核心 + MC 版本」当名字
+    modpackUri?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { modpackUri = null },
+            title = { Text("导入整合包") },
+            text = {
+                Column {
+                    Text(
+                        "会解压到新的实例目录，并自动识别启动方式（jar / Forge / 只有 mods）。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedTextField(
+                        value = modpackName,
+                        onValueChange = { modpackName = it },
+                        label = { Text("实例名（可留空）") },
+                        placeholder = { Text("留空自动命名") },
+                        singleLine = true,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        "提示：整合包通常要吃更多内存，导入后可在实例详情里调整。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.importModpack(uri, modpackName)
+                        modpackUri = null
+                    },
+                ) { Text("导入") }
+            },
+            dismissButton = {
+                TextButton(onClick = { modpackUri = null }) { Text("取消") }
+            },
+        )
+    }
+
     // 批量启停的可用性：启动只针对「既没跑也不在启动中」的实例，
     // 停止只针对运行中的实例（stop() 对停止中的实例是空操作，不必打扰）
     val startableCount = filtered.count { inst ->
@@ -206,10 +264,11 @@ fun ServerScreen(
             GroupButton(
                 label = "导入 jar",
                 icon = Icons.Filled.FileOpen,
-                shape = M3Shape.groupLast(56f),
+                // 三个按钮横向相连：新建（首）/ 导入 jar（中）/ 整合包（尾）
+                shape = M3Shape.groupMiddle(),
                 container = MaterialTheme.colorScheme.secondaryContainer,
                 content = MaterialTheme.colorScheme.onSecondaryContainer,
-                enabled = true,
+                enabled = !importing,
                 // 用系统文件选择器挑一个已有的 server.jar 导入
                 onClick = {
                     // MIME 只是"建议筛选项"：有的文件管理器把 .jar 报成 octet-stream，
@@ -219,6 +278,18 @@ fun ServerScreen(
                         arrayOf("application/java-archive", "application/x-java-archive", "application/octet-stream")
                     )
                 },
+            )
+            GroupButton(
+                // issue #15：「服务器整合包 zip 直接导入」
+                // 与「导入 jar」分开成两个按钮而不是合成一个"导入":
+                // 两者处理路径完全不同（单个 jar vs 整棵目录树），合并后没法给出准确提示。
+                label = "整合包",
+                icon = Icons.Filled.FolderZip,
+                shape = M3Shape.groupLast(56f),
+                container = MaterialTheme.colorScheme.secondaryContainer,
+                content = MaterialTheme.colorScheme.onSecondaryContainer,
+                enabled = !importing,
+                onClick = { modpackLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed")) },
             )
         }
 
