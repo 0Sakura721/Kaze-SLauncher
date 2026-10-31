@@ -430,7 +430,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
 }
 
 /**
- * 液态玻璃浮动胶囊底栏（照搬「现在的 BiliPai」= Miuix IosLiquidGlassNavigationBar 版式，
+ * 液态玻璃浮动胶囊底栏（Miuix IosLiquidGlassNavigationBar 版式，
  * Miuix/AndroidLiquidGlass Apache-2.0，已记 NOTICES）：
  *  - 24dp 边距悬浮圆胶囊（64dp 高）+ 10dp 投影
  *  - 玻璃链：Haze 背景模糊 + vibrancy 饱和度 1.5 + Kyant0 圆角矩形折射透镜（24dp/24dp）
@@ -503,9 +503,9 @@ private fun LiquidGlassNavBar(
                         } else Modifier
                     )
             )
-            // 层②：表面色（BiliPai onDrawSurface 等效：container alpha 0.4）
+            // 层②：表面色（container alpha 0.4）
             Box(Modifier.fillMaxSize().background(containerColor))
-            // 层③：图标与标签（BiliPai tabsContent——始终在最上，不被折射）
+            // 层③：图标与标签（始终在最上，不被折射）
             Row(
                 Modifier.fillMaxSize().padding(4.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),

@@ -3,7 +3,7 @@ package com.kaze.newage.ui.theme
 import androidx.compose.runtime.staticCompositionLocalOf
 import dev.chrisbanes.haze.HazeState
 /**
- * 主题模式（照搬 BiliPai 主题设置思路，GPL-3.0）：
+ * 主题模式：
  *  - M3：Material 3 动态取色（Material You，跟随系统深浅色）
  *  - GLASS：液态玻璃（Haze 原生背景模糊 + 折射，跟随系统深浅色）
  *  - SHELL：「岚」手写视图界面（纸感 / 墨夜两套配色，自绘控件）

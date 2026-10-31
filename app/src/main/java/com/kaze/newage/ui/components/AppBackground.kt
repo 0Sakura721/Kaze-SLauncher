@@ -28,7 +28,7 @@ import kotlinx.coroutines.withContext
  * 应用级状态提供者：提供 Haze 模糊状态与玻璃模糊开关。
  * 背景绘制抽成 BackdropLayer（由 AppRoot 放进单一 hazeSource 内——多个 hazeSource
  * 同 state 会互相覆盖导致底栏模糊采样不到内容，真机实测"没任何效果"）。
- * 背景图方案借鉴 ZalithLauncher2（GPL-3.0），Haze 模糊方案照搬 BiliPai（GPL-3.0）。
+ * 背景图方案借鉴 ZalithLauncher2（GPL-3.0）；Haze 模糊方案基于 Kyant0/AndroidLiquidGlass（Apache-2.0）。
  */
 @Composable
 fun AppBackground(

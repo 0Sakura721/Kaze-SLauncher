@@ -32,7 +32,6 @@ Kaze SLauncher 整体以 **GNU General Public License v3.0** 发布，许可证�
 - Fold Craft Launcher（FCL）— GPL-3.0
 - ZalithLauncher 2 — GPL-3.0
 - PojavLauncher — GPL-3.0
-- BiliPai — GPL-3.0
 
 GPL-3.0 具有传染性：**改编**这些代码形成的作品必须以 GPL-3.0 发布。
 所以"改成 MIT / Apache-2.0"是不可行的 —— 那会直接违反上游许可证。
