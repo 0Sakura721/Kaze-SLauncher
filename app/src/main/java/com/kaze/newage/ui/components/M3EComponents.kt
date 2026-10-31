@@ -6,6 +6,7 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +42,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.core.animateFloatAsState
+import com.kaze.newage.ui.theme.AppThemeMode
+import com.kaze.newage.ui.theme.LocalAppTheme
 import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.M3Motion
 import com.kaze.newage.ui.theme.M3Shape
@@ -93,15 +96,23 @@ fun M3ECard(
     content: @Composable ColumnScope.() -> Unit = {},
 ) {
     val scheme = MaterialTheme.colorScheme
-    val container = when (variant) {
+    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
+    // Miuix（HyperOS 观感）：三种 variant 统一成「白卡片 + 细描边 + 大圆角」，无投影 ——
+    // HyperOS 的列表分组没有海拔概念，靠底色对比（灰底上的白卡）。
+    val container = if (isMiuix) {
+        scheme.surface
+    } else when (variant) {
         M3ECardVariant.Filled -> scheme.surfaceContainerHighest
         M3ECardVariant.Elevated -> scheme.surfaceContainerLow
         M3ECardVariant.Outlined -> scheme.surface
     }
-    val border = if (variant == M3ECardVariant.Outlined) {
-        BorderStroke(1.dp, scheme.outlineVariant)
-    } else null
-    val elevation = if (variant == M3ECardVariant.Elevated) 1.dp else 0.dp
+    val border = when {
+        isMiuix -> BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = 0.6f))
+        variant == M3ECardVariant.Outlined -> BorderStroke(1.dp, scheme.outlineVariant)
+        else -> null
+    }
+    val elevation = if (!isMiuix && variant == M3ECardVariant.Elevated) 1.dp else 0.dp
+    val cardShape = if (isMiuix) RoundedCornerShape(18.dp) else M3Shape.largeIncreased
 
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -124,7 +135,7 @@ fun M3ECard(
                     )
                 } else Modifier
             ),
-        shape = M3Shape.largeIncreased,
+        shape = cardShape,
         color = container,
         contentColor = scheme.onSurface,
         border = border,
@@ -213,7 +224,11 @@ fun M3EListItem(
                 } else Modifier
             ),
         shape = shape,
-        color = if (highlighted) {
+        // Miuix（HyperOS 观感）：列表行坐在白卡片上，行底=卡片色；高亮用浅蓝主容器
+        // （secondaryContainer 在 Miuix 灰白体系里偏灰，高亮辨识度不足）。
+        color = if (LocalAppTheme.current == AppThemeMode.MIUIX) {
+            if (highlighted) scheme.primaryContainer else scheme.surface
+        } else if (highlighted) {
             scheme.secondaryContainer
         } else {
             scheme.surfaceContainerLow
