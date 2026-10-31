@@ -40,6 +40,14 @@ object Downloader {
     fun sha1Of(file: File): String? = digestOf(file, "SHA-1")
 
     /**
+     * 计算文件 SHA-512（十六进制小写）；失败返回 null。
+     *
+     * 加它是因为 **Modrinth 的 `.mrpack` 清单主哈希就是 sha512**（同时也给 sha1）。
+     * 只校验 sha1 的话，遇到被投毒的 CDN 就少了一层更强的校验。
+     */
+    fun sha512Of(file: File): String? = digestOf(file, "SHA-512")
+
+    /**
      * 计算文件 SHA-256（十六进制小写）；失败返回 null。
      * 用于校验更新包——GitHub 的 release asset 带 `digest: sha256:…`，
      * 而 APK 实际是从多个第三方加速镜像下载的，见 [com.kaze.newage.core.update.UpdateInstaller]。

@@ -20,7 +20,9 @@ import com.kaze.newage.core.download.CoreBuild
 import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.server.ServerProperties
+import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.server.ModpackImporter
+import com.kaze.newage.core.server.ModpackManifest
 import com.kaze.newage.core.server.JarInspector
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.CoreType
@@ -1690,10 +1692,42 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     // ② 摊平 + 识别
                     _importJarProgress.value = ImportJarProgress.Running(1f, "整理目录…")
                     val flattened = ModpackImporter.flatten(tmpDir)
-                    val plan = ModpackImporter.inspect(tmpDir)
-                    if (plan.launch == ModpackImporter.Launch.MODS_ONLY) {
-                        // 只有 mods（没有核心）：不建立实例 —— 否则用户会得到一个必然启动失败的实例，
-                        // 还以为是自己操作错了。把该怎么做直接说清楚。
+                    // var：装完加载器/下载完模组后要**重新识别一次**（目录形态变了）
+                    var plan = ModpackImporter.inspect(tmpDir)
+
+                    // ── 判断这个包属于哪种格式、以及要不要联网 ──
+                    //  1. 通用懒人包：文件已实体在包里，什么都不用下
+                    //  2. Modrinth .mrpack：只有引用清单，要按 URL 下模组；加载器也要装
+                    //  3. CurseForge：只有平台 ID，免密钥拿不到下载地址（见下）
+                    val manifest = plan.format
+                    val loaderInstallable = plan.mcVersion.isNotEmpty() && when (plan.loader) {
+                        ModpackManifest.Loader.FORGE,
+                        ModpackManifest.Loader.NEOFORGE,
+                        ModpackManifest.Loader.FABRIC,
+                        ModpackManifest.Loader.VANILLA -> true
+                        else -> false
+                    }
+                    // 包里已经有能跑的东西（可直接 -jar 的 jar，或装好的 Forge）→ 不必再装加载器
+                    val alreadyRunnable = plan.launch == ModpackImporter.Launch.JAR ||
+                        (plan.launch == ModpackImporter.Launch.FORGE_ARGS && plan.missingForgeLibs.isEmpty())
+                    val needsLoaderInstall = loaderInstallable && !alreadyRunnable
+
+                    // CurseForge 的"只带 ID"包：如实拒绝，不假装导入成功。
+                    // 实测 api.curseforge.com 无 key 返回 403，网站那个 download 接口被
+                    // Cloudflare 拦成 403 —— 不是"懒得做"，是真的拿不到地址。
+                    val curse = manifest as? ModpackManifest.Format.Curse
+                    if (curse != null && curse.manifest.refs.isNotEmpty() && !hasPhysicalMods(tmpDir)) {
+                        throw RuntimeException(
+                            "这是 CurseForge 格式的整合包：清单只记录了 ${curse.manifest.refs.size} 个模组的" +
+                                "平台 ID，包里不含模组文件，而 CurseForge 的下载接口需要官方 API Key" +
+                                "（本应用没有），所以这类包无法自动安装。\n" +
+                                "可行的做法：① 改用它的「服务端包」（Server Pack，模组是实体文件，可直接导入）；" +
+                                "② 用 CurseForge App 装好后，把 mods / config 等打包成 zip 再导入。",
+                        )
+                    }
+                    if (plan.launch == ModpackImporter.Launch.MODS_ONLY && !loaderInstallable) {
+                        // 只有 mods，清单也没说要装哪个加载器：不建立实例 ——
+                        // 否则用户会得到一个必然启动失败的实例，还以为是自己操作错了。
                         throw RuntimeException(plan.warnings.firstOrNull() ?: "整合包里没有可用的服务端核心")
                     }
 
@@ -1707,7 +1741,27 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         moveDirChecked(tmpDir, dir)
                     }
 
-                    // ④ 登记。Forge 系：库齐全才写安装标记，否则留给启动时补
+                    // ④ 联网步骤（通用懒人包这里什么都不做）
+                    val netNotes = mutableListOf<String>()
+                    if (needsLoaderInstall) {
+                        installLoaderFor(dir, plan) { msg ->
+                            _importJarProgress.value = ImportJarProgress.Running(-1f, msg)
+                        }?.let { netNotes += it }
+                    }
+                    if (manifest is ModpackManifest.Format.Mrpack) {
+                        downloadManifestFiles(dir, manifest.manifest, netNotes) { done, total, msg ->
+                            _importJarProgress.value = ImportJarProgress.Running(
+                                if (total > 0) done.toFloat() / total else -1f, msg,
+                            )
+                        }
+                    }
+                    // 重新识别：加载器/模组装上之后，目录里的启动入口与库完整性都变了。
+                    // 后面的 Forge 安装标记判断必须基于**新**状态，用旧结果会写错标记。
+                    if (needsLoaderInstall || manifest !is ModpackManifest.Format.Plain) {
+                        plan = ModpackImporter.inspect(dir)
+                    }
+
+                    // ⑤ 登记。Forge 系：库齐全才写安装标记，否则留给启动时补
                     val instance = ServerInstance(
                         name = finalName,
                         coreType = runCatching { CoreType.valueOf(plan.coreTypeName) }
@@ -1755,6 +1809,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         else -> Unit
                     }
                     plan.warnings.forEach { console.emit("> 注意：$it", LineType.Warn) }
+                    netNotes.forEach { console.emit("> $it", LineType.System) }
                     if (result.skipped.isNotEmpty()) {
                         console.emit(
                             "> 有 ${result.skipped.size} 个条目被跳过（路径非法或超限），" +
@@ -1787,6 +1842,192 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
             }
         }
     }
+
+    /**
+     * 给整合包装加载器（联网）。返回一句说明性文字（写进控制台），失败原因也在里面。
+     *
+     * 三种加载器三条路：
+     *  - **Forge / NeoForge**：下 maven 上的 installer jar（按清单里的**确切版本**，不是取最新）
+     *    放进实例目录 —— 已有的启动流程会在首次启动时跑 `--installServer` 完成安装。
+     *  - **Fabric**：Fabric 没有 installer，改为「原版 `server.jar` + 官方现成的服务端启动器 jar」，
+     *    启动器会自己在同目录找 `server.jar`。
+     *  - **原版**：只下 `server.jar`。
+     *
+     * 刻意不在这里"装完就标记已安装"：Forge 的安装标记必须由真正的安装器跑完才写，
+     * 否则依赖库不全的包会被当成装好了，之后每次启动都跳过安装、永远修不回来。
+     */
+    private suspend fun installLoaderFor(
+        dir: File,
+        plan: ModpackImporter.Plan,
+        onStatus: (String) -> Unit,
+    ): String? {
+        val mc = plan.mcVersion
+        val loaderName = plan.loader.name
+        return try {
+            when (plan.loader) {
+                ModpackManifest.Loader.FORGE, ModpackManifest.Loader.NEOFORGE -> {
+                    val pair = ModpackImporter.loaderInstallerUrl(plan.loader, mc, plan.loaderVersion)
+                    if (pair == null) {
+                        "$loaderName 的版本信息不全（清单只给了 ${plan.loaderVersion.ifEmpty { "空" }}），" +
+                            "未能自动下载安装器；请手动放入 ${loaderName}-*-installer.jar 后启动一次"
+                    } else {
+                        val (url, fileName) = pair
+                        onStatus("下载 $loaderName 安装器…")
+                        val dest = File(dir, fileName)
+                        val used = Downloader.downloadFromSources(
+                            listOf(url), dest,
+                            onProgress = { done, total ->
+                                if (total > 0) {
+                                    onStatus("下载 $loaderName 安装器… ${done * 100 / total}%")
+                                }
+                            },
+                            validate = { it.length() > 0 && Downloader.isZip(it) },
+                        )
+                        if (used == null) {
+                            "$loaderName 安装器下载失败（网络问题？）。首次启动前请手动放入 $fileName"
+                        } else {
+                            "已下载 $loaderName 安装器（$fileName）：首次启动会自动完成安装，需要联网"
+                        }
+                    }
+                }
+
+                ModpackManifest.Loader.FABRIC -> {
+                    onStatus("下载原版服务端（Fabric 需要）…")
+                    val vanilla = runCatching { CoreSources.getVanillaDownload(mc) }
+                        .getOrNull()?.getOrNull()
+                    if (vanilla == null) {
+                        "原版服务端下载地址获取失败，Fabric 启动器需要它；请手动放入 server.jar"
+                    } else {
+                        val serverJar = File(dir, "server.jar")
+                        val okServer = Downloader.downloadFromSources(
+                            listOf(vanilla.url), serverJar,
+                            onProgress = { done, total ->
+                                if (total > 0) onStatus("下载原版服务端… ${done * 100 / total}%")
+                            },
+                            validate = { it.length() > 0 && Downloader.isZip(it) },
+                        ) != null
+                        if (!okServer) {
+                            "原版 server.jar 下载失败；Fabric 启动器需要同目录有一份 server.jar"
+                        } else {
+                            onStatus("下载 Fabric 启动器…")
+                            val fab = runCatching { CoreSources.getFabricDownload(mc, plan.loaderVersion) }
+                                .getOrNull()?.getOrNull()
+                            if (fab == null) {
+                                "Fabric 启动器地址获取失败；可稍后在「新建」里用 Fabric 建一个实例再把这些文件拷过去"
+                            } else {
+                                val fabJar = File(dir, fab.fileName)
+                                val okFab = Downloader.downloadFromSources(
+                                    listOf(fab.url), fabJar,
+                                    validate = { it.length() > 0 && Downloader.isZip(it) },
+                                ) != null
+                                if (!okFab) {
+                                    "Fabric 启动器下载失败；server.jar 已就位，可手动补一个 Fabric 启动器"
+                                } else {
+                                    "Fabric 已就绪（${fab.fileName} + server.jar），可直接启动"
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ModpackManifest.Loader.VANILLA -> {
+                    onStatus("下载原版服务端…")
+                    val vanilla = runCatching { CoreSources.getVanillaDownload(mc) }
+                        .getOrNull()?.getOrNull()
+                    if (vanilla == null) {
+                        "原版服务端下载地址获取失败；请手动放入 server.jar"
+                    } else {
+                        val serverJar = File(dir, "server.jar")
+                        val ok = Downloader.downloadFromSources(
+                            listOf(vanilla.url), serverJar,
+                            onProgress = { done, total ->
+                                if (total > 0) onStatus("下载原版服务端… ${done * 100 / total}%")
+                            },
+                            validate = { it.length() > 0 && Downloader.isZip(it) },
+                        ) != null
+                        if (ok) "原版服务端已就绪" else "原版服务端下载失败"
+                    }
+                }
+
+                else -> "$loaderName 加载器本项目暂不支持（如 Quilt），已保留包内文件；" +
+                    "请在「新建」里建一个同版本的服务端，或手动放入可运行的核心"
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // 联网步骤失败不该整包导入失败：模组与配置已经铺好，缺的只是加载器，
+            // 用户手动补一个就能用。所以这里返回说明而不是抛错。
+            "$loaderName 安装未完成：${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /**
+     * 按 Modrinth 清单下载文件（模组等）。失败**不中断**整个导入 —— 把失败数量记进
+     * [warnings] 让用户知道可以稍后在「模组」页单独补装。
+     *
+     * 校验策略：清单有 sha512 就校验 sha512（Modrinth 的主哈希），否则退 sha1，
+     * 都没有就只要求"下到了非空文件"。**包已存在且大小与清单一致时跳过**，
+     * 这样重复导入或断点续传后不会重复下载。
+     */
+    private suspend fun downloadManifestFiles(
+        dir: File,
+        manifest: ModpackManifest.Modrinth,
+        warnings: MutableList<String>,
+        onProgress: (done: Int, total: Int, msg: String) -> Unit,
+    ) {
+        val files = manifest.serverFiles
+        if (files.isEmpty()) {
+            if (manifest.skippedClientOnly > 0) {
+                warnings += "这个包里没有服务端要用的文件（${manifest.skippedClientOnly} 个纯客户端模组已跳过）"
+            }
+            return
+        }
+        var done = 0
+        var failed = 0
+        var unsafe = 0
+        for (f in files) {
+            val dest = ModpackImporter.resolveRemoteDest(dir, f.path)
+            if (dest == null) {
+                // 清单路径来自远端（不可信），越界的一律不写
+                unsafe++
+                continue
+            }
+            onProgress(done, files.size, "下载模组 ${done + 1}/${files.size}：${dest.name}")
+            if (dest.isFile && f.size > 0 && dest.length() == f.size) {
+                done++
+                continue
+            }
+            if (f.urls.isEmpty()) {
+                failed++
+                continue
+            }
+            val validate: (File) -> Boolean = { candidate ->
+                when {
+                    f.sha512 != null -> Downloader.sha512Of(candidate)?.equals(f.sha512, ignoreCase = true) == true
+                    f.sha1 != null -> Downloader.sha1Of(candidate)?.equals(f.sha1, ignoreCase = true) == true
+                    else -> candidate.length() > 0
+                }
+            }
+            val used = Downloader.downloadFromSources(f.urls, dest, validate = validate)
+            if (used == null) {
+                failed++
+                runCatching { dest.delete() }
+            } else {
+                done++
+            }
+        }
+        if (manifest.skippedClientOnly > 0) {
+            warnings += "${manifest.skippedClientOnly} 个纯客户端模组已跳过（服务端装了会崩或没用）"
+        }
+        if (unsafe > 0) warnings += "$unsafe 个文件的路径非法，已跳过"
+        if (failed > 0) {
+            warnings += "$failed 个模组下载失败（断网或源站删档），可在实例的「模组」页搜索重新安装"
+        }
+    }
+
+    /** 包里是否已经有实体的模组文件（用来判断 CurseForge 包是不是"服务端包"形态） */
+    private fun hasPhysicalMods(root: File): Boolean =
+        File(root, "mods").listFiles()?.any { it.isFile && it.name.endsWith(".jar", ignoreCase = true) } == true
 
     /**
      * 整合包实例名：用户可在导入对话框里填，留空就用识别到的「核心 + MC 版本」。
