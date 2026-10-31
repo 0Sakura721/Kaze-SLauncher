@@ -5,6 +5,46 @@
 
 ---
 
+## [0.8.0] - 2026-10-31
+
+### Added
+
+- **Miuix 主题**（设置 → 外观 → 主题样式，第 4 项）
+  与 Material 3 / 岚并列可选，切换立即生效、无需重启。
+  - HyperOS 观感：分组灰底 + 白卡片 + 大圆角 + HyperOS 蓝强调色，深色下纯黑底；
+  - 卡片换成「白卡 + 0.5dp 细描边 + 18dp 圆角、无投影」（HyperOS 靠底色对比而非海拔）；
+  - **开关本体换成 Miuix 的 Switch**（细长胶囊 + 白钮 + 蓝轨）—— 设置页 4 处行内开关
+    （显示背景 / 控制台 AI 入口 / MCP / 自动更新）都已接上；
+  - 状态色用 HyperOS 语义色（绿=在线、红=错误、黄=忙碌）。
+  - 实现说明：Miuix 自带的 MiuixTheme 与 Material3 的 CompositionLocal 不互通，整树替换会让
+    现有组件全部失色，所以取「**视觉令牌映射**」——把 Miuix 的配色语言翻译成 M3 ColorScheme，
+    现有组件零改动即获其观感；组件级差异（开关本体）按 `LocalAppTheme` 分支处理。
+  - 依赖 `top.yukonga.miuix.kmp:miuix-android:0.7.2`（Apache-2.0，已记 NOTICES）。
+    0.8+/0.9.x 要求 compileSdk 36/37，本项目 35，故取 0.7.2。
+
+### Changed
+
+- 设置页「主题样式」的选择器注释补上「液态玻璃为何不展示」的说明
+  （它是背景图+模糊的组合呈现，与「背景图」设置重复）。
+
+### Fixed
+
+- **`M3EListItem` 高亮对比度**：Miuix 分支高亮底色改成 primaryContainer（浅蓝）后，
+  前景仍是 onSecondaryContainer（灰），浅蓝底灰字发闷 —— 前景同步改 onPrimaryContainer。
+- **release lint 恢复**：此前为绕开「Lint 分析 miuix 字节码时自身崩溃
+  （IncompatibleClassChangeError in NonNullableMutableLiveDataDetector）」把
+  `checkReleaseBuilds` 整个关掉了 —— 等于用一道质量门换一个当时还没用上的依赖。
+  现改为只 `disable "NullSafeMutableLiveData"`，release 的其他检查全部生效。
+
+### Removed
+
+- **全部 BiliPai 引用（36 处）与源自它的死代码 shader**
+  本项目液态玻璃实际采用 Kyant0/AndroidLiquidGlass（Apache-2.0）的折射透镜 RuntimeShader
+  与 Miuix（Apache-2.0）的底栏版式；BiliPai 只是这两者的使用者，其代码未被复制。
+  来源标注改为直接指向真实上游（Kyant0 条目描述补全）。
+  另删除 `Modifier.liquidGlassEdgeRefractionSafe()` 与 `LIQUID_GLASS_EDGE_SHADER`
+  （40 行 AGSL）—— 全仓零调用，且注释声称源自 GPL 项目。
+
 ## [0.7.2] - 2026-10-31
 
 本版是**全面审计**的结果：逐类扫描代码（委托误用、重复导入、空断言测试、StateFlow 读改写、
