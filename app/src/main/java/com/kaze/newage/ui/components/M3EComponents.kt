@@ -233,7 +233,15 @@ fun M3EListItem(
         } else {
             scheme.surfaceContainerLow
         },
-        contentColor = if (highlighted) scheme.onSecondaryContainer else scheme.onSurface,
+        // 前景色必须与上面的底色配套：Miuix 高亮底是 primaryContainer（浅蓝），
+        // 沿用 onSecondaryContainer（灰）会变成「浅蓝底 + 灰字」，对比度不足、
+        // 字看起来发闷（M3 那边底是 secondaryContainer，配 onSecondaryContainer 才对）。
+        contentColor = when {
+            LocalAppTheme.current == AppThemeMode.MIUIX ->
+                if (highlighted) scheme.onPrimaryContainer else scheme.onSurface
+            highlighted -> scheme.onSecondaryContainer
+            else -> scheme.onSurface
+        },
     ) {
         Row(
             Modifier
@@ -329,6 +337,39 @@ fun M3EConnectedList(
  * 屏幕顶部：大标题 +（可选）副标题 + 右侧动作。
  * m3e-canvas 的草图里每屏顶部就是一个「粗体文本 + 若干按钮」，这里是它的实现。
  */
+/**
+ * 主题感知开关：Miuix 主题下用 Miuix 的 Switch（HyperOS 的细长胶囊 + 白钮 + 蓝轨），
+ * 其它主题用 M3 Switch。
+ *
+ * **只替换开关本体，不碰行的点击语义** —— 现有列表项的写法是「整行 onClick 负责切换、
+ * Switch 的 onCheckedChange = null」（两个都设会让点一下被切两次再弹回原位，见
+ * SettingsScreen 里那几处注释）。所以这里保留 [onCheckedChange] 可为 null 的签名，
+ * 调用方一行不用改。
+ */
+@Composable
+fun M3ESwitch(
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+    onCheckedChange: ((Boolean) -> Unit)? = null,
+    enabled: Boolean = true,
+) {
+    if (LocalAppTheme.current == AppThemeMode.MIUIX) {
+        top.yukonga.miuix.kmp.basic.Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = modifier,
+            enabled = enabled,
+        )
+    } else {
+        androidx.compose.material3.Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = modifier,
+            enabled = enabled,
+        )
+    }
+}
+
 @Composable
 fun M3EScreenHeader(
     title: String,
@@ -495,4 +536,5 @@ fun M3EScreenColumn(
             content = content,
         )
     }
+
 }
