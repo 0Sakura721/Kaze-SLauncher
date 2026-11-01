@@ -107,6 +107,10 @@ fun AddonsScreen(
     var searched by remember { mutableStateOf(false) }
     var refresh by remember { mutableIntStateOf(0) }
     val installed = remember(instanceId, refresh) { AddonManager.installed(instance, kind) }
+    // 插件更新检查的状态与进度（ViewModel 里，见 AddonUpdateState）
+    val addonUpdateState by viewModel.addonUpdate.collectAsStateWithLifecycle()
+    val addonBusy = addonUpdateState is AppViewModel.AddonUpdateState.Checking ||
+        addonUpdateState is AppViewModel.AddonUpdateState.Upgrading
     val results by viewModel.addonResults.collectAsStateWithLifecycle()
     val searching by viewModel.addonSearching.collectAsStateWithLifecycle()
     val searchError by viewModel.addonSearchError.collectAsStateWithLifecycle()
@@ -378,11 +382,30 @@ fun AddonsScreen(
             }
 
             // 已安装（启用 / 禁用 / 删除）
-            Text(
-                "已安装（${installed.size}）",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(top = M3Spacing.betweenParts),
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = M3Spacing.betweenParts),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "已安装（${installed.size}）",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                // 检查更新：有插件才显示（零安装时点它没有意义）
+                if (installed.isNotEmpty() && !addonBusy) {
+                    TextButton(onClick = { viewModel.checkAddonUpdate(instance, kind) }) {
+                        Text("检查更新")
+                    }
+                }
+            }
+            AddonUpdatePanel(
+                state = addonUpdateState,
+                kindLabel = kindLabel,
+                onUpgradeAll = { updates -> viewModel.upgradeAddons(instance, kind, updates) },
+                onDismiss = { viewModel.clearAddonUpdateState() },
             )
             // 过滤 chip 只在有东西可滤时出现：零安装时三颗全是 0、点了没效果
             if (installed.isNotEmpty()) {
@@ -588,4 +611,150 @@ private fun formatDownloads(n: Int): String = when {
     n >= 1_000_000 -> String.format(Locale.US, "%.1fM", n / 1_000_000f)
     n >= 1_000 -> String.format(Locale.US, "%.1fK", n / 1_000f)
     else -> n.toString()
+
+
+/**
+ * 插件更新检查的结果面板。
+ *
+ * 分四段展示（而不是一句"检查完毕"）：
+ *  - **可更新**：带版本号与一键全部更新；
+ *  - **已是最新**：给个数就行，不占地方；
+ *  - **认不出来源**：必须单独说 —— 这些插件不在管理范围内，用户需要知道"没被检查到"，
+ *    否则会以为全都检查过了；
+ *  - **上游无兼容版本**：插件已停更 / 不支持当前 MC 版本，这也是用户需要知道的。
+ */
+@Composable
+private fun AddonUpdatePanel(
+    state: AppViewModel.AddonUpdateState,
+    kindLabel: String,
+    onUpgradeAll: (List<com.kaze.newage.core.addons.AddonUpdate.Verdict.Update>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    when (state) {
+        AppViewModel.AddonUpdateState.Idle -> Unit
+
+        is AppViewModel.AddonUpdateState.Checking -> {
+            Text(
+                "正在检查（${state.done}/${state.total}）${state.current}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        is AppViewModel.AddonUpdateState.Upgrading -> {
+            Text(
+                "正在更新（${state.done}/${state.total}）${state.current}",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
+
+        is AppViewModel.AddonUpdateState.Failed -> {
+            Text(
+                "检查失败：${state.reason}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+
+        is AppViewModel.AddonUpdateState.Upgraded -> {
+            Text(
+                if (state.failed.isEmpty()) {
+                    "已更新 ${state.okCount} 个$kindLabel（重启服务端生效）"
+                } else {
+                    "已更新 ${state.okCount} 个，${state.failed.size} 个失败"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (state.failed.isEmpty()) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            state.failed.forEach {
+                Text(
+                    "· $it",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            TextButton(onClick = onDismiss) { Text("知道了") }
+        }
+
+        is AppViewModel.AddonUpdateState.Done -> {
+            val s = state.summary
+            if (s.total == 0) {
+                Text(
+                    "没有已装的$kindLabel 可检查。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                return
+            }
+            if (s.hasAny) {
+                Text(
+                    "${s.updates.size} 个$kindLabel 有新版本",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                s.updates.forEach { u ->
+                    Text(
+                        "· ${u.fileName}：${u.currentVersion} → ${u.next.version_number}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(
+                    onClick = { onUpgradeAll(s.updates) },
+                    modifier = Modifier.padding(top = 4.dp),
+                ) { Text("全部更新") }
+            } else {
+                Text(
+                    "已是最新（${s.latest.size} 个已检查）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            // 认不出来源的必须单独说明：这些不在管理范围内
+            if (s.unknown.isNotEmpty()) {
+                Text(
+                    "${s.unknown.size} 个认不出来源，未纳入检查",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                s.unknown.take(5).forEach { u ->
+                    Text(
+                        "· ${u.fileName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (s.unknown.size > 5) {
+                    Text(
+                        "· 还有 ${s.unknown.size - 5} 个…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (s.noCompatible.isNotEmpty()) {
+                Text(
+                    "${s.noCompatible.size} 个在当前核心/MC 版本下没有可用的新版本",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    }
+}
 }

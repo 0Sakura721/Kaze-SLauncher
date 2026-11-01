@@ -172,6 +172,88 @@ object AddonManager {
             part.copyTo(dest, overwrite = true)
             part.delete()
         }
+        // 记来源：以后「检查更新」靠它知道这个 jar 属于哪个项目、装的是哪个版本。
+        // 失败不影响安装本身（最坏情况是下次要重新识别，见 AddonRegistry.resolveByHash）。
+        AddonRegistry.remember(
+            instance,
+            kind,
+            AddonRegistry.Entry(
+                fileName = dest.name,
+                projectId = projectId,
+                slug = "",
+                versionId = version.id,
+                versionNumber = version.version_number,
+                loader = loaderFor(instance, kind),
+                gameVersion = instance.mcVersion,
+            ),
+        )
+        return dest
+    }
+
+
+    /**
+     * 安装**指定的**版本（更新流程用）。
+     *
+     * 和 [install] 的区别：不再调 `pickVersion` 去挑版本 —— 更新流程里版本已经由
+     * [AddonUpdate] 判定好了，再挑一次可能挑到别的（甚至挑回当前已装的这个），
+     * 白白下载一遍还让用户以为升级了。
+     *
+     * 下载与落盘的规则和 [install] 完全一致（临时名 + 原子换入 + ZIP 魔数校验），
+     * 所以复用同一套逻辑而不是复制一份。
+     */
+    suspend fun installVersion(
+        instance: ServerInstance,
+        kind: AddonKind,
+        projectId: String,
+        version: ModrinthVersion,
+        onProgress: (Float, String) -> Unit,
+    ): File {
+        val file = version.files.firstOrNull { it.primary } ?: version.files.firstOrNull()
+            ?: throw RuntimeException("版本无下载文件")
+        val rawName = file.filename.ifBlank { "$projectId.jar" }
+        val safeName = safeFileName(file.filename, projectId)
+        val dir = addonDir(instance, kind)
+        val dest = File(dir, safeName)
+        val canonicalDir = runCatching { dir.canonicalFile }.getOrElse { dir.absoluteFile }
+        val canonicalDest = runCatching { dest.canonicalFile }.getOrElse { dest.absoluteFile }
+        if (canonicalDest.parentFile?.path != canonicalDir.path) {
+            throw RuntimeException("插件文件名越界：$rawName")
+        }
+        onProgress(0f, "下载 ${file.filename}（${version.version_number}）…")
+        val part = File(dir, dest.name + ".part")
+        Downloader.download(
+            file.url,
+            part,
+            onProgress = { done, total ->
+                val progress = if (total > 0) done.toFloat() / total else 0f
+                onProgress(progress, "下载中 ${(done / 1024 / 1024)}MB / ${(total / 1024 / 1024)}MB")
+            },
+            validate = { f -> runCatching {
+                f.inputStream().use { ins ->
+                    val head = ByteArray(4)
+                    ins.read(head) == 4 &&
+                        head.contentEquals(byteArrayOf(0x50, 0x4B, 0x03, 0x04))
+                }
+            }.getOrDefault(false) },
+        )
+        if (dest.exists()) dest.delete()
+        if (!part.renameTo(dest)) {
+            part.copyTo(dest, overwrite = true)
+            part.delete()
+        }
+        AddonRegistry.remember(
+            instance,
+            kind,
+            AddonRegistry.Entry(
+                fileName = dest.name,
+                projectId = projectId,
+                slug = "",
+                versionId = version.id,
+                versionNumber = version.version_number,
+                loader = loaderFor(instance, kind),
+                gameVersion = instance.mcVersion,
+            ),
+        )
         return dest
     }
 }

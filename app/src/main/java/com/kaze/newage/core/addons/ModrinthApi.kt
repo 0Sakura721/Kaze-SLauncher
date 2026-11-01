@@ -33,6 +33,8 @@ data class ModrinthFile(
 @Serializable
 data class ModrinthVersion(
     val id: String = "",
+    /** 所属项目 id —— `/version_file/{hash}` 回查时用它知道 jar 属于哪个项目 */
+    val project_id: String = "",
     val version_number: String = "",
     val game_versions: List<String> = emptyList(),
     val loaders: List<String> = emptyList(),
@@ -83,6 +85,21 @@ object ModrinthApi {
         val url = "$BASE/project/$projectId/version?loaders=${enc("[\"$loader\"]")}$gamePart"
         val body = get(url)
         return json.decodeFromString<List<ModrinthVersion>>(body)
+    }
+
+    /**
+     * 按文件哈希反查版本（Modrinth `/version_file/{hash}`）。
+     *
+     * 用途：识别**台账里没有**的存量插件 —— 只要这个 jar 是从 Modrinth 下的，就能反查
+     * 出项目与版本，于是老用户不重装也能获得更新检查。
+     *
+     * 注意：查不到时 Modrinth 返回 404，这里让它抛出去，由调用方当作"识别不了"处理
+     * （不要吞成空对象，否则会被误认为"识别成功但项目为空"）。
+     */
+    fun versionByHash(hash: String, algorithm: String = "sha512"): ModrinthVersion {
+        if (hash.isBlank()) throw RuntimeException("哈希为空")
+        val body = get("$BASE/version_file/$hash?algorithm=$algorithm")
+        return json.decodeFromString<ModrinthVersion>(body)
     }
 
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")

@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import com.kaze.newage.container
 import com.kaze.newage.core.addons.AddonKind
 import kotlinx.serialization.Serializable
+import com.kaze.newage.core.addons.AddonRegistry
+import com.kaze.newage.core.addons.AddonUpdate
 import com.kaze.newage.core.addons.AddonManager
 import com.kaze.newage.core.addons.ModrinthApi
 import com.kaze.newage.core.addons.ModrinthSearchHit
@@ -1572,6 +1574,142 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
 
     fun clearAddonInstallState() {
         _addonInstall.value = DownloadState()
+    }
+
+    // ── 插件 / 模组更新（已装附加组件的升级）──
+
+    /** 附加组件更新检查的状态 */
+    sealed interface AddonUpdateState {
+        data object Idle : AddonUpdateState
+        data class Checking(val done: Int, val total: Int, val current: String) : AddonUpdateState
+        /** 检查完成；summary 里有可更新列表 / 已是最新 / 认不出来源 / 上游无兼容版本 */
+        data class Done(
+            val instanceId: String,
+            val kind: AddonKind,
+            val summary: AddonUpdate.Summary,
+        ) : AddonUpdateState
+        data class Failed(val reason: String) : AddonUpdateState
+        data class Upgrading(val done: Int, val total: Int, val current: String) : AddonUpdateState
+        data class Upgraded(val okCount: Int, val failed: List<String>) : AddonUpdateState
+    }
+
+    private val _addonUpdate = MutableStateFlow<AddonUpdateState>(AddonUpdateState.Idle)
+    val addonUpdate: StateFlow<AddonUpdateState> = _addonUpdate.asStateFlow()
+
+    /** 升级中的连点守卫 */
+    private var addonUpgradeRunning = false
+
+    fun clearAddonUpdateState() {
+        _addonUpdate.value = AddonUpdateState.Idle
+    }
+
+    /**
+     * 检查某个实例的插件 / 模组有没有新版本。
+     *
+     * 识别来源有两条路（见 [AddonRegistry]）：台账里有的直接读；台账里没有的**算 SHA-512
+     * 去 Modrinth 回查** —— 于是老用户不重装也能被纳入管理。回查失败的文件如实报
+     * "认不出来源"，而不是默默跳过（跳过会让用户以为全都检查过了）。
+     *
+     * 每个文件的网络请求是串行的：并发几十个请求会被 Modrinth 限流（429），
+     * 反而更慢，而且进度条也没法给出有意义的位置。
+     */
+    fun checkAddonUpdate(instance: ServerInstance, kind: AddonKind) {
+        if (_addonUpdate.value is AddonUpdateState.Checking) return
+        if (!AddonManager.supports(instance, kind)) {
+            _addonUpdate.value = AddonUpdateState.Failed(
+                "${instance.coreType.displayName} 不支持${if (kind == AddonKind.PLUGIN) "插件" else "模组"}",
+            )
+            return
+        }
+        val files = runCatching { AddonManager.installed(instance, kind) }.getOrDefault(emptyList())
+        if (files.isEmpty()) {
+            _addonUpdate.value = AddonUpdateState.Done(
+                instance.id, kind, AddonUpdate.summarize(emptyList()),
+            )
+            return
+        }
+        _addonUpdate.value = AddonUpdateState.Checking(0, files.size, "")
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // 先清掉磁盘上已不存在的台账记录，免得把删掉的插件报出来
+                val registry = AddonRegistry.prune(instance, kind).associateBy { it.fileName }
+                val loader = AddonManager.loaderFor(instance, kind)
+                val verdicts = mutableListOf<AddonUpdate.Verdict>()
+                files.forEachIndexed { idx, f ->
+                    _addonUpdate.value = AddonUpdateState.Checking(idx, files.size, f.name)
+                    // 台账 → 哈希回查 → 认不出来
+                    val entry = registry[f.name] ?: runCatching {
+                        AddonRegistry.resolveByHash(instance, kind, f)
+                    }.getOrNull()
+                    if (entry == null) {
+                        verdicts += AddonUpdate.Verdict.Unknown(f.name, "认不出来源（不是从 Modrinth 装的，或被改过）")
+                        return@forEachIndexed
+                    }
+                    val versions = runCatching {
+                        ModrinthApi.versions(entry.projectId, loader, instance.mcVersion.ifBlank { null })
+                    }.getOrElse {
+                        // 单个项目查询失败不该让整次检查崩掉：如实记成"查不到"，
+                        // 用户至少知道这一个没检查成
+                        verdicts += AddonUpdate.Verdict.Unknown(f.name, "查询失败：${it.message ?: "网络问题"}")
+                        return@forEachIndexed
+                    }
+                    verdicts += AddonUpdate.judge(f.name, entry, versions)
+                }
+                _addonUpdate.value = AddonUpdateState.Done(
+                    instance.id, kind, AddonUpdate.summarize(verdicts),
+                )
+            } catch (e: Exception) {
+                _addonUpdate.value = AddonUpdateState.Failed(e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
+     * 把检查出的更新逐个装上。
+     *
+     * ## 为什么逐个装而不是并发
+     * 每个都要写同一个目录、还可能撞同名文件（用户装了两个版本）；串行能保证
+     * "一个失败不影响后面"，也让进度条有意义。
+     *
+     * ## 失败不中断
+     * 某个插件下载失败（上游删了文件 / 网络抖动）时记下名字继续下一个，
+     * 最后一起汇报 —— 否则用户点了"全部更新"只成功一半还不知道哪几个没成。
+     */
+    fun upgradeAddons(
+        instance: ServerInstance,
+        kind: AddonKind,
+        updates: List<AddonUpdate.Verdict.Update>,
+    ) {
+        if (addonUpgradeRunning || updates.isEmpty()) return
+        addonUpgradeRunning = true
+        _addonUpdate.value = AddonUpdateState.Upgrading(0, updates.size, "")
+        viewModelScope.launch(Dispatchers.IO) {
+            val failed = mutableListOf<String>()
+            var ok = 0
+            try {
+                updates.forEachIndexed { idx, u ->
+                    _addonUpdate.value = AddonUpdateState.Upgrading(idx, updates.size, u.fileName)
+                    val r = runCatching {
+                        AddonManager.installVersion(instance, kind, u.projectId, u.next) { _, _ -> }
+                    }
+                    if (r.isSuccess) {
+                        ok++
+                        // 旧文件可能换了名字（上游改过 filename）：删掉旧的，避免同时加载两份
+                        val old = File(AddonManager.addonDir(instance, kind), u.fileName)
+                        val newFile = r.getOrNull()
+                        if (newFile != null && old.exists() && old.name != newFile.name) {
+                            runCatching { old.delete() }
+                            AddonRegistry.forget(instance, kind, u.fileName)
+                        }
+                    } else {
+                        failed += "${u.fileName}：${r.exceptionOrNull()?.message ?: "下载失败"}"
+                    }
+                }
+                _addonUpdate.value = AddonUpdateState.Upgraded(ok, failed)
+            } finally {
+                addonUpgradeRunning = false
+            }
+        }
     }
 
     // ── 动作：应用自身更新（设置页与启动弹窗共用同一份状态）──
