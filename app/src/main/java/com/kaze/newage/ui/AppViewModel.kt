@@ -1289,7 +1289,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         if (instance.coreType == CoreType.FORGE || instance.coreType == CoreType.NEOFORGE) {
             _coreUpdate.value = CoreUpdateState.Failed(
                 instance.id,
-                "Forge / NeoForge 的新版要重跑安装器才能生成依赖库，自动替换会让实例变成"半装"状态。" +
+                "Forge / NeoForge 的新版要重跑安装器才能生成依赖库，自动替换会让实例变成「半装」状态。" +
                     "请新建一个同版本实例并把 world / config 搬过去。",
             )
             return
