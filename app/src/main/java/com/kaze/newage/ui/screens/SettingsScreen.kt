@@ -32,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.BlurCircular
@@ -419,7 +420,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 section = SettingsSection.Appearance,
                 sectionOffsets = sectionOffsets,
             )
-            M3EConnectedList(count = 5) { index, shape ->
+            M3EConnectedList(count = 6) { index, shape ->
                 when (index) {
                     0 -> M3EListItem(
                         headline = t("主题样式"),
@@ -431,6 +432,15 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     1 -> M3EListItem(
+                        headline = t("界面语言"),
+                        supporting = appLanguageLabel(uiPrefs.appLanguage.value),
+                        leadingIcon = Icons.Filled.Language,
+                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                        shape = shape,
+                        onClick = { openDialog = SettingsDialog.Language },
+                        trailing = { RowChevron() },
+                    )
+                    2 -> M3EListItem(
                         headline = t("主题模式"),
                         supporting = themeModeLabel(uiPrefs.themeModeValue.value),
                         leadingIcon = Icons.Filled.Brightness6,
@@ -439,7 +449,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         onClick = { openDialog = SettingsDialog.ThemeMode },
                         trailing = { RowChevron() },
                     )
-                    2 -> M3EListItem(
+                    3 -> M3EListItem(
                         headline = t("颜色来源"),
                         supporting = if (uiPrefs.md3ColorSource.value == "custom") {
                             "自定义颜色 · ${uiPrefs.md3CustomColor.value}"
@@ -452,7 +462,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         onClick = { openDialog = SettingsDialog.ColorSource },
                         trailing = { RowChevron() },
                     )
-                    3 -> M3EListItem(
+                    4 -> M3EListItem(
                         headline = t("深色样式"),
                         supporting = darkStyleLabel(uiPrefs.darkStyle.value),
                         leadingIcon = Icons.Filled.DarkMode,
@@ -973,6 +983,20 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         when (openDialog) {
             null -> Unit
 
+            SettingsDialog.Language -> ChoiceDialog(
+                title = t("界面语言"),
+                options = com.kaze.newage.core.i18n.AppLanguage.entries,
+                selected = com.kaze.newage.core.i18n.AppLanguage.fromId(uiPrefs.appLanguage.value),
+                label = { appLanguageLabel(it.id) },
+                note = t("切换后立即生效，不需要重启"),
+                onSelect = { lang ->
+                    uiPrefs.setAppLanguage(lang.id)
+                    com.kaze.newage.core.i18n.LanguageState.apply(lang, appContext)
+                    openDialog = null
+                },
+                onDismiss = { openDialog = null },
+            )
+
             SettingsDialog.ThemeStyle -> ChoiceDialog(
                 title = t("主题样式"),
                 // 液态玻璃已从构建中移除：主题列表里不再出现该选项
@@ -1321,6 +1345,19 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 },
             )
         }
+    }
+
+/** 界面语言的显示名（跟随系统时附带解析结果，让用户知道实际会用哪种） */
+internal fun appLanguageLabel(id: String): String =
+    when (com.kaze.newage.core.i18n.AppLanguage.fromId(id)) {
+        com.kaze.newage.core.i18n.AppLanguage.SYSTEM ->
+            t("跟随系统") + " · " + if (com.kaze.newage.core.i18n.LanguageState.isChinese) {
+                t("简体中文")
+            } else {
+                "English"
+            }
+        com.kaze.newage.core.i18n.AppLanguage.ZH -> t("简体中文")
+        com.kaze.newage.core.i18n.AppLanguage.EN -> "English"
     }
 }
     }

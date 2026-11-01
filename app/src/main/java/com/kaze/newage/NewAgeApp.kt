@@ -3,6 +3,8 @@ package com.kaze.newage
 import android.app.Application
 import android.content.Context
 import com.kaze.newage.core.console.ConsoleStream
+import com.kaze.newage.core.i18n.AppLanguage
+import com.kaze.newage.core.i18n.LanguageState
 import com.kaze.newage.core.env.ProotEnvironment
 import com.kaze.newage.core.java.RootfsJavaManager
 import com.kaze.newage.core.log.AppLogStore
@@ -21,6 +23,9 @@ class NewAgeApp : Application() {
     override fun onCreate() {
         super.onCreate()
         container = AppContainer(this)
+        // 应用界面语言：必须在任何界面创建前把运行时语言定下来，
+        // 否则首帧会用默认语言渲染、随后才「跳」成用户选的语言。
+        LanguageState.apply(AppLanguage.fromId(container.uiPrefs.appLanguage.value), this)
     }
 }
 
