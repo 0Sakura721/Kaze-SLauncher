@@ -32,7 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.BlurCircular
@@ -134,6 +134,20 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.runtime.LaunchedEffect
 import com.kaze.newage.core.i18n.t
+
+/** 界面语言的显示名（跟随系统时附带解析结果，让用户知道实际会用哪种） */
+internal fun appLanguageLabel(id: String): String =
+    when (com.kaze.newage.core.i18n.AppLanguage.fromId(id)) {
+        com.kaze.newage.core.i18n.AppLanguage.SYSTEM ->
+            t("跟随系统") + " · " + if (com.kaze.newage.core.i18n.LanguageState.isChinese) {
+                t("简体中文")
+            } else {
+                "English"
+            }
+        com.kaze.newage.core.i18n.AppLanguage.ZH -> t("简体中文")
+        com.kaze.newage.core.i18n.AppLanguage.EN -> "English"
+    }
+}
 
 /** 背景图选图即用（显示端自适应铺满+模糊+遮罩），不再进入手动裁剪页 */
 
@@ -434,7 +448,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     1 -> M3EListItem(
                         headline = t("界面语言"),
                         supporting = appLanguageLabel(uiPrefs.appLanguage.value),
-                        leadingIcon = Icons.Filled.Language,
+                        leadingIcon = Icons.Filled.Translate,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
                         onClick = { openDialog = SettingsDialog.Language },
@@ -1347,17 +1361,4 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         }
     }
 
-/** 界面语言的显示名（跟随系统时附带解析结果，让用户知道实际会用哪种） */
-internal fun appLanguageLabel(id: String): String =
-    when (com.kaze.newage.core.i18n.AppLanguage.fromId(id)) {
-        com.kaze.newage.core.i18n.AppLanguage.SYSTEM ->
-            t("跟随系统") + " · " + if (com.kaze.newage.core.i18n.LanguageState.isChinese) {
-                t("简体中文")
-            } else {
-                "English"
-            }
-        com.kaze.newage.core.i18n.AppLanguage.ZH -> t("简体中文")
-        com.kaze.newage.core.i18n.AppLanguage.EN -> "English"
-    }
-}
     }
