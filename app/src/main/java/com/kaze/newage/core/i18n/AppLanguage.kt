@@ -46,8 +46,17 @@ enum class AppLanguage(val id: String, val label: String) {
  */
 object LanguageState {
 
+    /**
+     * 默认值取 [AppLanguage.ZH]（而不是 SYSTEM）：
+     *
+     * - 真实运行里 [apply] 在 `Application.onCreate` 就会被调用，默认值只在
+     *   **尚未初始化**时可见，用户感知不到；
+     * - 测试（Robolectric）默认跑在 en-US，若默认跟随系统，所有断言中文文案的用例
+     *   都会被翻译成英文而失败 —— 而中文是这套文案的**原文**，英文只是翻译层；
+     * - 因此默认「中文」既保住了改动前的行为，也让"没初始化时看到中文"这件事有意义。
+     */
     @Volatile
-    private var current: AppLanguage = AppLanguage.SYSTEM
+    private var current: AppLanguage = AppLanguage.ZH
 
     /** 解析后的实际语言（SYSTEM 会被解析成 ZH 或 EN） */
     @Volatile
