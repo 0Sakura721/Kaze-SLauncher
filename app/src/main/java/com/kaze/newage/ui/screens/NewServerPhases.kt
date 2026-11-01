@@ -106,6 +106,7 @@ import com.kaze.newage.ui.components.MemorySliderRow
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
 import androidx.compose.material3.OutlinedButton
+import com.kaze.newage.core.i18n.t
 
 
 // ───────────────────────────────────────────────
@@ -139,14 +140,14 @@ internal fun WizardProgress(step: Int, total: Int, title: String) {
 
 /** 核心类型描述（卡片副标题）：与 CoreType.displayName 分开，卡片标题短、正文说清区别 */
 internal fun CoreType.description(): String = when (this) {
-    CoreType.VANILLA -> "Mojang 官方 · 兼容性最好"
-    CoreType.PAPER -> "插件生态最好 · 性能更强"
-    CoreType.PURPUR -> "Paper 增强 · 更多可调项"
-    CoreType.SPIGOT -> "经典插件生态 · 构建较慢"
-    CoreType.FABRIC -> "轻量模组加载器 · 启动快"
-    CoreType.FORGE -> "经典模组加载器 · 兼容老模组"
-    CoreType.NEOFORGE -> "现代模组加载器 · 面向新版本"
-    CoreType.CUSTOM -> "已经有 server.jar？直接导入"
+    CoreType.VANILLA -> t("Mojang 官方 · 兼容性最好")
+    CoreType.PAPER -> t("插件生态最好 · 性能更强")
+    CoreType.PURPUR -> t("Paper 增强 · 更多可调项")
+    CoreType.SPIGOT -> t("经典插件生态 · 构建较慢")
+    CoreType.FABRIC -> t("轻量模组加载器 · 启动快")
+    CoreType.FORGE -> t("经典模组加载器 · 兼容老模组")
+    CoreType.NEOFORGE -> t("现代模组加载器 · 面向新版本")
+    CoreType.CUSTOM -> t("已经有 server.jar？直接导入")
 }
 
 @Composable
@@ -159,9 +160,9 @@ internal fun CoreSelectPhase(
     var picked by remember { mutableStateOf<CoreType?>(null) }
 
     Column(Modifier.fillMaxSize()) {
-        M3EScreenHeader(title = "新建服务端", subtitle = "选择服务端核心", leading = {
+        M3EScreenHeader(title = t("新建服务端"), subtitle = t("选择服务端核心"), leading = {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回"))
             }
         })
 
@@ -173,7 +174,7 @@ internal fun CoreSelectPhase(
                 .padding(horizontal = M3Spacing.screenMargin),
             verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenParts),
         ) {
-            WizardProgress(step = 1, total = 3, title = "选核心")
+            WizardProgress(step = 1, total = 3, title = t("选核心"))
 
             // 按分类分组：官方 / 性能优化 / 模组加载 / 导入
             coreGroups().forEach { (category, types) ->
@@ -202,7 +203,7 @@ internal fun CoreSelectPhase(
                 .padding(horizontal = M3Spacing.screenMargin, vertical = M3Spacing.betweenGroups)
         ) {
             PrimaryButton(
-                label = "下一步",
+                label = t("下一步"),
                 icon = Icons.AutoMirrored.Filled.ArrowForward,
                 enabled = picked != null,
                 onClick = { picked?.let(onSelect) },
@@ -263,7 +264,7 @@ internal fun CoreChoiceCard(
             if (selected) {
                 Icon(
                     Icons.Filled.Check,
-                    contentDescription = "已选中",
+                    contentDescription = t("已选中"),
                     tint = scheme.onPrimaryContainer,
                     modifier = Modifier.size(24.dp),
                 )
@@ -381,7 +382,7 @@ internal fun VersionConfigPhase(
     LaunchedEffect(selected) {
         val sel = selected
         if (sel != null) {
-            buildId = ""                       // 换版本就回到"最新构建"
+            buildId = ""                       // 换版本就回到t("最新构建")
             viewModel.loadBuilds(coreType, sel.id)
             if (name.isBlank()) name = "${coreType.displayName}-${sel.id}"
         }
@@ -491,7 +492,7 @@ internal fun VersionConfigPhase(
 
 /** Paper 叫「构建」，Fabric 叫「加载器」——同一处 UI 按核心类型换词 */
 internal fun buildNounOf(type: CoreType): String =
-    if (type == CoreType.FABRIC) "加载器" else "构建"
+    if (type == CoreType.FABRIC) t("加载器") else t("构建")
 
 @Composable
 internal fun BuildPickerDialog(
@@ -509,7 +510,7 @@ internal fun BuildPickerDialog(
                 LazyColumn(Modifier.weight(1f)) {
                     item {
                         BuildRow(
-                            label = "最新",
+                            label = t("最新"),
                             hint = builds.firstOrNull()?.name ?: "",
                             selected = selectedId.isBlank(),
                             onClick = { onPick("") },
@@ -527,7 +528,7 @@ internal fun BuildPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(t("关闭")) }
         },
     )
 }
@@ -589,10 +590,10 @@ internal fun VersionListPage(
     Column(Modifier.fillMaxSize().imePadding()) {
         M3EScreenHeader(
             title = coreType.displayName,
-            subtitle = "选择版本",
+            subtitle = t("选择版本"),
             leading = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回选择核心")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回选择核心"))
                 }
             },
         )
@@ -604,13 +605,13 @@ internal fun VersionListPage(
                 .padding(horizontal = M3Spacing.screenMargin),
             verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenParts),
         ) {
-            WizardProgress(step = 2, total = 3, title = "选版本与资源")
+            WizardProgress(step = 2, total = 3, title = t("选版本与资源"))
 
             OutlinedTextField(
                 value = query,
                 onValueChange = onQueryChange,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("搜索版本（如 1.21 / 26.2）") },
+                placeholder = { Text(t("搜索版本（如 1.21 / 26.2）")) },
                 leadingIcon = { Icon(Icons.Filled.Search, null) },
                 singleLine = true,
             )
@@ -655,14 +656,14 @@ internal fun VersionListPage(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        if (versions.isEmpty()) "版本列表加载失败，请检查网络" else "没有匹配的版本",
+                        if (versions.isEmpty()) t("版本列表加载失败，请检查网络") else t("没有匹配的版本"),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     // 加载失败给一个就地重试：此前只能返回上一页再进来一次
                     // （离线/DNS 卡住时尤其需要，否则用户对着一个空页无路可走）
                     if (versions.isEmpty()) {
-                        OutlinedButton(onClick = onRetry) { Text("重试") }
+                        OutlinedButton(onClick = onRetry) { Text(t("重试")) }
                     }
                 }
                 else -> {
@@ -740,7 +741,7 @@ internal fun VersionRow(
             }
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "配置",
+                contentDescription = t("配置"),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(22.dp),
             )
@@ -814,11 +815,11 @@ internal fun ConfigPage(
     // adjustNothing 下窗口不随键盘缩放：实例名/端口等输入框与底部按钮都会被键盘盖住
     Column(Modifier.fillMaxSize().imePadding()) {
         M3EScreenHeader(
-            title = "配置",
+            title = t("配置"),
             subtitle = "MC ${version.id} · ${coreType.displayName}",
             leading = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回选择版本")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回选择版本"))
                 }
             },
             trailing = {
@@ -841,14 +842,14 @@ internal fun ConfigPage(
                 .padding(horizontal = M3Spacing.screenMargin),
             verticalArrangement = Arrangement.spacedBy(M3Spacing.betweenGroups),
         ) {
-            WizardProgress(step = 3, total = 3, title = "确认安装")
+            WizardProgress(step = 3, total = 3, title = t("确认安装"))
 
             // ── 节① 实例名称 ──
             OutlinedTextField(
                 value = name,
                 onValueChange = onNameChange,
-                label = { Text("实例名称") },
-                placeholder = { Text("如 我的生存服") },
+                label = { Text(t("实例名称")) },
+                placeholder = { Text(t("如 我的生存服")) },
                 // 名字里的 `/` 不会被文件系统接受：实例目录名与备份文件名都会做替换
                 // （InstanceStore.sanitize / BackupManager.sanitizeName）。不写出来的话，
                 // 用户填「生存/正式」会以为建出的是带斜杠的目录，实际拿到的是「生存_正式」。
@@ -870,7 +871,7 @@ internal fun ConfigPage(
             // 本次分配的结果与警告在卡内紧随滑块显示，两者不重复。
             M3ECard(
                 variant = M3ECardVariant.Outlined,
-                title = "游戏内存",
+                title = t("游戏内存"),
                 supporting = "设备中已使用 ${fmtGb(usedMemGb * 1024f)} / 设备总内存 ${fmtGb(totalMemGb * 1024f)}",
             ) {
                 Row(
@@ -879,7 +880,7 @@ internal fun ConfigPage(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        if (autoMemory) "自动分配内存" else "手动分配",
+                        if (autoMemory) t("自动分配内存") else t("手动分配"),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Switch(checked = autoMemory, onCheckedChange = onAutoMemory)
@@ -895,7 +896,7 @@ internal fun ConfigPage(
 
                 // 状态文案：数值已在滑块 thumb 与档位标签上显示过，这里只说差异信息
                 val statusText = if (autoMemory) {
-                    "根据设备可用内存自动分配，不可手动修改"
+                    t("根据设备可用内存自动分配，不可手动修改")
                 } else {
                     "游戏分配 ${fmtGb(effectiveMb)}"
                 }
@@ -914,14 +915,14 @@ internal fun ConfigPage(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "范围 512 MB ~ 8192 MB",
+                            t("范围 512 MB ~ 8192 MB"),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         TextButton(
                             onClick = { onShowMemoryDialog(true) },
                         ) {
-                            Text("精确输入", style = MaterialTheme.typography.labelMedium)
+                            Text(t("精确输入"), style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -933,7 +934,7 @@ internal fun ConfigPage(
             // 默认仍是「自动」，所以不关心的人什么都不用做。
             M3ECard(
                 variant = M3ECardVariant.Outlined,
-                title = "Java 版本",
+                title = t("Java 版本"),
                 supporting = if (javaOverride > 0) {
                     "已指定 Java $javaOverride（推荐 $autoJava）"
                 } else {
@@ -944,21 +945,21 @@ internal fun ConfigPage(
                     M3ESegmentedRow(
                         options = JavaChoices,
                         selected = javaOverride,
-                        label = { v -> if (v == 0) "自动" else "Java $v" },
+                        label = { v -> if (v == 0) t("自动") else "Java $v" },
                         onSelect = onJavaOverride,
                         height = 40.dp,
                     )
                     if (javaTooLow) {
                         Text(
                             "Java $javaOverride 低于该版本推荐的 Java $autoJava，" +
-                                "启动时可能报 UnsupportedClassVersionError。",
+                                t("启动时可能报 UnsupportedClassVersionError。"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
                     if (javaOverride == 0) {
                         Text(
-                            "选「自动」时按 MC 版本推断，与旧版行为一致。",
+                            t("选「自动」时按 MC 版本推断，与旧版行为一致。"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -971,7 +972,7 @@ internal fun ConfigPage(
                 M3EListItem(
                     headline = "核心${buildNounOf(coreType)}",
                     supporting = when {
-                        buildsLoading -> "正在获取列表…"
+                        buildsLoading -> t("正在获取列表…")
                         buildId.isBlank() -> "最新（${builds.firstOrNull()?.name ?: "?"}）"
                         else -> "已选：${builds.firstOrNull { it.id == buildId }?.name ?: buildId}"
                     },
@@ -980,7 +981,7 @@ internal fun ConfigPage(
                     shape = M3Shape.listSingle,
                     trailing = {
                         TextButton(onClick = onShowBuildPicker, enabled = builds.isNotEmpty()) {
-                            Text("选择")
+                            Text(t("选择"))
                         }
                     },
                 )
@@ -989,14 +990,14 @@ internal fun ConfigPage(
             // ── 节⑤ 服务器设置（安装时就定下基础参数，参考 FCL 安装页的"可选项"）──
             M3ECard(
                 variant = M3ECardVariant.Outlined,
-                title = "服务器设置",
-                supporting = "会写入 server.properties，创建后也能在实例详情里修改",
+                title = t("服务器设置"),
+                supporting = t("会写入 server.properties，创建后也能在实例详情里修改"),
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
                         value = portText,
                         onValueChange = onPortTextChange,
-                        label = { Text("端口") },
+                        label = { Text(t("端口")) },
                         placeholder = { Text(freePort.toString()) },
                         supportingText = {
                             val p = portText.toIntOrNull()
@@ -1004,9 +1005,9 @@ internal fun ConfigPage(
                             val conflict = p != null && p in usedPorts
                             Text(
                                 when {
-                                    portText.isBlank() -> "留空自动分配"
-                                    invalid -> "端口需在 1024 ~ 65535"
-                                    conflict -> "该端口已被其它实例占用"
+                                    portText.isBlank() -> t("留空自动分配")
+                                    invalid -> t("端口需在 1024 ~ 65535")
+                                    conflict -> t("该端口已被其它实例占用")
                                     else -> "将使用端口 $p"
                                 },
                                 color = if (invalid || conflict) MaterialTheme.colorScheme.error
@@ -1020,7 +1021,7 @@ internal fun ConfigPage(
                     OutlinedTextField(
                         value = maxPlayersText,
                         onValueChange = onMaxPlayersTextChange,
-                        label = { Text("最大玩家") },
+                        label = { Text(t("最大玩家")) },
                         supportingText = { Text("1 ~ 999") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1033,16 +1034,16 @@ internal fun ConfigPage(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("正版验证", style = MaterialTheme.typography.bodyMedium)
+                        Text(t("正版验证"), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            if (onlineMode) "仅正版账号可进入" else "离线客户端也能进入（局域网常用）",
+                            if (onlineMode) t("仅正版账号可进入") else t("离线客户端也能进入（局域网常用）"),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Switch(checked = onlineMode, onCheckedChange = onOnlineModeChange)
                 }
-                Text("默认游戏模式", style = MaterialTheme.typography.bodyMedium)
+                Text(t("默认游戏模式"), style = MaterialTheme.typography.bodyMedium)
                 GameModePicker(gameMode = gameMode, onGameModeChange = onGameModeChange)
             }
 
@@ -1054,8 +1055,8 @@ internal fun ConfigPage(
             if (download.running) {
                 M3ECard(
                     variant = M3ECardVariant.Filled,
-                    title = "正在下载服务端核心",
-                    supporting = download.message.ifBlank { "准备下载…" },
+                    title = t("正在下载服务端核心"),
+                    supporting = download.message.ifBlank { t("准备下载…") },
                 ) {
                     WavyLinearProgress(progress = download.progress.coerceIn(0f, 1f))
                 }
@@ -1063,7 +1064,7 @@ internal fun ConfigPage(
             download.error?.let {
                 M3ECard(
                     variant = M3ECardVariant.Outlined,
-                    title = "下载失败",
+                    title = t("下载失败"),
                     supporting = it,
                     titleIcon = Icons.Filled.ErrorOutline,
                 )
@@ -1079,14 +1080,14 @@ internal fun ConfigPage(
         ) {
             if (download.running) {
                 TonalButton(
-                    label = "取消下载",
+                    label = t("取消下载"),
                     enabled = true,
                     onClick = onCancelDownload,
                 )
             } else {
                 PrimaryButton(
                     // 上次下载失败时按钮直接说"重试"：断点保留在 .part 文件里
-                    label = if (download.error != null) "重试下载（断点续传）" else "下载并创建",
+                    label = if (download.error != null) t("重试下载（断点续传）") else t("下载并创建"),
                     enabled = canCreate,
                     onClick = onCreate,
                 )
@@ -1103,13 +1104,13 @@ internal fun ConfigPage(
             val gb = parsedGb?.takeIf { it in 0.5f..8f }
             AlertDialog(
                 onDismissRequest = { onShowMemoryDialog(false) },
-                title = { Text("精确设置内存") },
+                title = { Text(t("精确设置内存")) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedTextField(
                             value = inputGb,
                             onValueChange = { inputGb = it; inputBad = false },
-                            label = { Text("内存（GB）") },
+                            label = { Text(t("内存（GB）")) },
                             placeholder = { Text("2.0 ~ 8.0") },
                             singleLine = true,
                             isError = inputBad,
@@ -1117,7 +1118,7 @@ internal fun ConfigPage(
                         )
                         if (inputBad) {
                             Text(
-                                "请输入 0.5 ~ 8 之间的数字（如 2.5）",
+                                t("请输入 0.5 ~ 8 之间的数字（如 2.5）"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error,
                             )
@@ -1132,10 +1133,10 @@ internal fun ConfigPage(
                             onMemoryMb((gb * 1024f).coerceIn(512f, 8192f))
                             onShowMemoryDialog(false)
                         }
-                    }) { Text("确定") }
+                    }) { Text(t("确定")) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { onShowMemoryDialog(false) }) { Text("取消") }
+                    TextButton(onClick = { onShowMemoryDialog(false) }) { Text(t("取消")) }
                 },
             )
         }
@@ -1167,10 +1168,10 @@ internal fun SliderRow(
 @Composable
 internal fun GameModePicker(gameMode: String, onGameModeChange: (String) -> Unit) {
     val modes = listOf(
-        "survival" to "生存",
-        "creative" to "创造",
-        "adventure" to "冒险",
-        "spectator" to "旁观",
+        "survival" to t("生存"),
+        "creative" to t("创造"),
+        "adventure" to t("冒险"),
+        "spectator" to t("旁观"),
     )
     M3ESegmentedRow(
         options = modes.map { it.first },
@@ -1200,7 +1201,7 @@ internal fun EulaCard(agreed: Boolean, onAgreedChange: (Boolean) -> Unit) {
         variant = M3ECardVariant.Outlined,
         title = "Minecraft EULA",
         titleIcon = Icons.Filled.Description,
-        supporting = "建服前必须同意 Mojang 的最终用户许可协议",
+        supporting = t("建服前必须同意 Mojang 的最终用户许可协议"),
     ) {
         Row(
             Modifier
@@ -1211,11 +1212,11 @@ internal fun EulaCard(agreed: Boolean, onAgreedChange: (Boolean) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Checkbox(checked = agreed, onCheckedChange = null)
-            Text("我已阅读并同意 Minecraft EULA", style = MaterialTheme.typography.bodyMedium)
+            Text(t("我已阅读并同意 Minecraft EULA"), style = MaterialTheme.typography.bodyMedium)
         }
         // 条款链接独立成行：不在上面那个 toggleable 的范围内，点它只开浏览器
         Text(
-            "点此查看条款",
+            t("点此查看条款"),
             style = MaterialTheme.typography.labelMedium,
             color = scheme.primary,
             modifier = Modifier

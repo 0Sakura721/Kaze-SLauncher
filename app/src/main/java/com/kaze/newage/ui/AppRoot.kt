@@ -96,6 +96,7 @@ import com.kaze.newage.ui.theme.liquidGlassLensSafe
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
+import com.kaze.newage.core.i18n.t
 
 enum class Dest(
     val route: String,
@@ -103,10 +104,10 @@ enum class Dest(
     val icon: ImageVector,
     val iconSelected: ImageVector,
 ) {
-    Home("home", "主页", Icons.Outlined.Home, Icons.Filled.Home),
-    Server("server", "服务端", Icons.Outlined.Dns, Icons.Filled.Dns),
-    Console("console", "控制台", Icons.Outlined.Terminal, Icons.Filled.Terminal),
-    Settings("settings", "设置", Icons.Outlined.Settings, Icons.Filled.Settings),
+    Home("home", t("主页"), Icons.Outlined.Home, Icons.Filled.Home),
+    Server("server", t("服务端"), Icons.Outlined.Dns, Icons.Filled.Dns),
+    Console("console", t("控制台"), Icons.Outlined.Terminal, Icons.Filled.Terminal),
+    Settings("settings", t("设置"), Icons.Outlined.Settings, Icons.Filled.Settings),
 }
 
 @Composable
@@ -398,7 +399,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         onClick = { viewModel.downloadAndInstallUpdate(releaseInfo) },
                         enabled = !busy,
                     ) {
-                        Text(if (busy) "下载中…" else "下载并安装")
+                        Text(if (busy) t("下载中…") else t("下载并安装"))
                     }
                 },
                 dismissButton = {
@@ -417,9 +418,9 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     ) {
                         Text(
                             when {
-                                cancelled -> "正在取消…"
-                                busy -> "取消下载"
-                                else -> "以后再说"
+                                cancelled -> t("正在取消…")
+                                busy -> t("取消下载")
+                                else -> t("以后再说")
                             },
                         )
                     }

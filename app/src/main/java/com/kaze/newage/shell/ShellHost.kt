@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import com.kaze.newage.core.i18n.t
 
 /**
  * 壳的"宿主"层：把 ViewModel 的状态翻译成界面能直接用的东西。
@@ -142,15 +143,15 @@ class ShellHost(
         val state = stateOf(instance.id)
         if (state == ServerState.Stopping) {
             // 已在停止中再点一次 = 用户不想等了 → 必须经确认，不能直接砍
-            Sheet(context, "强制停止", "优雅停止会先把世界存盘，世界大时要等一会儿").apply {
+            Sheet(context, t("强制停止"), t("优雅停止会先把世界存盘，世界大时要等一会儿")).apply {
                 add(context.txt(
-                    "强制停止会让服务端来不及保存世界，最近一段时间的方块改动可能丢失。确定要现在终止吗？",
+                    t("强制停止会让服务端来不及保存世界，最近一段时间的方块改动可能丢失。确定要现在终止吗？"),
                     Type.body, ShellTheme.current.ink2,
                 ).apply { setLineSpacing(context.dp(3f).toFloat(), 1f) })
-                buttons("立即终止", {
+                buttons(t("立即终止"), {
                     vm.forceStopInstance(instance)
                     dismiss()
-                }, secondaryLabel = "再等等", onSecondary = { dismiss() }, danger = true)
+                }, secondaryLabel = t("再等等"), onSecondary = { dismiss() }, danger = true)
                 show()
             }
             return
@@ -180,7 +181,7 @@ class ShellHost(
             s != ServerState.Running && !s.isBusy()
         }
         if (todo.isEmpty()) {
-            toast("没有可启动的实例")
+            toast(t("没有可启动的实例"))
             return
         }
         toast("开始依次启动 ${todo.size} 个实例")
@@ -215,13 +216,13 @@ class ShellHost(
 
     /** 重命名对话框 */
     fun renameDialog(instance: ServerInstance) {
-        val sheet = Sheet(context, "重命名实例", "只改显示名，不影响目录与 server.properties")
-        val field = context.input("实例名", instance.name)
+        val sheet = Sheet(context, t("重命名实例"), t("只改显示名，不影响目录与 server.properties"))
+        val field = context.input(t("实例名"), instance.name)
         sheet.add(field)
-        sheet.buttons("保存", {
+        sheet.buttons(t("保存"), {
             val name = field.text.toString().trim()
             if (name.isEmpty()) {
-                toast("名称不能为空", error = true)
+                toast(t("名称不能为空"), error = true)
             } else if (name == instance.name) {
                 sheet.dismiss()
             } else {
@@ -229,7 +230,7 @@ class ShellHost(
                 sheet.dismiss()
                 toast("已重命名为 $name")
             }
-        }, secondaryLabel = "取消", onSecondary = { sheet.dismiss() })
+        }, secondaryLabel = t("取消"), onSecondary = { sheet.dismiss() })
         sheet.show()
     }
 
@@ -239,18 +240,18 @@ class ShellHost(
         sheet.add(
             context.txt(
                 "只移除应用里的实例记录；目录 ${instance.dir.name} 与世界存档仍在磁盘上，" +
-                    "可以重新导入。此动作不可撤销。",
+                    t("可以重新导入。此动作不可撤销。"),
                 Type.body, ShellTheme.current.ink2,
             ).apply { setLineSpacing(context.dp(3f).toFloat(), 1f) },
         )
         sheet.buttons(
-            "删除",
+            t("删除"),
             {
                 sheet.dismiss()
                 remove(instance)
                 onDone()
             },
-            secondaryLabel = "取消",
+            secondaryLabel = t("取消"),
             onSecondary = { sheet.dismiss() },
             danger = true,
         )
@@ -288,7 +289,7 @@ class ShellHost(
                 if (ready != null) {
                     withContext(Dispatchers.Main) { onDone() }
                 } else {
-                    withContext(Dispatchers.Main) { toast("环境部署超时，请查看诊断日志", error = true) }
+                    withContext(Dispatchers.Main) { toast(t("环境部署超时，请查看诊断日志"), error = true) }
                 }
             }
         }
@@ -313,7 +314,7 @@ class ShellHost(
         runCatching {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             if (pm.isIgnoringBatteryOptimizations(context.packageName)) {
-                toast("已经在电池优化白名单里")
+                toast(t("已经在电池优化白名单里"))
                 return
             }
             context.startActivity(
@@ -329,10 +330,10 @@ class ShellHost(
             context.startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-        }.onFailure { toast("没有可打开该链接的应用", error = true) }
+        }.onFailure { toast(t("没有可打开该链接的应用"), error = true) }
     }
 
-    fun copy(text: String, label: String = "已复制") {
+    fun copy(text: String, label: String = t("已复制")) {
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
         cm.setPrimaryClip(android.content.ClipData.newPlainText(label, text))
         toast(label)

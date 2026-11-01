@@ -105,13 +105,14 @@ import com.kaze.newage.ui.theme.statusPalette
 import com.kaze.newage.ui.toLabel
 import com.kaze.newage.ui.toTone
 import kotlinx.coroutines.launch
+import com.kaze.newage.core.i18n.t
 
 /** 首次进入的快捷提问（一键发送，省得打字） */
 private val QUICK_QUESTIONS = listOf(
-    "现在什么情况？",
-    "谁在线？",
-    "内存够不够？",
-    "为什么卡住了 / 起不来？",
+    t("现在什么情况？"),
+    t("谁在线？"),
+    t("内存够不够？"),
+    t("为什么卡住了 / 起不来？"),
 )
 
 /**
@@ -172,7 +173,7 @@ fun AiScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
     ) {
         M3EScreenHeader(
-            title = "AI 助手",
+            title = t("AI 助手"),
             subtitle = current?.let { inst ->
                 buildString {
                     append(inst.name)
@@ -181,10 +182,10 @@ fun AiScreen(
                     append(" ")
                     append(inst.mcVersion)
                 }
-            } ?: "未选择实例",
+            } ?: t("未选择实例"),
             leading = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回"))
                 }
             },
             trailing = {
@@ -193,23 +194,23 @@ fun AiScreen(
                 if (messages.isNotEmpty()) {
                     var confirmClear by remember { mutableStateOf(false) }
                     IconButton(onClick = { confirmClear = true }, enabled = !busy) {
-                        Icon(Icons.Filled.Delete, contentDescription = "清空对话")
+                        Icon(Icons.Filled.Delete, contentDescription = t("清空对话"))
                     }
                     if (confirmClear) {
                         AlertDialog(
                             onDismissRequest = { confirmClear = false },
-                            title = { Text("删除会话历史？") },
+                            title = { Text(t("删除会话历史？")) },
                             text = { Text("将清空 AI 助手的全部对话记录（${messages.size} 条），且不可恢复。") },
                             confirmButton = {
                                 TextButton(onClick = {
                                     viewModel.clearAiChat()
                                     confirmClear = false
                                 }) {
-                                    Text("删除", color = MaterialTheme.colorScheme.error)
+                                    Text(t("删除"), color = MaterialTheme.colorScheme.error)
                                 }
                             },
                             dismissButton = {
-                                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+                                TextButton(onClick = { confirmClear = false }) { Text(t("取消")) }
                             },
                         )
                     }
@@ -219,7 +220,7 @@ fun AiScreen(
                     leftToSettings = true
                     onOpenSettings()
                 }) {
-                    Icon(Icons.Filled.Tune, contentDescription = "AI 设置")
+                    Icon(Icons.Filled.Tune, contentDescription = t("AI 设置"))
                 }
             },
         )
@@ -326,14 +327,14 @@ fun AiScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    if (thinking) "深度思考中…（先出推理再出答案，可能要一两分钟）"
-                    else "正在思考…（首次响应可能要十几秒）",
+                    if (thinking) t("深度思考中…（先出推理再出答案，可能要一两分钟）")
+                    else t("正在思考…（首次响应可能要十几秒）"),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = { viewModel.cancelAiTurn() }) {
-                    Text("取消")
+                    Text(t("取消"))
                 }
             }
         }
@@ -372,7 +373,7 @@ private fun OnboardingContent(viewModel: AppViewModel) {
             )
         }
         Spacer(Modifier.height(14.dp))
-        Text("问问你的服务器", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
+        Text(t("问问你的服务器"), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(6.dp))
         Text(
             "AI 能看状态、读日志、改配置（写入需你确认）、查资料。\n命令与文件写入都必须经你确认才会执行。",
@@ -382,16 +383,16 @@ private fun OnboardingContent(viewModel: AppViewModel) {
         )
         Spacer(Modifier.height(20.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CapabilityCard(Icons.Filled.Dns, "运行状态", "卡不卡、谁在线", Modifier.weight(1f))
-            CapabilityCard(Icons.Filled.Terminal, "日志报错", "为什么起不来", Modifier.weight(1f))
+            CapabilityCard(Icons.Filled.Dns, t("运行状态"), t("卡不卡、谁在线"), Modifier.weight(1f))
+            CapabilityCard(Icons.Filled.Terminal, t("日志报错"), t("为什么起不来"), Modifier.weight(1f))
         }
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CapabilityCard(Icons.Filled.People, "玩家内存", "内存够不够", Modifier.weight(1f))
-            CapabilityCard(Icons.Filled.TravelExplore, "联网查资料", "搜攻略与报错", Modifier.weight(1f))
+            CapabilityCard(Icons.Filled.People, t("玩家内存"), t("内存够不够"), Modifier.weight(1f))
+            CapabilityCard(Icons.Filled.TravelExplore, t("联网查资料"), t("搜攻略与报错"), Modifier.weight(1f))
         }
         Spacer(Modifier.height(24.dp))
-        Text("试试这样问", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(t("试试这样问"), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QUICK_QUESTIONS.forEach { q ->
@@ -645,7 +646,7 @@ private fun ThinkingPanel(reasoning: String) {
                 )
                 Icon(
                     if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = if (expanded) "收起" else "展开",
+                    contentDescription = if (expanded) t("收起") else t("展开"),
                     modifier = Modifier.size(16.dp),
                 )
             }
@@ -773,7 +774,7 @@ private fun WriteRequestRow(
                         modifier = Modifier.size(15.dp),
                         tint = scheme.primary,
                     )
-                    Text("AI 请求写入文件", style = MaterialTheme.typography.titleSmall)
+                    Text(t("AI 请求写入文件"), style = MaterialTheme.typography.titleSmall)
                 }
                 // 目标实例 + 解析后的绝对路径：路径里可能带模型/网页给的控制符，
                 // 上屏前统一过滤（终端转义与 bidi 反转都能伪造出"看起来是另一个文件"）
@@ -849,7 +850,7 @@ private fun WriteRequestRow(
                             modifier = Modifier.weight(1f),
                         )
                         TextButton(onClick = { showFull = !showFull }) {
-                            Text(if (showFull) "只看预览" else "查看全文")
+                            Text(if (showFull) t("只看预览") else t("查看全文"))
                         }
                     }
                 }
@@ -864,10 +865,10 @@ private fun WriteRequestRow(
                             modifier = Modifier.size(16.dp),
                             tint = scheme.primary,
                         )
-                        Text("已写入", style = MaterialTheme.typography.labelLarge, color = scheme.primary)
+                        Text(t("已写入"), style = MaterialTheme.typography.labelLarge, color = scheme.primary)
                     }
                     2 -> Text(
-                        "已拒绝（未写入任何内容）",
+                        t("已拒绝（未写入任何内容）"),
                         style = MaterialTheme.typography.labelLarge,
                         color = scheme.onSurfaceVariant,
                     )
@@ -877,19 +878,19 @@ private fun WriteRequestRow(
                     ) {
                         // 成功才置 1：失败必须如实显示，并且允许重试（否则用户被卡死在"待确认"）
                         Text(
-                            "写入失败，未改动文件",
+                            t("写入失败，未改动文件"),
                             style = MaterialTheme.typography.labelLarge,
                             color = scheme.error,
                         )
-                        Button(onClick = onApprove, enabled = !busy) { Text("重试") }
-                        OutlinedButton(onClick = onDeny, enabled = !busy) { Text("放弃") }
+                        Button(onClick = onApprove, enabled = !busy) { Text(t("重试")) }
+                        OutlinedButton(onClick = onDeny, enabled = !busy) { Text(t("放弃")) }
                     }
                     else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = onApprove, enabled = !busy) {
-                            Text("允许写入")
+                            Text(t("允许写入"))
                         }
                         OutlinedButton(onClick = onDeny, enabled = !busy) {
-                            Text("拒绝")
+                            Text(t("拒绝"))
                         }
                     }
                 }
@@ -936,7 +937,7 @@ private fun ReadRequestRow(
                         modifier = Modifier.size(15.dp),
                         tint = scheme.error,
                     )
-                    Text("AI 想读取一个可能有敏感内容的文件", style = MaterialTheme.typography.titleSmall)
+                    Text(t("AI 想读取一个可能有敏感内容的文件"), style = MaterialTheme.typography.titleSmall)
                 }
                 // 路径可能带模型/网页给的控制符：上屏前统一过滤（bidi 反转能伪造出"另一个文件"）
                 Text(
@@ -955,25 +956,25 @@ private fun ReadRequestRow(
                     color = scheme.error,
                 )
                 Text(
-                    "读取不会改动文件，但内容会随本轮提问发给你配置的 AI 服务地址。" +
-                        "只在你确实需要 AI 看这个文件时允许。",
+                    t("读取不会改动文件，但内容会随本轮提问发给你配置的 AI 服务地址。") +
+                        t("只在你确实需要 AI 看这个文件时允许。"),
                     style = MaterialTheme.typography.labelSmall,
                     color = scheme.onSurfaceVariant,
                 )
                 when (msg.readState) {
                     1 -> Text(
-                        "已允许读取",
+                        t("已允许读取"),
                         style = MaterialTheme.typography.labelLarge,
                         color = scheme.primary,
                     )
                     2 -> Text(
-                        "已拒绝（文件没有被读取，也没有发出任何内容）",
+                        t("已拒绝（文件没有被读取，也没有发出任何内容）"),
                         style = MaterialTheme.typography.labelLarge,
                         color = scheme.onSurfaceVariant,
                     )
                     else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onApprove, enabled = !busy) { Text("允许读取") }
-                        OutlinedButton(onClick = onDeny, enabled = !busy) { Text("拒绝") }
+                        Button(onClick = onApprove, enabled = !busy) { Text(t("允许读取")) }
+                        OutlinedButton(onClick = onDeny, enabled = !busy) { Text(t("拒绝")) }
                     }
                 }
             }
@@ -1015,7 +1016,7 @@ private fun AiSuggestionCard(
                     tint = consoleLineColor(LineType.System),
                 )
                 Text(
-                    "建议命令",
+                    t("建议命令"),
                     style = MaterialTheme.typography.labelSmall,
                     color = consoleLineColor(LineType.System),
                 )
@@ -1028,7 +1029,7 @@ private fun AiSuggestionCard(
                         tint = consoleLineColor(LineType.System),
                     )
                     Text(
-                        "已发送到控制台",
+                        t("已发送到控制台"),
                         style = MaterialTheme.typography.labelSmall,
                         color = consoleLineColor(LineType.System),
                     )
@@ -1046,7 +1047,7 @@ private fun AiSuggestionCard(
                         tint = consoleLineColor(LineType.Error),
                     )
                     Text(
-                        "危险命令：会影响玩家或服务端，请确认后再执行",
+                        t("危险命令：会影响玩家或服务端，请确认后再执行"),
                         style = MaterialTheme.typography.labelMedium,
                         color = consoleLineColor(LineType.Error),
                     )
@@ -1063,14 +1064,14 @@ private fun AiSuggestionCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 FilledTonalButton(onClick = onExecute, enabled = !sent && serverRunning) {
-                    Text(if (sent) "已发送" else "执行")
+                    Text(if (sent) t("已发送") else t("执行"))
                 }
                 OutlinedButton(onClick = { clipboard.setText(AnnotatedString(command)) }) {
-                    Text("复制")
+                    Text(t("复制"))
                 }
                 if (!sent && !serverRunning) {
                     Text(
-                        "服务端未运行",
+                        t("服务端未运行"),
                         style = MaterialTheme.typography.labelSmall,
                         color = consoleLineColor(LineType.Warn),
                     )
@@ -1114,7 +1115,7 @@ private fun InputDock(
                 FilterChip(
                     selected = thinking,
                     onClick = { viewModel.setAiThinking(!thinking) },
-                    label = { Text("深度思考") },
+                    label = { Text(t("深度思考")) },
                 )
                 Spacer(Modifier.weight(1f))
                 profileName?.let {
@@ -1135,7 +1136,7 @@ private fun InputDock(
                     value = input,
                     onValueChange = { viewModel.setAiDraft(it) },
                     modifier = Modifier.weight(1f),
-                    placeholder = { Text("问问 AI：现在什么情况？") },
+                    placeholder = { Text(t("问问 AI：现在什么情况？")) },
                     singleLine = true,
                     enabled = !busy,
                     shape = M3Shape.groupSingle(52f),
@@ -1163,7 +1164,7 @@ private fun InputDock(
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "发送",
+                            contentDescription = t("发送"),
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -1205,7 +1206,7 @@ private fun JumpToBottomPill(
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                 )
-                Text("回到底部", style = MaterialTheme.typography.labelLarge)
+                Text(t("回到底部"), style = MaterialTheme.typography.labelLarge)
             }
         }
     }

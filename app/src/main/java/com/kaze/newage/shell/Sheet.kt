@@ -14,6 +14,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.kaze.newage.R
+import com.kaze.newage.core.i18n.t
 
 // ══════════════════════════════════════════════════════════════════════════
 // 底部弹层
@@ -150,7 +151,7 @@ open class Sheet(
             val close = context.txt("×", 21f, ShellTheme.current.ink3).apply {
                 gravity = Gravity.CENTER
                 background = context.rip(Color.TRANSPARENT, 18f)
-                tappable("关闭") { dismiss() }
+                tappable(t("关闭")) { dismiss() }
             }
             header.addView(close, LinearLayout.LayoutParams(context.dp(36f), context.dp(36f)))
             root.addView(header)
@@ -389,8 +390,8 @@ open class Sheet(
 fun Context.confirm(
     title: String,
     message: String,
-    confirmLabel: String = "确定",
-    cancelLabel: String = "取消",
+    confirmLabel: String = t("确定"),
+    cancelLabel: String = t("取消"),
     danger: Boolean = false,
     onConfirm: () -> Unit,
 ) {
@@ -445,6 +446,6 @@ fun Context.choiceSheet(
             LinearLayout.LayoutParams.WRAP_CONTENT,
         ).apply { bottomMargin = dp(3f) })
     }
-    sheet.footerText("取消", ShellTheme.current.ink3) { sheet.dismiss() }
+    sheet.footerText(t("取消"), ShellTheme.current.ink3) { sheet.dismiss() }
     sheet.show()
 }

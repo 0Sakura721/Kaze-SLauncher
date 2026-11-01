@@ -2,6 +2,7 @@ package com.kaze.newage.ui.theme
 
 import androidx.compose.runtime.staticCompositionLocalOf
 import dev.chrisbanes.haze.HazeState
+import com.kaze.newage.core.i18n.t
 /**
  * 主题模式：
  *  - M3：Material 3 动态取色（Material You，跟随系统深浅色）
@@ -19,10 +20,10 @@ import dev.chrisbanes.haze.HazeState
  * 但这个差异**只存在于实现层**，选择器上它们平等。
  */
 enum class AppThemeMode(val id: String, val label: String, val desc: String) {
-    M3("m3", "Material 3", "动态取色（Material You）"),
-    GLASS("glass", "液态玻璃", "原生背景模糊 + 折射"),
-    SHELL("shell", "岚", "纸感 / 墨夜 · 自绘视图"),
-    MIUIX("miuix", "Miuix", "HyperOS 风组件"),
+    M3("m3", "Material 3", t("动态取色（Material You）")),
+    GLASS("glass", t("液态玻璃"), t("原生背景模糊 + 折射")),
+    SHELL("shell", t("岚"), t("纸感 / 墨夜 · 自绘视图")),
+    MIUIX("miuix", "Miuix", t("HyperOS 风组件")),
     ;
 
     /** 该样式是否由手写视图层实现（需要整壳切换，而非 Compose 内换主题） */
@@ -67,9 +68,9 @@ val LocalGlassBlurEnabled = staticCompositionLocalOf { true }
  *  - DARK：强制黑色（浅色背景图）
  */
 enum class FgColorMode(val id: String, val label: String) {
-    AUTO("auto", "跟随主题"),
-    LIGHT("light", "白色"),
-    DARK("dark", "黑色"),
+    AUTO("auto", t("跟随主题")),
+    LIGHT("light", t("白色")),
+    DARK("dark", t("黑色")),
     ;
 
     companion object {

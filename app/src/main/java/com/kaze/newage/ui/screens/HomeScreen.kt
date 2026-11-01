@@ -69,6 +69,7 @@ import com.kaze.newage.ui.theme.M3Spacing
 import com.kaze.newage.ui.theme.statusPalette
 import com.kaze.newage.ui.toLabel
 import com.kaze.newage.ui.toTone
+import com.kaze.newage.core.i18n.t
 
 /**
  * 主页 —— 落地屏。
@@ -174,7 +175,7 @@ fun HomeScreen(
                     titleIcon = null,
                     supporting = buildString {
                         append("MC ")
-                        append(current.mcVersion.ifBlank { "自定义" })
+                        append(current.mcVersion.ifBlank { t("自定义") })
                         append(" · ")
                         append(current.coreType.displayName)
                         append(" · Java ")
@@ -188,7 +189,7 @@ fun HomeScreen(
                     trailing = {
                         Icon(
                             Icons.Filled.KeyboardArrowDown,
-                            contentDescription = "切换实例",
+                            contentDescription = t("切换实例"),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     },
@@ -198,8 +199,8 @@ fun HomeScreen(
             } else {
                 M3ECard(
                     variant = M3ECardVariant.Outlined,
-                    title = "还没有服务端",
-                    supporting = "下载 Vanilla / Paper 服务端，或在「服务端」页导入已有的 server.jar",
+                    title = t("还没有服务端"),
+                    supporting = t("下载 Vanilla / Paper 服务端，或在「服务端」页导入已有的 server.jar"),
                     onClick = onNewServer,
                     content = { },
                 )
@@ -212,7 +213,7 @@ fun HomeScreen(
                 shape = M3Shape.medium,
             ) {
                 DropdownMenuItem(
-                    text = { Text("切换实例", style = MaterialTheme.typography.titleSmall) },
+                    text = { Text(t("切换实例"), style = MaterialTheme.typography.titleSmall) },
                     enabled = false,
                     onClick = { },
                 )
@@ -295,10 +296,10 @@ fun HomeScreen(
                 val actionLabel = when {
                     // 停止中再点一次 = 强制停止：正常停止会一直等服务器存完世界，
                     // 要不要砍掉由用户拍板（点了会先弹确认框）
-                    serverState == ServerState.Stopping -> "强制停止"
-                    running -> "停止服务端"
-                    busy -> "取消启动"
-                    else -> "启动服务端"
+                    serverState == ServerState.Stopping -> t("强制停止")
+                    running -> t("停止服务端")
+                    busy -> t("取消启动")
+                    else -> t("启动服务端")
                 }
                 val actionIcon = if (running || busy) Icons.Filled.Stop else Icons.Filled.PlayArrow
                 Surface(
@@ -341,7 +342,7 @@ fun HomeScreen(
                     onClick = { onNavigate(Dest.Console.route) },
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Filled.Terminal, contentDescription = "打开控制台", modifier = Modifier.size(24.dp))
+                        Icon(Icons.Filled.Terminal, contentDescription = t("打开控制台"), modifier = Modifier.size(24.dp))
                     }
                 }
             }
@@ -360,8 +361,8 @@ fun HomeScreen(
         if (envState == ProotEnvironment.State.SETTING_UP) {
             M3ECard(
                 variant = M3ECardVariant.Outlined,
-                title = "正在部署 Linux 环境",
-                supporting = download.message.ifBlank { "准备部署…" },
+                title = t("正在部署 Linux 环境"),
+                supporting = download.message.ifBlank { t("准备部署…") },
             ) {
                 WavyLinearProgress(
                     progress = download.progress.coerceIn(0f, 1f),
@@ -371,14 +372,14 @@ fun HomeScreen(
         } else if (envState != ProotEnvironment.State.READY) {
             M3EListItem(
                 headline = when (envState) {
-                    ProotEnvironment.State.READY -> "Linux 环境已就绪"
-                    ProotEnvironment.State.ERROR -> "环境部署失败"
-                    else -> "Linux 环境未部署"
+                    ProotEnvironment.State.READY -> t("Linux 环境已就绪")
+                    ProotEnvironment.State.ERROR -> t("环境部署失败")
+                    else -> t("Linux 环境未部署")
                 },
                 supporting = if (javaVersions.isNotEmpty()) {
                     "proot + Ubuntu · 已安装 ${javaVersions.joinToString(" / ") { "Java $it" }}"
                 } else {
-                    "proot + Ubuntu · Java 在启动时按版本自动安装"
+                    t("proot + Ubuntu · Java 在启动时按版本自动安装")
                 },
                 leadingIcon = when (envState) {
                     ProotEnvironment.State.READY -> Icons.Filled.CheckCircle
@@ -393,7 +394,7 @@ fun HomeScreen(
                 shape = M3Shape.listSingle,
                 trailing = {
                     if (envState != ProotEnvironment.State.READY) {
-                        TextButton(onClick = { viewModel.setupEnv() }) { Text("部署") }
+                        TextButton(onClick = { viewModel.setupEnv() }) { Text(t("部署")) }
                     }
                 },
             )
@@ -406,8 +407,8 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                HomeSecondaryAction(Icons.Filled.Terminal, "控制台") { onNavigate(Dest.Console.route) }
-                HomeSecondaryAction(Icons.Filled.FolderOpen, "实例目录") {
+                HomeSecondaryAction(Icons.Filled.Terminal, t("控制台")) { onNavigate(Dest.Console.route) }
+                HomeSecondaryAction(Icons.Filled.FolderOpen, t("实例目录")) {
                     // 必须走 FileProvider 的 content://：targetSdk≥24 传 file:// 会抛
                     // FileUriExposedException，异常一吞按钮就"点了没反应"（此处原样）。
                     // 自定义实例目录在 FileProvider 的根之外，打不开就提示真实路径。
@@ -420,10 +421,10 @@ fun HomeScreen(
                     }
                 }
                 // 走真正的重启：以前直接 startInstance，运行中会被 guard 挡掉、点了没反应
-                HomeSecondaryAction(Icons.Filled.RestartAlt, "重启") {
+                HomeSecondaryAction(Icons.Filled.RestartAlt, t("重启")) {
                     if (!busy) viewModel.restartInstance(current)
                 }
-                HomeSecondaryAction(Icons.Filled.MoreVert, "更多") { onNavigate(Dest.Server.route) }
+                HomeSecondaryAction(Icons.Filled.MoreVert, t("更多")) { onNavigate(Dest.Server.route) }
             }
         } else {
             Surface(
@@ -443,7 +444,7 @@ fun HomeScreen(
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(22.dp))
                     Spacer(Modifier.width(10.dp))
-                    Text("新建服务端", style = MaterialTheme.typography.labelLarge)
+                    Text(t("新建服务端"), style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
@@ -483,11 +484,11 @@ private fun HomeSecondaryAction(
 @Composable
 private fun EulaSteps(state: ServerState) {
     val currentStep = if (state == ServerState.FirstRun) 0 else 1
-    val steps = listOf("生成 eula.txt", "接受条款", "启动服务端")
+    val steps = listOf(t("生成 eula.txt"), t("接受条款"), t("启动服务端"))
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "首次启动需要确认 Minecraft EULA",
-        supporting = "服务端会先生成 eula.txt 并退出，随后自动改写为 eula=true 再启动",
+        title = t("首次启动需要确认 Minecraft EULA"),
+        supporting = t("服务端会先生成 eula.txt 并退出，随后自动改写为 eula=true 再启动"),
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             steps.forEachIndexed { i, label ->

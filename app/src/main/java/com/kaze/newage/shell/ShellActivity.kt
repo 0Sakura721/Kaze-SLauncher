@@ -16,6 +16,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.AppViewModel
+import com.kaze.newage.core.i18n.t
 
 /**
  * 壳的根 Activity。
@@ -68,7 +69,7 @@ class ShellActivity : ComponentActivity() {
         // importJar 自己负责拷贝、而不是让实例直接引用 uri 的原因。
         vm.importJar(
             uri = uri,
-            name = "导入-" + java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+            name = t("导入-") + java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
                 .format(java.util.Date()),
             memoryMb = 1024,
         )
@@ -130,19 +131,19 @@ class ShellActivity : ComponentActivity() {
      */
     private fun showCreateSheet() {
         if (!vm.env.isReady) {
-            val sheet = Sheet(this, "先部署环境", "服务端跑在 proot 提供的 Linux 里", scrollable = false)
+            val sheet = Sheet(this, t("先部署环境"), t("服务端跑在 proot 提供的 Linux 里"), scrollable = false)
             sheet.add(
                 txt(
-                    "第一次使用需要下载 Linux 运行时（约 60–200 MB，视架构与网络）。" +
-                        "中途退出会保留断点，下次接着下。",
+                    t("第一次使用需要下载 Linux 运行时（约 60–200 MB，视架构与网络）。") +
+                        t("中途退出会保留断点，下次接着下。"),
                     Type.body, ShellTheme.current.ink2,
                 ).apply { setLineSpacing(dp(3f).toFloat(), 1f) },
             )
-            sheet.buttons("开始部署", {
+            sheet.buttons(t("开始部署"), {
                 sheet.dismiss()
-                host.toast("开始部署环境…")
-                host.setupEnvironment { host.toast("环境就绪，可以新建实例了") }
-            }, secondaryLabel = "稍后", onSecondary = { sheet.dismiss() })
+                host.toast(t("开始部署环境…"))
+                host.setupEnvironment { host.toast(t("环境就绪，可以新建实例了")) }
+            }, secondaryLabel = t("稍后"), onSecondary = { sheet.dismiss() })
             sheet.show()
             return
         }
@@ -222,10 +223,10 @@ class ShellActivity : ComponentActivity() {
 
         navBar = ShellNavBar(this).apply {
             tabs = listOf(
-                ShellNavBar.Tab("home", "实例"),
-                ShellNavBar.Tab("server", "服务端"),
-                ShellNavBar.Tab("console", "控制台"),
-                ShellNavBar.Tab("settings", "设置"),
+                ShellNavBar.Tab("home", t("实例")),
+                ShellNavBar.Tab("server", t("服务端")),
+                ShellNavBar.Tab("console", t("控制台")),
+                ShellNavBar.Tab("settings", t("设置")),
             )
             onSelect = { index -> selectTab(index) }
             background = rounded(t.surface, 0f, t.stroke, Dim.line)

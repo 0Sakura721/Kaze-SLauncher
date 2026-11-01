@@ -43,6 +43,7 @@ import com.kaze.newage.ui.theme.M3Spacing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.kaze.newage.core.i18n.t
 
 /**
  * 诊断日志：应用自身的 logcat 落盘（由 [com.kaze.newage.core.log.AppLogStore] 采集）
@@ -55,7 +56,7 @@ import kotlinx.coroutines.withContext
 fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var text by remember { mutableStateOf("读取中…") }
+    var text by remember { mutableStateOf(t("读取中…")) }
     var envText by remember { mutableStateOf("") }
     var reload by remember { mutableStateOf(0) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -64,22 +65,22 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val tick by remember(reload) { mutableStateOf(reload) }
 
     LaunchedEffect(tick) {
-        text = appLog.tail(1200).ifBlank { "（暂无日志）" }
+        text = appLog.tail(1200).ifBlank { t("（暂无日志）") }
         envText = withContext(Dispatchers.IO) {
             runCatching {
                 val f = viewModel.prootEnv.diagnosticsFile()
-                if (f.isFile) f.readText().takeLast(4000) else "（尚未生成，应用启动时会写入一次）"
-            }.getOrDefault("（读取失败）")
+                if (f.isFile) f.readText().takeLast(4000) else t("（尚未生成，应用启动时会写入一次）")
+            }.getOrDefault(t("（读取失败）"))
         }
     }
 
     Column(Modifier.fillMaxSize()) {
         M3EScreenHeader(
-            title = "诊断日志",
-            subtitle = "应用日志 · 环境自检",
+            title = t("诊断日志"),
+            subtitle = t("应用日志 · 环境自检"),
             leading = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回"))
                 }
             },
         )
@@ -98,14 +99,14 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             ) {
                 OutlinedButton(onClick = { reload++ }) {
                     Icon(Icons.Filled.Refresh, null, Modifier.size(18.dp))
-                    Text("  刷新", style = MaterialTheme.typography.labelLarge)
+                    Text(t("  刷新"), style = MaterialTheme.typography.labelLarge)
                 }
                 OutlinedButton(onClick = {
                     // 分享当前日志文件：走 FileProvider（file:// 会被系统直接拒绝）
                     scope.launch {
                         runCatching {
                             val f = appLog.currentFile().takeIf { it.isFile } ?: appLog.files().firstOrNull()
-                            val target = f ?: error("还没有日志文件")
+                            val target = f ?: error(t("还没有日志文件"))
                             val uri = androidx.core.content.FileProvider.getUriForFile(
                                 context,
                                 "${context.packageName}.fileprovider",
@@ -117,7 +118,7 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             context.startActivity(
-                                android.content.Intent.createChooser(intent, "分享诊断日志")
+                                android.content.Intent.createChooser(intent, t("分享诊断日志"))
                                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
                             )
                         }.onFailure {
@@ -130,11 +131,11 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                     }
                 }) {
                     Icon(Icons.Filled.Share, null, Modifier.size(18.dp))
-                    Text("  分享", style = MaterialTheme.typography.labelLarge)
+                    Text(t("  分享"), style = MaterialTheme.typography.labelLarge)
                 }
                 OutlinedButton(onClick = { confirmClear = true }) {
                     Icon(Icons.Filled.Delete, null, Modifier.size(18.dp))
-                    Text("  清空", style = MaterialTheme.typography.labelLarge)
+                    Text(t("  清空"), style = MaterialTheme.typography.labelLarge)
                 }
             }
             // 清空不可撤销，而且这些日志正是"崩溃前那一段"的唯一现场 ——
@@ -142,11 +143,11 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             if (confirmClear) {
                 androidx.compose.material3.AlertDialog(
                     onDismissRequest = { confirmClear = false },
-                    title = { Text("清空应用日志？") },
+                    title = { Text(t("清空应用日志？")) },
                     text = {
                         Text(
-                            "已落盘的诊断日志将被永久删除，无法恢复。" +
-                                "如果正准备反馈问题，建议先点「分享」把当前日志发出去。"
+                            t("已落盘的诊断日志将被永久删除，无法恢复。") +
+                                t("如果正准备反馈问题，建议先点「分享」把当前日志发出去。")
                         )
                     },
                     confirmButton = {
@@ -156,17 +157,17 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                                 appLog.clear()
                                 reload++
                             }
-                        }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+                        }) { Text(t("清空"), color = MaterialTheme.colorScheme.error) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { confirmClear = false }) { Text("取消") }
+                        TextButton(onClick = { confirmClear = false }) { Text(t("取消")) }
                     },
                 )
             }
 
             M3ECard(
                 variant = M3ECardVariant.Outlined,
-                title = "应用日志",
+                title = t("应用日志"),
                 supporting = "logcat 只存在内存里（重启即失），这里留存最近 ${com.kaze.newage.core.log.AppLogStore.KEEP_FILES} 天；分享可得全文",
             ) {
                 // 高度必须有界：tail(1200) 满载约 19000dp，不设上限会把「环境自检」卡
@@ -187,8 +188,8 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
 
             M3ECard(
                 variant = M3ECardVariant.Outlined,
-                title = "环境自检",
-                supporting = "rootfs 关键文件、权限、容器 DNS、execve 实测",
+                title = t("环境自检"),
+                supporting = t("rootfs 关键文件、权限、容器 DNS、execve 实测"),
             ) {
                 SelectionContainer {
                     Text(

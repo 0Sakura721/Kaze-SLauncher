@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.kaze.newage.ui.theme.M3Shape
+import com.kaze.newage.core.i18n.t
 
 /**
  * 内存分配滑块 —— **创建向导与「实例详情 → 改内存」共用同一个控件**。
@@ -37,7 +38,7 @@ fun MemorySliderRow(
     val scheme = MaterialTheme.colorScheme
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            if (autoMemory) "自动分配（建议 ${fmtGb(sliderMb)}）" else "游戏分配",
+            if (autoMemory) "自动分配（建议 ${fmtGb(sliderMb)}）" else t("游戏分配"),
             style = MaterialTheme.typography.labelMedium,
             color = scheme.onSurfaceVariant,
         )

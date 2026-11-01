@@ -36,6 +36,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import com.kaze.newage.core.i18n.t
 
 /**
  * AI 对话控制器：把 [com.kaze.newage.ui.AppViewModel] 里的 AI 逻辑**原样搬出来**
@@ -147,7 +148,7 @@ class AiChatController(private val host: AiChatHost) {
     /** 取消当前 AI 提问（正在思考/工具循环中时有效） */
     fun cancelAiTurn() {
         if (!_aiBusy.value) return
-        aiCancelReason = "已取消本轮提问。"
+        aiCancelReason = t("已取消本轮提问。")
         aiCancelRequested = true
         // 只置标志位不够：线程仍卡在阻塞读上直到 readTimeout（思考模式最长 240 秒），
         // 界面看着像没反应。关连接必须走异步入口 —— disconnect 自身在阻塞读进行中会等到
@@ -164,7 +165,7 @@ class AiChatController(private val host: AiChatHost) {
      */
     fun onAiScreenLeft() {
         if (!_aiBusy.value) return
-        aiCancelReason = "你离开了 AI 页面，本轮提问已停止（回到本页可重新提问）。"
+        aiCancelReason = t("你离开了 AI 页面，本轮提问已停止（回到本页可重新提问）。")
         aiCancelRequested = true
         AiClient.cancelActiveAsync()
     }
@@ -249,7 +250,7 @@ class AiChatController(private val host: AiChatHost) {
                 AiChatMessage(
                     nextAiId(),
                     isUser = false,
-                    text = "还没有配置 AI：点右上角的滑块图标进入设置，填入 API Key（默认 DeepSeek）即可开始对话。",
+                    text = t("还没有配置 AI：点右上角的滑块图标进入设置，填入 API Key（默认 DeepSeek）即可开始对话。"),
                     isError = true,
                 )
             )
@@ -300,7 +301,7 @@ class AiChatController(private val host: AiChatHost) {
                 runTurn(session)
             } catch (e: Exception) {
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "AI 请求失败", isError = true)
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: t("AI 请求失败"), isError = true)
                 )
             } finally {
                 _aiBusy.value = false
@@ -326,8 +327,8 @@ class AiChatController(private val host: AiChatHost) {
                 appendAiMessage(
                     AiChatMessage(
                         nextAiId(), isUser = false,
-                        text = aiCancelReason ?: "已取消本轮提问。",
-                        toolNote = "已取消",
+                        text = aiCancelReason ?: t("已取消本轮提问。"),
+                        toolNote = t("已取消"),
                     )
                 )
                 aiCancelReason = null
@@ -389,10 +390,10 @@ class AiChatController(private val host: AiChatHost) {
                         isUser = false,
                         text = when {
                             partial.isNotEmpty() -> "（已中止）${partial.take(1000)}…"
-                            userCancelled -> reason ?: "已取消本轮提问。"
-                            else -> "AI 响应超时，已停止本轮。可重试或换个问法。"
+                            userCancelled -> reason ?: t("已取消本轮提问。")
+                            else -> t("AI 响应超时，已停止本轮。可重试或换个问法。")
                         },
-                        toolNote = if (userCancelled) "已取消" else "响应超时",
+                        toolNote = if (userCancelled) t("已取消") else t("响应超时"),
                     )
                 )
                 return
@@ -415,8 +416,8 @@ class AiChatController(private val host: AiChatHost) {
                 ?.take(AI_MAX_REASONING_CHARS)
             // 开了深度思考却没拿到思考内容：给可见诊断，而不是无声无息让用户以为坏了
             val thinkingNote = if (session.config.thinking && reasoning == null) {
-                "已开启深度思考，但该模型没有返回思考过程：DeepSeek 官方 deepseek-flash " +
-                    "会自动返回；其它服务商可能不支持思考输出，或需要显式参数" +
+                t("已开启深度思考，但该模型没有返回思考过程：DeepSeek 官方 deepseek-flash ") +
+                    t("会自动返回；其它服务商可能不支持思考输出，或需要显式参数") +
                     "（在 AI 设置「附加请求参数」里填写，如 Qwen 的 {\"enable_thinking\":true}）"
             } else {
                 null
@@ -443,7 +444,7 @@ class AiChatController(private val host: AiChatHost) {
                                 steps = listOf(
                                     AiToolStep(
                                         title = "$label ${AiSanitize.displayOneLine(tool.path)}",
-                                        detail = "你在 AI 设置里把该工具设成了「禁止」",
+                                        detail = t("你在 AI 设置里把该工具设成了「禁止」"),
                                         status = AiToolStep.Status.DENIED,
                                     )
                                 ),
@@ -452,7 +453,7 @@ class AiChatController(private val host: AiChatHost) {
                         session.apiMessages += AiMessage(
                             AiMessage.ROLE_USER,
                             "【工具结果】${tool.name} \"${tool.path}\" → 被用户设置拒绝：" +
-                                "该工具已被禁用，不要重试，请直接告诉用户需要什么。",
+                                t("该工具已被禁用，不要重试，请直接告诉用户需要什么。"),
                         )
                         continue
                     }
@@ -475,7 +476,7 @@ class AiChatController(private val host: AiChatHost) {
                                 AiChatMessage(
                                     id = nextAiId(),
                                     isUser = false,
-                                    text = parsed.analysis.ifBlank { "这一步需要你先确认。" },
+                                    text = parsed.analysis.ifBlank { t("这一步需要你先确认。") },
                                     readRequest = AiReadRequest(
                                         path = tool.path,
                                         absPath = policy.resolvedPath,
@@ -537,8 +538,8 @@ class AiChatController(private val host: AiChatHost) {
                         AiChatMessage(
                             id = nextAiId(),
                             isUser = false,
-                            text = parsed.analysis.ifBlank { if (tool.name == "read_memory") "已读取记忆" else "已保存记忆" },
-                            toolNote = "记忆",
+                            text = parsed.analysis.ifBlank { if (tool.name == "read_memory") t("已读取记忆") else t("已保存记忆") },
+                            toolNote = t("记忆"),
                         )
                     )
                     session.apiMessages += AiMessage(
@@ -555,13 +556,13 @@ class AiChatController(private val host: AiChatHost) {
                                 text = "已按你的设置阻止了一次文件写入\n" +
                                     AiSanitize.displayOneLine(tool.path) +
                                     "\n原因：你在 AI 设置里把「写入文件」设成了「禁止」",
-                                toolNote = "已按设置阻止写入",
+                                toolNote = t("已按设置阻止写入"),
                                 isError = true,
                                 instanceId = session.instanceId,
                                 steps = listOf(
                                     AiToolStep(
                                         title = "写入 ${AiSanitize.displayOneLine(tool.path)}",
-                                        detail = "你在 AI 设置里把「写入文件」设成了「禁止」",
+                                        detail = t("你在 AI 设置里把「写入文件」设成了「禁止」"),
                                         status = AiToolStep.Status.DENIED,
                                     )
                                 ),
@@ -570,7 +571,7 @@ class AiChatController(private val host: AiChatHost) {
                         session.apiMessages += AiMessage(
                             AiMessage.ROLE_USER,
                             "【工具结果】write_file \"${tool.path}\" → 被用户设置拒绝：" +
-                                "写入文件工具已被禁用，不要重试，请直接告诉用户需要自己改什么。",
+                                t("写入文件工具已被禁用，不要重试，请直接告诉用户需要自己改什么。"),
                         )
                         continue
                     }
@@ -602,8 +603,8 @@ class AiChatController(private val host: AiChatHost) {
                             session.apiMessages += AiMessage(
                                 AiMessage.ROLE_USER,
                                 "【工具结果】write_file \"${tool.path}\" → 失败：" +
-                                    "当前没有可写入的实例（实例可能已被删除，或本轮提问时未选中实例）。" +
-                                    "请告诉用户先选中一个实例。",
+                                    t("当前没有可写入的实例（实例可能已被删除，或本轮提问时未选中实例）。") +
+                                    t("请告诉用户先选中一个实例。"),
                             )
                             continue
                         }
@@ -619,13 +620,13 @@ class AiChatController(private val host: AiChatHost) {
                                 id = nextAiId(), isUser = false,
                                 text = if (ok) "已按设置自动写入 ${tool.path}\n$detail"
                                 else "自动写入失败：${tool.path}\n$detail",
-                                toolNote = if (ok) "已自动写入 ${tool.path}" else "自动写入失败",
+                                toolNote = if (ok) "已自动写入 ${tool.path}" else t("自动写入失败"),
                                 isError = !ok,
                                 instanceId = session.instanceId,
                                 steps = listOf(
                                     AiToolStep(
                                         title = "写入 ${AiSanitize.displayOneLine(tool.path)}",
-                                        detail = if (ok) "已按你的设置自动写入（无需确认）" else detail,
+                                        detail = if (ok) t("已按你的设置自动写入（无需确认）") else detail,
                                         status = if (ok) AiToolStep.Status.OK else AiToolStep.Status.FAILED,
                                         elapsedMs = elapsed,
                                     )
@@ -654,7 +655,7 @@ class AiChatController(private val host: AiChatHost) {
                         session.apiMessages += AiMessage(
                             AiMessage.ROLE_USER,
                             "【工具结果】write_file \"${tool.path}\" → 被启动器策略拒绝：${policy.forbidden}。" +
-                                "该文件不允许通过 AI 修改，请改用其它方案，或直接告诉用户应该怎么改。",
+                                t("该文件不允许通过 AI 修改，请改用其它方案，或直接告诉用户应该怎么改。"),
                         )
                         continue
                     }
@@ -665,7 +666,7 @@ class AiChatController(private val host: AiChatHost) {
                         AiChatMessage(
                             id = nextAiId(),
                             isUser = false,
-                            text = parsed.analysis.ifBlank { "我准备写入文件。" },
+                            text = parsed.analysis.ifBlank { t("我准备写入文件。") },
                             writeRequest = AiWriteRequest(
                                 path = tool.path,
                                 content = tool.content,
@@ -691,7 +692,7 @@ class AiChatController(private val host: AiChatHost) {
                 id = nextAiId(),
                 isUser = false,
                 text = "本轮工具调用已达上限（$AI_MAX_TOOL_ROUNDS 次）。基于已获得的信息：\n" +
-                    lastAnalysis.ifBlank { "（模型没有给出更多分析，请换个问法继续）" },
+                    lastAnalysis.ifBlank { t("（模型没有给出更多分析，请换个问法继续）") },
             )
         )
     }
@@ -731,13 +732,13 @@ class AiChatController(private val host: AiChatHost) {
                             text = "已按你的设置阻止了一次文件写入\n" +
                                 AiSanitize.displayOneLine(args.path) +
                                 "\n原因：你在 AI 设置里把「写入文件」设成了「禁止」",
-                            toolNote = "已按设置阻止写入",
+                            toolNote = t("已按设置阻止写入"),
                             isError = true,
                             instanceId = session.instanceId,
                             steps = listOf(
                                 AiToolStep(
                                     title = "写入 ${AiSanitize.displayOneLine(args.path)}",
-                                    detail = "你在 AI 设置里把「写入文件」设成了「禁止」",
+                                    detail = t("你在 AI 设置里把「写入文件」设成了「禁止」"),
                                     status = AiToolStep.Status.DENIED,
                                 )
                             ),
@@ -745,8 +746,8 @@ class AiChatController(private val host: AiChatHost) {
                     )
                     session.apiMessages += AiMessage(
                         AiMessage.ROLE_TOOL,
-                        "被用户设置拒绝：写入文件工具已被禁用。不要重试该工具，" +
-                            "请直接告诉用户需要自己修改什么。",
+                        t("被用户设置拒绝：写入文件工具已被禁用。不要重试该工具，") +
+                            t("请直接告诉用户需要自己修改什么。"),
                         toolCallId = tc.id,
                     )
                     continue
@@ -754,7 +755,7 @@ class AiChatController(private val host: AiChatHost) {
                 if (args.content.isEmpty()) {
                     session.apiMessages += AiMessage(
                         AiMessage.ROLE_TOOL,
-                        "失败：content 为空，请给出完整新文件内容",
+                        t("失败：content 为空，请给出完整新文件内容"),
                         toolCallId = tc.id,
                     )
                     continue
@@ -772,8 +773,8 @@ class AiChatController(private val host: AiChatHost) {
                     if (target == null) {
                         session.apiMessages += AiMessage(
                             AiMessage.ROLE_TOOL,
-                            "失败：当前没有可写入的实例（实例可能已被删除，或本轮提问时未选中实例）。" +
-                                "请告诉用户先选中一个实例。",
+                            t("失败：当前没有可写入的实例（实例可能已被删除，或本轮提问时未选中实例）。") +
+                                t("请告诉用户先选中一个实例。"),
                             toolCallId = tc.id,
                         )
                         continue
@@ -790,13 +791,13 @@ class AiChatController(private val host: AiChatHost) {
                             id = nextAiId(), isUser = false,
                             text = if (ok) "已按设置自动写入 ${args.path}\n$detail"
                             else "自动写入失败：${args.path}\n$detail",
-                            toolNote = if (ok) "已自动写入 ${args.path}" else "自动写入失败",
+                            toolNote = if (ok) "已自动写入 ${args.path}" else t("自动写入失败"),
                             isError = !ok,
                             instanceId = session.instanceId,
                             steps = listOf(
                                 AiToolStep(
                                     title = "写入 ${AiSanitize.displayOneLine(args.path)}",
-                                    detail = if (ok) "已按你的设置自动写入（无需确认）" else detail,
+                                    detail = if (ok) t("已按你的设置自动写入（无需确认）") else detail,
                                     status = if (ok) AiToolStep.Status.OK else AiToolStep.Status.FAILED,
                                     elapsedMs = elapsed,
                                 )
@@ -831,7 +832,7 @@ class AiChatController(private val host: AiChatHost) {
                 if (pause != null) {
                     session.apiMessages += AiMessage(
                         AiMessage.ROLE_TOOL,
-                        "已跳过：一次只处理一个待确认写入，请等当前写入确认后再重新发起",
+                        t("已跳过：一次只处理一个待确认写入，请等当前写入确认后再重新发起"),
                         toolCallId = tc.id,
                     )
                     continue
@@ -853,8 +854,8 @@ class AiChatController(private val host: AiChatHost) {
                 appendAiMessage(
                     AiChatMessage(
                         nextAiId(), isUser = false,
-                        text = if (name == "read_memory") "已读取记忆" else "已保存记忆",
-                        toolNote = "记忆",
+                        text = if (name == "read_memory") t("已读取记忆") else t("已保存记忆"),
+                        toolNote = t("记忆"),
                     )
                 )
                 session.apiMessages += AiMessage(AiMessage.ROLE_TOOL, result, toolCallId = tc.id)
@@ -880,7 +881,7 @@ class AiChatController(private val host: AiChatHost) {
                         steps = listOf(
                             AiToolStep(
                                 title = "$label ${AiSanitize.displayOneLine(targetPath)}",
-                                detail = "你在 AI 设置里把该工具设成了「禁止」",
+                                detail = t("你在 AI 设置里把该工具设成了「禁止」"),
                                 status = AiToolStep.Status.DENIED,
                             )
                         ),
@@ -914,7 +915,7 @@ class AiChatController(private val host: AiChatHost) {
                 } else {
                     session.apiMessages += AiMessage(
                         AiMessage.ROLE_TOOL,
-                        "已跳过：一次只处理一个待确认读取，请等当前确认完成后再重新发起",
+                        t("已跳过：一次只处理一个待确认读取，请等当前确认完成后再重新发起"),
                         toolCallId = tc.id,
                     )
                 }
@@ -962,7 +963,7 @@ class AiChatController(private val host: AiChatHost) {
             "write" -> appendAiMessage(
                 AiChatMessage(
                     id = nextAiId(), isUser = false,
-                    text = "我准备写入文件。",
+                    text = t("我准备写入文件。"),
                     writeRequest = AiWriteRequest(
                         path = pausedArgs.path,
                         content = pausedArgs.content,
@@ -977,7 +978,7 @@ class AiChatController(private val host: AiChatHost) {
             "read" -> appendAiMessage(
                 AiChatMessage(
                     id = nextAiId(), isUser = false,
-                    text = "这个文件里可能有敏感内容，需要你先确认。",
+                    text = t("这个文件里可能有敏感内容，需要你先确认。"),
                     readRequest = AiReadRequest(
                         path = pausedArgs.path,
                         absPath = pauseReadPolicy?.resolvedPath.orEmpty(),
@@ -1021,7 +1022,7 @@ class AiChatController(private val host: AiChatHost) {
             AiChatMessage(
                 id = nextAiId(),
                 isUser = false,
-                text = parsed.analysis.ifBlank { "（模型没有给出分析文本）" },
+                text = parsed.analysis.ifBlank { t("（模型没有给出分析文本）") },
                 command = parsed.command.takeIf { it.isNotEmpty() },
                 rawReply = cleaned,
                 instanceId = session.instanceId,
@@ -1043,7 +1044,7 @@ class AiChatController(private val host: AiChatHost) {
         // 抓网页不需要实例目录
         if (name == "fetch_page") return AiWebPage.fetch(path)
         val dir = (instanceId ?: host.currentInstanceId.value)?.let { host.instanceStore.get(it) }?.dir
-            ?: return "失败：当前未选择实例，无法访问文件"
+            ?: return t("失败：当前未选择实例，无法访问文件")
         return if (name == "read_file") {
             AiFileTools.readFile(dir, host.appContext.filesDir, path)
         } else {
@@ -1067,7 +1068,7 @@ class AiChatController(private val host: AiChatHost) {
      * 而模型其实是在没有数据的情况下继续回答的。
      */
     private fun aiReadFailureNote(note: String, result: String): String? =
-        result.takeIf { it.startsWith("失败") || it.startsWith("工具执行失败") }
+        result.takeIf { it.startsWith(t("失败")) || it.startsWith(t("工具执行失败")) }
             ?.let { "$note\n$it" }
 
     // ── 借鉴 Harness 的三个机制：循环卫生 guard / 权限分档 / 会话记忆 ──
@@ -1095,7 +1096,7 @@ class AiChatController(private val host: AiChatHost) {
     /** execute_command 工具：按档位决定直接执行还是升级为建议卡片 */
     private fun execCommandTool(session: AiTurnSession, rawCommand: String): String {
         val cmd = AiSuggestion.sanitizeCommand(rawCommand)
-            ?: return "失败：命令为空或含非法字符"
+            ?: return t("失败：命令为空或含非法字符")
         val mode = AiCommandPolicy.modeById(host.uiPrefs.aiCommandMode.value)
         if (!AiCommandPolicy.canAuto(mode, cmd)) {
             // 当前档位不允许自动执行：升级为建议卡片，用户点「执行」才发送
@@ -1107,14 +1108,14 @@ class AiChatController(private val host: AiChatHost) {
                     instanceId = session.instanceId,
                 )
             )
-            return "已向用户展示命令建议卡片，等待用户确认执行。"
+            return t("已向用户展示命令建议卡片，等待用户确认执行。")
         }
         val inst = session.instanceId?.let { host.instanceStore.get(it) }
-            ?: return "失败：实例不存在或已被删除"
+            ?: return t("失败：实例不存在或已被删除")
         // 未运行的实例 stdin 不存在，sendCommand 是静默 no-op —— 不检查的话
         // 审计日志和回喂都会谎报"已执行"，模型还会反复发起无效调用
         if (host.serverManager.states.value[inst.id] != ServerState.Running) {
-            return "失败：服务端未运行（命令未执行）。可先建议用户启动服务端，或改用其它方案"
+            return t("失败：服务端未运行（命令未执行）。可先建议用户启动服务端，或改用其它方案")
         }
         host.serverManager.sendCommand(inst, cmd)
         AiAudit.log(host.appContext, "ai-command（自动）[${inst.name}] $cmd")
@@ -1136,15 +1137,15 @@ class AiChatController(private val host: AiChatHost) {
             ?.let { id -> File(host.appContext.filesDir, "ai_memory_$id.md") }
 
     private fun execMemoryTool(name: String, instanceId: String?, content: String): String {
-        val f = aiMemoryFile(instanceId) ?: return "失败：未选择实例"
+        val f = aiMemoryFile(instanceId) ?: return t("失败：未选择实例")
         return if (name == "read_memory") {
-            if (!f.isFile) "（暂无记忆）"
+            if (!f.isFile) t("（暂无记忆）")
             else runCatching { f.readText() }
                 .getOrElse { "读取失败：${it.message}" }
                 .take(4096)
-                .ifBlank { "（暂无记忆）" }
+                .ifBlank { t("（暂无记忆）") }
         } else {
-            if (content.isBlank()) return "失败：记忆内容为空"
+            if (content.isBlank()) return t("失败：记忆内容为空")
             runCatching { f.writeText(content.take(4096)) }
                 .getOrElse { "写入失败：${it.message}" }
             AiAudit.log(host.appContext, "ai-memory 更新（${content.length} 字符）")
@@ -1167,11 +1168,11 @@ class AiChatController(private val host: AiChatHost) {
                 // 写入绑定到请求发起时的实例（消息里记录的），不是当前选中的实例
                 val dir = (msg.instanceId?.let { host.instanceStore.get(it) }
                     ?: host.currentInstanceId.value?.let { host.instanceStore.get(it) })?.dir
-                val result = if (dir == null) "失败：实例不存在或已被删除"
+                val result = if (dir == null) t("失败：实例不存在或已被删除")
                 else runCatching { AiFileTools.writeFile(dir, req.path, req.content) }
                     .getOrElse { "失败：${it.message}" }
                 // 失败路径的 result 一律以"失败"开头（writeFile 与上方 dir 判空共同约定）
-                val success = !result.startsWith("失败")
+                val success = !result.startsWith(t("失败"))
                 setAiWriteState(messageId, if (success) 1 else 3)
                 appendAiMessage(
                     AiChatMessage(
@@ -1195,7 +1196,7 @@ class AiChatController(private val host: AiChatHost) {
                 aiSession = null
                 setAiWriteState(messageId, 3)
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "写入流程失败", isError = true)
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: t("写入流程失败"), isError = true)
                 )
             } finally {
                 _aiBusy.value = false
@@ -1216,7 +1217,7 @@ class AiChatController(private val host: AiChatHost) {
             appendAiMessage(
                 AiChatMessage(
                     nextAiId(), isUser = false,
-                    text = "本轮会话已结束，已拒绝本次写入。",
+                    text = t("本轮会话已结束，已拒绝本次写入。"),
                     toolNote = "拒绝写入 ${req.path}",
                 )
             )
@@ -1234,7 +1235,7 @@ class AiChatController(private val host: AiChatHost) {
             } catch (e: Exception) {
                 aiSession = null
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "流程失败", isError = true)
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: t("流程失败"), isError = true)
                 )
             } finally {
                 _aiBusy.value = false
@@ -1266,7 +1267,7 @@ class AiChatController(private val host: AiChatHost) {
             try {
                 val dir = (msg.instanceId?.let { host.instanceStore.get(it) }
                     ?: host.currentInstanceId.value?.let { host.instanceStore.get(it) })?.dir
-                val result = if (dir == null) "失败：实例不存在或已被删除"
+                val result = if (dir == null) t("失败：实例不存在或已被删除")
                 else runCatching { AiFileTools.readFile(dir, host.appContext.filesDir, req.path) }
                     .getOrElse { "工具执行失败：${it.message}" }
                 val note = "读取 ${req.path}"
@@ -1293,7 +1294,7 @@ class AiChatController(private val host: AiChatHost) {
                 aiSession = null
                 setAiReadState(messageId, 0)
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "读取流程失败", isError = true)
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: t("读取流程失败"), isError = true)
                 )
             } finally {
                 _aiBusy.value = false
@@ -1325,14 +1326,14 @@ class AiChatController(private val host: AiChatHost) {
                 session.apiMessages += resumeToolResult(
                     session,
                     "【工具结果】read_file \"${req.path}\" → 用户拒绝了这次读取。请不要重试，" +
-                        "也不要换其它方式去拿这个文件的内容，直接基于已有信息回答",
+                        t("也不要换其它方式去拿这个文件的内容，直接基于已有信息回答"),
                 )
                 session.pendingToolCallId = null
                 runTurn(session)
             } catch (e: Exception) {
                 aiSession = null
                 appendAiMessage(
-                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: "流程失败", isError = true)
+                    AiChatMessage(nextAiId(), isUser = false, text = e.message ?: t("流程失败"), isError = true)
                 )
             } finally {
                 _aiBusy.value = false
@@ -1384,9 +1385,9 @@ class AiChatController(private val host: AiChatHost) {
     private fun buildAiContext(): String {
         val inst = host.currentInstanceId.value?.let { host.instanceStore.get(it) }
         val base = AiContext.build(
-            instanceName = inst?.name ?: "（未选择实例）",
+            instanceName = inst?.name ?: t("（未选择实例）"),
             mcVersion = inst?.mcVersion ?: "",
-            coreType = inst?.coreType?.displayName ?: "未知",
+            coreType = inst?.coreType?.displayName ?: t("未知"),
             javaMajor = inst?.javaMajor ?: 0,
             memoryMb = inst?.memoryMb ?: 0,
             stateLabel = host.serverState.value.toLabel(),

@@ -17,6 +17,7 @@ import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.data.model.VersionType
 import com.kaze.newage.ui.isBusy
 import com.kaze.newage.ui.toLabel
+import com.kaze.newage.core.i18n.t
 
 /**
  * 首页：概览卡 + 实例清单。
@@ -47,14 +48,14 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         alertSlot = c.col()
         body.addView(alertSlot, c.stackMargin(top = 4f))
         body.addView(
-            c.sectionHeader("实例", "新建") { openCreate() },
+            c.sectionHeader(t("实例"), t("新建")) { openCreate() },
             c.stackMargin(top = 18f, bottom = 7f),
         )
         listSlot = c.col()
         body.addView(listSlot)
         body.addView(
             c.txt(
-                "点卡片进控制台 · 长按置顶或删除 · 运行中的实例由前台服务保活",
+                t("点卡片进控制台 · 长按置顶或删除 · 运行中的实例由前台服务保活"),
                 Type.micro, ShellTheme.current.ink3,
             ).apply {
                 gravity = Gravity.CENTER
@@ -65,7 +66,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
 
     private fun buildTitle(): LinearLayout = c.row().apply {
         val texts = c.col().apply {
-            addView(c.txt("岚", Type.display, ShellTheme.current.ink, medium = true))
+            addView(c.txt(t("岚"), Type.display, ShellTheme.current.ink, medium = true))
             addView(
                 c.txt(host.deviceSummary(), Type.micro, ShellTheme.current.ink3).apply {
                     setPadding(0, dp(4f), 0, 0)
@@ -81,7 +82,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                     stroke = ShellTheme.current.accent.alpha(0.26f),
                     strokeWidth = Dim.line,
                 )
-                tappable("新建实例") { openCreate() }
+                tappable(t("新建实例")) { openCreate() }
             },
             LinearLayout.LayoutParams(dp(38f), dp(38f)),
         )
@@ -94,7 +95,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
 
         val texts = c.col().apply {
             setPadding(dp(12f), 0, dp(4f), 0)
-            overviewTitle = c.txt("还没有实例", Type.title, ShellTheme.current.ink, medium = true)
+            overviewTitle = c.txt(t("还没有实例"), Type.title, ShellTheme.current.ink, medium = true)
             addView(overviewTitle)
             // 这里是"实例名 · 版本"这类中英混排：用等宽字体会让汉字被拉成方块格子，
             // 等宽只留给纯数字（CPU、内存、端口）。
@@ -108,7 +109,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 ellipsize = TextUtils.TruncateAt.END
             }
             addView(overviewSub)
-            overviewHint = c.txt("点右上角 ＋ 新建", Type.micro, ShellTheme.current.ink3).apply {
+            overviewHint = c.txt(t("点右上角 ＋ 新建"), Type.micro, ShellTheme.current.ink3).apply {
                 setPadding(0, dp(7f), 0, 0)
                 // 只限行数不给省略号的话，第三行会被硬切，读起来像句子断了
                 //（同一块的 overviewSub 就是对的：maxLines + TruncateAt.END）。
@@ -119,7 +120,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         }
         row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-        overviewPrimary = c.txt("启动", Type.micro, ShellTheme.current.accent, medium = true).apply {
+        overviewPrimary = c.txt(t("启动"), Type.micro, ShellTheme.current.accent, medium = true).apply {
             gravity = Gravity.CENTER
             setPadding(dp(13f), dp(9f), dp(13f), dp(9f))
             // 单行且不参与压缩：两字按钮被挤到只剩一个字宽时会竖排（真机实测过），
@@ -131,7 +132,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 stroke = ShellTheme.current.accent.alpha(0.28f),
                 strokeWidth = Dim.line,
             )
-            tappable("启动或停止当前实例") { toggleFocused() }
+            tappable(t("启动或停止当前实例")) { toggleFocused() }
         }
         row.addView(overviewPrimary)
         addView(row)
@@ -178,21 +179,21 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
 
         when {
             focus == null -> {
-                overviewTitle.text = "还没有实例"
-                overviewSub.text = "服务端跑在本地 proot 环境里"
-                overviewHint.text = "点右上角 ＋ 选择核心与版本"
-                overviewPrimary.text = "新建"
+                overviewTitle.text = t("还没有实例")
+                overviewSub.text = t("服务端跑在本地 proot 环境里")
+                overviewHint.text = t("点右上角 ＋ 选择核心与版本")
+                overviewPrimary.text = t("新建")
             }            running > 0 -> {
-                overviewTitle.text = "运行中"
+                overviewTitle.text = t("运行中")
                 overviewSub.text = "${focus.name} · ${focus.mcVersion.ifBlank { "自定义" }}"
                 overviewHint.text = "${running} / ${instances.size} 个实例在跑 · 内存 ${focus.memoryMb} MB"
-                overviewPrimary.text = "停止"
+                overviewPrimary.text = t("停止")
             }
             else -> {
-                overviewTitle.text = "全部停止"
+                overviewTitle.text = t("全部停止")
                 overviewSub.text = "${instances.size} 个实例待命"
-                overviewHint.text = "点圆盘或右侧按钮启动最近使用的实例"
-                overviewPrimary.text = "启动"
+                overviewHint.text = t("点圆盘或右侧按钮启动最近使用的实例")
+                overviewPrimary.text = t("启动")
             }
         }
         val tone = if (running > 0) ShellTheme.current.accent else ShellTheme.current.ink2
@@ -211,9 +212,9 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         if (instances.isEmpty()) {
             listSlot.addView(
                 c.emptyState(
-                    "还没有服务端实例",
-                    "选核心与版本，应用会下载 jar、建目录、配好 server.properties",
-                    "新建实例",
+                    t("还没有服务端实例"),
+                    t("选核心与版本，应用会下载 jar、建目录、配好 server.properties"),
+                    t("新建实例"),
                 ) { openCreate() },
                 c.stackMargin(),
             )
@@ -229,12 +230,12 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         if (!host.vm.env.isReady) {
             alertSlot.addView(
                 c.banner(
-                    "Linux 环境未部署。启动实例时会自动下载环境，也可以在设置里先部署。",
+                    t("Linux 环境未部署。启动实例时会自动下载环境，也可以在设置里先部署。"),
                     ShellTheme.current.warn,
-                    "部署",
+                    t("部署"),
                 ) {
-                    host.toast("开始部署环境…")
-                    host.setupEnvironment { host.toast("环境已就绪") }
+                    host.toast(t("开始部署环境…"))
+                    host.setupEnvironment { host.toast(t("环境已就绪")) }
                 },
                 c.stackMargin(top = 8f),
             )
@@ -245,7 +246,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 c.banner(
                     "「${failed.name}」启动失败，进控制台看具体原因。",
                     ShellTheme.current.danger,
-                    "查看",
+                    t("查看"),
                 ) { host.openConsoleAction(failed) },
                 c.stackMargin(top = 8f),
             )
@@ -290,7 +291,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 )
                 if (instance.pinned) {
                     nameRow.addView(
-                        c.txt("置顶", Type.micro, ShellTheme.current.accent, medium = true).apply {
+                        c.txt(t("置顶"), Type.micro, ShellTheme.current.accent, medium = true).apply {
                             setPadding(dp(6f), 0, 0, 0)
                         },
                     )
@@ -365,16 +366,16 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         val tone: Int
         when {
             state == ServerState.Stopping -> {
-                label = "强制"; tone = ShellTheme.current.danger
+                label = t("强制"); tone = ShellTheme.current.danger
             }
             running -> {
-                label = "停止"; tone = ShellTheme.current.ink2
+                label = t("停止"); tone = ShellTheme.current.ink2
             }
             busy -> {
                 label = "…"; tone = ShellTheme.current.ink3
             }
             else -> {
-                label = "启动"; tone = ShellTheme.current.accent
+                label = t("启动"); tone = ShellTheme.current.accent
             }
         }
         return c.txt(label, Type.micro, tone, medium = true).apply {
@@ -414,33 +415,33 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             instance.name,
             "${instance.coreType.displayName} · ${instance.mcVersion.ifBlank { "自定义" }} · ${state.toLabel()}",
         )
-        sheet.add(c.settingRow("打开控制台", "实时日志、发送命令、CPU 与内存占用") {
+        sheet.add(c.settingRow(t("打开控制台"), t("实时日志、发送命令、CPU 与内存占用")) {
             sheet.dismiss()
             host.openConsoleAction(instance)
         })
         sheet.add(c.splitter())
-        sheet.add(c.settingRow(if (running) "重启" else "启动", "重启会先优雅停服再拉起") {
+        sheet.add(c.settingRow(if (running) t("重启") else t("启动"), t("重启会先优雅停服再拉起")) {
             sheet.dismiss()
             if (running) host.restart(instance) else host.start(instance)
         })
         if (state == ServerState.Stopping) {
             sheet.add(c.splitter())
-            sheet.add(c.settingRow("强制停止", "世界可能来不及保存", c.chevron(ShellTheme.current.danger)) {
+            sheet.add(c.settingRow(t("强制停止"), t("世界可能来不及保存"), c.chevron(ShellTheme.current.danger)) {
                 sheet.dismiss()
                 host.stop(instance)
             })
         }
         sheet.add(c.splitter())
-        sheet.add(c.settingRow(if (instance.pinned) "取消置顶" else "置顶", "置顶的实例排在最前") {
+        sheet.add(c.settingRow(if (instance.pinned) t("取消置顶") else t("置顶"), t("置顶的实例排在最前")) {
             sheet.dismiss()
             host.vm.setInstancePinned(instance, !instance.pinned)
         })
         sheet.add(c.splitter())
-        sheet.add(c.settingRow("删除实例", "世界与目录保留在磁盘上", c.chevron(ShellTheme.current.danger)) {
+        sheet.add(c.settingRow(t("删除实例"), t("世界与目录保留在磁盘上"), c.chevron(ShellTheme.current.danger)) {
             sheet.dismiss()
             confirmDelete(instance)
         })
-        sheet.footerText("关闭", ShellTheme.current.ink3) { sheet.dismiss() }
+        sheet.footerText(t("关闭"), ShellTheme.current.ink3) { sheet.dismiss() }
         sheet.show()
     }
 
@@ -449,18 +450,18 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         sheet.add(
             c.txt(
                 "只移除应用里的实例记录；目录 ${instance.dir.name} 与世界存档仍在磁盘上，" +
-                    "可以重新导入。此动作不可撤销。",
+                    t("可以重新导入。此动作不可撤销。"),
                 Type.body, ShellTheme.current.ink2,
             ).apply { setLineSpacing(dp(3f).toFloat(), 1f) },
         )
         sheet.buttons(
-            "删除",
+            t("删除"),
             {
                 sheet.dismiss()
                 host.remove(instance)
                 host.toast("已删除 ${instance.name}")
             },
-            secondaryLabel = "取消",
+            secondaryLabel = t("取消"),
             onSecondary = { sheet.dismiss() },
             danger = true,
         )
@@ -497,7 +498,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
 internal class CreateWizard(
     context: Context,
     private val host: ShellHost,
-) : Sheet(context, "新建服务端", "选核心与版本，应用会下载 jar 并建目录") {
+) : Sheet(context, t("新建服务端"), t("选核心与版本，应用会下载 jar 并建目录")) {
 
     private val c = context
     private val vm = host.vm
@@ -530,12 +531,12 @@ internal class CreateWizard(
     }
 
     init {
-        label("服务端核心")
+        label(t("服务端核心"))
         coreGrid = c.col()
         add(coreGrid)
         renderCores()
 
-        label("游戏版本")
+        label(t("游戏版本"))
         add(
             c.row().apply {
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -544,15 +545,15 @@ internal class CreateWizard(
                     ShellTheme.current.stroke, Dim.line,
                 )
                 setPadding(c.dp(13f), c.dp(11f), c.dp(12f), c.dp(11f))
-                addView(c.txt("目标版本", Type.body, ShellTheme.current.ink))
+                addView(c.txt(t("目标版本"), Type.body, ShellTheme.current.ink))
                 addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
-                versionValue = c.mono("未选择", Type.body, ShellTheme.current.ink3)
+                versionValue = c.mono(t("未选择"), Type.body, ShellTheme.current.ink3)
                 addView(versionValue)
                 addView(
                     c.chevron(),
                     LinearLayout.LayoutParams(c.dp(18f), c.dp(18f)).apply { marginStart = c.dp(3f) },
                 )
-                tappable("选择游戏版本") { pickVersion() }
+                tappable(t("选择游戏版本")) { pickVersion() }
             },
         )
 
@@ -562,24 +563,24 @@ internal class CreateWizard(
                 ShellTheme.current.stroke, Dim.line,
             )
             setPadding(c.dp(13f), c.dp(11f), c.dp(12f), c.dp(11f))
-            addView(c.txt("构建", Type.body, ShellTheme.current.ink))
+            addView(c.txt(t("构建"), Type.body, ShellTheme.current.ink))
             addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
-            buildValue = c.mono("最新", Type.body, ShellTheme.current.ink3)
+            buildValue = c.mono(t("最新"), Type.body, ShellTheme.current.ink3)
             addView(buildValue)
             addView(
                 c.chevron(),
                 LinearLayout.LayoutParams(c.dp(18f), c.dp(18f)).apply { marginStart = c.dp(3f) },
             )
             visibility = View.GONE
-            tappable("选择构建") { pickBuild() }
+            tappable(t("选择构建")) { pickBuild() }
         }
         add(buildRow)
 
-        label("实例名称")
-        nameInput = c.input("留空则用「核心-版本」命名")
+        label(t("实例名称"))
+        nameInput = c.input(t("留空则用「核心-版本」命名"))
         add(nameInput)
 
-        label("内存上限")
+        label(t("内存上限"))
         memoryValue = c.mono("", Type.title, ShellTheme.current.ink)
         memoryMb = MemoryLimits.clamp(MemoryLimits.suggestFrom(maxMem.toFloat()).toInt())
         memoryValue.text = "$memoryMb MB"
@@ -610,7 +611,7 @@ internal class CreateWizard(
         }
         add(progress)
 
-        buttons("下载并创建", { startDownload() }, secondaryLabel = "取消", onSecondary = { dismiss() })
+        buttons(t("下载并创建"), { startDownload() }, secondaryLabel = t("取消"), onSecondary = { dismiss() })
     }
 
     // ── 核心选择 ───────────────────────────────────────────────────────
@@ -660,9 +661,9 @@ internal class CreateWizard(
                 mcVersion = ""
                 buildId = ""
                 builds = emptyList()
-                versionValue.text = "未选择"
+                versionValue.text = t("未选择")
                 versionValue.setTextColor(ShellTheme.current.ink3)
-                buildValue.text = "最新"
+                buildValue.text = t("最新")
                 buildRow.visibility = View.GONE
                 renderCores()
             }
@@ -674,7 +675,7 @@ internal class CreateWizard(
     private fun pickVersion() {
         if (busy) return
         if (coreType == CoreType.CUSTOM) {
-            host.toast("「导入 jar」不通过下载创建，请在设置里用导入功能")
+            host.toast(t("「导入 jar」不通过下载创建，请在设置里用导入功能"))
             return
         }
         vm.loadVersions(coreType)
@@ -691,7 +692,7 @@ internal class CreateWizard(
             progress.visibility = View.GONE
             clearStatus()
             if (list.isEmpty()) {
-                host.toast("没取到版本列表，检查网络后重试", error = true)
+                host.toast(t("没取到版本列表，检查网络后重试"), error = true)
                 return@awaitVersions
             }
             showVersionPicker(list)
@@ -701,14 +702,14 @@ internal class CreateWizard(
     private fun showVersionPicker(list: List<GameVersion>) {
         val options = list.take(150).map { v ->
             v.id to when (v.type) {
-                VersionType.SNAPSHOT -> "快照版"
-                VersionType.RELEASE -> "正式版"
-                VersionType.OLD_BETA -> "远古测试版"
-                VersionType.OLD_ALPHA -> "远古预览版"
+                VersionType.SNAPSHOT -> t("快照版")
+                VersionType.RELEASE -> t("正式版")
+                VersionType.OLD_BETA -> t("远古测试版")
+                VersionType.OLD_ALPHA -> t("远古预览版")
             }
         }
         c.choiceSheet(
-            "选择版本",
+            t("选择版本"),
             "${coreType.displayName} · 共 ${list.size} 个",
             options,
             options.indexOfFirst { it.first == mcVersion },
@@ -717,7 +718,7 @@ internal class CreateWizard(
             versionValue.text = mcVersion
             versionValue.setTextColor(ShellTheme.current.ink)
             buildId = ""
-            buildValue.text = "最新"
+            buildValue.text = t("最新")
             buildValue.setTextColor(ShellTheme.current.ink3)
             if (coreType == CoreType.PAPER || coreType == CoreType.FABRIC) {
                 loadBuilds()
@@ -738,12 +739,12 @@ internal class CreateWizard(
     private fun pickBuild() {
         if (busy) return
         if (builds.isEmpty()) {
-            host.toast("该核心没有可选构建，将取最新")
+            host.toast(t("该核心没有可选构建，将取最新"))
             return
         }
         val options = builds.map { it.name to (it.fileName ?: "") }
         c.choiceSheet(
-            "选择构建",
+            t("选择构建"),
             "$mcVersion · 共 ${builds.size} 个",
             options,
             options.indexOfFirst { it.first == buildId },
@@ -759,11 +760,11 @@ internal class CreateWizard(
     private fun startDownload() {
         if (busy) return
         if (mcVersion.isBlank()) {
-            host.toast("先选一个游戏版本", error = true)
+            host.toast(t("先选一个游戏版本"), error = true)
             return
         }
         if (vm.download.value.running) {
-            host.toast("已有下载在进行中", error = true)
+            host.toast(t("已有下载在进行中"), error = true)
             return
         }
         val name = nameInput.text.toString().trim().ifBlank {
@@ -771,11 +772,11 @@ internal class CreateWizard(
         }
 
         busy = true
-        setPrimaryBusy(true, "下载中…")
+        setPrimaryBusy(true, t("下载中…"))
         progress.visibility = View.VISIBLE
         progress.indeterminate = true
         progress.fraction = 0f
-        setStatus("解析下载地址…", ShellTheme.current.ink3)
+        setStatus(t("解析下载地址…"), ShellTheme.current.ink3)
 
         vm.downloadAndCreate(
             name = name,
@@ -787,10 +788,10 @@ internal class CreateWizard(
             busy = false
             progress.indeterminate = false
             if (instance == null) {
-                val err = vm.download.value.error ?: "创建失败"
+                val err = vm.download.value.error ?: t("创建失败")
                 setStatus(err, ShellTheme.current.danger)
                 progress.fraction = 0f
-                setPrimaryBusy(false, "重试下载")
+                setPrimaryBusy(false, t("重试下载"))
             } else {
                 progress.fraction = 1f
                 setStatus("创建完成：${instance.name}", ShellTheme.current.good)
@@ -815,7 +816,7 @@ internal class CreateWizard(
                 busy = false
                 progress.indeterminate = false
                 setStatus(st.error, ShellTheme.current.danger)
-                setPrimaryBusy(false, "重试下载")
+                setPrimaryBusy(false, t("重试下载"))
             }
         }
     }

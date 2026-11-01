@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.kaze.newage.core.console.LineType
+import com.kaze.newage.core.i18n.t
 
 // ══════════════════════════════════════════════════════════════
 // 主题系统：
@@ -33,9 +34,9 @@ import com.kaze.newage.core.console.LineType
 
 /** 液态玻璃模式（三档） */
 enum class GlassMode(val id: String, val label: String, val progress: Float) {
-    CLEAR("clear", "清晰", 0.2f),
-    BALANCED("balanced", "均衡", 0.5f),
-    FROSTED("frosted", "磨砂", 0.85f),
+    CLEAR("clear", t("清晰"), 0.2f),
+    BALANCED("balanced", t("均衡"), 0.5f),
+    FROSTED("frosted", t("磨砂"), 0.85f),
     ;
 
     companion object {
@@ -477,7 +478,7 @@ fun statusPalette(): StatusPalette = when (LocalAppTheme.current) {
     AppThemeMode.M3 -> if (LocalDarkTheme.current) StatusPalette(
         running = Color(0xFF34D399),
         busy = Color(0xFFFFC24B),
-        idle = Color(0xFFA9B3C8), // 提亮：深色下"未启动/已停止"等状态字可见
+        idle = Color(0xFFA9B3C8), // 提亮：深色下t("未启动/已停止")等状态字可见
         error = Color(0xFFFF6B6B),
     ) else StatusPalette(
         running = Color(0xFF23A268),

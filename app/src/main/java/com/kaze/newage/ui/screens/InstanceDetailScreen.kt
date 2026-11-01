@@ -110,6 +110,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.Surface
+import com.kaze.newage.core.i18n.t
 
 /**
  * 实例详情 —— 一个服务端的全部控制项，按「运行 / 配置 / 世界 / 附加」四个分区组织。
@@ -209,7 +210,7 @@ fun InstanceDetailScreen(
                     appContext.contentResolver.openInputStream(uri)?.use { ins ->
                         val f = BackupManager.import(instance, ins, name)
                         "已导入：${f.name}"
-                    } ?: "导入失败：无法读取文件"
+                    } ?: t("导入失败：无法读取文件")
                 } catch (e: Exception) {
                     "导入失败：${e.message}"
                 }
@@ -246,13 +247,13 @@ fun InstanceDetailScreen(
             subtitle = "${instance.coreType.displayName} · MC ${instance.mcVersion.ifBlank { "自定义" }} · Java ${instance.javaMajor} · ${instance.memoryMb} MB",
             leading = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回"))
                 }
             },
             trailing = {
                 // 改名：只改软件里显示的名字，与服务器 MOTD（server.properties）独立
                 IconButton(onClick = { showRenameDialog = true }) {
-                    Icon(Icons.Filled.Edit, contentDescription = "重命名实例")
+                    Icon(Icons.Filled.Edit, contentDescription = t("重命名实例"))
                 }
             },
         )
@@ -285,12 +286,12 @@ fun InstanceDetailScreen(
         // 启动失败必须被看到，也要有出路：常驻失败条 + 直达启动日志
         if (state == ServerState.Error) {
             M3EListItem(
-                headline = "服务端启动失败",
-                supporting = "启动日志里有退出码与完整报错，先看日志再决定改配置还是换 Java 版本",
+                headline = t("服务端启动失败"),
+                supporting = t("启动日志里有退出码与完整报错，先看日志再决定改配置还是换 Java 版本"),
                 leadingIcon = Icons.Filled.ErrorOutline,
                 iconContainer = MaterialTheme.colorScheme.errorContainer,
                 shape = M3Shape.listSingle,
-                trailing = { TextButton(onClick = onOpenLogs) { Text("查看日志") } },
+                trailing = { TextButton(onClick = onOpenLogs) { Text(t("查看日志")) } },
                 modifier = Modifier.padding(
                     horizontal = M3Spacing.screenMargin,
                     vertical = M3Spacing.betweenParts,
@@ -401,7 +402,7 @@ fun InstanceDetailScreen(
                                     state == ServerState.FirstRun ||
                                     state == ServerState.AcceptingEula
                                 ) {
-                                    backupMsg = "请先停止服务端再恢复备份"
+                                    backupMsg = t("请先停止服务端再恢复备份")
                                 } else {
                                     restoreTarget = f
                                 }
@@ -432,7 +433,7 @@ fun InstanceDetailScreen(
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
             title = { Text("删除「${target.name.removeSuffix(".zip")}」？") },
-            text = { Text("该备份文件将被永久删除，无法恢复。") },
+            text = { Text(t("该备份文件将被永久删除，无法恢复。")) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -442,10 +443,10 @@ fun InstanceDetailScreen(
                         backupMsg = "已删除备份：${f.name.removeSuffix(".zip")}"
                         backupRefresh++
                     }
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                ) { Text(t("删除"), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+                TextButton(onClick = { deleteTarget = null }) { Text(t("取消")) }
             },
         )
     }
@@ -455,7 +456,7 @@ fun InstanceDetailScreen(
             onDismissRequest = { restoreTarget = null },
             title = { Text("恢复「${target.name.removeSuffix(".zip")}」？") },
             text = {
-                Text("当前实例目录（世界存档、配置、插件/模组）将被备份内容完整覆盖。此操作不可撤销。")
+                Text(t("当前实例目录（世界存档、配置、插件/模组）将被备份内容完整覆盖。此操作不可撤销。"))
             },
             confirmButton = {
                 TextButton(
@@ -467,7 +468,7 @@ fun InstanceDetailScreen(
                         //「立即备份 / 导入 / 删除备份」，就会一边换目录一边打包/删文件，
                         // 轻则备份里混进半截 tmp 内容，重则两边互相删对方的中间目录。
                         if (backupBusy) {
-                            backupMsg = "有其它备份任务正在进行，请稍后再恢复"
+                            backupMsg = t("有其它备份任务正在进行，请稍后再恢复")
                             return@TextButton
                         }
                         backupBusy = true
@@ -482,10 +483,10 @@ fun InstanceDetailScreen(
                             backupBusy = false
                         }
                     }
-                ) { Text("恢复", color = MaterialTheme.colorScheme.error) }
+                ) { Text(t("恢复"), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { restoreTarget = null }) { Text("取消") }
+                TextButton(onClick = { restoreTarget = null }) { Text(t("取消")) }
             },
         )
     }

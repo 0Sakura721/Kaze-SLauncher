@@ -106,6 +106,7 @@ import com.kaze.newage.ui.components.MemorySliderRow
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
 import androidx.compose.material3.OutlinedButton
+import com.kaze.newage.core.i18n.t
 
 /**
  * 新建服务端 —— 三步向导：选核心 → 选版本与资源 → 确认安装。
@@ -136,7 +137,7 @@ fun NewServerScreen(
         uri?.let {
             viewModel.importJar(
                 uri = it,
-                name = "导入-" + java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+                name = t("导入-") + java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
                     .format(java.util.Date()),
                 memoryMb = 1024,
             )

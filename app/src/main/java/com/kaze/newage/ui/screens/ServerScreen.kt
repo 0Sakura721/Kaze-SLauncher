@@ -76,6 +76,7 @@ import com.kaze.newage.ui.isBusy
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
 import com.kaze.newage.ui.toLabel
+import com.kaze.newage.core.i18n.t
 
 /**
  * 服务端 —— 多实例的列表与管理（多开 / 筛选 / 启停 / 导入）。
@@ -145,7 +146,7 @@ fun ServerScreen(
         uri?.let {
             viewModel.importJar(
                 uri = it,
-                name = "导入-" + java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+                name = t("导入-") + java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
                     .format(java.util.Date()),
                 memoryMb = 1024,
             )
@@ -171,23 +172,23 @@ fun ServerScreen(
     modpackUri?.let { uri ->
         AlertDialog(
             onDismissRequest = { modpackUri = null },
-            title = { Text("导入整合包") },
+            title = { Text(t("导入整合包")) },
             text = {
                 Column {
                     Text(
-                        "会解压到新的实例目录，并自动识别启动方式（jar / Forge / 只有 mods）。",
+                        t("会解压到新的实例目录，并自动识别启动方式（jar / Forge / 只有 mods）。"),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     OutlinedTextField(
                         value = modpackName,
                         onValueChange = { modpackName = it },
-                        label = { Text("实例名（可留空）") },
-                        placeholder = { Text("留空自动命名") },
+                        label = { Text(t("实例名（可留空）")) },
+                        placeholder = { Text(t("留空自动命名")) },
                         singleLine = true,
                         modifier = Modifier.padding(top = 8.dp),
                     )
                     Text(
-                        "提示：整合包通常要吃更多内存，导入后可在实例详情里调整。",
+                        t("提示：整合包通常要吃更多内存，导入后可在实例详情里调整。"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
@@ -200,10 +201,10 @@ fun ServerScreen(
                         viewModel.importModpack(uri, modpackName)
                         modpackUri = null
                     },
-                ) { Text("导入") }
+                ) { Text(t("导入")) }
             },
             dismissButton = {
-                TextButton(onClick = { modpackUri = null }) { Text("取消") }
+                TextButton(onClick = { modpackUri = null }) { Text(t("取消")) }
             },
         )
     }
@@ -218,9 +219,9 @@ fun ServerScreen(
 
     Column(Modifier.fillMaxSize()) {
         M3EScreenHeader(
-            title = "服务端",
+            title = t("服务端"),
             subtitle = if (instances.isEmpty()) {
-                "还没有服务端实例"
+                t("还没有服务端实例")
             } else {
                 "共 ${instances.size} 个实例 · $runningCount 个运行中"
             },
@@ -236,7 +237,7 @@ fun ServerScreen(
                 IconButton(onClick = onOpenAi) {
                     Icon(
                         Icons.Filled.SmartToy,
-                        contentDescription = "AI 助手",
+                        contentDescription = t("AI 助手"),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -253,7 +254,7 @@ fun ServerScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             GroupButton(
-                label = "新建",
+                label = t("新建"),
                 icon = Icons.Filled.Add,
                 shape = M3Shape.groupFirst(56f),
                 container = MaterialTheme.colorScheme.primary,
@@ -262,7 +263,7 @@ fun ServerScreen(
                 onClick = onNewServer,
             )
             GroupButton(
-                label = "导入 jar",
+                label = t("导入 jar"),
                 icon = Icons.Filled.FileOpen,
                 // 三个按钮横向相连：新建（首）/ 导入 jar（中）/ 整合包（尾）
                 shape = M3Shape.groupMiddle(),
@@ -283,7 +284,7 @@ fun ServerScreen(
                 // issue #15：「服务器整合包 zip 直接导入」
                 // 与「导入 jar」分开成两个按钮而不是合成一个"导入":
                 // 两者处理路径完全不同（单个 jar vs 整棵目录树），合并后没法给出准确提示。
-                label = "整合包",
+                label = t("整合包"),
                 icon = Icons.Filled.FolderZip,
                 shape = M3Shape.groupLast(56f),
                 container = MaterialTheme.colorScheme.secondaryContainer,
@@ -410,7 +411,7 @@ fun ServerScreen(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
             GroupButton(
-                label = "启动全部",
+                label = t("启动全部"),
                 icon = Icons.Filled.PlayArrow,
                 shape = M3Shape.groupFirst(56f),
                 container = MaterialTheme.colorScheme.primary,
@@ -428,7 +429,7 @@ fun ServerScreen(
                 },
             )
             GroupButton(
-                label = "停止全部",
+                label = t("停止全部"),
                 icon = Icons.Filled.Stop,
                 shape = M3Shape.groupLast(56f),
                 container = MaterialTheme.colorScheme.secondaryContainer,
@@ -456,10 +457,10 @@ fun ServerScreen(
 
 /** 顶部分段筛选的档位（「全部」没有对应的 CoreCategory，所以不能直接用那个枚举） */
 private enum class InstanceFilter(val label: String, val category: CoreCategory?) {
-    ALL("全部", null),
-    OFFICIAL("官方", CoreCategory.OFFICIAL),
-    OPTIMIZED("性能", CoreCategory.OPTIMIZED),
-    MODDED("模组", CoreCategory.MODDED),
+    ALL(t("全部"), null),
+    OFFICIAL(t("官方"), CoreCategory.OFFICIAL),
+    OPTIMIZED(t("性能"), CoreCategory.OPTIMIZED),
+    MODDED(t("模组"), CoreCategory.MODDED),
 }
 
 /**
@@ -523,12 +524,12 @@ private fun EmptyState(
                 modifier = Modifier.size(40.dp),
             )
             Text(
-                if (hasInstances) "「$filterLabel」下没有服务端" else "还没有服务端",
+                if (hasInstances) "「$filterLabel」下没有服务端" else t("还没有服务端"),
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(
                 if (hasInstances) {
-                    "换一个筛选档，或者新建一个"
+                    t("换一个筛选档，或者新建一个")
                 } else {
                     "点上方「新建」下载 Vanilla / Paper 服务端，\n或「导入 jar」添加已有的 server.jar"
                 },
@@ -537,7 +538,7 @@ private fun EmptyState(
                 textAlign = TextAlign.Center,
             )
             if (!hasInstances) {
-                TextButton(onClick = onNewServer) { Text("新建服务端") }
+                TextButton(onClick = onNewServer) { Text(t("新建服务端")) }
             }
         }
     }
@@ -574,10 +575,10 @@ private fun coreTypeIcon(category: CoreCategory): ImageVector = when (category) 
 
 /** 实例状态文案（运行中 / 启动中 / 已停止 / 启动失败）——全应用统一词汇见 ServerStateUi */
 private fun instanceStatusText(state: ServerState): String = when {
-    state == ServerState.Running -> "运行中"
+    state == ServerState.Running -> t("运行中")
     state.isBusy() -> state.toLabel()
-    state == ServerState.Error -> "启动失败"
-    else -> "已停止"
+    state == ServerState.Error -> t("启动失败")
+    else -> t("已停止")
 }
 
 /**
@@ -589,7 +590,7 @@ private fun instanceSummary(instance: ServerInstance, state: ServerState): Strin
     append(instance.coreType.displayName)
     // 不写 "MC "：版本号本身就是 MC 版本，这几个字符在这个摘要行里很值钱
     append(" · ")
-    append(instance.mcVersion.ifBlank { "自定义" })
+    append(instance.mcVersion.ifBlank { t("自定义") })
     append(" · Java ")
     append(instance.javaMajor)
     append(" · ")
@@ -660,7 +661,7 @@ private fun InstanceRow(
                         // 置顶标记：排序列表之外的第二重确认，扫一眼就知道哪几个在前面
                         Icon(
                             Icons.Filled.PushPin,
-                            contentDescription = "已置顶",
+                            contentDescription = t("已置顶"),
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(16.dp),
                         )
@@ -672,7 +673,7 @@ private fun InstanceRow(
                         // 语义靠 contentDescription 保留给读屏。
                         Icon(
                             Icons.Filled.Warning,
-                            contentDescription = "EULA 未接受",
+                            contentDescription = t("EULA 未接受"),
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(18.dp),
                         )
@@ -681,9 +682,9 @@ private fun InstanceRow(
                         icon = if (showStop) Icons.Filled.Stop else Icons.Filled.PlayArrow,
                         description = when {
                             // 停止中再点一次 = 强制停止（正常停止会一直等服务器存完世界）
-                            state == ServerState.Stopping -> "强制停止"
-                            showStop -> "停止"
-                            else -> "启动"
+                            state == ServerState.Stopping -> t("强制停止")
+                            showStop -> t("停止")
+                            else -> t("启动")
                         },
                         container = if (showStop) {
                             MaterialTheme.colorScheme.errorContainer
@@ -699,7 +700,7 @@ private fun InstanceRow(
                     )
                     RoundActionButton(
                         icon = Icons.Filled.MoreVert,
-                        description = "更多",
+                        description = t("更多"),
                         container = Color.Transparent,
                         content = MaterialTheme.colorScheme.onSurfaceVariant,
                         onClick = { menuExpanded = true },
@@ -713,7 +714,7 @@ private fun InstanceRow(
                     shape = M3Shape.medium,
                 ) {
                     DropdownMenuItem(
-                        text = { Text(if (pinned) "取消置顶" else "置顶") },
+                        text = { Text(if (pinned) t("取消置顶") else t("置顶")) },
                         leadingIcon = { Icon(Icons.Filled.PushPin, null, Modifier.size(20.dp)) },
                         onClick = {
                             menuExpanded = false
@@ -723,7 +724,7 @@ private fun InstanceRow(
                     // 一键重启：与实例详情/主页同一个 stop→等停稳→start 链路。
                     // 只在运行中可点（停止态谈不上的重启），停止中交给停止流程自己收尾
                     DropdownMenuItem(
-                        text = { Text("重启") },
+                        text = { Text(t("重启")) },
                         leadingIcon = { Icon(Icons.Filled.RestartAlt, null, Modifier.size(20.dp)) },
                         enabled = running,
                         onClick = {
@@ -732,7 +733,7 @@ private fun InstanceRow(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("打开实例目录") },
+                        text = { Text(t("打开实例目录")) },
                         leadingIcon = { Icon(Icons.Filled.FolderOpen, null, Modifier.size(20.dp)) },
                         onClick = {
                             menuExpanded = false
@@ -748,7 +749,7 @@ private fun InstanceRow(
                         },
                     )
                     DropdownMenuItem(
-                        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                        text = { Text(t("删除"), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
                             Icon(
                                 Icons.Filled.Delete,
@@ -770,7 +771,7 @@ private fun InstanceRow(
                         onDismissRequest = { confirmDelete = false },
                         title = { Text("删除「${instance.name}」？") },
                         text = {
-                            Text("将永久删除实例目录及其全部备份（世界存档、配置、插件/模组）。此操作不可恢复。")
+                            Text(t("将永久删除实例目录及其全部备份（世界存档、配置、插件/模组）。此操作不可恢复。"))
                         },
                         confirmButton = {
                             TextButton(
@@ -779,12 +780,12 @@ private fun InstanceRow(
                                     onDelete()
                                 }
                             ) {
-                                Text("删除", color = MaterialTheme.colorScheme.error)
+                                Text(t("删除"), color = MaterialTheme.colorScheme.error)
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = { confirmDelete = false }) {
-                                Text("取消")
+                                Text(t("取消"))
                             }
                         },
                     )
