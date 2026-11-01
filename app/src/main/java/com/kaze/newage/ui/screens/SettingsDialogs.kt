@@ -414,6 +414,7 @@ internal fun UpdateStatusCard(
 /** 「行 → 选择器」弹窗的标识（同一时刻只开一个） */
 internal enum class SettingsDialog {
     ThemeStyle,
+    Language,
     ThemeMode,
     ColorSource,
     DarkStyle,
@@ -703,3 +704,17 @@ internal fun SettingsCategoryBar(
         }
     }
 }
+
+/** 界面语言的显示名（跟随系统时附带解析结果，让用户知道实际会用哪种） */
+internal fun appLanguageLabel(id: String): String =
+    when (com.kaze.newage.core.i18n.AppLanguage.fromId(id)) {
+        com.kaze.newage.core.i18n.AppLanguage.SYSTEM ->
+            t("跟随系统") + " · " + if (com.kaze.newage.core.i18n.LanguageState.isChinese) {
+                t("简体中文")
+            } else {
+                "English"
+            }
+        com.kaze.newage.core.i18n.AppLanguage.ZH -> t("简体中文")
+        com.kaze.newage.core.i18n.AppLanguage.EN -> "English"
+    }
+

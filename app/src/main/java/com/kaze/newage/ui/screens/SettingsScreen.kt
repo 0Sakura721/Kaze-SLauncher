@@ -32,7 +32,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material.icons.filled.BlurCircular
@@ -134,20 +133,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.runtime.LaunchedEffect
 import com.kaze.newage.core.i18n.t
-
-/** 界面语言的显示名（跟随系统时附带解析结果，让用户知道实际会用哪种） */
-internal fun appLanguageLabel(id: String): String =
-    when (com.kaze.newage.core.i18n.AppLanguage.fromId(id)) {
-        com.kaze.newage.core.i18n.AppLanguage.SYSTEM ->
-            t("跟随系统") + " · " + if (com.kaze.newage.core.i18n.LanguageState.isChinese) {
-                t("简体中文")
-            } else {
-                "English"
-            }
-        com.kaze.newage.core.i18n.AppLanguage.ZH -> t("简体中文")
-        com.kaze.newage.core.i18n.AppLanguage.EN -> "English"
-    }
-}
 
 /** 背景图选图即用（显示端自适应铺满+模糊+遮罩），不再进入手动裁剪页 */
 
@@ -434,7 +419,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 section = SettingsSection.Appearance,
                 sectionOffsets = sectionOffsets,
             )
-            M3EConnectedList(count = 6) { index, shape ->
+            M3EConnectedList(count = 5) { index, shape ->
                 when (index) {
                     0 -> M3EListItem(
                         headline = t("主题样式"),
@@ -446,15 +431,6 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     1 -> M3EListItem(
-                        headline = t("界面语言"),
-                        supporting = appLanguageLabel(uiPrefs.appLanguage.value),
-                        leadingIcon = Icons.Filled.Translate,
-                        iconContainer = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = shape,
-                        onClick = { openDialog = SettingsDialog.Language },
-                        trailing = { RowChevron() },
-                    )
-                    2 -> M3EListItem(
                         headline = t("主题模式"),
                         supporting = themeModeLabel(uiPrefs.themeModeValue.value),
                         leadingIcon = Icons.Filled.Brightness6,
@@ -463,7 +439,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         onClick = { openDialog = SettingsDialog.ThemeMode },
                         trailing = { RowChevron() },
                     )
-                    3 -> M3EListItem(
+                    2 -> M3EListItem(
                         headline = t("颜色来源"),
                         supporting = if (uiPrefs.md3ColorSource.value == "custom") {
                             "自定义颜色 · ${uiPrefs.md3CustomColor.value}"
@@ -476,7 +452,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         onClick = { openDialog = SettingsDialog.ColorSource },
                         trailing = { RowChevron() },
                     )
-                    4 -> M3EListItem(
+                    3 -> M3EListItem(
                         headline = t("深色样式"),
                         supporting = darkStyleLabel(uiPrefs.darkStyle.value),
                         leadingIcon = Icons.Filled.DarkMode,
@@ -959,6 +935,40 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 onDismiss = { viewModel.resetUpdateState() },
             )
 
+            // ═══ 界面语言 ═══
+            // 单独一块而不是塞进「外观」的列表：语言是全局设置，与那些视觉选项不是一类；
+            // 独立成块也让「跟随系统」的解析结果有地方展示（见 supporting）。
+            M3ECard(
+                modifier = Modifier.padding(top = M3Spacing.betweenParts),
+                variant = M3ECardVariant.Filled,
+                title = t("界面语言"),
+                supporting = appLanguageLabel(uiPrefs.appLanguage.value),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.kaze.newage.core.i18n.AppLanguage.entries.forEach { lang ->
+                        val on = com.kaze.newage.core.i18n.AppLanguage.fromId(
+                            uiPrefs.appLanguage.value,
+                        ) == lang
+                        if (on) {
+                            Button(onClick = {}) { Text(appLanguageLabel(lang.id)) }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    uiPrefs.setAppLanguage(lang.id)
+                                    com.kaze.newage.core.i18n.LanguageState.apply(lang, appContext)
+                                },
+                            ) { Text(appLanguageLabel(lang.id)) }
+                        }
+                    }
+                }
+                Text(
+                    t("切换后立即生效，不需要重启"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+
             // ═══ 关于与许可证 ═══
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
@@ -997,19 +1007,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         when (openDialog) {
             null -> Unit
 
-            SettingsDialog.Language -> ChoiceDialog(
-                title = t("界面语言"),
-                options = com.kaze.newage.core.i18n.AppLanguage.entries,
-                selected = com.kaze.newage.core.i18n.AppLanguage.fromId(uiPrefs.appLanguage.value),
-                label = { appLanguageLabel(it.id) },
-                note = t("切换后立即生效，不需要重启"),
-                onSelect = { lang ->
-                    uiPrefs.setAppLanguage(lang.id)
-                    com.kaze.newage.core.i18n.LanguageState.apply(lang, appContext)
-                    openDialog = null
-                },
-                onDismiss = { openDialog = null },
-            )
+            SettingsDialog.Language -> Unit
 
             SettingsDialog.ThemeStyle -> ChoiceDialog(
                 title = t("主题样式"),
@@ -1360,5 +1358,5 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             )
         }
     }
-
+}
     }
