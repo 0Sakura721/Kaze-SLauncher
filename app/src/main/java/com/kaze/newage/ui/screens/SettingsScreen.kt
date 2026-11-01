@@ -146,14 +146,20 @@ private val JAVA_INSTALL_VERSIONS = listOf(8, 17, 21, 25)
  *
  * 这是**合规义务**：内容必须保持完整可读 —— 换版式可以，删减条款说明不行。
  */
-internal const val ABOUT_LICENSE_TEXT =
-    "Kaze SLauncher\n" +
-        "在 Android 上运行 Minecraft Java 服务端的启动器。\n\n" +
-        "本软件以 GNU GPL-3.0 发布，源码随发行提供。\n" +
-        t("架构与 UI 体系参考 Fold Craft Launcher（FCL）与 ZalithLauncher2（均 GPL-3.0）；") +
-        "运行环境为 proot + Ubuntu 24.04 rootfs。完整第三方组件清单见 THIRD_PARTY_NOTICES.md。\n\n" +
-        "下载或运行 Minecraft 服务端即表示你同意 Minecraft EULA（aka.ms/MinecraftEULA）。\n" +
-        t("Minecraft 是 Mojang Studios 的商标，本项目与其无关。")
+    /**
+     * 关于与许可证正文。
+     *
+     * 不能是 `const val`：正文文案要经 [t] 按当前语言查表，而 `const val` 必须是编译期常量。
+     * 改成函数后每次调用组装一次（用在「关于」区块，不在热路径上）。
+     */
+    internal fun aboutLicenseText(): String =
+        "Kaze SLauncher\n" +
+            t("在 Android 上运行 Minecraft Java 服务端的启动器。") + "\n\n" +
+            t("本软件以 GNU GPL-3.0 发布，源码随发行提供。") + "\n" +
+            t("架构与 UI 体系参考 Fold Craft Launcher（FCL）与 ZalithLauncher2（均 GPL-3.0）；") +
+            t("运行环境为 proot + Ubuntu 24.04 rootfs。完整第三方组件清单见 THIRD_PARTY_NOTICES.md。") + "\n\n" +
+            t("下载或运行 Minecraft 服务端即表示你同意 Minecraft EULA（aka.ms/MinecraftEULA）。") + "\n" +
+            t("Minecraft 是 Mojang Studios 的商标，本项目与其无关。")
 
 /**
  * 设置：外观 / 运行与存储 / 关于与许可证，一屏到底。

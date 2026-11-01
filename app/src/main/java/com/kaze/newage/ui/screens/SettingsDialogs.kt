@@ -315,7 +315,7 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(
-                    ABOUT_LICENSE_TEXT,
+                    aboutLicenseText(),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
