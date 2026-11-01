@@ -131,6 +131,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.runtime.LaunchedEffect
+import com.kaze.newage.core.i18n.t
 
 // ──────────────────────────────────────────────────────────────
 // 分组版式的零件
@@ -232,7 +233,7 @@ internal fun <T> ChoiceDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(t("完成")) } },
     )
 }
 
@@ -271,7 +272,7 @@ internal fun SliderDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(t("完成")) } },
     )
 }
 
@@ -286,7 +287,7 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
     if (legalDoc != null) {
         AlertDialog(
             onDismissRequest = { legalDoc = null },
-            title = { Text(if (legalDoc == "gpl") "GNU GPL-3.0 全文" else "第三方组件声明") },
+            title = { Text(if (legalDoc == "gpl") t("GNU GPL-3.0 全文") else t("第三方组件声明")) },
             text = {
                 val body = remember(legalDoc) {
                     runCatching {
@@ -301,12 +302,12 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
                     fontSize = 11.sp,
                 )
             },
-            confirmButton = { TextButton(onClick = { legalDoc = null }) { Text("关闭") } },
+            confirmButton = { TextButton(onClick = { legalDoc = null }) { Text(t("关闭")) } },
         )
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("关于与许可证") },
+        title = { Text(t("关于与许可证")) },
         text = {
             Column(
                 Modifier
@@ -314,13 +315,13 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(
-                    ABOUT_LICENSE_TEXT,
+                    aboutLicenseText(),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(t("关闭")) } },
     )
 }
 
@@ -347,7 +348,7 @@ internal fun UpdateStatusCard(
 
         is AppUpdateState.Checking -> M3ECard(
             variant = M3ECardVariant.Outlined,
-            title = "正在检查更新…",
+            title = t("正在检查更新…"),
             content = {
                 WavyLinearProgress(progress = null, modifier = Modifier.fillMaxWidth())
             },
@@ -355,24 +356,24 @@ internal fun UpdateStatusCard(
 
         is AppUpdateState.Error -> M3ECard(
             variant = M3ECardVariant.Outlined,
-            title = "检查更新失败",
+            title = t("检查更新失败"),
             supporting = state.msg,
             content = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onCheck) { Text("重试") }
-                    TextButton(onClick = onDismiss) { Text("关闭") }
+                    Button(onClick = onCheck) { Text(t("重试")) }
+                    TextButton(onClick = onDismiss) { Text(t("关闭")) }
                 }
             },
         )
 
         is AppUpdateState.Latest -> M3ECard(
             variant = M3ECardVariant.Outlined,
-            title = "已是最新版本",
-            supporting = "（或仓库暂未发布更新）",
+            title = t("已是最新版本"),
+            supporting = t("（或仓库暂未发布更新）"),
             content = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = onCheck) { Text("重新检查") }
-                    TextButton(onClick = onDismiss) { Text("关闭") }
+                    TextButton(onClick = onCheck) { Text(t("重新检查")) }
+                    TextButton(onClick = onDismiss) { Text(t("关闭")) }
                 }
             },
         )
@@ -382,19 +383,19 @@ internal fun UpdateStatusCard(
             title = "发现新版本 ${state.info.tag}",
             // 设置页的检查更新**不显示 changelog**（真机要求）：这里只做"手动检查 + 一键更新"，
             // 不再把 Release 正文摊开。想看更新说明，去应用启动时的更新弹窗。
-            supporting = "点「下载并安装」开始更新",
+            supporting = t("点「下载并安装」开始更新"),
             content = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { onDownload(state.info) }) { Text("下载并安装") }
+                    Button(onClick = { onDownload(state.info) }) { Text(t("下载并安装")) }
                     // 「以后再说」：卡片收起、检查入口解禁 —— 原来这一步是死端
-                    TextButton(onClick = onDismiss) { Text("以后再说") }
+                    TextButton(onClick = onDismiss) { Text(t("以后再说")) }
                 }
             },
         )
 
         is AppUpdateState.Downloading -> M3ECard(
             variant = M3ECardVariant.Outlined,
-            title = "正在下载更新",
+            title = t("正在下载更新"),
             supporting = state.message,
             content = {
                 WavyLinearProgress(
@@ -404,7 +405,7 @@ internal fun UpdateStatusCard(
                 TextButton(
                     onClick = onCancel,
                     modifier = Modifier.align(Alignment.End),
-                ) { Text("取消") }
+                ) { Text(t("取消")) }
             },
         )
     }
@@ -413,6 +414,7 @@ internal fun UpdateStatusCard(
 /** 「行 → 选择器」弹窗的标识（同一时刻只开一个） */
 internal enum class SettingsDialog {
     ThemeStyle,
+    Language,
     ThemeMode,
     ColorSource,
     DarkStyle,
@@ -431,20 +433,20 @@ internal enum class SettingsDialog {
 internal enum class BackgroundRow { Image, Toggle, Blur, Mask, Clear }
 
 internal fun themeModeLabel(value: Int): String = when (value) {
-    1 -> "浅色模式"
-    2 -> "深色模式"
-    else -> "跟随系统"
+    1 -> t("浅色模式")
+    2 -> t("深色模式")
+    else -> t("跟随系统")
 }
 
-internal fun darkStyleLabel(value: Int): String = if (value == 1) "AMOLED 纯黑" else "普通黑"
+internal fun darkStyleLabel(value: Int): String = if (value == 1) t("AMOLED 纯黑") else t("普通黑")
 
 internal fun updateModeLabel(value: String): String = when (value) {
-    "patch" -> "增量补丁（省流量，约 5%）"
-    else -> "完整安装包（默认，最稳妥）"
+    "patch" -> t("增量补丁（省流量，约 5%）")
+    else -> t("完整安装包（默认，最稳妥）")
 }
 
 internal fun updateChannelLabel(value: String): String =
-    if (value == "stable") "仅正式版" else "预览版（含测试版）"
+    if (value == "stable") t("仅正式版") else t("预览版（含测试版）")
 
 /** 自研 HSV 取色器（自研实现，无第三方依赖；无第三方依赖）：
  * 色相条 + 饱和度/明度面板 + 实时预览，确定后回调 ARGB */
@@ -471,7 +473,7 @@ internal fun ColorPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("选择二级色") },
+        title = { Text(t("选择二级色")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 // 饱和度（横轴）× 明度（纵轴）2D 面板
@@ -618,10 +620,10 @@ internal fun ColorPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(current.toArgb()) }) { Text("确定") }
+            TextButton(onClick = { onConfirm(current.toArgb()) }) { Text(t("确定")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(t("取消")) }
         },
     )
 }
@@ -638,14 +640,14 @@ internal const val SECTION_STICKY_SLOP = 48
  * 「当前分区」也是按偏移量取最后一个已越过的分区。
  */
 internal enum class SettingsSection(val label: String) {
-    Appearance("外观"),
-    Background("背景图"),
-    Storage("存储"),
+    Appearance(t("外观")),
+    Background(t("背景图")),
+    Storage(t("存储")),
     JavaRuntime("Java"),
-    Console("控制台"),
+    Console(t("控制台")),
     Mcp("MCP"),
-    BackgroundAndUpdate("后台"),
-    About("关于"),
+    BackgroundAndUpdate(t("后台")),
+    About(t("关于")),
 }
 
 /**
@@ -702,3 +704,17 @@ internal fun SettingsCategoryBar(
         }
     }
 }
+
+/** 界面语言的显示名（跟随系统时附带解析结果，让用户知道实际会用哪种） */
+internal fun appLanguageLabel(id: String): String =
+    when (com.kaze.newage.core.i18n.AppLanguage.fromId(id)) {
+        com.kaze.newage.core.i18n.AppLanguage.SYSTEM ->
+            t("跟随系统") + " · " + if (com.kaze.newage.core.i18n.LanguageState.isChinese) {
+                t("简体中文")
+            } else {
+                "English"
+            }
+        com.kaze.newage.core.i18n.AppLanguage.ZH -> t("简体中文")
+        com.kaze.newage.core.i18n.AppLanguage.EN -> "English"
+    }
+

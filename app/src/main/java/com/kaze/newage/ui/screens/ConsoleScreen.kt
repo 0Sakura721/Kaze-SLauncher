@@ -115,6 +115,7 @@ import com.kaze.newage.core.console.CountFormat
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
 import com.kaze.newage.core.monitor.ProcessStats
+import com.kaze.newage.core.i18n.t
 
 /**
  * 控制台：实时日志（主题化深色终端）+ 命令输入 —— 本应用的主工作台。
@@ -145,10 +146,10 @@ private const val SCROLL_ANIMATE_MAX_ITEMS = 30
  * 排查时丢了会误导（例如「> 正在停止服务器…」不见了，会以为停止没生效）。
  */
 private enum class ConsoleLevelFilter(val label: String) {
-    ALL("全部"),
-    INFO("信息"),
-    WARN("警告"),
-    ERROR("错误");
+    ALL(t("全部")),
+    INFO(t("信息")),
+    WARN(t("警告")),
+    ERROR(t("错误"));
 
     fun matches(type: LineType): Boolean = when (this) {
         ALL -> true
@@ -310,19 +311,19 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
     ) {
         // ── 屏幕头：实例切换（左）+ 实例摘要（中）+ 状态胶囊（右）──
         M3EScreenHeader(
-            title = current?.name ?: "未选择实例",
+            title = current?.name ?: t("未选择实例"),
             subtitle = if (current != null) {
                 buildString {
                     // 真机上这段会被截断成 "Java 17 · ··"：去掉冗余的 "MC " 与内存上限
                     // （上限在实例详情里，实际占用就在下面那一行监控里）
-                    append(current.mcVersion.ifBlank { "自定义" })
+                    append(current.mcVersion.ifBlank { t("自定义") })
                     append(" · ")
                     append(current.coreType.displayName)
                     append(" · Java ")
                     append(current.javaMajor)
                 }
             } else {
-                "还没有服务端实例，去「服务端」页新建"
+                t("还没有服务端实例，去「服务端」页新建")
             },
             leading = {
                 // 切换实例：多开时每个实例有独立控制台，入口放在屏幕头第一位
@@ -335,7 +336,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                     ) {
                         Icon(
                             Icons.Filled.Dns,
-                            contentDescription = "切换实例",
+                            contentDescription = t("切换实例"),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -375,7 +376,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                                     if (inst.id == currentInstanceId) {
                                         Icon(
                                             Icons.Filled.Check,
-                                            contentDescription = "当前实例",
+                                            contentDescription = t("当前实例"),
                                             tint = MaterialTheme.colorScheme.primary,
                                         )
                                     }
@@ -424,28 +425,28 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                 buildString {
                     if (s == null) {
                         // 带上诊断计数：读不到 /proc 和匹配规则不对，修法完全不同
-                        append("CPU 采样中…（").append(ProcessStats.lastDiag.ifBlank { "扫描中" })
+                        append(t("CPU 采样中…（")).append(ProcessStats.lastDiag.ifBlank { t("扫描中") })
                             .append("）")
                     } else {
                         append("CPU ").append(fmt("%.0f", s.cpuPercent)).append("%")
                         // 单核占用率可以超过 100%，所以把"用了几个核"也说清楚 ——
                         // 否则 8 核机器上的 12% 会让人以为很闲，其实是吃满了一个核
-                        if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append("核）")
+                        if (s.coresUsed >= 1.05f) append("（").append(fmt("%.1f", s.coresUsed)).append(t("核）"))
                         if (s.rssKb < 0) {
                             // 读不到就直说，**不要显示成 0.00 GB** —— 那看起来像"服务端不占内存"，
                             // 真机上就是这么被误判成"ram 没读出来"的（其实多半是选错了进程）。
                             // 顺带把 pid 打出来，下一次一眼就能核对。
-                            append(" · 内存读不到（pid ").append(s.pid).append("）")
+                            append(t(" · 内存读不到（pid ")).append(s.pid).append("）")
                         } else {
-                            append(" · 内存 ").append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append("G")
+                            append(t(" · 内存 ")).append(fmt("%.2f", s.rssKb / 1024f / 1024f)).append("G")
                             append("（").append(fmt("%.0f", memPct)).append("%）")
                         }
                         // 整机还剩多少可用内存：手机上服务端"莫名其妙崩"多半是 OOM，
                         // 把剩余量摆在服务端占用旁边，一眼能看出还有多少余量。
                         if (s.availMemKb >= 0) {
                             // 简写"可用 3.2G"：真机 360dp 宽度下，"整机可用 3.20 GB" 会被截成 "整机可…"
-                            append(" · 可用 ").append(fmt("%.1f", s.availMemKb / 1024f / 1024f)).append("G")
-                            if (s.lowMemory) append("（低内存）")
+                            append(t(" · 可用 ")).append(fmt("%.1f", s.availMemKb / 1024f / 1024f)).append("G")
+                            if (s.lowMemory) append(t("（低内存）"))
                         }
                     }
                 },
@@ -466,10 +467,10 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // 复制日志：一键复制当前实例完整日志到剪贴板
-            ConsoleAction(Icons.Filled.ContentCopy, "复制日志", enabled = current != null) {
+            ConsoleAction(Icons.Filled.ContentCopy, t("复制日志"), enabled = current != null) {
                 viewModel.copyConsoleLog()
             }
-            ConsoleAction(Icons.Filled.Save, "保存日志", enabled = current != null) {
+            ConsoleAction(Icons.Filled.Save, t("保存日志"), enabled = current != null) {
                 val name = "${current?.name ?: "server"}-${
                     SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
                 }.log"
@@ -477,7 +478,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             }
             ConsoleAction(
                 icon = Icons.Filled.ArrowDownward,
-                label = if (follow) "暂停自动滚动" else "恢复自动滚动",
+                label = if (follow) t("暂停自动滚动") else t("恢复自动滚动"),
                 active = follow,
             ) {
                 if (follow) {
@@ -488,12 +489,12 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                     scope.launch { scrollToNewest(animated = true) }
                 }
             }
-            ConsoleAction(Icons.Filled.Delete, "清空日志") { viewModel.clearConsole() }
+            ConsoleAction(Icons.Filled.Delete, t("清空日志")) { viewModel.clearConsole() }
             // 筛选/搜索/显示设置的开关。选中色在「栏展开」或「条件仍在生效」时都点亮：
             // 收起状态下的生效过滤靠它和行数里的「命中/总数」提示，否则用户会以为列表坏了
             ConsoleAction(
                 icon = Icons.Filled.FilterList,
-                label = if (showFilterBar) "收起筛选与搜索" else "筛选与搜索",
+                label = if (showFilterBar) t("收起筛选与搜索") else t("筛选与搜索"),
                 active = showFilterBar || filterActive,
             ) { showFilterBar = !showFilterBar }
             Spacer(Modifier.weight(1f))
@@ -524,7 +525,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                 val logSize = logFile?.takeIf { it.isFile }?.length() ?: 0L
                 AlertDialog(
                     onDismissRequest = { showCountDetail = false },
-                    title = { Text("控制台统计") },
+                    title = { Text(t("控制台统计")) },
                     text = {
                         Column {
                             Text("内存中保留：${lines.size} 行（${CountFormat.short(lines.size.toLong())}）")
@@ -537,14 +538,14 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 "完整日志一直在写盘，控制台只是滑动窗口：\n" +
-                                    (logFile?.absolutePath ?: "（未选择实例）"),
+                                    (logFile?.absolutePath ?: t("（未选择实例）")),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     },
                     confirmButton = {
-                        TextButton(onClick = { showCountDetail = false }) { Text("知道了") }
+                        TextButton(onClick = { showCountDetail = false }) { Text(t("知道了")) }
                     },
                 )
             }
@@ -578,7 +579,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     modifier = Modifier.width(160.dp).height(48.dp),
-                    placeholder = { Text("搜索日志…", style = MaterialTheme.typography.bodySmall) },
+                    placeholder = { Text(t("搜索日志…"), style = MaterialTheme.typography.bodySmall) },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodySmall,
                     trailingIcon = {
@@ -586,14 +587,14 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                             IconButton(onClick = { searchQuery = "" }) {
                                 Icon(
                                     Icons.Filled.Close,
-                                    contentDescription = "清除搜索",
+                                    contentDescription = t("清除搜索"),
                                     modifier = Modifier.size(16.dp),
                                 )
                             }
                         }
                     },
                 )
-                ConsoleAction(Icons.Filled.TextFields, "控制台显示设置（字号 / 时间戳）") {
+                ConsoleAction(Icons.Filled.TextFields, t("控制台显示设置（字号 / 时间戳）")) {
                     showDisplaySettings = true
                 }
             }
@@ -628,8 +629,8 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                                 Spacer(Modifier.width(8.dp))
                             }
                             Text(
-                                if (loadingOlder) "正在读取更早的日志…"
-                                else "加载更早的日志（内存只留最近 5 万行）",
+                                if (loadingOlder) t("正在读取更早的日志…")
+                                else t("加载更早的日志（内存只留最近 5 万行）"),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
                             )
@@ -784,7 +785,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             // 默认关：入口常驻会一直占着输入行一截位置（360dp 屏上更挤），
             // 不用 AI 的人不该被迫天天看到它 —— 要用的在设置里开一次。
             if (uiPrefs.consoleAiEntry.value) {
-                ConsoleAction(Icons.Filled.SmartToy, "AI 助手", enabled = true, size = 48.dp) {
+                ConsoleAction(Icons.Filled.SmartToy, t("AI 助手"), enabled = true, size = 48.dp) {
                     onOpenAi()
                 }
                 Spacer(Modifier.width(6.dp))
@@ -806,8 +807,8 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                 modifier = Modifier.weight(1f),
                 placeholder = {
                     Text(
-                        if (serverState == ServerState.Running) "输入命令（stop / op…）"
-                        else "服务端运行后可输入命令"
+                        if (serverState == ServerState.Running) t("输入命令（stop / op…）")
+                        else t("服务端运行后可输入命令")
                     )
                 },
                 singleLine = true,
@@ -830,7 +831,7 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "发送",
+                        contentDescription = t("发送"),
                         modifier = Modifier.size(22.dp),
                     )
                 }
@@ -931,7 +932,7 @@ private fun JumpToBottomPill(
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                 )
-                Text("回到底部", style = MaterialTheme.typography.labelLarge)
+                Text(t("回到底部"), style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -952,7 +953,7 @@ private fun DisplaySettingsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("控制台显示") },
+        title = { Text(t("控制台显示")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -971,21 +972,21 @@ private fun DisplaySettingsDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        "时间戳前缀",
+                        t("时间戳前缀"),
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Switch(checked = timestamps, onCheckedChange = onTimestamps)
                 }
                 Text(
-                    "时间戳为 [HH:mm:ss] 前缀，只影响控制台显示，不写入日志文件。" +
-                        "从磁盘回读的更早日志没有时间记录，显示的是载入时间。",
+                    t("时间戳为 [HH:mm:ss] 前缀，只影响控制台显示，不写入日志文件。") +
+                        t("从磁盘回读的更早日志没有时间记录，显示的是载入时间。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(t("完成")) } },
     )
 }
 
@@ -1003,17 +1004,17 @@ private fun QuickCommandEditorDialog(
     var draft by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("快捷命令") },
+        title = { Text(t("快捷命令")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "点 chip 直接把命令发给服务端；长按 chip 也可快速删除。最多 12 条。",
+                    t("点 chip 直接把命令发给服务端；长按 chip 也可快速删除。最多 12 条。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (list.isEmpty()) {
                     Text(
-                        "还没有快捷命令，在下面输入第一条",
+                        t("还没有快捷命令，在下面输入第一条"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1053,7 +1054,7 @@ private fun QuickCommandEditorDialog(
                         onValueChange = { draft = it },
                         modifier = Modifier.weight(1f),
                         placeholder = {
-                            Text("新命令，如 list / say hi", style = MaterialTheme.typography.bodySmall)
+                            Text(t("新命令，如 list / say hi"), style = MaterialTheme.typography.bodySmall)
                         },
                         singleLine = true,
                     )
@@ -1063,12 +1064,12 @@ private fun QuickCommandEditorDialog(
                             list = list + draft.trim()
                             draft = ""
                         },
-                    ) { Text("添加") }
+                    ) { Text(t("添加")) }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(list) }) { Text("保存") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = { TextButton(onClick = { onSave(list) }) { Text(t("保存")) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(t("取消")) } },
     )
 }
 
@@ -1133,7 +1134,7 @@ private fun QuickCommandAddChip(onClick: () -> Unit) {
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                "快捷命令",
+                t("快捷命令"),
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(start = 4.dp),
             )

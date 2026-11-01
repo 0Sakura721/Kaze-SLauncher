@@ -114,6 +114,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.Surface
+import com.kaze.newage.core.i18n.t
 
 
 
@@ -152,7 +153,7 @@ internal fun InstanceActionRow(
             IconButton(onClick = onRestart, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Icons.Filled.RestartAlt,
-                    contentDescription = "重启服务端",
+                    contentDescription = t("重启服务端"),
                     modifier = Modifier.size(26.dp),
                 )
             }
@@ -174,10 +175,10 @@ internal fun InstanceActionRow(
             Text(
                 when {
                     // 停止中再点一次 = 强制停止（正常停止会一直等服务器存完世界）
-                    state == ServerState.Stopping -> "强制停止"
-                    running -> "停止服务端"
-                    busy -> "取消启动"
-                    else -> "启动服务端"
+                    state == ServerState.Stopping -> t("强制停止")
+                    running -> t("停止服务端")
+                    busy -> t("取消启动")
+                    else -> t("启动服务端")
                 },
                 style = MaterialTheme.typography.labelLarge,
             )
@@ -212,32 +213,32 @@ internal fun RunTab(
 
     M3ECard(
         variant = M3ECardVariant.Elevated,
-        title = "运行状态",
+        title = t("运行状态"),
         supporting = buildString {
             append(instance.coreType.displayName)
             append(" · MC ")
-            append(instance.mcVersion.ifBlank { "自定义" })
+            append(instance.mcVersion.ifBlank { t("自定义") })
             append(" · Java ")
             append(instance.javaMajor)
-            append(" · 端口 ")
+            append(t(" · 端口 "))
             append(port)
             if (running) {
-                append(" · 在线 ")
+                append(t(" · 在线 "))
                 append(onlinePlayers.size)
-                append(" 人")
+                append(t(" 人"))
             }
         },
         // 状态胶囊不再重复：上方常驻状态条已经显示同一个值，同一屏两枚胶囊互相抢注意力
         content = {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 M3EMetric(
-                    value = if (running) formatClock(uptime) else "未运行",
-                    label = "运行时长",
+                    value = if (running) formatClock(uptime) else t("未运行"),
+                    label = t("运行时长"),
                     modifier = Modifier.weight(1.25f),
                 )
                 M3EMetric(
                     value = "${instance.memoryMb} MB",
-                    label = "内存上限",
+                    label = t("内存上限"),
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -276,29 +277,29 @@ internal fun RunTab(
                 Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "连接地址（MC 客户端「多人游戏 → 直接连接」粘贴）",
+                            t("连接地址（MC 客户端「多人游戏 → 直接连接」粘贴）"),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f),
                         )
                         TextButton(onClick = { lanRefresh++ }) {
-                            Text("刷新", style = MaterialTheme.typography.labelSmall)
+                            Text(t("刷新"), style = MaterialTheme.typography.labelSmall)
                         }
                     }
-                    AddressCopyRow("本机", "127.0.0.1:$port") { copyAddress("本机", "127.0.0.1:$port") }
+                    AddressCopyRow(t("本机"), "127.0.0.1:$port") { copyAddress(t("本机"), "127.0.0.1:$port") }
                     val primary = lan.primary
                     if (primary != null) {
-                        AddressCopyRow("局域网", "$primary:$port") { copyAddress("局域网", "$primary:$port") }
+                        AddressCopyRow(t("局域网"), "$primary:$port") { copyAddress(t("局域网"), "$primary:$port") }
                         // 同 Wi-Fi 的朋友用局域网地址；离开 Wi-Fi 就要靠公网/端口转发
                         Text(
-                            "同 Wi-Fi 的朋友用「局域网」这条。手机流量下连不上 —— 那是网络环境限制，不是应用问题。",
+                            t("同 Wi-Fi 的朋友用「局域网」这条。手机流量下连不上 —— 那是网络环境限制，不是应用问题。"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp),
                         )
                     } else {
                         Text(
-                            "没取到局域网地址：确认已连 Wi-Fi 或开了热点，然后点「刷新」。",
+                            t("没取到局域网地址：确认已连 Wi-Fi 或开了热点，然后点「刷新」。"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(top = 2.dp),
@@ -307,7 +308,7 @@ internal fun RunTab(
                     // 其它候选（同时开热点 + Wi-Fi、或有多张网卡时让用户自己挑）
                     if (lan.others.isNotEmpty()) {
                         Text(
-                            "其它可用地址：" + lan.others.joinToString("、") { it.address },
+                            t("其它可用地址：") + lan.others.joinToString("、") { it.address },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline,
                             modifier = Modifier.padding(top = 2.dp),
@@ -322,7 +323,7 @@ internal fun RunTab(
                 onClick = { showMemoryEditor = true },
                 modifier = Modifier.padding(top = 4.dp),
             ) {
-                Text("修改内存分配", style = MaterialTheme.typography.labelMedium)
+                Text(t("修改内存分配"), style = MaterialTheme.typography.labelMedium)
             }
             EditMemoryDialog(
                 visible = showMemoryEditor,
@@ -359,9 +360,9 @@ internal fun RunTab(
     M3EConnectedList(count = 2) { index, shape ->
         if (index == 0) {
             M3EListItem(
-                headline = "立即备份",
+                headline = t("立即备份"),
                 supporting = if (latestBackup == null) {
-                    "还没有备份 · 世界数据珍贵，建议现在就备一份"
+                    t("还没有备份 · 世界数据珍贵，建议现在就备一份")
                 } else {
                     "最近 ${backupStamp(latestBackup)} · 共 ${backups.size} 份 · 点一下再备一份"
                 },
@@ -372,8 +373,8 @@ internal fun RunTab(
             )
         } else {
             M3EListItem(
-                headline = "查看启动日志",
-                supporting = "每次启动的完整输出与退出码（含崩溃报告）",
+                headline = t("查看启动日志"),
+                supporting = t("每次启动的完整输出与退出码（含崩溃报告）"),
                 leadingIcon = Icons.AutoMirrored.Filled.ReceiptLong,
                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                 onClick = onOpenLogs,
@@ -405,11 +406,11 @@ internal fun WorldTab(
 ) {
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "备份",
-        supporting = "世界 + 配置全量打包；运行中会先让服务端落盘再打包",
+        title = t("备份"),
+        supporting = t("世界 + 配置全量打包；运行中会先让服务端落盘再打包"),
         trailing = {
             Button(onClick = onBackup, enabled = !busy, modifier = Modifier.height(40.dp)) {
-                Text(if (busy) "备份中…" else "立即备份")
+                Text(if (busy) t("备份中…") else t("立即备份"))
             }
         },
         content = {
@@ -421,7 +422,7 @@ internal fun WorldTab(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("停服自动备份", style = MaterialTheme.typography.bodyMedium)
+                    Text(t("停服自动备份"), style = MaterialTheme.typography.bodyMedium)
                     Text(
                         "服务端退出后自动打包（auto_ 前缀），保留最近 ${BackupManager.AUTO_KEEP} 份",
                         style = MaterialTheme.typography.bodySmall,
@@ -432,7 +433,7 @@ internal fun WorldTab(
             }
             if (backups.isEmpty()) {
                 Text(
-                    "还没有备份。世界数据珍贵，建议开服前/后定期备份。",
+                    t("还没有备份。世界数据珍贵，建议开服前/后定期备份。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -440,7 +441,7 @@ internal fun WorldTab(
             OutlinedButton(
                 onClick = onImport,
                 modifier = Modifier.padding(top = 12.dp),
-            ) { Text("导入备份") }
+            ) { Text(t("导入备份")) }
 
             if (backups.isNotEmpty()) {
                 M3EConnectedList(count = backups.size, modifier = Modifier.padding(top = 12.dp)) { index, shape ->
@@ -456,12 +457,12 @@ internal fun WorldTab(
                                 // 「恢复」是最高频动作，保留为一键直达（有二次确认兜底）；
                                 // 导出/删除是低频动作，收进溢出菜单 —— 原来三个控件并排
                                 // 会把 360dp 屏的备份名/时间戳列挤到只剩 ~100dp。
-                                TextButton(onClick = { onRestoreRequest(f) }, enabled = !busy) { Text("恢复") }
+                                TextButton(onClick = { onRestoreRequest(f) }, enabled = !busy) { Text(t("恢复")) }
                                 var backupMenu by remember { mutableStateOf(false) }
                                 IconButton(onClick = { backupMenu = true }, enabled = !busy) {
                                     Icon(
                                         Icons.Filled.MoreVert,
-                                        contentDescription = "更多操作（导出 / 删除）",
+                                        contentDescription = t("更多操作（导出 / 删除）"),
                                     )
                                 }
                                 DropdownMenu(
@@ -470,14 +471,14 @@ internal fun WorldTab(
                                     shape = M3Shape.medium,
                                 ) {
                                     DropdownMenuItem(
-                                        text = { Text("导出") },
+                                        text = { Text(t("导出")) },
                                         onClick = {
                                             backupMenu = false
                                             onExport(f)
                                         },
                                     )
                                     DropdownMenuItem(
-                                        text = { Text("删除", color = MaterialTheme.colorScheme.error) },
+                                        text = { Text(t("删除"), color = MaterialTheme.colorScheme.error) },
                                         leadingIcon = {
                                             Icon(
                                                 Icons.Filled.Delete,
@@ -501,7 +502,7 @@ internal fun WorldTab(
                 Text(
                     it,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (it.startsWith("已")) MaterialTheme.colorScheme.primary
+                    color = if (it.startsWith(t("已"))) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(top = 12.dp),
                 )
@@ -526,8 +527,8 @@ internal fun AddonsTab(
     M3EConnectedList(count = 3) { index, shape ->
         when (index) {
             0 -> M3EListItem(
-                headline = "插件",
-                supporting = if (pluginOk) "下载/启停插件" else "需 Paper 类核心",
+                headline = t("插件"),
+                supporting = if (pluginOk) t("下载/启停插件") else t("需 Paper 类核心"),
                 leadingIcon = Icons.Filled.Extension,
                 iconContainer = MaterialTheme.colorScheme.primaryContainer,
                 onClick = pluginClick,
@@ -535,8 +536,8 @@ internal fun AddonsTab(
             )
 
             1 -> M3EListItem(
-                headline = "模组",
-                supporting = if (modOk) "下载/启停模组" else "需 Fabric/Forge 类核心",
+                headline = t("模组"),
+                supporting = if (modOk) t("下载/启停模组") else t("需 Fabric/Forge 类核心"),
                 leadingIcon = Icons.Filled.ViewInAr,
                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                 onClick = modClick,
@@ -544,8 +545,8 @@ internal fun AddonsTab(
             )
 
             else -> M3EListItem(
-                headline = "日志",
-                supporting = "崩溃报告 · latest.log",
+                headline = t("日志"),
+                supporting = t("崩溃报告 · latest.log"),
                 leadingIcon = Icons.AutoMirrored.Filled.ReceiptLong,
                 iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
                 onClick = onOpenLogs,
@@ -556,9 +557,9 @@ internal fun AddonsTab(
 
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "改完要重启",
-        supporting = "插件放在 plugins/、模组放在 mods/，停用是给文件加 .disabled 后缀；" +
-            "增删或改启用状态后都要重启服务端才会生效。",
+        title = t("改完要重启"),
+        supporting = t("插件放在 plugins/、模组放在 mods/，停用是给文件加 .disabled 后缀；") +
+            t("增删或改启用状态后都要重启服务端才会生效。"),
     )
 }
 
@@ -604,15 +605,15 @@ internal fun PlayerManageCard(
 
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "玩家管理",
-        supporting = "白名单直接改文件，开服前后都能用；OP / 踢出需要服务端运行中。",
+        title = t("玩家管理"),
+        supporting = t("白名单直接改文件，开服前后都能用；OP / 踢出需要服务端运行中。"),
         trailing = {
             IconButton(onClick = {
                 reload()
                 if (running) viewModel.refreshPlayers()
                 msg = null
             }) {
-                Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+                Icon(Icons.Filled.Refresh, contentDescription = t("刷新"))
             }
         },
         content = {
@@ -622,10 +623,10 @@ internal fun PlayerManageCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("启用白名单", style = MaterialTheme.typography.bodyLarge)
+                    Text(t("启用白名单"), style = MaterialTheme.typography.bodyLarge)
                     Text(
-                        if (whitelistOn) "只有名单内的玩家能进服"
-                        else "任何人都能进服（名单不生效）",
+                        if (whitelistOn) t("只有名单内的玩家能进服")
+                        else t("任何人都能进服（名单不生效）"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -638,9 +639,9 @@ internal fun PlayerManageCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("移出名单立刻踢下线", style = MaterialTheme.typography.bodyLarge)
+                        Text(t("移出名单立刻踢下线"), style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            if (enforceOn) "从名单移除的在线玩家会被踢出" else "已在线的人不受名单变更影响",
+                            if (enforceOn) t("从名单移除的在线玩家会被踢出") else t("已在线的人不受名单变更影响"),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -649,7 +650,7 @@ internal fun PlayerManageCard(
                 }
                 if (running) {
                     Text(
-                        "开关改动需要重启服务端或执行 whitelist reload 才生效",
+                        t("开关改动需要重启服务端或执行 whitelist reload 才生效"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.tertiary,
                         modifier = Modifier.padding(top = 4.dp),
@@ -662,8 +663,8 @@ internal fun PlayerManageCard(
             // ── 在线玩家 ──
             if (running) {
                 Text(
-                    if (players.isEmpty()) "在线玩家：暂无（点右上角刷新）"
-                    else "在线玩家（点名字填入下方输入栏）：",
+                    if (players.isEmpty()) t("在线玩家：暂无（点右上角刷新）")
+                    else t("在线玩家（点名字填入下方输入栏）："),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 if (players.isNotEmpty()) {
@@ -691,7 +692,7 @@ internal fun PlayerManageCard(
                 }
             } else {
                 Text(
-                    "服务端未运行：在线列表与 OP/踢出不可用，白名单仍可编辑。",
+                    t("服务端未运行：在线列表与 OP/踢出不可用，白名单仍可编辑。"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -736,7 +737,7 @@ internal fun PlayerManageCard(
                                     onClick = {
                                         val removed = WhitelistFile.remove(instance.dir, e.name)
                                         reload()
-                                        msg = if (removed) "已从白名单移除 ${e.name}" else "移除失败"
+                                        msg = if (removed) "已从白名单移除 ${e.name}" else t("移除失败")
                                     },
                                     modifier = Modifier.size(32.dp),
                                 ) {
@@ -755,13 +756,13 @@ internal fun PlayerManageCard(
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it; msg = null },
-                label = { Text("玩家名") },
-                placeholder = { Text("如 Steve") },
+                label = { Text(t("玩家名")) },
+                placeholder = { Text(t("如 Steve")) },
                 singleLine = true,
                 shape = M3Shape.large,
                 isError = name.isNotBlank() && !WhitelistFile.isValidName(name),
                 supportingText = if (name.isNotBlank() && !WhitelistFile.isValidName(name)) {
-                    { Text("玩家名为 1~16 个字符，不能含空格或引号") }
+                    { Text(t("玩家名为 1~16 个字符，不能含空格或引号")) }
                 } else null,
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
@@ -778,14 +779,14 @@ internal fun PlayerManageCard(
                                 msg = "已加入白名单：${name.trim()}"
                                 name = ""
                             }
-                            WhitelistFile.AddResult.AlreadyThere -> msg = "已经在白名单里了"
-                            WhitelistFile.AddResult.Invalid -> msg = "玩家名不合法"
-                            WhitelistFile.AddResult.TooLong -> msg = "玩家名超过 16 个字符"
+                            WhitelistFile.AddResult.AlreadyThere -> msg = t("已经在白名单里了")
+                            WhitelistFile.AddResult.Invalid -> msg = t("玩家名不合法")
+                            WhitelistFile.AddResult.TooLong -> msg = t("玩家名超过 16 个字符")
                         }
                         reload()
                     },
                     enabled = WhitelistFile.isValidName(name),
-                ) { Text("加入白名单") }
+                ) { Text(t("加入白名单")) }
 
                 OutlinedButton(
                     onClick = {
@@ -795,10 +796,10 @@ internal fun PlayerManageCard(
                         msg = if (removed) "已从白名单移除 $n" else "名单里没有 $n"
                     },
                     enabled = WhitelistFile.isValidName(name),
-                ) { Text("移出白名单") }
+                ) { Text(t("移出白名单")) }
 
                 if (whitelist.isNotEmpty()) {
-                    TextButton(onClick = { confirmClear = true }) { Text("清空名单") }
+                    TextButton(onClick = { confirmClear = true }) { Text(t("清空名单")) }
                 }
             }
 
@@ -809,13 +810,13 @@ internal fun PlayerManageCard(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     OutlinedButton(onClick = { if (name.isNotBlank()) { viewModel.sendCommand("op ${name.trim()}") } }) {
-                        Text("设为 OP")
+                        Text(t("设为 OP"))
                     }
                     OutlinedButton(onClick = { if (name.isNotBlank()) { viewModel.sendCommand("deop ${name.trim()}") } }) {
-                        Text("取消 OP")
+                        Text(t("取消 OP"))
                     }
                     OutlinedButton(onClick = { if (name.isNotBlank()) { viewModel.sendCommand("kick ${name.trim()}") } }) {
-                        Text("踢出")
+                        Text(t("踢出"))
                     }
                 }
             }
@@ -834,11 +835,11 @@ internal fun PlayerManageCard(
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            title = { Text("清空白名单？") },
+            title = { Text(t("清空白名单？")) },
             text = {
                 Text(
                     "将删除全部 ${whitelist.size} 条记录。" +
-                        if (whitelistOn) "白名单当前已启用 —— 清空后没人能进服。" else "",
+                        if (whitelistOn) t("白名单当前已启用 —— 清空后没人能进服。") else "",
                 )
             },
             confirmButton = {
@@ -846,10 +847,10 @@ internal fun PlayerManageCard(
                     WhitelistFile.clear(instance.dir)
                     reload()
                     confirmClear = false
-                    msg = "白名单已清空"
-                }) { Text("清空", color = MaterialTheme.colorScheme.error) }
+                    msg = t("白名单已清空")
+                }) { Text(t("清空"), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text(t("取消")) } },
         )
     }
 }
@@ -895,7 +896,7 @@ internal fun EditMemoryDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("内存分配") },
+        title = { Text(t("内存分配")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
@@ -919,10 +920,10 @@ internal fun EditMemoryDialog(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { mb = suggestMb }) {
-                        Text("用建议值", style = MaterialTheme.typography.labelMedium)
+                        Text(t("用建议值"), style = MaterialTheme.typography.labelMedium)
                     }
                     OutlinedButton(onClick = { exactText = mb.toInt().toString(); showExact = true }) {
-                        Text("精确输入", style = MaterialTheme.typography.labelMedium)
+                        Text(t("精确输入"), style = MaterialTheme.typography.labelMedium)
                     }
                 }
                 if (showExact) {
@@ -938,7 +939,7 @@ internal fun EditMemoryDialog(
                 }
                 Text(
                     "范围 ${MemoryLimits.MIN_MB} ~ ${MemoryLimits.MAX_MB} MB，每 ${MemoryLimits.STEP_MB} MB 一档；" +
-                        if (isRunning) "服务器运行中，重启后生效。" else "下次启动生效。",
+                        if (isRunning) t("服务器运行中，重启后生效。") else t("下次启动生效。"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -946,9 +947,9 @@ internal fun EditMemoryDialog(
         },
         confirmButton = {
             val typed = if (showExact) exactText.toIntOrNull() else null
-            TextButton(onClick = { onConfirm(MemoryLimits.clamp(typed ?: mb.toInt())) }) { Text("保存") }
+            TextButton(onClick = { onConfirm(MemoryLimits.clamp(typed ?: mb.toInt())) }) { Text(t("保存")) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(t("取消")) } },
     )
 }
 
@@ -993,11 +994,11 @@ internal fun CoreVersionCard(
 
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "核心版本",
+        title = t("核心版本"),
         supporting = buildString {
             append(instance.coreType.displayName)
-            if (instance.coreBuild.isNotBlank()) append(" · 构建 ").append(instance.coreBuild)
-            else append(" · 构建未知（旧版本建的实例）")
+            if (instance.coreBuild.isNotBlank()) append(t(" · 构建 ")).append(instance.coreBuild)
+            else append(t(" · 构建未知（旧版本建的实例）"))
             if (instance.mcVersion.isNotBlank()) append(" · MC ").append(instance.mcVersion)
         },
     ) {
@@ -1010,7 +1011,7 @@ internal fun CoreVersionCard(
                 )
                 if (isRunning) {
                     Text(
-                        "请先停止服务端再升级（运行中的进程还占着旧 jar）",
+                        t("请先停止服务端再升级（运行中的进程还占着旧 jar）"),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -1019,8 +1020,8 @@ internal fun CoreVersionCard(
                     Button(
                         onClick = { viewModel.upgradeCore(instance, st.info) },
                         enabled = !isRunning && !busy,
-                    ) { Text("下载并替换") }
-                    TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("忽略") }
+                    ) { Text(t("下载并替换")) }
+                    TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text(t("忽略")) }
                 }
             }
 
@@ -1030,7 +1031,7 @@ internal fun CoreVersionCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("知道了") }
+                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text(t("知道了")) }
             }
 
             is AppViewModel.CoreUpdateState.Unsupported -> {
@@ -1039,7 +1040,7 @@ internal fun CoreVersionCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("知道了") }
+                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text(t("知道了")) }
             }
 
             is AppViewModel.CoreUpdateState.Failed -> {
@@ -1048,7 +1049,7 @@ internal fun CoreVersionCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
-                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("关闭") }
+                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text(t("关闭")) }
             }
 
             is AppViewModel.CoreUpdateState.Upgrading -> {
@@ -1069,11 +1070,11 @@ internal fun CoreVersionCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
-                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("知道了") }
+                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text(t("知道了")) }
             }
 
             is AppViewModel.CoreUpdateState.Checking -> {
-                Text("正在检查…", style = MaterialTheme.typography.bodySmall)
+                Text(t("正在检查…"), style = MaterialTheme.typography.bodySmall)
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             }
 
@@ -1081,7 +1082,7 @@ internal fun CoreVersionCard(
                 TextButton(
                     onClick = { viewModel.checkCoreUpdate(instance) },
                     enabled = !busy,
-                ) { Text("检查核心更新") }
+                ) { Text(t("检查核心更新")) }
             }
         }
     }
@@ -1100,13 +1101,13 @@ internal fun AdvancedSettingsCard(
 
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "高级设置",
-        supporting = "空格分隔，重启后生效；写错会导致启动失败（原因见控制台）。Forge 也可写 user_jvm_args.txt",
+        title = t("高级设置"),
+        supporting = t("空格分隔，重启后生效；写错会导致启动失败（原因见控制台）。Forge 也可写 user_jvm_args.txt"),
     ) {
         OutlinedTextField(
             value = args,
             onValueChange = { args = it },
-            label = { Text("JVM 附加参数") },
+            label = { Text(t("JVM 附加参数")) },
             placeholder = { Text("-XX:+UseG1GC -Dfile.encoding=UTF-8") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -1116,7 +1117,7 @@ internal fun AdvancedSettingsCard(
         // 也有人想用更高版本 Java 跑旧服务端来获得更好的 GC。
         Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
             Text(
-                "Java 版本",
+                t("Java 版本"),
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
@@ -1146,7 +1147,7 @@ internal fun AdvancedSettingsCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "无图形界面（nogui）",
+                t("无图形界面（nogui）"),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
@@ -1161,7 +1162,7 @@ internal fun AdvancedSettingsCard(
             enabled = (args != instance.extraJvmArgs) || (nogui != instance.nogui) ||
                 (javaMajor != instance.javaMajor),
         ) {
-            Text(if (isRunning) "保存（重启后生效）" else "保存")
+            Text(if (isRunning) t("保存（重启后生效）") else t("保存"))
         }
     }
 }
@@ -1198,8 +1199,8 @@ internal fun PropertiesEditor(
     val ctx = LocalContext.current
     val propsFile = File(dir, "server.properties")
     M3EListItem(
-        headline = "用其他应用打开",
-        supporting = "交给系统或第三方编辑器改 server.properties，改完保存后重启服务端生效",
+        headline = t("用其他应用打开"),
+        supporting = t("交给系统或第三方编辑器改 server.properties，改完保存后重启服务端生效"),
         trailing = {
             TextButton(onClick = {
                 // 文件还不存在（没启动过）就先按编辑器里的当前值落一份，否则对方打开的是空文件
@@ -1211,7 +1212,7 @@ internal fun PropertiesEditor(
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
-            }) { Text("打开") }
+            }) { Text(t("打开")) }
         },
     )
 
@@ -1234,13 +1235,13 @@ internal fun PropertiesEditor(
     // ── 服务器 ──
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "服务器",
-        supporting = "写回实例目录里的 server.properties（未知键原样保留）",
+        title = t("服务器"),
+        supporting = t("写回实例目录里的 server.properties（未知键原样保留）"),
         content = {
             OutlinedTextField(
                 value = motd,
                 onValueChange = { set("motd", it) },
-                label = { Text("服务器标题（MOTD）") },
+                label = { Text(t("服务器标题（MOTD）")) },
                 singleLine = true,
                 shape = M3Shape.large,
                 modifier = Modifier.fillMaxWidth(),
@@ -1263,10 +1264,10 @@ internal fun PropertiesEditor(
                             set("server-port", v)
                         }
                     },
-                    label = { Text("端口") },
+                    label = { Text(t("端口")) },
                     // 越界输入根本写不进 state（输入框会"打不进字"），必须说明原因，
                     // 否则用户只会以为应用坏了
-                    supportingText = { Text("1024 ~ 65535，超出范围的输入不会保存") },
+                    supportingText = { Text(t("1024 ~ 65535，超出范围的输入不会保存")) },
                     singleLine = true,
                     shape = M3Shape.large,
                     modifier = Modifier.weight(1f),
@@ -1274,7 +1275,7 @@ internal fun PropertiesEditor(
                 OutlinedTextField(
                     value = maxPlayers.toString(),
                     onValueChange = { v -> v.toIntOrNull()?.let { set("max-players", it.toString()) } },
-                    label = { Text("最大人数") },
+                    label = { Text(t("最大人数")) },
                     singleLine = true,
                     shape = M3Shape.large,
                     modifier = Modifier.weight(1f),
@@ -1286,9 +1287,9 @@ internal fun PropertiesEditor(
     // ── 玩法 ──
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "玩法",
+        title = t("玩法"),
         content = {
-            Text("游戏模式", style = MaterialTheme.typography.labelLarge)
+            Text(t("游戏模式"), style = MaterialTheme.typography.labelLarge)
             // FlowRow 而不是 Row：普通 Row 里靠后的 chip 只能用剩余宽度测量，
             // 系统字体放大后会被压到 0 宽或裁字（同文件「空服自动暂停」已用 FlowRow）
             FlowRow(
@@ -1296,13 +1297,13 @@ internal fun PropertiesEditor(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf("survival" to "生存", "creative" to "创造", "adventure" to "冒险", "spectator" to "旁观").forEach { (id, label) ->
+                listOf("survival" to t("生存"), "creative" to t("创造"), "adventure" to t("冒险"), "spectator" to t("旁观")).forEach { (id, label) ->
                     CheckChip(selected = gamemode == id, label = label, onClick = { set("gamemode", id) })
                 }
             }
 
             Text(
-                "难度",
+                t("难度"),
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 12.dp),
             )
@@ -1311,29 +1312,29 @@ internal fun PropertiesEditor(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf("peaceful" to "和平", "easy" to "简单", "normal" to "普通", "hard" to "困难").forEach { (id, label) ->
+                listOf("peaceful" to t("和平"), "easy" to t("简单"), "normal" to t("普通"), "hard" to t("困难")).forEach { (id, label) ->
                     CheckChip(selected = difficulty == id, label = label, onClick = { set("difficulty", id) })
                 }
             }
 
             Text(
-                "规则开关",
+                t("规则开关"),
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 12.dp),
             )
-            SettingSwitchRow("允许 PVP", pvp) { set("pvp", it.toString()) }
-            SettingSwitchRow("正版验证（online-mode）", onlineMode) { set("online-mode", it.toString()) }
-            SettingSwitchRow("白名单", whiteList) { set("white-list", it.toString()) }
-            SettingSwitchRow("允许飞行", allowFlight) { set("allow-flight", it.toString()) }
-            SettingSwitchRow("命令方块", commandBlock) { set("enable-command-block", it.toString()) }
-            SettingSwitchRow("极限模式（hardcore）", hardcore) { set("hardcore", it.toString()) }
+            SettingSwitchRow(t("允许 PVP"), pvp) { set("pvp", it.toString()) }
+            SettingSwitchRow(t("正版验证（online-mode）"), onlineMode) { set("online-mode", it.toString()) }
+            SettingSwitchRow(t("白名单"), whiteList) { set("white-list", it.toString()) }
+            SettingSwitchRow(t("允许飞行"), allowFlight) { set("allow-flight", it.toString()) }
+            SettingSwitchRow(t("命令方块"), commandBlock) { set("enable-command-block", it.toString()) }
+            SettingSwitchRow(t("极限模式（hardcore）"), hardcore) { set("hardcore", it.toString()) }
         },
     )
 
     // ── 性能与暂停 ──
     M3ECard(
         variant = M3ECardVariant.Filled,
-        title = "性能与暂停",
+        title = t("性能与暂停"),
         content = {
             SettingSlider(
                 label = "视距：$viewDistance 区块",
@@ -1356,12 +1357,12 @@ internal fun PropertiesEditor(
 
             // 空服自动暂停（MC 1.21.2+；-1 = 关闭）
             Text(
-                "空服自动暂停",
+                t("空服自动暂停"),
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.padding(top = 12.dp),
             )
             Text(
-                "没有玩家在线时自动暂停服务器以节省资源（属性 pause-when-empty-seconds）",
+                t("没有玩家在线时自动暂停服务器以节省资源（属性 pause-when-empty-seconds）"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1370,7 +1371,7 @@ internal fun PropertiesEditor(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf(-1 to "关闭", 30 to "30 秒", 60 to "60 秒", 120 to "2 分钟", 300 to "5 分钟").forEach { (sec, label) ->
+                listOf(-1 to t("关闭"), 30 to t("30 秒"), 60 to t("60 秒"), 120 to t("2 分钟"), 300 to t("5 分钟")).forEach { (sec, label) ->
                     CheckChip(
                         selected = pauseSeconds == sec,
                         label = label,
@@ -1391,11 +1392,11 @@ internal fun PropertiesEditor(
     ) {
         Icon(Icons.Filled.Save, contentDescription = null, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
-        Text(if (saved) "已保存" else "保存配置", style = MaterialTheme.typography.labelLarge)
+        Text(if (saved) t("已保存") else t("保存配置"), style = MaterialTheme.typography.labelLarge)
     }
     if (saved && isRunning) {
         Text(
-            "配置已保存；运行中的服务器将在重启后生效。",
+            t("配置已保存；运行中的服务器将在重启后生效。"),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1447,18 +1448,18 @@ internal fun RenameInstanceDialog(
     var newName by remember(instance.id) { mutableStateOf(instance.name) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名实例") },
+        title = { Text(t("重命名实例")) },
         text = {
             Column {
                 OutlinedTextField(
                     value = newName,
                     onValueChange = { newName = it },
-                    label = { Text("实例名称") },
+                    label = { Text(t("实例名称")) },
                     singleLine = true,
                     shape = M3Shape.large,
                 )
                 Text(
-                    "仅修改软件内显示名；服务器 MOTD 独立保存在 server.properties 中，不受影响。",
+                    t("仅修改软件内显示名；服务器 MOTD 独立保存在 server.properties 中，不受影响。"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
@@ -1474,10 +1475,10 @@ internal fun RenameInstanceDialog(
                     onDismiss()
                 },
                 enabled = newName.isNotBlank(),
-            ) { Text("确定") }
+            ) { Text(t("确定")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(t("取消")) }
         },
     )
 }
@@ -1497,8 +1498,8 @@ internal fun formatClock(totalSec: Long): String {
  * 完整说法在运行状态卡的「正在处理…」一行里给全。
  */
 internal fun ServerState.shortLabel(): String = when (this) {
-    ServerState.FirstRun -> "首次启动"
-    ServerState.AcceptingEula -> "重启中"
+    ServerState.FirstRun -> t("首次启动")
+    ServerState.AcceptingEula -> t("重启中")
     else -> toLabel()
 }
 

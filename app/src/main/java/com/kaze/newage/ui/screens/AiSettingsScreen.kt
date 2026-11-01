@@ -60,6 +60,7 @@ import com.kaze.newage.ui.components.M3EScreenHeader
 import com.kaze.newage.ui.components.M3EStatusChip
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
+import com.kaze.newage.core.i18n.t
 
 /**
  * AI 设置页（全屏）：模型配置档案 + 联网搜索源。
@@ -84,11 +85,11 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     ) {
         // 头部钉住不随内容滚走：长内容滚下去后返回键也得在
         M3EScreenHeader(
-            title = "AI 设置",
-            subtitle = "模型配置 · 联网搜索",
+            title = t("AI 设置"),
+            subtitle = t("模型配置 · 联网搜索"),
             leading = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回"))
                 }
             },
         )
@@ -103,7 +104,7 @@ fun AiSettingsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
         if (editingProfile != null) {
             if (prefs.aiSecretStorageError.value) {
                 Text(
-                    "系统密钥库不可用或写入失败，API Key 未保存。请检查设备安全组件后重试；应用不会降级为明文存储。",
+                    t("系统密钥库不可用或写入失败，API Key 未保存。请检查设备安全组件后重试；应用不会降级为明文存储。"),
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = M3Spacing.screenMargin, vertical = 8.dp),
@@ -161,7 +162,7 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
     val prefs = viewModel.uiPrefs
     val profiles = prefs.aiProfiles.value
 
-    SectionTitle("模型配置")
+    SectionTitle(t("模型配置"))
     // 档案 JSON 损坏：配置看起来"全没了"，但原文已被保留 —— 必须明说，并给一个收尾入口。
     // 沉默的话，用户会以为是自己删的，或者以为启动器把他的 Key 弄丢了。
     if (prefs.aiProfilesCorrupt.value) {
@@ -174,21 +175,21 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
             contentColor = MaterialTheme.colorScheme.onErrorContainer,
         ) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("配置文件读取失败", style = MaterialTheme.typography.titleSmall)
+                Text(t("配置文件读取失败"), style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "已保存的模型配置（含 API Key）格式损坏，本次没能读出来 —— " +
-                        "原始内容已原样保留，没有被删除。请重新填写一次 API Key；" +
-                        "确认不再需要那份原文后，点下面的按钮清除。",
+                    t("已保存的模型配置（含 API Key）格式损坏，本次没能读出来 —— ") +
+                        t("原始内容已原样保留，没有被删除。请重新填写一次 API Key；") +
+                        t("确认不再需要那份原文后，点下面的按钮清除。"),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 TextButton(onClick = { viewModel.clearCorruptAiProfiles() }) {
-                    Text("我已处理，清除提示")
+                    Text(t("我已处理，清除提示"))
                 }
             }
         }
     }
     SectionNote(
-        "可建多份配置（不同服务商 / Key），单击卡片选择用于对话；点「编辑」修改模型与 Key。"
+        t("可建多份配置（不同服务商 / Key），单击卡片选择用于对话；点「编辑」修改模型与 Key。")
     )
     Spacer(Modifier.height(8.dp))
 
@@ -214,14 +215,14 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            p.name.ifBlank { "未命名" },
+                            p.name.ifBlank { t("未命名") },
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         if (assigned) {
                             M3EStatusChip(
-                                text = "对话使用",
+                                text = t("对话使用"),
                                 color = MaterialTheme.colorScheme.primary,
                             )
                         }
@@ -235,7 +236,7 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
                     )
                 }
                 TextButton(onClick = { onEdit(p) }) {
-                    Text("编辑")
+                    Text(t("编辑"))
                 }
             }
         }
@@ -250,10 +251,10 @@ private fun ProfileSection(viewModel: AppViewModel, onEdit: (AiProfile) -> Unit)
     ) {
         Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.width(18.dp))
         Spacer(Modifier.width(6.dp))
-        Text("新增配置")
+        Text(t("新增配置"))
     }
     if (profiles.isEmpty()) {
-        SectionNote("还没有配置 —— 点「新增配置」已预填 DeepSeek 默认值，填上你的 Key 即可用。")
+        SectionNote(t("还没有配置 —— 点「新增配置」已预填 DeepSeek 默认值，填上你的 Key 即可用。"))
     }
 }
 
@@ -272,11 +273,11 @@ private fun AiProfileEditForm(
     var key by remember(initial.id) { mutableStateOf(initial.apiKey) }
     var extraBody by remember(initial.id) { mutableStateOf(initial.extraBody) }
 
-    SectionTitle(if (isNew) "新增配置" else "编辑配置")
+    SectionTitle(if (isNew) t("新增配置") else t("编辑配置"))
     OutlinedTextField(
         value = name,
         onValueChange = { name = it },
-        label = { Text("配置名称") },
+        label = { Text(t("配置名称")) },
         singleLine = true,
         modifier = Modifier
             .fillMaxWidth()
@@ -286,7 +287,7 @@ private fun AiProfileEditForm(
     OutlinedTextField(
         value = baseUrl,
         onValueChange = { baseUrl = it },
-        label = { Text("服务地址") },
+        label = { Text(t("服务地址")) },
         singleLine = true,
         modifier = Modifier
             .fillMaxWidth()
@@ -296,7 +297,7 @@ private fun AiProfileEditForm(
     OutlinedTextField(
         value = models,
         onValueChange = { models = it },
-        label = { Text("模型名（可多个，逗号分隔）") },
+        label = { Text(t("模型名（可多个，逗号分隔）")) },
         placeholder = { Text("deepseek-flash") },
         singleLine = true,
         modifier = Modifier
@@ -318,7 +319,7 @@ private fun AiProfileEditForm(
     OutlinedTextField(
         value = extraBody,
         onValueChange = { extraBody = it },
-        label = { Text("附加请求参数（JSON，可选）") },
+        label = { Text(t("附加请求参数（JSON，可选）")) },
         placeholder = { Text("""{"enable_thinking":true}""") },
         modifier = Modifier
             .fillMaxWidth()
@@ -328,8 +329,8 @@ private fun AiProfileEditForm(
     Spacer(Modifier.height(6.dp))
     SectionNote(
         "模型名留空回退 DeepSeek 默认；旧名（deepseek-chat / deepseek-reasoner）保存时自动归一。\n" +
-            "「深度思考」：DeepSeek 走原生 thinking 参数；其它服务商若思考=换模型名，" +
-            "填第二个模型名即可，或把显式参数写进附加参数。"
+            t("「深度思考」：DeepSeek 走原生 thinking 参数；其它服务商若思考=换模型名，") +
+            t("填第二个模型名即可，或把显式参数写进附加参数。")
     )
     Spacer(Modifier.height(12.dp))
     Row(
@@ -339,7 +340,7 @@ private fun AiProfileEditForm(
         Button(onClick = {
             onSave(
                 initial.copy(
-                    name = name.trim().ifBlank { "未命名" },
+                    name = name.trim().ifBlank { t("未命名") },
                     baseUrl = baseUrl.trim(),
                     models = AiProfileStore.parseModelList(models),
                     apiKey = key.trim(),
@@ -347,15 +348,15 @@ private fun AiProfileEditForm(
                 )
             )
         }) {
-            Text("保存")
+            Text(t("保存"))
         }
         if (!isNew) {
             TextButton(onClick = { onDelete(initial.id) }) {
-                Text("删除", color = MaterialTheme.colorScheme.error)
+                Text(t("删除"), color = MaterialTheme.colorScheme.error)
             }
         }
         TextButton(onClick = onCancel) {
-            Text("取消")
+            Text(t("取消"))
         }
     }
 }
@@ -367,8 +368,8 @@ private fun CommandModeSection(viewModel: AppViewModel) {
     val prefs = viewModel.uiPrefs
     val current = AiCommandPolicy.modeById(prefs.aiCommandMode.value)
 
-    SectionTitle("控制台命令执行")
-    SectionNote("决定 AI 能在多大范围内直接执行服务端命令。无论哪档，执行记录都会写入审计日志。")
+    SectionTitle(t("控制台命令执行"))
+    SectionNote(t("决定 AI 能在多大范围内直接执行服务端命令。无论哪档，执行记录都会写入审计日志。"))
     Spacer(Modifier.height(8.dp))
 
     AiCommandPolicy.Mode.entries.forEach { mode ->
@@ -394,10 +395,10 @@ private fun CommandModeSection(viewModel: AppViewModel) {
                     ) {
                         Text(mode.label, style = MaterialTheme.typography.titleSmall)
                         if (selected) {
-                            M3EStatusChip(text = "当前", color = MaterialTheme.colorScheme.primary)
+                            M3EStatusChip(text = t("当前"), color = MaterialTheme.colorScheme.primary)
                         }
                         if (danger) {
-                            M3EStatusChip(text = "慎用", color = MaterialTheme.colorScheme.error)
+                            M3EStatusChip(text = t("慎用"), color = MaterialTheme.colorScheme.error)
                         }
                     }
                     Text(
@@ -411,8 +412,8 @@ private fun CommandModeSection(viewModel: AppViewModel) {
     }
     if (current == AiCommandPolicy.Mode.ALL) {
         SectionNote(
-            "已放开全部命令：AI 可能自行执行 stop 等影响服务端的命令（仍会先说明意图）。" +
-                "随时可切回「仅建议」。"
+            t("已放开全部命令：AI 可能自行执行 stop 等影响服务端的命令（仍会先说明意图）。") +
+                t("随时可切回「仅建议」。")
         )
     }
     Spacer(Modifier.height(4.dp))
@@ -436,11 +437,11 @@ private fun SkillsSection(viewModel: AppViewModel) {
     // 每次进入设置页重新扫一次：用户可能刚把技能目录拷进 /sdcard
     var scan by remember { mutableStateOf(viewModel.installedSkills()) }
 
-    SectionTitle("技能")
+    SectionTitle(t("技能"))
     SectionNote(
-        "把技能放进实例目录的 skills/<名字>/SKILL.md，AI 就会知道它、需要时自己读取。" +
-            "技能是你自己的本地文件（不联网、不下载）；这里可以逐个关掉，" +
-            "关掉的技能不会出现在 AI 的清单里。"
+        t("把技能放进实例目录的 skills/<名字>/SKILL.md，AI 就会知道它、需要时自己读取。") +
+            t("技能是你自己的本地文件（不联网、不下载）；这里可以逐个关掉，") +
+            t("关掉的技能不会出现在 AI 的清单里。")
     )
     Spacer(Modifier.height(8.dp))
 
@@ -455,7 +456,7 @@ private fun SkillsSection(viewModel: AppViewModel) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("刷新技能列表", style = MaterialTheme.typography.titleSmall)
+                Text(t("刷新技能列表"), style = MaterialTheme.typography.titleSmall)
                 Text(
                     "当前实例：${scan.skills.size} 个技能" +
                         if (scan.warnings.isNotEmpty()) "，${scan.warnings.size} 个有问题" else "",
@@ -465,14 +466,14 @@ private fun SkillsSection(viewModel: AppViewModel) {
             }
             Icon(
                 Icons.Filled.Refresh,
-                contentDescription = "刷新",
+                contentDescription = t("刷新"),
                 modifier = Modifier.padding(4.dp),
             )
         }
     }
 
     if (scan.skills.isEmpty()) {
-        SectionNote("还没有技能。在实例目录下建 skills/<名字>/SKILL.md 即可（可以从别处拷）。")
+        SectionNote(t("还没有技能。在实例目录下建 skills/<名字>/SKILL.md 即可（可以从别处拷）。"))
     }
     scan.skills.forEach { skill ->
         val enabled = skill.id !in disabled
@@ -517,12 +518,12 @@ private fun SkillsSection(viewModel: AppViewModel) {
 @Composable
 private fun ToolPolicySection(viewModel: AppViewModel) {
     val prefs = viewModel.uiPrefs
-    SectionTitle("工具权限")
+    SectionTitle(t("工具权限"))
     SectionNote(
-        "逐个工具决定 AI 能不能自己动手。自动＝需要时直接执行；每次询问＝执行前弹确认卡；" +
-            "禁止＝永不执行（并会告诉模型它被禁用了，免得反复重试）。" +
-            "读取敏感文件（凭据、ops.json、开了 rcon 的 server.properties）始终要确认，" +
-            "不受这里的「自动」放宽。控制台命令由上面的「控制台命令执行」单独管。"
+        t("逐个工具决定 AI 能不能自己动手。自动＝需要时直接执行；每次询问＝执行前弹确认卡；") +
+            t("禁止＝永不执行（并会告诉模型它被禁用了，免得反复重试）。") +
+            t("读取敏感文件（凭据、ops.json、开了 rcon 的 server.properties）始终要确认，") +
+            t("不受这里的「自动」放宽。控制台命令由上面的「控制台命令执行」单独管。")
     )
     Spacer(Modifier.height(8.dp))
 

@@ -87,6 +87,14 @@ emember(path) 缓存位图的话，
         }
     )
 
+    /**
+     * 界面语言：system=跟随系统 / zh=简体中文 / en=English。默认 zh（中文是文案原文，首次安装保持改动前的观感；要英文可在设置里切换或选跟随系统）。
+     *
+     * 用字符串而不是 resources 的 locale 配置：本项目的界面文案走运行时字典
+     * （见 core/i18n），需要能随时改、且切换后立即生效，不必重建 Activity。
+     */
+    val appLanguage = mutableStateOf(prefs.getString("app_language", "zh") ?: "zh")
+
     /** 深色样式：0=普通黑 1=AMOLED纯黑 */
     val darkStyle = mutableStateOf(prefs.getInt("dark_style", 0))
 
@@ -586,6 +594,12 @@ emember(path) 缓存位图的话，
         darkStyle.value = v
         prefs.edit().putInt("dark_style", v).apply()
     }
+    /** 设置界面语言（同时更新运行时语言状态，界面靠 revision 触发重组） */
+    fun setAppLanguage(id: String) {
+        appLanguage.value = id
+        prefs.edit().putString("app_language", id).apply()
+    }
+
 
     fun setMd3ColorSource(v: String) {
         md3ColorSource.value = v

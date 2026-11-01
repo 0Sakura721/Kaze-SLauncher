@@ -1,5 +1,7 @@
 # Kaze SLauncher
 
+> **语言 / Language**：**简体中文** · [English](docs/User-Guide.md)
+
 > 在 Android 手机上运行 **Minecraft Java 版服务端**的启动器。应用内置基于 proot 的 Ubuntu 24.04 运行环境，无需 Root，也不需要单独安装 Termux。
 
 [![CI](https://github.com/0Sakura721/Kaze-SLauncher/actions/workflows/ci.yml/badge.svg)](https://github.com/0Sakura721/Kaze-SLauncher/actions/workflows/ci.yml)
@@ -23,6 +25,7 @@
 | 第三方代码、素材与许可证清单 | [第三方声明](THIRD_PARTY_NOTICES.md) |
 | 液态玻璃分支的用途与使用方式 | [分支说明](LIQUIDGLASS_BRANCH.md) |
 
+- **[English User Guide](docs/User-Guide.md)** — full user manual in English
 ## 快速开始
 
 1. 从 [Releases](https://github.com/0Sakura721/Kaze-SLauncher/releases) 下载与设备架构相符的 APK 并安装。

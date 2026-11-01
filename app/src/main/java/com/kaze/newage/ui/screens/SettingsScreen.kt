@@ -132,6 +132,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.runtime.LaunchedEffect
+import com.kaze.newage.core.i18n.t
 
 /** 背景图选图即用（显示端自适应铺满+模糊+遮罩），不再进入手动裁剪页 */
 
@@ -145,14 +146,20 @@ private val JAVA_INSTALL_VERSIONS = listOf(8, 17, 21, 25)
  *
  * 这是**合规义务**：内容必须保持完整可读 —— 换版式可以，删减条款说明不行。
  */
-internal const val ABOUT_LICENSE_TEXT =
-    "Kaze SLauncher\n" +
-        "在 Android 上运行 Minecraft Java 服务端的启动器。\n\n" +
-        "本软件以 GNU GPL-3.0 发布，源码随发行提供。\n" +
-        "架构与 UI 体系参考 Fold Craft Launcher（FCL）与 ZalithLauncher2（均 GPL-3.0）；" +
-        "运行环境为 proot + Ubuntu 24.04 rootfs。完整第三方组件清单见 THIRD_PARTY_NOTICES.md。\n\n" +
-        "下载或运行 Minecraft 服务端即表示你同意 Minecraft EULA（aka.ms/MinecraftEULA）。\n" +
-        "Minecraft 是 Mojang Studios 的商标，本项目与其无关。"
+    /**
+     * 关于与许可证正文。
+     *
+     * 不能是 `const val`：正文文案要经 [t] 按当前语言查表，而 `const val` 必须是编译期常量。
+     * 改成函数后每次调用组装一次（用在「关于」区块，不在热路径上）。
+     */
+    internal fun aboutLicenseText(): String =
+        "Kaze SLauncher\n" +
+            t("在 Android 上运行 Minecraft Java 服务端的启动器。") + "\n\n" +
+            t("本软件以 GNU GPL-3.0 发布，源码随发行提供。") + "\n" +
+            t("架构与 UI 体系参考 Fold Craft Launcher（FCL）与 ZalithLauncher2（均 GPL-3.0）；") +
+            t("运行环境为 proot + Ubuntu 24.04 rootfs。完整第三方组件清单见 THIRD_PARTY_NOTICES.md。") + "\n\n" +
+            t("下载或运行 Minecraft 服务端即表示你同意 Minecraft EULA（aka.ms/MinecraftEULA）。") + "\n" +
+            t("Minecraft 是 Mojang Studios 的商标，本项目与其无关。")
 
 /**
  * 设置：外观 / 运行与存储 / 关于与许可证，一屏到底。
@@ -195,7 +202,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 uiPrefs.saveBackgroundImage(uri)
                 uiPrefs.setBgEnabled(true)
             } catch (e: Exception) {
-                android.util.Log.w("KazeSettings", "设置背景图失败", e)
+                android.util.Log.w("KazeSettings", t("设置背景图失败"), e)
                 // 选图即用却什么都不发生，用户只会重复试。必须给出可见原因
                 android.widget.Toast.makeText(
                     appContext,
@@ -212,11 +219,11 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         if (uri == null) return@rememberLauncherForActivityResult
         val dir = StorageDirUtil.treeUriToFile(uri)
         if (dir == null) {
-            Toast.makeText(appContext, "所选目录暂不支持（请选择主存储或 SD 卡目录）", Toast.LENGTH_LONG).show()
+            Toast.makeText(appContext, t("所选目录暂不支持（请选择主存储或 SD 卡目录）"), Toast.LENGTH_LONG).show()
             return@rememberLauncherForActivityResult
         }
         if (!StorageDirUtil.isWritableDir(dir)) {
-            Toast.makeText(appContext, "所选目录不可写，无法存放实例", Toast.LENGTH_LONG).show()
+            Toast.makeText(appContext, t("所选目录不可写，无法存放实例"), Toast.LENGTH_LONG).show()
             return@rememberLauncherForActivityResult
         }
         // 持久化 SAF 授权（防系统回收）+ 保存路径
@@ -244,7 +251,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             }
         }
         viewModel.rescanInstances()
-        Toast.makeText(appContext, "实例目录已切换，正在扫描所选目录…", Toast.LENGTH_LONG).show()
+        Toast.makeText(appContext, t("实例目录已切换，正在扫描所选目录…"), Toast.LENGTH_LONG).show()
     }
 
     /** 释放当前自定义目录的 SAF 持久授权（恢复默认目录时调用） */
@@ -266,7 +273,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) dirPicker.launch(null)
-        else Toast.makeText(appContext, "未授予存储权限，无法选择自定义目录", Toast.LENGTH_LONG).show()
+        else Toast.makeText(appContext, t("未授予存储权限，无法选择自定义目录"), Toast.LENGTH_LONG).show()
     }
 
     // 「实例目录」行的按钮与整行点击共用这一段判定（分支理由见上）
@@ -280,7 +287,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 // Android 11+：先引导授予「所有文件访问」（分区存储下 File API 读写任意目录的前提）
                 Toast.makeText(
                     appContext,
-                    "请在系统设置中授予「所有文件访问」后，再次点击选择目录",
+                    t("请在系统设置中授予「所有文件访问」后，再次点击选择目录"),
                     Toast.LENGTH_LONG,
                 ).show()
                 runCatching {
@@ -309,8 +316,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 )
             )
         } catch (e: Exception) {
-                android.util.Log.w("KazeSettings", "请求忽略电池优化失败", e)
-                android.widget.Toast.makeText(appContext, "系统未提供该设置入口（部分机型会屏蔽）", android.widget.Toast.LENGTH_SHORT).show()
+                android.util.Log.w("KazeSettings", t("请求忽略电池优化失败"), e)
+                android.widget.Toast.makeText(appContext, t("系统未提供该设置入口（部分机型会屏蔽）"), android.widget.Toast.LENGTH_SHORT).show()
             }
     }
 
@@ -373,7 +380,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         // ── 页头：标题 + 版本胶囊（旧版是写死 #A87C27 背板的徽章，颜色不能写死故换掉）──
         // 页头与分类条固定在顶部、不参与滚动，分类条才有「吸附」的意义
         M3EScreenHeader(
-            title = "设置",
+            title = t("设置"),
             trailing = {
                 M3EStatusChip(
                     text = "v${BuildConfig.VERSION_NAME}",
@@ -406,16 +413,16 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             // 里没有对应的持久化项，主题与组件层目前恒为强调字阶 + 表现力弹簧；要加开关
             // 必须同时改 SettingsPrefs/Theme/组件层，超出本次界面重构（只动这一屏）的范围。
             GroupHeader(
-                title = "外观",
+                title = t("外观"),
                 icon = Icons.Filled.Palette,
-                supporting = "主题模式 · 颜色来源 · 深色样式",
+                supporting = t("主题模式 · 颜色来源 · 深色样式"),
                 section = SettingsSection.Appearance,
                 sectionOffsets = sectionOffsets,
             )
             M3EConnectedList(count = 5) { index, shape ->
                 when (index) {
                     0 -> M3EListItem(
-                        headline = "主题样式",
+                        headline = t("主题样式"),
                         supporting = AppThemeMode.fromId(uiPrefs.themeMode.value).let { "${it.label} · ${it.desc}" },
                         leadingIcon = Icons.Filled.AutoAwesome,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -424,7 +431,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     1 -> M3EListItem(
-                        headline = "主题模式",
+                        headline = t("主题模式"),
                         supporting = themeModeLabel(uiPrefs.themeModeValue.value),
                         leadingIcon = Icons.Filled.Brightness6,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -433,11 +440,11 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     2 -> M3EListItem(
-                        headline = "颜色来源",
+                        headline = t("颜色来源"),
                         supporting = if (uiPrefs.md3ColorSource.value == "custom") {
                             "自定义颜色 · ${uiPrefs.md3CustomColor.value}"
                         } else {
-                            "壁纸动态取色"
+                            t("壁纸动态取色")
                         },
                         leadingIcon = Icons.Filled.Colorize,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -446,7 +453,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     3 -> M3EListItem(
-                        headline = "深色样式",
+                        headline = t("深色样式"),
                         supporting = darkStyleLabel(uiPrefs.darkStyle.value),
                         leadingIcon = Icons.Filled.DarkMode,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -455,7 +462,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     else -> M3EListItem(
-                        headline = "图标与文字颜色",
+                        headline = t("图标与文字颜色"),
                         supporting = FgColorMode.fromId(uiPrefs.fgColorMode.value).label,
                         leadingIcon = Icons.Filled.FormatColorText,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -468,16 +475,16 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             // AMOLED 只在深色下有意义：浅色（或跟随系统且系统为浅色）时点了界面毫无变化，
             // 用户会以为设置没保存。这里把前提写清楚。
             if (!darkNow) {
-                SettingNote("「AMOLED 纯黑」只在深色模式下生效，当前是浅色")
+                SettingNote(t("「AMOLED 纯黑」只在深色模式下生效，当前是浅色"))
             }
 
             // ═══ 背景图 ═══
             val hasBg = uiPrefs.hasBackgroundImage
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                title = "背景图",
+                title = t("背景图"),
                 icon = Icons.Filled.Image,
-                supporting = if (hasBg) "已设置 · 可调模糊与遮罩" else "自定义壁纸 · 选图即用，无需裁剪",
+                supporting = if (hasBg) t("已设置 · 可调模糊与遮罩") else t("自定义壁纸 · 选图即用，无需裁剪"),
                 section = SettingsSection.Background,
                 sectionOffsets = sectionOffsets,
             )
@@ -494,8 +501,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             M3EConnectedList(count = bgRows.size) { index, shape ->
                 when (bgRows[index]) {
                     BackgroundRow.Image -> M3EListItem(
-                        headline = "背景图片",
-                        supporting = if (hasBg) "已设置 · 点击可更换" else "未选择背景图",
+                        headline = t("背景图片"),
+                        supporting = if (hasBg) t("已设置 · 点击可更换") else t("未选择背景图"),
                         leadingIcon = Icons.Filled.Wallpaper,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -505,13 +512,13 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         // 行尾只留文字按钮，整行交给它，行为不变但不会发两次。
                         trailing = {
                             TextButton(onClick = { imageLauncher.launch(arrayOf("image/*")) }) {
-                                Text(if (hasBg) "更换" else "选择图片")
+                                Text(if (hasBg) t("更换") else t("选择图片"))
                             }
                         },
                     )
                     BackgroundRow.Toggle -> M3EListItem(
-                        headline = "显示背景",
-                        supporting = "选择图片后自动开启",
+                        headline = t("显示背景"),
+                        supporting = t("选择图片后自动开启"),
                         leadingIcon = Icons.Filled.Visibility,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -527,7 +534,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         },
                     )
                     BackgroundRow.Blur -> M3EListItem(
-                        headline = "模糊强度",
+                        headline = t("模糊强度"),
                         supporting = "当前 ${uiPrefs.bgBlur.floatValue.toInt()}",
                         leadingIcon = Icons.Filled.BlurLinear,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -536,7 +543,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     BackgroundRow.Mask -> M3EListItem(
-                        headline = "遮罩浓度",
+                        headline = t("遮罩浓度"),
                         supporting = "当前 ${uiPrefs.bgOpacity.floatValue.toInt()} · 越高越暗，0 为不遮",
                         leadingIcon = Icons.Filled.Opacity,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -545,8 +552,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     BackgroundRow.Clear -> M3EListItem(
-                        headline = "清除背景图",
-                        supporting = "删除已保存的壁纸并关闭显示",
+                        headline = t("清除背景图"),
+                        supporting = t("删除已保存的壁纸并关闭显示"),
                         leadingIcon = Icons.Filled.DeleteOutline,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -562,22 +569,22 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             val customDir = uiPrefs.instanceDirPath.value
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                title = "存储",
+                title = t("存储"),
                 icon = Icons.Filled.Storage,
-                supporting = "实例目录 · 默认在手机根目录 KazeS/，可自定义到其他分区或 SD 卡",
+                supporting = t("实例目录 · 默认在手机根目录 KazeS/，可自定义到其他分区或 SD 卡"),
                 section = SettingsSection.Storage,
                 sectionOffsets = sectionOffsets,
             )
             M3EConnectedList(count = if (customDir.isBlank()) 1 else 2) { index, shape ->
                 if (index == 0) {
                     M3EListItem(
-                        headline = "实例目录",
+                        headline = t("实例目录"),
                         supporting = when {
-                            customDir.isBlank() -> "默认位置 · 手机根目录 KazeS/"
+                            customDir.isBlank() -> t("默认位置 · 手机根目录 KazeS/")
                             // 目录失效时要说明：InstanceStore 会静默回落到默认目录（新实例建在
                             // 用户找不到的地方），而这里若只显示旧路径 → 两边说法不一致
-                            File(customDir).isDirectory -> "自定义目录 · 可用"
-                            else -> "自定义目录当前不可用（已回落到默认目录）"
+                            File(customDir).isDirectory -> t("自定义目录 · 可用")
+                            else -> t("自定义目录当前不可用（已回落到默认目录）")
                         },
                         leadingIcon = Icons.Filled.FolderOpen,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -586,13 +593,13 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         // 这条尤其不能连发：两次 requestInstanceDir 会连续拉两次目录选择器，
                         // 而且"释放旧授权 + 持久化新授权"会连着跑两遍，授权计数对不上。
                         trailing = {
-                            TextButton(onClick = requestInstanceDir) { Text("选择目录") }
+                            TextButton(onClick = requestInstanceDir) { Text(t("选择目录")) }
                         },
                     )
                 } else {
                     M3EListItem(
-                        headline = "恢复默认目录",
-                        supporting = "回到手机根目录 KazeS/",
+                        headline = t("恢复默认目录"),
+                        supporting = t("回到手机根目录 KazeS/"),
                         leadingIcon = Icons.Filled.RestartAlt,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -603,7 +610,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                             releaseInstanceDirGrant()
                             uiPrefs.setInstanceDir("")
                             viewModel.rescanInstances()
-                            Toast.makeText(appContext, "已恢复默认实例目录", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(appContext, t("已恢复默认实例目录"), Toast.LENGTH_SHORT).show()
                         },
                     )
                 }
@@ -615,10 +622,10 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             // ═══ Java 运行时 ═══
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                title = "Java 运行时",
+                title = t("Java 运行时"),
                 icon = Icons.Filled.Coffee,
-                supporting = "已装：" + if (javaVersions.isEmpty()) {
-                    "无"
+                supporting = t("已装：") + if (javaVersions.isEmpty()) {
+                    t("无")
                 } else {
                     javaVersions.sorted().joinToString(" / ") { "Java $it" }
                 },
@@ -636,10 +643,10 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     headline = "Java $version",
                     supporting = when {
                         // 带上确切版本号：光写「已安装」看不出检测到的是哪个小版本
-                        installed -> javaVersionDetails[version]?.let { "已安装 · $it" } ?: "已安装"
-                        javaTask.running && isTaskFor -> "任务进行中…"
+                        installed -> javaVersionDetails[version]?.let { "已安装 · $it" } ?: t("已安装")
+                        javaTask.running && isTaskFor -> t("任务进行中…")
                         javaTask.error != null && isTaskFor -> javaTask.error.orEmpty().take(80)
-                        else -> "未安装"
+                        else -> t("未安装")
                     },
                     leadingIcon = Icons.Filled.Coffee,
                     iconContainer = if (installed) {
@@ -655,27 +662,27 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                             installed -> OutlinedButton(
                                 onClick = { javaDeleteConfirm = version },
                                 enabled = !javaTask.running,
-                            ) { Text("删除") }
+                            ) { Text(t("删除")) }
                             javaTask.running && isTaskFor && !javaTask.cancelRequested -> OutlinedButton(
                                 onClick = { viewModel.cancelJavaTask() },
-                            ) { Text("取消") }
+                            ) { Text(t("取消")) }
                             javaTask.error != null && isTaskFor -> Button(
                                 onClick = { viewModel.installJava(version) },
                                 enabled = !javaTask.running,
-                            ) { Text("重试") }
+                            ) { Text(t("重试")) }
                             else -> Button(
                                 onClick = { viewModel.installJava(version) },
                                 enabled = !javaTask.running,
                             ) {
                                 Text(
-                                    if (javaTask.running && isTaskFor) "取消中…" else "下载安装"
+                                    if (javaTask.running && isTaskFor) t("取消中…") else t("下载安装")
                                 )
                             }
                         }
                     },
                 )
             }
-            SettingNote("MC 对应 Java：1.8–1.16.5→8 · 1.17–1.20.4→17 · ≥1.20.5→21 · ≥26.x→25")
+            SettingNote(t("MC 对应 Java：1.8–1.16.5→8 · 1.17–1.20.4→17 · ≥1.20.5→21 · ≥26.x→25"))
             if (javaTask.running) {
                 // 旧版是行内 LinearProgressIndicator，这里换成 Expressive 波浪进度条
                 M3ECard(
@@ -705,16 +712,16 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             // ═══ 控制台 ═══
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                title = "控制台",
+                title = t("控制台"),
                 icon = Icons.Filled.Terminal,
-                supporting = "AI 入口 · 常驻显示",
+                supporting = t("AI 入口 · 常驻显示"),
                 section = SettingsSection.Console,
                 sectionOffsets = sectionOffsets,
             )
             M3EConnectedList(count = 1) { _, shape ->
                 M3EListItem(
-                    headline = "控制台 AI 入口",
-                    supporting = "在控制台命令输入行常驻显示 AI 助手按钮",
+                    headline = t("控制台 AI 入口"),
+                    supporting = t("在控制台命令输入行常驻显示 AI 助手按钮"),
                     leadingIcon = Icons.Filled.SmartToy,
                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                     shape = shape,
@@ -733,17 +740,17 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             // ═══ MCP 服务 ═══
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                title = "MCP 服务",
+                title = t("MCP 服务"),
                 icon = Icons.Filled.Lan,
-                supporting = "外部 AI 控制 · 映射端口 · 访问令牌",
+                supporting = t("外部 AI 控制 · 映射端口 · 访问令牌"),
                 section = SettingsSection.Mcp,
                 sectionOffsets = sectionOffsets,
             )
             M3EConnectedList(count = 5) { index, shape ->
                 when (index) {
                     0 -> M3EListItem(
-                        headline = "启用 MCP 服务",
-                        supporting = "开放本地接口，供外部 AI 客户端控制服务端",
+                        headline = t("启用 MCP 服务"),
+                        supporting = t("开放本地接口，供外部 AI 客户端控制服务端"),
                         leadingIcon = Icons.Filled.SmartToy,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -757,7 +764,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         },
                     )
                     1 -> M3EListItem(
-                        headline = "监听地址与端口",
+                        headline = t("监听地址与端口"),
                         supporting = "${uiPrefs.mcpBindAddress.value} · 端口 ${uiPrefs.mcpPort.value}",
                         leadingIcon = Icons.Filled.Router,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -766,7 +773,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     2 -> M3EListItem(
-                        headline = "自动分配范围",
+                        headline = t("自动分配范围"),
                         supporting = "映射端口被占用时按范围顺延（${uiPrefs.mcpPortRangeStart.value}–${uiPrefs.mcpPortRangeEnd.value}）",
                         leadingIcon = Icons.Filled.Tune,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -775,8 +782,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     3 -> M3EListItem(
-                        headline = "访问令牌",
-                        supporting = "Bearer 认证：外部请求必须携带此令牌",
+                        headline = t("访问令牌"),
+                        supporting = t("Bearer 认证：外部请求必须携带此令牌"),
                         leadingIcon = Icons.Filled.Key,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -796,19 +803,19 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         }
                         val address = boundPort?.let { "http://$displayHost:$it/mcp" }
                         M3EListItem(
-                            headline = "连接地址",
+                            headline = t("连接地址"),
                             supporting = address
                                 ?: if (uiPrefs.mcpEnabled.value) {
                                     "服务未运行${lastError?.let { "（$it）" } ?: ""}"
                                 } else {
-                                    "启用服务后显示连接地址"
+                                    t("启用服务后显示连接地址")
                                 },
                             leadingIcon = Icons.Filled.Link,
                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                             shape = shape,
                             onClick = address?.let { a -> {
                                 clipboard.setText(AnnotatedString(a))
-                                Toast.makeText(appContext, "已复制连接地址", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(appContext, t("已复制连接地址"), Toast.LENGTH_SHORT).show()
                             } },
                             trailing = {
                                 if (address != null) {
@@ -823,26 +830,26 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     }
                 }
             }
-            SettingNote("监听地址选 0.0.0.0 时局域网内设备均可访问；请妥善保管令牌，不用时关闭。")
+            SettingNote(t("监听地址选 0.0.0.0 时局域网内设备均可访问；请妥善保管令牌，不用时关闭。"))
 
             // ═══ 后台与更新 ═══
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                title = "后台与更新",
+                title = t("后台与更新"),
                 icon = Icons.Filled.Shield,
-                supporting = "电池优化 · 更新通道 · 自动检查",
+                supporting = t("电池优化 · 更新通道 · 自动检查"),
                 section = SettingsSection.BackgroundAndUpdate,
                 sectionOffsets = sectionOffsets,
             )
-            SettingNote("服务端运行时会拉起前台服务，退后台不被系统回收。")
+            SettingNote(t("服务端运行时会拉起前台服务，退后台不被系统回收。"))
             M3EConnectedList(count = 4) { index, shape ->
                 when (index) {
                     0 -> M3EListItem(
-                        headline = "电池优化",
+                        headline = t("电池优化"),
                         supporting = if (batteryOk) {
-                            "已允许后台运行，应用不被省电策略回收"
+                            t("已允许后台运行，应用不被省电策略回收")
                         } else {
-                            "未加入白名单：应用在后台可能被系统回收"
+                            t("未加入白名单：应用在后台可能被系统回收")
                         },
                         leadingIcon = Icons.Filled.BatterySaver,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -853,18 +860,18 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = {
                             if (batteryOk) {
                                 M3EStatusChip(
-                                    text = "已加入白名单",
+                                    text = t("已加入白名单"),
                                     color = statusPalette().running,
                                     icon = Icons.Filled.CheckCircle,
                                 )
                             } else {
-                                TextButton(onClick = requestIgnoreBattery) { Text("加入白名单") }
+                                TextButton(onClick = requestIgnoreBattery) { Text(t("加入白名单")) }
                             }
                         },
                     )
                     1 -> M3EListItem(
-                        headline = "启动时自动检查更新",
-                        supporting = "打开后每次启动应用自动检查，发现新版本会弹窗提示",
+                        headline = t("启动时自动检查更新"),
+                        supporting = t("打开后每次启动应用自动检查，发现新版本会弹窗提示"),
                         leadingIcon = Icons.Filled.SystemUpdate,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -879,7 +886,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         },
                     )
                     2 -> M3EListItem(
-                        headline = "更新通道",
+                        headline = t("更新通道"),
                         supporting = updateChannelLabel(uiPrefs.updateChannel.value),
                         leadingIcon = Icons.AutoMirrored.Filled.AltRoute,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -888,7 +895,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     3 -> M3EListItem(
-                        headline = "更新方式",
+                        headline = t("更新方式"),
                         supporting = updateModeLabel(uiPrefs.updateMode.value),
                         leadingIcon = Icons.Filled.CloudDownload,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -897,7 +904,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         trailing = { RowChevron() },
                     )
                     else -> M3EListItem(
-                        headline = "检查更新",
+                        headline = t("检查更新"),
                         supporting = "当前版本 $currentVersion · GitHub Releases · 自动测速选择最快下载线路",
                         leadingIcon = Icons.Filled.CloudDownload,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -918,7 +925,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 }
             }
             if (!batteryOk) {
-                SettingNote("vivo 等机型另有「后台耗电管理」：请在 系统设置 → 电池 → 后台耗电管理 中允许 Kaze SLauncher。")
+                SettingNote(t("vivo 等机型另有「后台耗电管理」：请在 系统设置 → 电池 → 后台耗电管理 中允许 Kaze SLauncher。"))
             }
             UpdateStatusCard(
                 state = updateState,
@@ -928,10 +935,44 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 onDismiss = { viewModel.resetUpdateState() },
             )
 
+            // ═══ 界面语言 ═══
+            // 单独一块而不是塞进「外观」的列表：语言是全局设置，与那些视觉选项不是一类；
+            // 独立成块也让「跟随系统」的解析结果有地方展示（见 supporting）。
+            M3ECard(
+                modifier = Modifier.padding(top = M3Spacing.betweenParts),
+                variant = M3ECardVariant.Filled,
+                title = t("界面语言"),
+                supporting = appLanguageLabel(uiPrefs.appLanguage.value),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.kaze.newage.core.i18n.AppLanguage.entries.forEach { lang ->
+                        val on = com.kaze.newage.core.i18n.AppLanguage.fromId(
+                            uiPrefs.appLanguage.value,
+                        ) == lang
+                        if (on) {
+                            Button(onClick = {}) { Text(appLanguageLabel(lang.id)) }
+                        } else {
+                            OutlinedButton(
+                                onClick = {
+                                    uiPrefs.setAppLanguage(lang.id)
+                                    com.kaze.newage.core.i18n.LanguageState.apply(lang, appContext)
+                                },
+                            ) { Text(appLanguageLabel(lang.id)) }
+                        }
+                    }
+                }
+                Text(
+                    t("切换后立即生效，不需要重启"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+
             // ═══ 关于与许可证 ═══
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                title = "关于与许可证",
+                title = t("关于与许可证"),
                 icon = Icons.Filled.Gavel,
                 supporting = "v${BuildConfig.VERSION_NAME} · GNU GPL-3.0",
                 section = SettingsSection.About,
@@ -940,8 +981,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             M3EConnectedList(count = 2) { index, shape ->
                 if (index == 0) {
                     M3EListItem(
-                        headline = "诊断日志",
-                        supporting = "应用日志 · 环境自检 · 出问题可直接分享",
+                        headline = t("诊断日志"),
+                        supporting = t("应用日志 · 环境自检 · 出问题可直接分享"),
                         leadingIcon = Icons.Filled.BugReport,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -950,8 +991,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     )
                 } else {
                     M3EListItem(
-                        headline = "许可证与第三方组件",
-                        supporting = "GPL-3.0 · 第三方组件清单 · Minecraft EULA 声明",
+                        headline = t("许可证与第三方组件"),
+                        supporting = t("GPL-3.0 · 第三方组件清单 · Minecraft EULA 声明"),
                         leadingIcon = Icons.Filled.Gavel,
                         iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                         shape = shape,
@@ -966,8 +1007,10 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         when (openDialog) {
             null -> Unit
 
+            SettingsDialog.Language -> Unit
+
             SettingsDialog.ThemeStyle -> ChoiceDialog(
-                title = "主题样式",
+                title = t("主题样式"),
                 // 液态玻璃已从构建中移除：主题列表里不再出现该选项
                 //（相关代码保留在 ui/theme/LiquidGlassEffect.kt 与 blur/shader 目录，未接入）
                 // GLASS（液态玻璃）暂不在选择器里展示：它是背景图+模糊的组合呈现，
@@ -998,7 +1041,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             )
 
             SettingsDialog.ThemeMode -> ChoiceDialog(
-                title = "主题模式",
+                title = t("主题模式"),
                 options = listOf(0, 1, 2),
                 selected = uiPrefs.themeModeValue.value,
                 label = { themeModeLabel(it) },
@@ -1009,13 +1052,13 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             // 二级色的取色器见 theme/Theme.kt seedColorScheme：取色风格已移除，自定义颜色只选种子色
             SettingsDialog.ColorSource -> AlertDialog(
                 onDismissRequest = { openDialog = null },
-                title = { Text("颜色来源") },
+                title = { Text(t("颜色来源")) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         M3ESegmentedRow(
                             options = listOf("wallpaper", "custom"),
                             selected = uiPrefs.md3ColorSource.value,
-                            label = { if (it == "wallpaper") "壁纸动态取色" else "自定义颜色" },
+                            label = { if (it == "wallpaper") t("壁纸动态取色") else t("自定义颜色") },
                             onSelect = { uiPrefs.setMd3ColorSource(it) },
                             height = 44.dp,
                         )
@@ -1038,44 +1081,44 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                                         )
                                 )
                                 Column(Modifier.weight(1f)) {
-                                    Text("二级色", style = MaterialTheme.typography.bodyMedium)
+                                    Text(t("二级色"), style = MaterialTheme.typography.bodyMedium)
                                     Text(
                                         uiPrefs.md3CustomColor.value,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                Button(onClick = { showColorPicker = true }) { Text("取色") }
+                                Button(onClick = { showColorPicker = true }) { Text(t("取色")) }
                             }
                         }
                     }
                 },
-                confirmButton = { TextButton(onClick = { openDialog = null }) { Text("完成") } },
+                confirmButton = { TextButton(onClick = { openDialog = null }) { Text(t("完成")) } },
             )
 
             SettingsDialog.DarkStyle -> ChoiceDialog(
-                title = "深色样式",
+                title = t("深色样式"),
                 options = listOf(0, 1),
                 selected = uiPrefs.darkStyle.value,
                 label = { darkStyleLabel(it) },
-                note = if (darkNow) null else "「AMOLED 纯黑」只在深色模式下生效，当前是浅色",
+                note = if (darkNow) null else t("「AMOLED 纯黑」只在深色模式下生效，当前是浅色"),
                 onSelect = { uiPrefs.setDarkStyle(it) },
                 onDismiss = { openDialog = null },
             )
 
             SettingsDialog.FgColor -> ChoiceDialog(
-                title = "图标与文字颜色",
+                title = t("图标与文字颜色"),
                 options = FgColorMode.entries,
                 selected = FgColorMode.fromId(uiPrefs.fgColorMode.value),
                 label = { it.label },
-                note = "深色背景图选「白色」、浅色图选「黑色」可保证可读性",
+                note = t("深色背景图选「白色」、浅色图选「黑色」可保证可读性"),
                 onSelect = { uiPrefs.setFgColorMode(it.id) },
                 onDismiss = { openDialog = null },
             )
 
 
             SettingsDialog.BgBlur -> SliderDialog(
-                title = "模糊强度",
+                title = t("模糊强度"),
                 value = uiPrefs.bgBlur.floatValue,
                 valueText = "模糊强度：${uiPrefs.bgBlur.floatValue.toInt()}",
                 range = 0f..25f,
@@ -1084,32 +1127,32 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
             )
 
             SettingsDialog.BgMask -> SliderDialog(
-                title = "遮罩浓度",
+                title = t("遮罩浓度"),
                 value = uiPrefs.bgOpacity.floatValue,
                 valueText = "遮罩浓度：${uiPrefs.bgOpacity.floatValue.toInt()}",
                 range = 0f..90f,
-                note = "越高越暗，0 为不遮",
+                note = t("越高越暗，0 为不遮"),
                 onValueChange = { uiPrefs.setBgOpacity(it) },
                 onDismiss = { openDialog = null },
             )
 
             SettingsDialog.UpdateMode -> ChoiceDialog(
-                title = "更新方式",
+                title = t("更新方式"),
                 options = listOf("full", "patch"),
                 selected = uiPrefs.updateMode.value,
                 label = { updateModeLabel(it) },
-                note = "完整安装包最稳妥（默认）；增量补丁只下载变化的部分，约省 95% 流量，" +
-                    "拼装后会校验 sha256 与签名，失败自动回退整包",
+                note = t("完整安装包最稳妥（默认）；增量补丁只下载变化的部分，约省 95% 流量，") +
+                    t("拼装后会校验 sha256 与签名，失败自动回退整包"),
                 onSelect = { uiPrefs.setUpdateMode(it) },
                 onDismiss = { openDialog = null },
             )
 
             SettingsDialog.UpdateChannel -> ChoiceDialog(
-                title = "更新通道",
+                title = t("更新通道"),
                 options = listOf("preview", "stable"),
                 selected = uiPrefs.updateChannel.value,
                 label = { updateChannelLabel(it) },
-                note = "预览版优先推送最新功能（含测试版本）；正式版仅推送稳定发布",
+                note = t("预览版优先推送最新功能（含测试版本）；正式版仅推送稳定发布"),
                 onSelect = { uiPrefs.setUpdateChannel(it) },
                 onDismiss = { openDialog = null },
             )
@@ -1124,7 +1167,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 var text by remember { mutableStateOf(uiPrefs.mcpPort.value.toString()) }
                 AlertDialog(
                     onDismissRequest = { openDialog = null },
-                    title = { Text("监听地址与端口") },
+                    title = { Text(t("监听地址与端口")) },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1141,27 +1184,27 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                                 FilterChip(
                                     selected = addrChoice == 2,
                                     onClick = { addrChoice = 2 },
-                                    label = { Text("自定义") },
+                                    label = { Text(t("自定义")) },
                                 )
                             }
                             if (addrChoice == 2) {
                                 OutlinedTextField(
                                     value = customAddr,
                                     onValueChange = { s -> customAddr = s.trim().take(15) },
-                                    label = { Text("IPv4 地址") },
+                                    label = { Text(t("IPv4 地址")) },
                                     singleLine = true,
                                 )
                             }
                             OutlinedTextField(
                                 value = text,
                                 onValueChange = { s -> text = s.filter { it.isDigit() }.take(5) },
-                                label = { Text("端口（1024–65535）") },
+                                label = { Text(t("端口（1024–65535）")) },
                                 singleLine = true,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             )
                             Text(
-                                "0.0.0.0 局域网内均可访问，127.0.0.1 仅本机；端口被占用时" +
-                                    "按「自动分配范围」顺延，实际以「连接地址」为准。",
+                                t("0.0.0.0 局域网内均可访问，127.0.0.1 仅本机；端口被占用时") +
+                                    t("按「自动分配范围」顺延，实际以「连接地址」为准。"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1171,7 +1214,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                         TextButton(onClick = {
                             val p = text.toIntOrNull()
                             if (p == null || p !in 1024..65535) {
-                                Toast.makeText(appContext, "端口需在 1024 ~ 65535", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(appContext, t("端口需在 1024 ~ 65535"), Toast.LENGTH_SHORT).show()
                                 return@TextButton
                             }
                             val addr = when (addrChoice) {
@@ -1180,16 +1223,16 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                                 else -> customAddr.trim()
                             }
                             if (!isValidIpv4(addr)) {
-                                Toast.makeText(appContext, "监听地址不是有效的 IPv4", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(appContext, t("监听地址不是有效的 IPv4"), Toast.LENGTH_SHORT).show()
                                 return@TextButton
                             }
                             uiPrefs.setMcpBindAddress(addr)
                             uiPrefs.setMcpPort(p)
                             viewModel.rebindMcp()
                             openDialog = null
-                        }) { Text("保存") }
+                        }) { Text(t("保存")) }
                     },
-                    dismissButton = { TextButton(onClick = { openDialog = null }) { Text("取消") } },
+                    dismissButton = { TextButton(onClick = { openDialog = null }) { Text(t("取消")) } },
                 )
             }
 
@@ -1198,14 +1241,14 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 var endText by remember { mutableStateOf(uiPrefs.mcpPortRangeEnd.value.toString()) }
                 AlertDialog(
                     onDismissRequest = { openDialog = null },
-                    title = { Text("自动分配范围") },
+                    title = { Text(t("自动分配范围")) },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
                                     value = startText,
                                     onValueChange = { s -> startText = s.filter { it.isDigit() }.take(5) },
-                                    label = { Text("起始") },
+                                    label = { Text(t("起始")) },
                                     singleLine = true,
                                     modifier = Modifier.weight(1f),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1213,14 +1256,14 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                                 OutlinedTextField(
                                     value = endText,
                                     onValueChange = { s -> endText = s.filter { it.isDigit() }.take(5) },
-                                    label = { Text("结束") },
+                                    label = { Text(t("结束")) },
                                     singleLine = true,
                                     modifier = Modifier.weight(1f),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                 )
                             }
                             Text(
-                                "映射端口被占用时，从起始端口顺延取第一个可用端口。",
+                                t("映射端口被占用时，从起始端口顺延取第一个可用端口。"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1233,7 +1276,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                             if (s == null || e == null || s !in 1024..65535 || e !in 1024..65535 || s > e) {
                                 Toast.makeText(
                                     appContext,
-                                    "范围无效：起止须在 1024 ~ 65535，且起始不大于结束",
+                                    t("范围无效：起止须在 1024 ~ 65535，且起始不大于结束"),
                                     Toast.LENGTH_SHORT,
                                 ).show()
                             } else {
@@ -1241,9 +1284,9 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                                 viewModel.rebindMcp()
                                 openDialog = null
                             }
-                        }) { Text("保存") }
+                        }) { Text(t("保存")) }
                     },
-                    dismissButton = { TextButton(onClick = { openDialog = null }) { Text("取消") } },
+                    dismissButton = { TextButton(onClick = { openDialog = null }) { Text(t("取消")) } },
                 )
             }
 
@@ -1251,32 +1294,32 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 var token by remember { mutableStateOf(uiPrefs.mcpToken.value) }
                 AlertDialog(
                     onDismissRequest = { openDialog = null },
-                    title = { Text("访问令牌") },
+                    title = { Text(t("访问令牌")) },
                     text = {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = token,
                                 onValueChange = {},
                                 readOnly = true,
-                                label = { Text("Bearer 令牌") },
+                                label = { Text(t("Bearer 令牌")) },
                                 singleLine = true,
                             )
                             Text(
-                                "外部请求需带请求头 Authorization: Bearer <令牌>。" +
-                                    "重新生成后旧令牌立即失效，已配置的客户端要改用新令牌。",
+                                t("外部请求需带请求头 Authorization: Bearer <令牌>。") +
+                                    t("重新生成后旧令牌立即失效，已配置的客户端要改用新令牌。"),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     },
-                    confirmButton = { TextButton(onClick = { openDialog = null }) { Text("完成") } },
+                    confirmButton = { TextButton(onClick = { openDialog = null }) { Text(t("完成")) } },
                     dismissButton = {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                             TextButton(onClick = {
                                 clipboard.setText(AnnotatedString(token))
-                                Toast.makeText(appContext, "已复制访问令牌", Toast.LENGTH_SHORT).show()
-                            }) { Text("复制") }
-                            TextButton(onClick = { token = uiPrefs.regenerateMcpToken() }) { Text("重新生成") }
+                                Toast.makeText(appContext, t("已复制访问令牌"), Toast.LENGTH_SHORT).show()
+                            }) { Text(t("复制")) }
+                            TextButton(onClick = { token = uiPrefs.regenerateMcpToken() }) { Text(t("重新生成")) }
                         }
                     },
                 )
@@ -1307,10 +1350,10 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                     TextButton(onClick = {
                         javaDeleteConfirm = null
                         viewModel.uninstallJava(version)
-                    }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                    }) { Text(t("删除"), color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { javaDeleteConfirm = null }) { Text("取消") }
+                    TextButton(onClick = { javaDeleteConfirm = null }) { Text(t("取消")) }
                 },
             )
         }

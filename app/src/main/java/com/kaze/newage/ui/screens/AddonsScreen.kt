@@ -71,6 +71,7 @@ import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
 import java.io.File
 import java.util.Locale
+import com.kaze.newage.core.i18n.t
 
 /**
  * 插件 / 模组管理页：Modrinth 搜索下载 + 已安装列表（启用/禁用/删除）。
@@ -97,7 +98,7 @@ fun AddonsScreen(
         return
     }
 
-    val kindLabel = if (kind == AddonKind.PLUGIN) "插件" else "模组"
+    val kindLabel = if (kind == AddonKind.PLUGIN) t("插件") else t("模组")
     // 核心不支持这类附件时整页只读：搜索/安装全部禁用。
     // 原来只有一条警示横幅，搜索与安装照常可用 —— 用户能把 Fabric 模组装进 Paper 实例
     // （mods/ 目录对 Paper 毫无意义，白下几十 MB 还不报错）。
@@ -173,11 +174,11 @@ fun AddonsScreen(
     replaceTarget?.takeIf { installState.replacePending }?.let { hit ->
         AlertDialog(
             onDismissRequest = { viewModel.cancelReplaceAddon() },
-            title = { Text("已存在同名文件") },
+            title = { Text(t("已存在同名文件")) },
             text = {
                 Text(
                     "${installState.message}\n\n" +
-                        "继续安装会用它替换掉原文件（Bukkit / Fabric 按文件名加载，改名会让同一个" +
+                        t("继续安装会用它替换掉原文件（Bukkit / Fabric 按文件名加载，改名会让同一个") +
                         "${kindLabel}被加载两遍，所以只能替换）。原文件将被覆盖，无法撤销。"
                 )
             },
@@ -185,10 +186,10 @@ fun AddonsScreen(
                 TextButton(onClick = {
                     viewModel.confirmReplaceAddon(instance, kind, hit)
                     refresh++
-                }) { Text("替换", color = MaterialTheme.colorScheme.error) }
+                }) { Text(t("替换"), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.cancelReplaceAddon() }) { Text("取消") }
+                TextButton(onClick = { viewModel.cancelReplaceAddon() }) { Text(t("取消")) }
             },
         )
     }
@@ -206,7 +207,7 @@ fun AddonsScreen(
                 "安装时按 ${AddonManager.loaderFor(instance, kind)} 过滤",
             leading = {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回"))
                 }
             },
         )
@@ -261,12 +262,12 @@ fun AddonsScreen(
             ) {
                 CheckChip(
                     selected = !sortByDownloads,
-                    label = "相关度",
+                    label = t("相关度"),
                     onClick = { sortByDownloads = false },
                 )
                 CheckChip(
                     selected = sortByDownloads,
-                    label = "下载最多",
+                    label = t("下载最多"),
                     onClick = { sortByDownloads = true },
                 )
             }
@@ -276,8 +277,8 @@ fun AddonsScreen(
             if (installState.running) {
                 M3ECard(
                     variant = M3ECardVariant.Outlined,
-                    title = "正在安装",
-                    supporting = installState.message.ifBlank { "准备下载…" },
+                    title = t("正在安装"),
+                    supporting = installState.message.ifBlank { t("准备下载…") },
                     content = {
                         WavyLinearProgress(
                             progress = installState.progress.coerceIn(0f, 1f),
@@ -337,7 +338,7 @@ fun AddonsScreen(
                         headline = hit.title,
                         // 下载数放前面：辅助文本只有两行，长描述会把行尾的计数挤掉
                         supporting = "${formatDownloads(hit.downloads)} 次下载 · " +
-                            hit.description.ifBlank { "（无描述）" },
+                            hit.description.ifBlank { t("（无描述）") },
                         leadingIcon = if (kind == AddonKind.PLUGIN) Icons.Filled.Extension
                         else Icons.Filled.ViewInAr,
                         iconContainer = MaterialTheme.colorScheme.primaryContainer,
@@ -356,7 +357,7 @@ fun AddonsScreen(
                                         viewModel.installAddonChecked(instance, kind, hit)
                                     },
                                     enabled = supported && !installState.running,
-                                ) { Text("安装") }
+                                ) { Text(t("安装")) }
                             }
                         },
                     )
@@ -365,7 +366,7 @@ fun AddonsScreen(
                 // 空状态：搜过了、不在搜、没结果、也没报错
                 M3EListItem(
                     headline = "没有找到相关$kindLabel",
-                    supporting = "换个关键词试试（支持 Modrinth 上的项目名，如 EssentialsX、lithium）",
+                    supporting = t("换个关键词试试（支持 Modrinth 上的项目名，如 EssentialsX、lithium）"),
                     leadingIcon = Icons.Filled.SearchOff,
                     iconContainer = MaterialTheme.colorScheme.surfaceContainerHighest,
                     shape = M3Shape.listSingle,
@@ -373,8 +374,8 @@ fun AddonsScreen(
             } else if (!searched && supported) {
                 // 还没搜过：说清楚怎么开始，别留一片空白（不支持核心时不给这条假入口）
                 M3EListItem(
-                    headline = "搜索 Modrinth",
-                    supporting = "输入关键词后回车，或点右侧搜索图标；结果按上面的排序方式显示",
+                    headline = t("搜索 Modrinth"),
+                    supporting = t("输入关键词后回车，或点右侧搜索图标；结果按上面的排序方式显示"),
                     leadingIcon = Icons.Filled.Search,
                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                     shape = M3Shape.listSingle,
@@ -397,7 +398,7 @@ fun AddonsScreen(
                 // 检查更新：有插件才显示（零安装时点它没有意义）
                 if (installed.isNotEmpty() && !addonBusy) {
                     TextButton(onClick = { viewModel.checkAddonUpdate(instance, kind) }) {
-                        Text("检查更新")
+                        Text(t("检查更新"))
                     }
                 }
             }
@@ -472,7 +473,7 @@ fun AddonsScreen(
                                 IconButton(onClick = { deleteTarget = file }) {
                                     Icon(
                                         Icons.Filled.Delete,
-                                        contentDescription = "删除",
+                                        contentDescription = t("删除"),
                                         tint = MaterialTheme.colorScheme.error,
                                     )
                                 }
@@ -481,7 +482,7 @@ fun AddonsScreen(
                     )
                 }
                 Text(
-                    "更改启用状态或增删后，重启服务端生效。",
+                    t("更改启用状态或增删后，重启服务端生效。"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -499,10 +500,10 @@ fun AddonsScreen(
                     deleteTarget = null
                     AddonManager.delete(target)
                     refresh++
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(t("删除"), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("取消") }
+                TextButton(onClick = { deleteTarget = null }) { Text(t("取消")) }
             },
         )
     }
@@ -557,7 +558,7 @@ private fun SearchField(
             ) {
                 if (query.isEmpty()) {
                     Text(
-                        if (enabled) "搜索 Modrinth" else "当前核心不支持这类附件",
+                        if (enabled) t("搜索 Modrinth") else t("当前核心不支持这类附件"),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -584,7 +585,7 @@ private fun SearchField(
                 }
             } else {
                 IconButton(onClick = onSubmit, enabled = enabled && query.isNotBlank()) {
-                    Icon(Icons.Filled.Search, contentDescription = "搜索")
+                    Icon(Icons.Filled.Search, contentDescription = t("搜索"))
                 }
             }
         }
@@ -657,7 +658,7 @@ private fun AddonUpdatePanel(
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(top = 4.dp),
             )
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(t("关闭")) }
         }
 
         is AppViewModel.AddonUpdateState.Upgraded -> {
@@ -682,7 +683,7 @@ private fun AddonUpdatePanel(
                     color = MaterialTheme.colorScheme.error,
                 )
             }
-            TextButton(onClick = onDismiss) { Text("知道了") }
+            TextButton(onClick = onDismiss) { Text(t("知道了")) }
         }
 
         is AppViewModel.AddonUpdateState.Done -> {
@@ -713,7 +714,7 @@ private fun AddonUpdatePanel(
                 Button(
                     onClick = { onUpgradeAll(s.updates) },
                     modifier = Modifier.padding(top = 4.dp),
-                ) { Text("全部更新") }
+                ) { Text(t("全部更新")) }
             } else {
                 Text(
                     "已是最新（${s.latest.size} 个已检查）",
@@ -753,7 +754,7 @@ private fun AddonUpdatePanel(
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            TextButton(onClick = onDismiss) { Text("关闭") }
+            TextButton(onClick = onDismiss) { Text(t("关闭")) }
         }
     }
 }

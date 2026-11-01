@@ -20,6 +20,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import com.kaze.newage.core.i18n.t
 
 /**
  * 服务端页：多实例列表与管理。
@@ -89,16 +90,16 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
 
     private fun buildTitle(): LinearLayout = c.row().apply {
         val texts = c.col().apply {
-            addView(c.txt("服务端", Type.display, ShellTheme.current.ink, medium = true))
+            addView(c.txt(t("服务端"), Type.display, ShellTheme.current.ink, medium = true))
             addView(
-                c.txt("多开 · 筛选 · 导入", Type.micro, ShellTheme.current.ink3).apply {
+                c.txt(t("多开 · 筛选 · 导入"), Type.micro, ShellTheme.current.ink3).apply {
                     setPadding(0, dp(4f), 0, 0)
                 },
             )
         }
         addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addView(
-            c.txt("导入", Type.micro, ShellTheme.current.ink2, medium = true).apply {
+            c.txt(t("导入"), Type.micro, ShellTheme.current.ink2, medium = true).apply {
                 gravity = Gravity.CENTER
                 setPadding(dp(13f), dp(9f), dp(13f), dp(9f))
                 background = c.rip(
@@ -106,7 +107,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                     stroke = ShellTheme.current.strokeStrong,
                     strokeWidth = Dim.line,
                 )
-                tappable("导入已有 jar") { host.pickJar() }
+                tappable(t("导入已有 jar")) { host.pickJar() }
             },
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, dp(34f),
@@ -120,7 +121,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                     stroke = ShellTheme.current.accent.alpha(0.26f),
                     strokeWidth = Dim.line,
                 )
-                tappable("新建服务端") { host.openCreate() }
+                tappable(t("新建服务端")) { host.openCreate() }
             },
             LinearLayout.LayoutParams(dp(34f), dp(34f)),
         )
@@ -157,7 +158,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         countRow.removeAllViews()
         // 分段：全部 + 四个分类。计数取自当前实例集，不是筛选结果。
         val segments = listOf<Pair<String, CoreCategory?>>(
-            "全部" to null,
+            t("全部") to null,
             CoreCategory.OFFICIAL.displayName to CoreCategory.OFFICIAL,
             CoreCategory.OPTIMIZED.displayName to CoreCategory.OPTIMIZED,
             CoreCategory.MODDED.displayName to CoreCategory.MODDED,
@@ -260,10 +261,10 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         if (list.isEmpty()) {
             listSlot.addView(
                 c.emptyState(
-                    if (instances.isEmpty()) "还没有服务端实例" else "这个分类下没有实例",
-                    if (instances.isEmpty()) "选核心与版本下载，或导入已有的 server.jar"
-                    else "换一个筛选条件试试",
-                    if (instances.isEmpty()) "新建实例" else null,
+                    if (instances.isEmpty()) t("还没有服务端实例") else t("这个分类下没有实例"),
+                    if (instances.isEmpty()) t("选核心与版本下载，或导入已有的 server.jar")
+                    else t("换一个筛选条件试试"),
+                    if (instances.isEmpty()) t("新建实例") else null,
                 ) { if (instances.isEmpty()) host.openCreate() },
                 c.stackMargin(),
             )
@@ -309,7 +310,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                         )
                         if (inst.pinned) {
                             nameRow.addView(
-                                c.txt("置顶", Type.micro, ShellTheme.current.accent, medium = true).apply {
+                                c.txt(t("置顶"), Type.micro, ShellTheme.current.accent, medium = true).apply {
                                     setPadding(dp(6f), 0, 0, 0)
                                 },
                             )
@@ -352,31 +353,31 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         val running = state == ServerState.Running
         val sheet = Sheet(c, inst.name, "${inst.coreType.displayName} · ${state.toLabel()}")
 
-        sheet.add(c.settingRow("打开控制台", "实时日志与命令") {
+        sheet.add(c.settingRow(t("打开控制台"), t("实时日志与命令")) {
             sheet.dismiss()
             host.openConsoleAction(inst)
         })
         sheet.add(c.splitter())
-        sheet.add(c.settingRow(if (running) "重启" else "启动", "重启会先优雅停服") {
+        sheet.add(c.settingRow(if (running) t("重启") else t("启动"), t("重启会先优雅停服")) {
             sheet.dismiss()
             if (running) host.restart(inst) else host.start(inst)
         })
         sheet.add(c.splitter())
-        sheet.add(c.settingRow("重命名", "只改显示名，不影响目录") {
+        sheet.add(c.settingRow(t("重命名"), t("只改显示名，不影响目录")) {
             sheet.dismiss()
             host.renameDialog(inst)
         })
         sheet.add(c.splitter())
-        sheet.add(c.settingRow(if (inst.pinned) "取消置顶" else "置顶", "置顶的排在最前") {
+        sheet.add(c.settingRow(if (inst.pinned) t("取消置顶") else t("置顶"), t("置顶的排在最前")) {
             sheet.dismiss()
             host.vm.setInstancePinned(inst, !inst.pinned)
         })
         sheet.add(c.splitter())
-        sheet.add(c.settingRow("删除实例", "世界与目录保留在磁盘上", c.chevron(ShellTheme.current.danger)) {
+        sheet.add(c.settingRow(t("删除实例"), t("世界与目录保留在磁盘上"), c.chevron(ShellTheme.current.danger)) {
             sheet.dismiss()
             host.confirmDelete(inst) { host.toast("已删除 ${inst.name}") }
         })
-        sheet.footerText("关闭", ShellTheme.current.ink3) { sheet.dismiss() }
+        sheet.footerText(t("关闭"), ShellTheme.current.ink3) { sheet.dismiss() }
         sheet.show()
     }
 

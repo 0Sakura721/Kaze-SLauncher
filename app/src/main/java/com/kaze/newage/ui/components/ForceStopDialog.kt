@@ -6,6 +6,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import com.kaze.newage.core.i18n.t
 
 /**
  * 「强制停止」确认框（真机要求，原话两条）：
@@ -36,20 +37,20 @@ fun ForceStopConfirmDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("强制停止？") },
+        title = { Text(t("强制停止？")) },
         text = {
             Text(
                 "「$instanceName」可能正在保存世界。强制停止会先发 SIGTERM 让它收尾，" +
                     "最多等 5 秒，之后强制结束进程 —— 没存完的部分可能会丢失。\n\n" +
-                    "如果它只是慢，建议点「继续等它存完」；服务器自己停好后这个提示会自动消失。",
+                    t("如果它只是慢，建议点「继续等它存完」；服务器自己停好后这个提示会自动消失。"),
                 style = MaterialTheme.typography.bodyMedium,
             )
         },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("强制停止") }
+            TextButton(onClick = onConfirm) { Text(t("强制停止")) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("继续等它存完") }
+            TextButton(onClick = onDismiss) { Text(t("继续等它存完")) }
         },
     )
 }

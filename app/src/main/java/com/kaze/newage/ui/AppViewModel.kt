@@ -63,6 +63,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import com.kaze.newage.core.console.CONSOLE_EAGER_LIMIT
 import com.kaze.newage.core.monitor.ProcessStats
+import com.kaze.newage.core.i18n.t
 
 /** 服务端下载状态 */
 data class DownloadState(
@@ -356,9 +357,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 refreshJava()
                 _javaTask.value = JavaTaskState(version = version, progress = 1f, message = "Java $version 安装完成")
             } catch (e: InterruptedException) {
-                _javaTask.value = JavaTaskState(version = version, message = "已取消（已下载部分保留，可继续）")
+                _javaTask.value = JavaTaskState(version = version, message = t("已取消（已下载部分保留，可继续）"))
             } catch (e: Exception) {
-                _javaTask.value = JavaTaskState(version = version, error = e.message ?: "安装失败")
+                _javaTask.value = JavaTaskState(version = version, error = e.message ?: t("安装失败"))
             }
         }
     }
@@ -366,7 +367,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     /** 请求取消正在进行的 Java 任务（下载中止，断点保留） */
     fun cancelJavaTask() {
         if (_javaTask.value.running) {
-            _javaTask.value = _javaTask.value.copy(cancelRequested = true, message = "正在取消…")
+            _javaTask.value = _javaTask.value.copy(cancelRequested = true, message = t("正在取消…"))
         }
     }
 
@@ -400,7 +401,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 refreshJava()
                 _javaTask.value = JavaTaskState(message = "Java $version 已卸载")
             } catch (e: Exception) {
-                _javaTask.value = JavaTaskState(version = version, error = e.message ?: "卸载失败")
+                _javaTask.value = JavaTaskState(version = version, error = e.message ?: t("卸载失败"))
             }
         }
     }
@@ -417,7 +418,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         // 部署是长任务（下载 rootfs + apt）：连点两次会同时跑两套部署、互相踩文件
         if (_envTask.value.running) return
         // 同步置位，理由同 installJava
-        _envTask.value = DownloadState(running = true, progress = 0f, message = "准备部署…")
+        _envTask.value = DownloadState(running = true, progress = 0f, message = t("准备部署…"))
         // 部署要跑几分钟（下载 rootfs + apt），退出界面不应中断
         container.appScope.launch {
             try {
@@ -425,9 +426,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     _envTask.value = DownloadState(running = true, progress = progress, message = message)
                 }
                 refreshJava()
-                _envTask.value = DownloadState(done = true, message = "环境部署完成")
+                _envTask.value = DownloadState(done = true, message = t("环境部署完成"))
             } catch (e: Exception) {
-                _envTask.value = DownloadState(error = e.message ?: "部署失败")
+                _envTask.value = DownloadState(error = e.message ?: t("部署失败"))
             }
         }
     }
@@ -470,7 +471,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 android.net.Uri.parse("package:${container.appContext.packageName}"),
             ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             container.appContext.startActivity(intent)
-        } catch (e: Exception) { android.util.Log.w("KazeApp", "请求忽略电池优化失败", e) }
+        } catch (e: Exception) { android.util.Log.w("KazeApp", t("请求忽略电池优化失败"), e) }
     }
 
     /**
@@ -500,7 +501,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
             }
             if (stopped == null) {
                 serverManager.consoleFor(instance.id).emit(
-                    "> 仍在停止中（多半还在保存世界）：已取消本次启动。要立即终止请再点一次「强制停止」",
+                    t("> 仍在停止中（多半还在保存世界）：已取消本次启动。要立即终止请再点一次「强制停止」"),
                     LineType.Warn,
                 )
                 return@launch
@@ -569,7 +570,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         val running = serverManager.states.value[instance.id] == ServerState.Running
         serverManager.consoleFor(instance.id).emit(
             "> 内存上限已改为 $mb MB" +
-                if (running) "（当前进程仍按旧值运行，重启后生效）" else "（下次启动生效）",
+                if (running) t("（当前进程仍按旧值运行，重启后生效）") else t("（下次启动生效）"),
             LineType.System,
         )
     }
@@ -579,8 +580,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         instanceStore.setExtraJvmArgs(instance.id, args)
         val running = serverManager.states.value[instance.id] == ServerState.Running
         serverManager.consoleFor(instance.id).emit(
-            "> JVM 附加参数已更新" +
-                if (running) "（当前进程仍按旧参数运行，重启后生效）" else "（下次启动生效）",
+            t("> JVM 附加参数已更新") +
+                if (running) t("（当前进程仍按旧参数运行，重启后生效）") else t("（下次启动生效）"),
             LineType.System,
         )
     }
@@ -596,7 +597,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         val running = serverManager.states.value[instance.id] == ServerState.Running
         serverManager.consoleFor(instance.id).emit(
             "> Java 版本已改为 Java $javaMajor" +
-                if (running) "（当前进程仍按旧版本运行，重启后生效）" else "（下次启动生效）",
+                if (running) t("（当前进程仍按旧版本运行，重启后生效）") else t("（下次启动生效）"),
             LineType.System,
         )
     }
@@ -960,7 +961,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 _olderCursor.value = chunk.cursor
                 _hasMoreOlder.value = chunk.hasMore
             } catch (e: Exception) {
-                android.util.Log.w("KazeSLauncher", "回读更早日志失败", e)
+                android.util.Log.w("KazeSLauncher", t("回读更早日志失败"), e)
                 _hasMoreOlder.value = false
             } finally {
                 _loadingOlder.value = false
@@ -1009,7 +1010,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     out.write(text.toByteArray(Charsets.UTF_8))
                 }
             } catch (e: Exception) {
-                android.util.Log.w("KazeApp", "导出控制台日志失败", e)
+                android.util.Log.w("KazeApp", t("导出控制台日志失败"), e)
                 // 静默失败会让用户以为"已经保存了"。导出是明确的一次用户操作，失败必须说出来
                 viewModelScope.launch(Dispatchers.Main) {
                     android.widget.Toast.makeText(
@@ -1027,7 +1028,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         val text = _consoleLines.value.joinToString("\n") { it.text }
         val ctx = container.appContext
         if (text.isBlank()) {
-            android.widget.Toast.makeText(ctx, "暂无日志", android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(ctx, t("暂无日志"), android.widget.Toast.LENGTH_SHORT).show()
             return
         }
         viewModelScope.launch(Dispatchers.Main) {
@@ -1035,10 +1036,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 val cm = ctx.getSystemService(
                     android.content.Context.CLIPBOARD_SERVICE
                 ) as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("Kaze 日志", text))
-                android.widget.Toast.makeText(ctx, "已复制完整日志", android.widget.Toast.LENGTH_SHORT).show()
+                cm.setPrimaryClip(android.content.ClipData.newPlainText(t("Kaze 日志"), text))
+                android.widget.Toast.makeText(ctx, t("已复制完整日志"), android.widget.Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                android.util.Log.w("KazeApp", "复制日志到剪贴板失败", e)
+                android.util.Log.w("KazeApp", t("复制日志到剪贴板失败"), e)
                 // 本协程已在 Main 上，可直接弹提示：复制失败却提示"已复制"是明确的错误反馈
                 android.widget.Toast.makeText(
                     ctx,
@@ -1073,7 +1074,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             container.appContext,
-                            "实例仍在停止中（可能正在安装或部署），请稍后再试删除",
+                            t("实例仍在停止中（可能正在安装或部署），请稍后再试删除"),
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     }
@@ -1208,7 +1209,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         if (!CoreUpdate.supports(instance.coreType)) {
             _coreUpdate.value = CoreUpdateState.Unsupported(
                 instance.id,
-                "这是手动导入的 jar，没有上游可以对比 —— 需要你自己下载新版覆盖",
+                t("这是手动导入的 jar，没有上游可以对比 —— 需要你自己下载新版覆盖"),
             )
             return
         }
@@ -1221,7 +1222,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     val newer = CoreUpdate.pickNewer(builds, instance.coreBuild)
                     if (newer == null) {
                         _coreUpdate.value = CoreUpdateState.UpToDate(
-                            instance.id, instance.coreBuild.ifBlank { "最新" },
+                            instance.id, instance.coreBuild.ifBlank { t("最新") },
                         )
                         return@launch
                     }
@@ -1232,7 +1233,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         CoreUpdate.Result.Available(
                             buildId = newer.id,
                             label = newer.name,
-                            current = instance.coreBuild.ifBlank { "未知（旧版本未记录）" },
+                            current = instance.coreBuild.ifBlank { t("未知（旧版本未记录）") },
                             downloadUrl = dl.url,
                             fileName = dl.fileName,
                             sha1 = dl.sha1,
@@ -1285,19 +1286,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         if (coreUpgradeRunning) return
         val state = serverManager.states.value[instance.id] ?: ServerState.Idle
         if (state == ServerState.Running || state.isBusy()) {
-            _coreUpdate.value = CoreUpdateState.Failed(instance.id, "请先停止服务端再升级核心")
+            _coreUpdate.value = CoreUpdateState.Failed(instance.id, t("请先停止服务端再升级核心"))
             return
         }
         if (instance.coreType == CoreType.FORGE || instance.coreType == CoreType.NEOFORGE) {
             _coreUpdate.value = CoreUpdateState.Failed(
                 instance.id,
-                "Forge / NeoForge 的新版要重跑安装器才能生成依赖库，自动替换会让实例变成「半装」状态。" +
-                    "请新建一个同版本实例并把 world / config 搬过去。",
+                t("Forge / NeoForge 的新版要重跑安装器才能生成依赖库，自动替换会让实例变成「半装」状态。") +
+                    t("请新建一个同版本实例并把 world / config 搬过去。"),
             )
             return
         }
         coreUpgradeRunning = true
-        _coreUpdate.value = CoreUpdateState.Upgrading(instance.id, 0f, "准备下载…")
+        _coreUpdate.value = CoreUpdateState.Upgrading(instance.id, 0f, t("准备下载…"))
         viewModelScope.launch(Dispatchers.IO) {
             val target = File(instance.dir, info.fileName)
             val part = File(instance.dir, info.fileName + ".part")
@@ -1320,9 +1321,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                             (info.sha1 == null ||
                                 Downloader.sha1Of(f)?.equals(info.sha1, ignoreCase = true) == true)
                     },
-                ) ?: throw RuntimeException("下载失败（网络或源站问题）")
+                ) ?: throw RuntimeException(t("下载失败（网络或源站问题）"))
 
-                _coreUpdate.value = CoreUpdateState.Upgrading(instance.id, 1f, "替换核心 jar…")
+                _coreUpdate.value = CoreUpdateState.Upgrading(instance.id, 1f, t("替换核心 jar…"))
                 // 旧 jar 改名备份（同目录 rename 是原子的）
                 val oldJar = instance.jarFile
                 if (oldJar.exists()) {
@@ -1334,7 +1335,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 if (!part.renameTo(target)) {
                     // 换入失败：立刻把旧 jar 放回去
                     runCatching { backup.renameTo(oldJar) }
-                    throw RuntimeException("无法写入新核心（可用空间不足？）")
+                    throw RuntimeException(t("无法写入新核心（可用空间不足？）"))
                 }
                 replaced = true
                 runCatching { backup.delete() }
@@ -1374,7 +1375,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         // 每次创建都从**干净的空槽位**开始：`download` 是跨页面共享的，上一次安装留下的
         // error/done 会被配置页读出来 —— 用户刚进向导就看到一条过期的「下载失败」，
         // 按钮还写着"重试下载（断点续传）"，而这次什么都没下载过。
-        _download.value = DownloadState(running = true, progress = 0f, message = "解析下载地址…")
+        _download.value = DownloadState(running = true, progress = 0f, message = t("解析下载地址…"))
         downloadCancelRequested = false
         // 核心 jar 可能几十 MB：用户点返回键去干别的，下载应继续完成并建出实例
         container.appScope.launch {
@@ -1421,11 +1422,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 )
                 if (used == null) {
                     if (downloadCancelRequested) {
-                        _download.value = DownloadState(message = "已取消（已下载部分保留，可重试续传）")
+                        _download.value = DownloadState(message = t("已取消（已下载部分保留，可重试续传）"))
                         withContext(Dispatchers.Main) { onComplete(null) }
                         return@launch
                     }
-                    throw RuntimeException("下载失败：所有源不可用（请检查网络后重试）")
+                    throw RuntimeException(t("下载失败：所有源不可用（请检查网络后重试）"))
                 }
                 if (!part.renameTo(target)) {
                     part.copyTo(target, overwrite = true)
@@ -1453,12 +1454,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     ServerProperties.save(dir, props)
                 }
                 _currentInstanceId.value = instance.id
-                _download.value = DownloadState(done = true, message = "下载完成")
+                _download.value = DownloadState(done = true, message = t("下载完成"))
                 // 导航/UI 回调必须回主线程（否则 Compose 报 setCurrentState 或静默失败不跳转）
                 withContext(Dispatchers.Main) { onComplete(instance) }
             } catch (e: Exception) {
                 // 保留 dir 与 .part 半成品：重试时断点续传；目录扫描不会把 .part 误识别为实例
-                _download.value = DownloadState(error = e.message ?: "下载失败")
+                _download.value = DownloadState(error = e.message ?: t("下载失败"))
                 withContext(Dispatchers.Main) { onComplete(null) }
             }
         }
@@ -1536,7 +1537,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
             } catch (e: Exception) {
                 // 解析失败（没有适配当前 MC 版本 / 文件名非法）：直接把原因说出来，
                 // 继续走 install 只会拿到同一句错误、白白多一次网络请求
-                _addonInstall.value = DownloadState(error = e.message ?: "解析适配版本失败")
+                _addonInstall.value = DownloadState(error = e.message ?: t("解析适配版本失败"))
                 return@launch
             }
             _addonInstall.value = DownloadState()
@@ -1567,7 +1568,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 }
                 _addonInstall.value = DownloadState(done = true, message = "已安装 ${file.name}（重启服务端生效）")
             } catch (e: Exception) {
-                _addonInstall.value = DownloadState(error = e.message ?: "安装失败")
+                _addonInstall.value = DownloadState(error = e.message ?: t("安装失败"))
             }
         }
     }
@@ -1642,7 +1643,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         AddonRegistry.resolveByHash(instance, kind, f)
                     }.getOrNull()
                     if (entry == null) {
-                        verdicts += AddonUpdate.Verdict.Unknown(f.name, "认不出来源（不是从 Modrinth 装的，或被改过）")
+                        verdicts += AddonUpdate.Verdict.Unknown(f.name, t("认不出来源（不是从 Modrinth 装的，或被改过）"))
                         return@forEachIndexed
                     }
                     val versions = runCatching {
@@ -1766,7 +1767,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 }
                 _appUpdate.value = if (info == null) AppUpdateState.Latest else AppUpdateState.Found(info)
             } catch (e: Exception) {
-                _appUpdate.value = AppUpdateState.Error(e.message ?: "检查失败（网络不可达？）")
+                _appUpdate.value = AppUpdateState.Error(e.message ?: t("检查失败（网络不可达？）"))
             }
         }
     }
@@ -1787,7 +1788,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     fun downloadAndInstallUpdate(info: UpdateChecker.ReleaseInfo) {
         if (_appUpdate.value is AppUpdateState.Downloading) return
         updateCancelRequested = false
-        _appUpdate.value = AppUpdateState.Downloading(info, 0f, "准备下载…")
+        _appUpdate.value = AppUpdateState.Downloading(info, 0f, t("准备下载…"))
         container.appScope.launch {
             val file = UpdateInstaller.download(
                 context = container.appContext,
@@ -1801,14 +1802,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
             )
             if (file == null) {
                 _appUpdate.value = if (updateCancelRequested) AppUpdateState.Idle
-                else AppUpdateState.Error("下载失败：所有线路不可用，请稍后重试")
+                else AppUpdateState.Error(t("下载失败：所有线路不可用，请稍后重试"))
                 return@launch
             }
             val installed = withContext(Dispatchers.Main) {
                 UpdateInstaller.install(container.appContext, file)
             }
             _appUpdate.value = if (installed) AppUpdateState.Idle
-            else AppUpdateState.Error("无法打开安装器，请到设置中开启「安装未知应用」权限")
+            else AppUpdateState.Error(t("无法打开安装器，请到设置中开启「安装未知应用」权限"))
         }
     }
 
@@ -1871,7 +1872,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     fun importJar(uri: android.net.Uri, name: String, memoryMb: Int) {
         if (importJarRunning) return
         importJarRunning = true
-        _importJarProgress.value = ImportJarProgress.Running(0f, "准备导入…")
+        _importJarProgress.value = ImportJarProgress.Running(0f, t("准备导入…"))
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = container.appContext
             var dir: File? = null
@@ -1881,7 +1882,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 // ── ① 先落到临时文件，体检通过才建实例目录 ──
                 // 直接往实例目录写的话，被拒绝的文件也会留下一个半成品目录
                 val tmpJar = File(ctx.cacheDir, "import-probe-${System.currentTimeMillis()}.jar")
-                _importJarProgress.value = ImportJarProgress.Running(0f, "读取所选文件…")
+                _importJarProgress.value = ImportJarProgress.Running(0f, t("读取所选文件…"))
                 copyWithProgress(ctx, uri, tmpJar) { done, total ->
                     _importJarProgress.value = ImportJarProgress.Running(
                         if (total > 0) (done.toFloat() / total).coerceIn(0f, 1f) else 0f,
@@ -1890,17 +1891,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     )
                 }
                 if (!tmpJar.isFile || tmpJar.length() == 0L) {
-                    throw RuntimeException("所选文件为空，或没有被真正读取（授权可能已失效）")
+                    throw RuntimeException(t("所选文件为空，或没有被真正读取（授权可能已失效）"))
                 }
 
-                _importJarProgress.value = ImportJarProgress.Running(1f, "检查文件…")
+                _importJarProgress.value = ImportJarProgress.Running(1f, t("检查文件…"))
                 val info = JarInspector.quickCheck(tmpJar)
                 if (!info.looksLikeServerJar) {
                     // 体检不通过：明确告诉用户"为什么不是"，而不是让他导入之后再撞墙
                     throw RuntimeException(
                         "选择的文件看起来不是 Minecraft 服务端（${info.evidence}）。" +
-                            "请选 server.jar 本身：Paper/Purpur 选 paper-x.jar，Forge 选安装器生成的 " +
-                            "forge-*-universal.jar 或 run.jar。",
+                            t("请选 server.jar 本身：Paper/Purpur 选 paper-x.jar，Forge 选安装器生成的 ") +
+                            t("forge-*-universal.jar 或 run.jar。"),
                     )
                 }
 
@@ -1915,7 +1916,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     tmpJar.delete()
                 }
                 if (!target.isFile || target.length() == 0L) {
-                    throw RuntimeException("把文件放进实例目录失败（可用空间不足？）")
+                    throw RuntimeException(t("把文件放进实例目录失败（可用空间不足？）"))
                 }
 
                 val coreType = runCatching { CoreType.valueOf(info.coreTypeName) }
@@ -1984,7 +1985,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     fun importModpack(uri: android.net.Uri, name: String) {
         if (importJarRunning) return
         importJarRunning = true
-        _importJarProgress.value = ImportJarProgress.Running(0f, "准备导入整合包…")
+        _importJarProgress.value = ImportJarProgress.Running(0f, t("准备导入整合包…"))
         viewModelScope.launch(Dispatchers.IO) {
             val ctx = container.appContext
             var dir: File? = null
@@ -1997,8 +1998,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 val tmpDir = File(ctx.cacheDir, "modpack-${System.currentTimeMillis()}").apply { mkdirs() }
                 try {
                     val input = ctx.contentResolver.openInputStream(uri)
-                        ?: throw RuntimeException("无法打开所选文件（授权可能已失效，请重新选择）")
-                    _importJarProgress.value = ImportJarProgress.Running(0f, "解压中…")
+                        ?: throw RuntimeException(t("无法打开所选文件（授权可能已失效，请重新选择）"))
+                    _importJarProgress.value = ImportJarProgress.Running(0f, t("解压中…"))
                     val result = input.use {
                         // 必须用具名参数：extract 的最后一个参数是 shouldCancel，
                         // 尾随 lambda 会被绑到它上面（报 "actual type is Function1<..., Boolean>"）
@@ -2015,11 +2016,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         )
                     }
                     if (result.entryCount == 0) {
-                        throw RuntimeException("压缩包里没有任何文件")
+                        throw RuntimeException(t("压缩包里没有任何文件"))
                     }
 
                     // ② 摊平 + 识别
-                    _importJarProgress.value = ImportJarProgress.Running(1f, "整理目录…")
+                    _importJarProgress.value = ImportJarProgress.Running(1f, t("整理目录…"))
                     val flattened = ModpackImporter.flatten(tmpDir)
                     // var：装完加载器/下载完模组后要**重新识别一次**（目录形态变了）
                     var plan = ModpackImporter.inspect(tmpDir)
@@ -2048,23 +2049,23 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     if (curse != null && curse.manifest.refs.isNotEmpty() && !hasPhysicalMods(tmpDir)) {
                         throw RuntimeException(
                             "这是 CurseForge 格式的整合包：清单只记录了 ${curse.manifest.refs.size} 个模组的" +
-                                "平台 ID，包里不含模组文件，而 CurseForge 的下载接口需要官方 API Key" +
+                                t("平台 ID，包里不含模组文件，而 CurseForge 的下载接口需要官方 API Key") +
                                 "（本应用没有），所以这类包无法自动安装。\n" +
-                                "可行的做法：① 改用它的「服务端包」（Server Pack，模组是实体文件，可直接导入）；" +
-                                "② 用 CurseForge App 装好后，把 mods / config 等打包成 zip 再导入。",
+                                t("可行的做法：① 改用它的「服务端包」（Server Pack，模组是实体文件，可直接导入）；") +
+                                t("② 用 CurseForge App 装好后，把 mods / config 等打包成 zip 再导入。"),
                         )
                     }
                     if (plan.launch == ModpackImporter.Launch.MODS_ONLY && !loaderInstallable) {
                         // 只有 mods，清单也没说要装哪个加载器：不建立实例 ——
                         // 否则用户会得到一个必然启动失败的实例，还以为是自己操作错了。
-                        throw RuntimeException(plan.warnings.firstOrNull() ?: "整合包里没有可用的服务端核心")
+                        throw RuntimeException(plan.warnings.firstOrNull() ?: t("整合包里没有可用的服务端核心"))
                     }
 
                     // ③ 搬到实例目录
                     val existing = instanceStore.instances.value.map { it.name }.toSet()
                     val finalName = uniqueName(modpackNameOf(name, plan), existing)
                     dir = instanceStore.createInstanceDir(finalName)
-                    _importJarProgress.value = ImportJarProgress.Running(1f, "写入实例目录…")
+                    _importJarProgress.value = ImportJarProgress.Running(1f, t("写入实例目录…"))
                     if (!tmpDir.renameTo(dir)) {
                         // 跨分区（cacheDir 与实例目录可能不同卷）→ 退回逐文件搬
                         moveDirChecked(tmpDir, dir)
@@ -2116,7 +2117,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     console.emit(
                         "> 已导入整合包（${result.entryCount} 个条目，" +
                             "${result.totalBytes / 1024 / 1024} MB" +
-                            if (flattened) "，已摊平目录" else "" + "）",
+                            if (flattened) t("，已摊平目录") else "" + "）",
                         LineType.System,
                     )
                     if (plan.evidence.isNotEmpty()) {
@@ -2124,9 +2125,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     }
                     when (plan.launch) {
                         ModpackImporter.Launch.FORGE_ARGS -> console.emit(
-                            "> 启动方式：Forge/NeoForge（@unix_args.txt）" +
+                            t("> 启动方式：Forge/NeoForge（@unix_args.txt）") +
                                 if (plan.missingForgeLibs.isEmpty()) {
-                                    "；依赖库齐全"
+                                    t("；依赖库齐全")
                                 } else {
                                     "；依赖库缺 ${plan.missingForgeLibs.size} 个，首次启动会自动补齐"
                                 },
@@ -2225,11 +2226,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 }
 
                 ModpackManifest.Loader.FABRIC -> {
-                    onStatus("下载原版服务端（Fabric 需要）…")
+                    onStatus(t("下载原版服务端（Fabric 需要）…"))
                     val vanilla = runCatching { CoreSources.getVanillaDownload(mc) }
                         .getOrNull()?.getOrNull()
                     if (vanilla == null) {
-                        "原版服务端下载地址获取失败，Fabric 启动器需要它；请手动放入 server.jar"
+                        t("原版服务端下载地址获取失败，Fabric 启动器需要它；请手动放入 server.jar")
                     } else {
                         val serverJar = File(dir, "server.jar")
                         val okServer = Downloader.downloadFromSources(
@@ -2240,13 +2241,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                             validate = { it.length() > 0 && Downloader.isZip(it) },
                         ) != null
                         if (!okServer) {
-                            "原版 server.jar 下载失败；Fabric 启动器需要同目录有一份 server.jar"
+                            t("原版 server.jar 下载失败；Fabric 启动器需要同目录有一份 server.jar")
                         } else {
-                            onStatus("下载 Fabric 启动器…")
+                            onStatus(t("下载 Fabric 启动器…"))
                             val fab = runCatching { CoreSources.getFabricDownload(mc, plan.loaderVersion) }
                                 .getOrNull()?.getOrNull()
                             if (fab == null) {
-                                "Fabric 启动器地址获取失败；可稍后在「新建」里用 Fabric 建一个实例再把这些文件拷过去"
+                                t("Fabric 启动器地址获取失败；可稍后在「新建」里用 Fabric 建一个实例再把这些文件拷过去")
                             } else {
                                 val fabJar = File(dir, fab.fileName)
                                 val okFab = Downloader.downloadFromSources(
@@ -2254,7 +2255,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                                     validate = { it.length() > 0 && Downloader.isZip(it) },
                                 ) != null
                                 if (!okFab) {
-                                    "Fabric 启动器下载失败；server.jar 已就位，可手动补一个 Fabric 启动器"
+                                    t("Fabric 启动器下载失败；server.jar 已就位，可手动补一个 Fabric 启动器")
                                 } else {
                                     "Fabric 已就绪（${fab.fileName} + server.jar），可直接启动"
                                 }
@@ -2264,11 +2265,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 }
 
                 ModpackManifest.Loader.VANILLA -> {
-                    onStatus("下载原版服务端…")
+                    onStatus(t("下载原版服务端…"))
                     val vanilla = runCatching { CoreSources.getVanillaDownload(mc) }
                         .getOrNull()?.getOrNull()
                     if (vanilla == null) {
-                        "原版服务端下载地址获取失败；请手动放入 server.jar"
+                        t("原版服务端下载地址获取失败；请手动放入 server.jar")
                     } else {
                         val serverJar = File(dir, "server.jar")
                         val ok = Downloader.downloadFromSources(
@@ -2278,12 +2279,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                             },
                             validate = { it.length() > 0 && Downloader.isZip(it) },
                         ) != null
-                        if (ok) "原版服务端已就绪" else "原版服务端下载失败"
+                        if (ok) t("原版服务端已就绪") else t("原版服务端下载失败")
                     }
                 }
 
                 else -> "$loaderName 加载器本项目暂不支持（如 Quilt），已保留包内文件；" +
-                    "请在「新建」里建一个同版本的服务端，或手动放入可运行的核心"
+                    t("请在「新建」里建一个同版本的服务端，或手动放入可运行的核心")
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -2396,7 +2397,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     private fun modpackNameOf(rawName: String, plan: ModpackImporter.Plan): String {
         if (rawName.isNotBlank()) return rawName.trim()
         val core = runCatching { CoreType.valueOf(plan.coreTypeName).displayName }
-            .getOrDefault("整合包")
+            .getOrDefault(t("整合包"))
         return if (plan.mcVersion.isNotEmpty()) "$core ${plan.mcVersion} 整合包" else "$core 整合包"
     }
 
@@ -2435,7 +2436,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
             ctx.contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }
         }.getOrNull() ?: -1L
         val ins = ctx.contentResolver.openInputStream(uri)
-            ?: throw RuntimeException("无法打开所选文件（授权可能已失效，请重新选择）")
+            ?: throw RuntimeException(t("无法打开所选文件（授权可能已失效，请重新选择）"))
         ins.use { input ->
             dest.outputStream().use { out ->
                 val buf = ByteArray(256 * 1024)
@@ -2464,9 +2465,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
      *  - 重名自动加序号（`Paper 1.21.4`、`Paper 1.21.4 (2)`）。
      */
     private fun importNameOf(rawName: String, info: JarInspector.Info, existing: Set<String>): String {
-        val placeholder = rawName.startsWith("导入-")
+        val placeholder = rawName.startsWith(t("导入-"))
         val coreLabel = runCatching { CoreType.valueOf(info.coreTypeName).displayName }
-            .getOrDefault("服务端")
+            .getOrDefault(t("服务端"))
         val base = if (!placeholder) {
             rawName
         } else {

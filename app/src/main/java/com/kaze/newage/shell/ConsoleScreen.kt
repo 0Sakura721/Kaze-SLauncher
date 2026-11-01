@@ -23,6 +23,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import com.kaze.newage.core.i18n.t
 
 /**
  * 控制台页。
@@ -113,15 +114,15 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
         val c = this.c
         return c.row().apply {
             val texts = c.col().apply {
-                addView(c.txt("控制台", Type.display, ShellTheme.current.ink, medium = true))
+                addView(c.txt(t("控制台"), Type.display, ShellTheme.current.ink, medium = true))
                 addView(
-                    c.txt("实时输出与命令", Type.micro, ShellTheme.current.ink3).apply {
+                    c.txt(t("实时输出与命令"), Type.micro, ShellTheme.current.ink3).apply {
                         setPadding(0, dp(4f), 0, 0)
                     },
                 )
             }
             addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            actionButton = c.txt("启动", Type.micro, ShellTheme.current.accent, medium = true).apply {
+            actionButton = c.txt(t("启动"), Type.micro, ShellTheme.current.accent, medium = true).apply {
                 gravity = Gravity.CENTER
                 setPadding(dp(15f), dp(9f), dp(15f), dp(9f))
                 background = c.rip(
@@ -129,7 +130,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
                     stroke = ShellTheme.current.accent.alpha(0.28f),
                     strokeWidth = Dim.line,
                 )
-                tappable("启动或停止") { toggleInstance() }
+                tappable(t("启动或停止")) { toggleInstance() }
             }
             addView(actionButton)
         }
@@ -143,8 +144,8 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
                 ShellTheme.current.stroke, Dim.line,
             )
             setPadding(dp(13f), dp(10f), dp(10f), dp(10f))
-            addView(c.txt("实例", Type.body, ShellTheme.current.ink3))
-            switcherValue = c.txt("未选择", Type.body, ShellTheme.current.ink, medium = true).apply {
+            addView(c.txt(t("实例"), Type.body, ShellTheme.current.ink3))
+            switcherValue = c.txt(t("未选择"), Type.body, ShellTheme.current.ink, medium = true).apply {
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
                 setPadding(dp(10f), 0, dp(4f), 0)
@@ -156,7 +157,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
                 c.chevron(),
                 LinearLayout.LayoutParams(dp(18f), dp(18f)).apply { marginStart = dp(5f) },
             )
-            tappable("切换实例") { pickInstance() }
+            tappable(t("切换实例")) { pickInstance() }
         }
     }
 
@@ -169,7 +170,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
             uptimeValue = c.mono("—", Type.title, ShellTheme.current.ink)
             topRow.addView(uptimeValue)
             topRow.addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
-            playerValue = c.txt("在线 0", Type.micro, ShellTheme.current.ink3)
+            playerValue = c.txt(t("在线 0"), Type.micro, ShellTheme.current.ink3)
             topRow.addView(playerValue)
             addView(topRow)
 
@@ -177,7 +178,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
 
             addView(metricRow("CPU", ::onCpuMeter, ::onCpuValue, tone = 0))
             addView(View(c), LinearLayout.LayoutParams(1, dp(7f)))
-            addView(metricRow("内存", ::onMemMeter, ::onMemValue, tone = 1))
+            addView(metricRow(t("内存"), ::onMemMeter, ::onMemValue, tone = 1))
         }
     }
 
@@ -282,7 +283,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
 
         // 空态要压在日志区**正中**：直接 addView 到卡片里会贴在底部，
         // 看上去像一条页脚而不是"这里还没内容"。
-        emptyHint = c.txt("还没有输出", Type.micro, ShellTheme.current.ink3).apply {
+        emptyHint = c.txt(t("还没有输出"), Type.micro, ShellTheme.current.ink3).apply {
             gravity = Gravity.CENTER
             visibility = View.GONE
         }
@@ -313,43 +314,43 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
         val c = this.c
         return c.row().apply {
             setPadding(dp(12f), dp(5f), dp(10f), dp(8f))
-            addView(c.txt("清屏", Type.micro, ShellTheme.current.ink3).apply {
+            addView(c.txt(t("清屏"), Type.micro, ShellTheme.current.ink3).apply {
                 setPadding(dp(4f), dp(5f), dp(12f), dp(5f))
-                tappable("清空控制台") {
+                tappable(t("清空控制台")) {
                     host.vm.clearConsole()
                     logArea.removeAllViews()
                     renderedSeq = Long.MIN_VALUE
                     refreshEmpty()
                 }
             })
-            addView(c.txt("更早", Type.micro, ShellTheme.current.ink3).apply {
+            addView(c.txt(t("更早"), Type.micro, ShellTheme.current.ink3).apply {
                 setPadding(dp(4f), dp(5f), dp(12f), dp(5f))
-                tappable("加载更早的日志") {
+                tappable(t("加载更早的日志")) {
                     host.vm.loadOlderConsole()
                     // 前插会打乱 renderedSeq 的单调性，下一次刷新走整表重画
                     renderedSeq = Long.MIN_VALUE
                 }
             })
-            addView(c.txt("字号", Type.micro, ShellTheme.current.ink3).apply {
+            addView(c.txt(t("字号"), Type.micro, ShellTheme.current.ink3).apply {
                 setPadding(dp(4f), dp(5f), dp(12f), dp(5f))
-                tappable("调整控制台字号") { cycleFontSize() }
+                tappable(t("调整控制台字号")) { cycleFontSize() }
             })
-            addView(c.txt("时间", Type.micro, ShellTheme.current.ink3).apply {
+            addView(c.txt(t("时间"), Type.micro, ShellTheme.current.ink3).apply {
                 setPadding(dp(4f), dp(5f), dp(12f), dp(5f))
-                tappable("切换时间戳") {
+                tappable(t("切换时间戳")) {
                     host.themePrefs.consoleStamps = !host.themePrefs.consoleStamps
-                    host.toast(if (host.themePrefs.consoleStamps) "显示时间戳" else "隐藏时间戳")
+                    host.toast(if (host.themePrefs.consoleStamps) t("显示时间戳") else t("隐藏时间戳"))
                     renderedSeq = Long.MIN_VALUE
                     renderLines(host.vm.consoleLines.value, forceFull = true)
                 }
             })
             addView(View(c), LinearLayout.LayoutParams(0, 1, 1f))
-            addView(c.txt("复制", Type.micro, ShellTheme.current.accent, medium = true).apply {
+            addView(c.txt(t("复制"), Type.micro, ShellTheme.current.accent, medium = true).apply {
                 setPadding(dp(4f), dp(5f), dp(4f), dp(5f))
-                tappable("复制全部日志") {
+                tappable(t("复制全部日志")) {
                     val lines = host.vm.consoleLines.value
                     if (lines.isEmpty()) {
-                        host.toast("控制台是空的")
+                        host.toast(t("控制台是空的"))
                     } else {
                         host.copy(lines.joinToString("\n") { it.text }, "已复制 ${lines.size} 行")
                     }
@@ -441,7 +442,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
                 )
                 setPadding(dp(12f), dp(3f), dp(4f), dp(3f))
             }
-            input = c.input("输入命令，如 list / say hi").apply {
+            input = c.input(t("输入命令，如 list / say hi")).apply {
                 background = null
                 setPadding(0, dp(10f), 0, dp(10f))
                 setOnEditorActionListener { _, _, _ ->
@@ -451,11 +452,11 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
             }
             row.addView(input, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(
-                c.txt("发送", Type.micro, ShellTheme.current.accent, medium = true).apply {
+                c.txt(t("发送"), Type.micro, ShellTheme.current.accent, medium = true).apply {
                     gravity = Gravity.CENTER
                     setPadding(dp(15f), dp(9f), dp(15f), dp(9f))
                     background = c.rip(ShellTheme.current.accentSoft, 9f)
-                    tappable("发送命令") { submit() }
+                    tappable(t("发送命令")) { submit() }
                 },
             )
             addView(row)
@@ -466,7 +467,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
         val c = this.c
         return c.row().apply {
             setPadding(0, 0, 0, dp(8f))
-            listOf("list" to "玩家", "say " to "广播", "save-all" to "存档", "stop" to "停服")
+            listOf("list" to t("玩家"), "say " to t("广播"), "save-all" to t("存档"), "stop" to t("停服"))
                 .forEach { (cmd, label) ->
                     addView(
                         c.txt(label, Type.micro, ShellTheme.current.ink2, medium = true).apply {
@@ -498,7 +499,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
     private fun sendDirect(cmd: String) {
         val inst = instance
         if (inst == null || host.stateOf(inst.id) != ServerState.Running) {
-            host.toast("实例没在运行，命令发不出去", error = true)
+            host.toast(t("实例没在运行，命令发不出去"), error = true)
             return
         }
         host.send(cmd)
@@ -509,7 +510,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
         if (text.isEmpty()) return
         val inst = instance
         if (inst == null || host.stateOf(inst.id) != ServerState.Running) {
-            host.toast("实例没在运行，命令发不出去", error = true)
+            host.toast(t("实例没在运行，命令发不出去"), error = true)
             return
         }
         host.send(text)
@@ -574,10 +575,10 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
     private fun refreshSwitcher() {
         val inst = instance
         if (inst == null) {
-            switcherValue.text = "未选择实例"
+            switcherValue.text = t("未选择实例")
             switcherValue.setTextColor(ShellTheme.current.ink3)
             stateSlot.removeAllViews()
-            actionButton.text = "启动"
+            actionButton.text = t("启动")
             actionButton.alpha = 1f
             return
         }
@@ -587,9 +588,9 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
         stateSlot.removeAllViews()
         stateSlot.addView(c.statusTag(state.toLabel(), toneOf(state)))
         actionButton.text = when {
-            state == ServerState.Running || state == ServerState.Stopping -> "停止"
+            state == ServerState.Running || state == ServerState.Stopping -> t("停止")
             state.isBusy() -> "…"
-            else -> "启动"
+            else -> t("启动")
         }
         actionButton.alpha = if (state.isBusy() && state != ServerState.Stopping) 0.55f else 1f
     }
@@ -617,14 +618,14 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
     private fun pickInstance() {
         val list = host.vm.instances.value
         if (list.isEmpty()) {
-            host.toast("还没有实例，先去首页新建")
+            host.toast(t("还没有实例，先去首页新建"))
             return
         }
         val options = list.map {
-            it.name to (it.coreType.displayName + " · " + it.mcVersion.ifBlank { "自定义" })
+            it.name to (it.coreType.displayName + " · " + it.mcVersion.ifBlank { t("自定义") })
         }
         val current = list.indexOfFirst { it.id == instance?.id }
-        c.choiceSheet("切换实例", "共 ${list.size} 个", options, current) { index ->
+        c.choiceSheet(t("切换实例"), "共 ${list.size} 个", options, current) { index ->
             host.select(list[index])
         }
     }

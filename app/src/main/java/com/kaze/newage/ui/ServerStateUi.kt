@@ -2,6 +2,7 @@ package com.kaze.newage.ui
 
 import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.ui.components.StatusTone
+import com.kaze.newage.core.i18n.t
 
 /** ServerState → 状态球基调 */
 fun ServerState.toTone(): StatusTone = when (this) {
@@ -13,14 +14,14 @@ fun ServerState.toTone(): StatusTone = when (this) {
 
 /** ServerState → 中文状态文案（全应用统一词汇） */
 fun ServerState.toLabel(): String = when (this) {
-    ServerState.Idle -> "未启动"
-    ServerState.Starting -> "启动中"
-    ServerState.FirstRun -> "首次启动 · 生成 eula.txt"
-    ServerState.AcceptingEula -> "已同意 EULA，正在重启"
-    ServerState.Running -> "运行中"
-    ServerState.Stopping -> "停止中"
-    ServerState.Stopped -> "已停止"
-    ServerState.Error -> "启动失败"
+    ServerState.Idle -> t("未启动")
+    ServerState.Starting -> t("启动中")
+    ServerState.FirstRun -> t("首次启动 · 生成 eula.txt")
+    ServerState.AcceptingEula -> t("已同意 EULA，正在重启")
+    ServerState.Running -> t("运行中")
+    ServerState.Stopping -> t("停止中")
+    ServerState.Stopped -> t("已停止")
+    ServerState.Error -> t("启动失败")
 }
 
 /** 是否处于过渡状态（不可操作启停） */

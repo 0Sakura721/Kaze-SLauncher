@@ -11,6 +11,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.kaze.newage.core.i18n.t
 
 // ══════════════════════════════════════════════════════════════════════════
 // 岚 · 设计令牌
@@ -25,9 +26,9 @@ import android.widget.TextView
 
 /** 主题模式：素纸 / 墨夜 / 跟随系统 */
 enum class ThemeMode(val key: String, val label: String) {
-    PAPER("paper", "素纸"),
-    INK("ink", "墨夜"),
-    SYSTEM("system", "跟随系统"),
+    PAPER("paper", t("素纸")),
+    INK("ink", t("墨夜")),
+    SYSTEM("system", t("跟随系统")),
     ;
 
     companion object {

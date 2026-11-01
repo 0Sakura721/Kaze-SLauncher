@@ -14,6 +14,7 @@ import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import kotlin.math.min
+import com.kaze.newage.core.i18n.t
 
 // ══════════════════════════════════════════════════════════════════════════
 // 自绘控件
@@ -108,7 +109,7 @@ class GaugeView @JvmOverloads constructor(
         setWillNotDraw(false)
         isClickable = true
         isFocusable = true
-        contentDescription = "启动或停止当前实例"
+        contentDescription = t("启动或停止当前实例")
         minimumWidth = context.dp(104f)
         minimumHeight = context.dp(104f)
     }

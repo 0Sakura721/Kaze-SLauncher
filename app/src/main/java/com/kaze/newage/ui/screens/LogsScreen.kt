@@ -69,11 +69,12 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.kaze.newage.core.i18n.t
 
 /** 启动日志筛选：全部 / 只看失败（失败 = crash-reports 里留下的那几份） */
 private enum class LogFilter(val label: String) {
-    All("全部"),
-    Failure("失败"),
+    All(t("全部")),
+    Failure(t("失败")),
 }
 
 /**
@@ -128,7 +129,7 @@ fun LogsScreen(
                 // 用户点了「导出全部」看到的是"毫无反应"，只能反复点。
                 val err = runCatching {
                     val text = buildString {
-                        appendLine("KAZE SLauncher 日志导出")
+                        appendLine(t("KAZE SLauncher 日志导出"))
                         appendLine("实例：${instance.name}")
                         appendLine("目录：${instance.dir.absolutePath}")
                         appendLine("导出时间：${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}")
@@ -139,7 +140,7 @@ fun LogsScreen(
                         }
                     }
                     val out = context.contentResolver.openOutputStream(target)
-                        ?: error("无法写入所选位置")
+                        ?: error(t("无法写入所选位置"))
                     out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
                 }.exceptionOrNull()
                 if (err != null) {
@@ -177,7 +178,7 @@ fun LogsScreen(
         // 查看大文件的中段时，刷新/返回也得随手可用 ──
         val openFile = selected
         M3EScreenHeader(
-            title = openFile?.name ?: "启动日志",
+            title = openFile?.name ?: t("启动日志"),
             subtitle = if (openFile != null) {
                 "${instance.name} · 修改于 ${fileTime(openFile)}"
             } else {
@@ -186,7 +187,7 @@ fun LogsScreen(
             leading = {
                 // 返回：正在看文件时先退回列表，再按一次才退出本页（与旧版一致）
                 IconButton(onClick = { if (selected != null) selected = null else onBack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回"))
                 }
             },
             trailing = {
@@ -195,7 +196,7 @@ fun LogsScreen(
                 IconButton(onClick = { refresh++ }) {
                     Icon(
                         Icons.Filled.Refresh,
-                        contentDescription = "刷新",
+                        contentDescription = t("刷新"),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -263,7 +264,7 @@ fun LogsScreen(
                 if (crashReports.isEmpty()) {
                     M3ECard(
                         variant = M3ECardVariant.Outlined,
-                        title = if (filter == LogFilter.Failure) "暂无启动失败记录" else "暂无崩溃报告",
+                        title = if (filter == LogFilter.Failure) t("暂无启动失败记录") else t("暂无崩溃报告"),
                         supporting = "服务端异常崩溃后会生成 crash-reports/*.txt，这里可以直接翻看它留下的最后输出",
                         content = { },
                     )
@@ -282,7 +283,7 @@ fun LogsScreen(
                             shape = shape,
                             trailing = {
                                 Text(
-                                    "查看",
+                                    t("查看"),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -294,22 +295,22 @@ fun LogsScreen(
 
             if (filter == LogFilter.All) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SectionLabel("完整日志")
+                    SectionLabel(t("完整日志"))
                     M3EConnectedList(2) { i, shape ->
                         if (i == 0) {
                             LogFileRow(
-                                headline = "运行日志",
+                                headline = t("运行日志"),
                                 file = runLog,
-                                missingHint = "启动/部署过服务器后生成（含环境检查、Java 安装、启动报错等完整记录）",
+                                missingHint = t("启动/部署过服务器后生成（含环境检查、Java 安装、启动报错等完整记录）"),
                                 icon = Icons.AutoMirrored.Filled.ReceiptLong,
                                 shape = shape,
                                 onClick = { selected = runLog },
                             )
                         } else {
                             LogFileRow(
-                                headline = "服务器日志",
+                                headline = t("服务器日志"),
                                 file = latestLog,
-                                missingHint = "尚未生成（服务端首次运行后出现）",
+                                missingHint = t("尚未生成（服务端首次运行后出现）"),
                                 icon = Icons.Filled.Description,
                                 shape = shape,
                                 onClick = { selected = latestLog },
@@ -325,7 +326,7 @@ fun LogsScreen(
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 ConnectedAction(
-                    label = "导出全部",
+                    label = t("导出全部"),
                     icon = Icons.Filled.FileDownload,
                     color = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -340,7 +341,7 @@ fun LogsScreen(
                     exportLauncher.launch(name)
                 }
                 ConnectedAction(
-                    label = "清空记录",
+                    label = t("清空记录"),
                     icon = Icons.Filled.DeleteSweep,
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -356,11 +357,11 @@ fun LogsScreen(
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            title = { Text("清空崩溃报告？") },
+            title = { Text(t("清空崩溃报告？")) },
             text = {
                 Text(
                     "将删除 ${crashReports.size} 份崩溃报告（crash-reports/*.txt），删除后无法恢复。\n" +
-                        "latest.log 与 console-output.log 是服务端正在写入的日志，不会被删除。"
+                        t("latest.log 与 console-output.log 是服务端正在写入的日志，不会被删除。")
                 )
             },
             confirmButton = {
@@ -369,10 +370,10 @@ fun LogsScreen(
                         confirmClear = false
                         clearRecords()
                     }
-                ) { Text("删除") }
+                ) { Text(t("删除")) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+                TextButton(onClick = { confirmClear = false }) { Text(t("取消")) }
             },
         )
     }
@@ -398,7 +399,7 @@ private fun LogFileRow(
         shape = shape,
         trailing = {
             Text(
-                if (exists) "查看" else "未生成",
+                if (exists) t("查看") else t("未生成"),
                 style = MaterialTheme.typography.labelMedium,
                 color = if (exists) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -483,7 +484,7 @@ private fun crashReason(file: File): String = runCatching {
 
 /** 读取文件末尾（最多 300KB），避免大日志撑爆内存 */
 private fun readTail(file: File, maxBytes: Int = 300 * 1024): String {
-    if (!file.exists()) return "（文件不存在）"
+    if (!file.exists()) return t("（文件不存在）")
     val len = file.length()
     val skip = if (len > maxBytes) len - maxBytes else 0L
     return file.inputStream().use { ins ->
