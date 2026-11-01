@@ -55,9 +55,16 @@ class CoreUpdateTest {
 
     @Test
     fun `构建号比较不区分大小写`() {
-        val builds = listOf(b("196"), b("195"))
-        // Fabric 的 loader 版本是数字点，但保留大小写不敏感的写法以防上游改格式
-        assertNotNull(CoreUpdate.pickNewer(builds, "196".lowercase()))
+        // 用带字母的构建号才能真的测到大小写：纯数字（"196"）没有大小写之分，
+        // 原来那条用例写 `"196".lowercase()` 其实什么都没测（CI 抓到的就是这个）。
+        val builds = listOf(b("Build-196"), b("Build-195"))
+        // 当前装的写成了小写 → 仍应认出"已经在最新"，不该误报有更新
+        assertNull(
+            "大小写不同但同一构建，应判为已是最新",
+            CoreUpdate.pickNewer(builds, "build-196"),
+        )
+        // 同理，旧构建的小写写法也要能认出来
+        assertEquals("Build-196", CoreUpdate.pickNewer(builds, "BUILD-195")!!.id)
     }
 
     @Test
