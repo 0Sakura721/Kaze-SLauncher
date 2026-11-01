@@ -961,6 +961,130 @@ internal fun EditMemoryDialog(
 /** 实例可选的 Java 大版本（已创建的实例只有确定值，没有"自动"这一档） */
 internal val JAVA_MAJORS: List<Int> = listOf(8, 17, 21, 25)
 
+/**
+ * 「核心版本」卡片：检查上游有没有新构建，并支持一键升级。
+ *
+ * ## 为什么单独的卡片
+ * 原来核心 jar 是**建实例时固化的** —— Paper 出了新构建、Fabric 换了 loader，用户只能
+ * 重新建实例再手动搬 world/config。这里给出检查 + 升级入口。
+ *
+ * ## 升级的前提条件（卡片上直接说明，而不是点了才报错）
+ *  - 必须**先停服**：运行中的进程还占着 jar，替换后跑的还是旧代码；
+ *  - Forge / NeoForge **不自动替换**：新版要重跑安装器生成依赖库，直接换会把实例变成
+ *    "半装"状态（见 ServerInstance.forgeInstalled 的注释），所以只给提示；
+ *  - 手动导入的 jar（CUSTOM）没有上游，检查直接说明不支持。
+ */
+@Composable
+internal fun CoreVersionCard(
+    viewModel: AppViewModel,
+    instance: ServerInstance,
+    isRunning: Boolean,
+) {
+    val state by viewModel.coreUpdate.collectAsStateWithLifecycle()
+    val busy = state is AppViewModel.CoreUpdateState.Checking ||
+        state is AppViewModel.CoreUpdateState.Upgrading
+
+    // 换实例/离开页面时清掉上次的结论，避免看到别的实例的结果
+    DisposableEffect(instance.id) {
+        onDispose { viewModel.clearCoreUpdateState() }
+    }
+
+    M3ECard(
+        variant = M3ECardVariant.Filled,
+        title = "核心版本",
+        supporting = buildString {
+            append(instance.coreType.displayName)
+            if (instance.coreBuild.isNotBlank()) append(" · 构建 ").append(instance.coreBuild)
+            else append(" · 构建未知（旧版本建的实例）")
+            if (instance.mcVersion.isNotBlank()) append(" · MC ").append(instance.mcVersion)
+        },
+    ) {
+        when (val st = state) {
+            is AppViewModel.CoreUpdateState.Available -> {
+                Text(
+                    "有新版本：${st.info.label}（当前 ${st.info.current}）",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                if (isRunning) {
+                    Text(
+                        "请先停止服务端再升级（运行中的进程还占着旧 jar）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { viewModel.upgradeCore(instance, st.info) },
+                        enabled = !isRunning && !busy,
+                    ) { Text("下载并替换") }
+                    TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("忽略") }
+                }
+            }
+
+            is AppViewModel.CoreUpdateState.UpToDate -> {
+                Text(
+                    "已是最新（${st.current}）",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("知道了") }
+            }
+
+            is AppViewModel.CoreUpdateState.Unsupported -> {
+                Text(
+                    st.reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("知道了") }
+            }
+
+            is AppViewModel.CoreUpdateState.Failed -> {
+                Text(
+                    "检查/升级失败：${st.reason}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("关闭") }
+            }
+
+            is AppViewModel.CoreUpdateState.Upgrading -> {
+                Text(st.message, style = MaterialTheme.typography.bodySmall)
+                if (st.progress >= 0f) {
+                    LinearProgressIndicator(
+                        progress = { st.progress },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                } else {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                }
+            }
+
+            is AppViewModel.CoreUpdateState.Upgraded -> {
+                Text(
+                    st.note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                TextButton(onClick = { viewModel.clearCoreUpdateState() }) { Text("知道了") }
+            }
+
+            is AppViewModel.CoreUpdateState.Checking -> {
+                Text("正在检查…", style = MaterialTheme.typography.bodySmall)
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            }
+
+            AppViewModel.CoreUpdateState.Idle -> {
+                TextButton(
+                    onClick = { viewModel.checkCoreUpdate(instance) },
+                    enabled = !busy,
+                ) { Text("检查核心更新") }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AdvancedSettingsCard(

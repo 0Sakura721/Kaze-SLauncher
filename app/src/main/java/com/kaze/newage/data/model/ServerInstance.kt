@@ -60,6 +60,16 @@ data class ServerInstance(
     val extraJvmArgs: String = "",  // 用户自定义 JVM 附加参数（空格分隔；启动时拼进 java 命令行）
     val pinned: Boolean = false,    // 置顶：服务端列表排在最前
     val autoBackup: Boolean = false, // 停服时自动备份世界（auto_ 前缀，保留最近 5 份）
+    /**
+     * 当前核心的构建 id（Paper 的 build 号 / Fabric 的 loader 版本）；空 = 未知（旧实例）。
+     * 「检查核心更新」靠它判断是否落后（见 com.kaze.newage.core.server.CoreUpdate）。
+     */
+    val coreBuild: String = "",
+    /**
+     * 建实例时用的下载地址。用于**没有构建列表**的核心（Purpur/Spigot/Vanilla/Forge/NeoForge）
+     * 的更新判定 —— 这些核心的地址里带版本号，地址变了就说明上游发了新包。
+     */
+    val coreDownloadUrl: String = "",
 ) {
     /** 实例目录下的 jar 文件 */
     val jarFile: File

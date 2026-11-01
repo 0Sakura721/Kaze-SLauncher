@@ -28,6 +28,9 @@ data class StoredInstance(
     val extraJvmArgs: String = "",
     val pinned: Boolean = false,
     val autoBackup: Boolean = false,
+    // 核心更新用：旧存档没有这两个键，默认值 + ignoreUnknownKeys 保证读得出来（视为未知）
+    val coreBuild: String = "",
+    val coreDownloadUrl: String = "",
 ) {
     fun toInstance(): ServerInstance = ServerInstance(
         id = id,
@@ -43,6 +46,8 @@ data class StoredInstance(
         extraJvmArgs = extraJvmArgs,
         pinned = pinned,
         autoBackup = autoBackup,
+        coreBuild = coreBuild,
+        coreDownloadUrl = coreDownloadUrl,
     )
 
     companion object {
@@ -60,6 +65,8 @@ data class StoredInstance(
             extraJvmArgs = instance.extraJvmArgs,
             pinned = instance.pinned,
             autoBackup = instance.autoBackup,
+            coreBuild = instance.coreBuild,
+            coreDownloadUrl = instance.coreDownloadUrl,
         )
     }
 }
