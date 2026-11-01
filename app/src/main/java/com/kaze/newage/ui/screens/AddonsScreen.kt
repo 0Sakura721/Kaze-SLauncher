@@ -611,7 +611,7 @@ private fun formatDownloads(n: Int): String = when {
     n >= 1_000_000 -> String.format(Locale.US, "%.1fM", n / 1_000_000f)
     n >= 1_000 -> String.format(Locale.US, "%.1fK", n / 1_000f)
     else -> n.toString()
-
+}
 
 /**
  * 插件更新检查的结果面板。
@@ -756,5 +756,4 @@ private fun AddonUpdatePanel(
             TextButton(onClick = onDismiss) { Text("关闭") }
         }
     }
-}
 }

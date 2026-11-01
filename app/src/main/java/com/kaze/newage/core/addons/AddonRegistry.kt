@@ -68,7 +68,7 @@ object AddonRegistry {
         val f = fileOf(instance, kind)
         f.parentFile?.mkdirs()
         val tmp = File(f.parentFile, f.name + ".tmp")
-        tmp.writeText(json.encodeToString(Stored(entries.distinctBy { it.fileName })))
+        tmp.writeText(json.encodeToString(Stored.serializer(), Stored(entries.distinctBy { it.fileName })))
         if (f.exists()) f.delete()
         tmp.renameTo(f)
     }.getOrDefault(false)
