@@ -366,6 +366,12 @@ fun InstanceDetailScreen(
                             },
                         )
 
+                        CoreVersionCard(
+                            viewModel = viewModel,
+                            instance = instance,
+                            isRunning = state == ServerState.Running,
+                        )
+
                         AdvancedSettingsCard(
                             viewModel = viewModel,
                             instance = instance,

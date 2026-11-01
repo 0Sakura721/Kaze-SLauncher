@@ -19,6 +19,7 @@ import com.kaze.newage.core.console.ConsoleParser
 import com.kaze.newage.core.download.CoreBuild
 import com.kaze.newage.core.download.CoreSources
 import com.kaze.newage.core.env.ProotEnvironment
+import com.kaze.newage.core.server.CoreUpdate
 import com.kaze.newage.core.server.ServerProperties
 import com.kaze.newage.core.server.ModpackImporter
 import com.kaze.newage.core.server.ModpackManifest
@@ -1172,6 +1173,186 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         downloadCancelRequested = true
     }
 
+    // ── 核心更新（已建实例的核心 jar 升级）──
+
+    /** 核心更新检查的状态 */
+    sealed interface CoreUpdateState {
+        data object Idle : CoreUpdateState
+        data class Checking(val instanceId: String) : CoreUpdateState
+        /** 有更新可用（含下载地址，界面可直接展示） */
+        data class Available(val instanceId: String, val info: CoreUpdate.Result.Available) : CoreUpdateState
+        data class UpToDate(val instanceId: String, val current: String) : CoreUpdateState
+        data class Unsupported(val instanceId: String, val reason: String) : CoreUpdateState
+        data class Failed(val instanceId: String, val reason: String) : CoreUpdateState
+        data class Upgrading(val instanceId: String, val progress: Float, val message: String) : CoreUpdateState
+        data class Upgraded(val instanceId: String, val note: String) : CoreUpdateState
+    }
+
+    private val _coreUpdate = MutableStateFlow<CoreUpdateState>(CoreUpdateState.Idle)
+    val coreUpdate: StateFlow<CoreUpdateState> = _coreUpdate.asStateFlow()
+
+    /** 升级中的连点守卫（与 importJar/downloadAndCreate 同理） */
+    private var coreUpgradeRunning = false
+
+    /**
+     * 检查某个实例的核心有没有新版本。
+     *
+     * 判定分两条路（见 [CoreUpdate]）：
+     *  - 有构建列表的核心（Paper / Fabric）→ 比 `coreBuild`；
+     *  - 其余 → 比对下载地址（地址里带版本号，变了就是新包）。
+     */
+    fun checkCoreUpdate(instance: ServerInstance) {
+        if (_coreUpdate.value is CoreUpdateState.Checking) return
+        if (!CoreUpdate.supports(instance.coreType)) {
+            _coreUpdate.value = CoreUpdateState.Unsupported(
+                instance.id,
+                "这是手动导入的 jar，没有上游可以对比 —— 需要你自己下载新版覆盖",
+            )
+            return
+        }
+        _coreUpdate.value = CoreUpdateState.Checking(instance.id)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val builds = CoreSources.fetchBuilds(instance.coreType, instance.mcVersion).getOrNull().orEmpty()
+                if (builds.isNotEmpty()) {
+                    // 有构建列表：精确比构建号
+                    val newer = CoreUpdate.pickNewer(builds, instance.coreBuild)
+                    if (newer == null) {
+                        _coreUpdate.value = CoreUpdateState.UpToDate(
+                            instance.id, instance.coreBuild.ifBlank { "最新" },
+                        )
+                        return@launch
+                    }
+                    val dl = CoreSources.resolveDownload(instance.coreType, instance.mcVersion, newer.id)
+                        .getOrThrow()
+                    _coreUpdate.value = CoreUpdateState.Available(
+                        instance.id,
+                        CoreUpdate.Result.Available(
+                            buildId = newer.id,
+                            label = newer.name,
+                            current = instance.coreBuild.ifBlank { "未知（旧版本未记录）" },
+                            downloadUrl = dl.url,
+                            fileName = dl.fileName,
+                            sha1 = dl.sha1,
+                        ),
+                    )
+                } else {
+                    // 没有构建列表：比对下载地址
+                    val dl = CoreSources.resolveDownload(instance.coreType, instance.mcVersion)
+                        .getOrThrow()
+                    val r = CoreUpdate.compareByUrl(
+                        currentUrl = instance.coreDownloadUrl,
+                        latestUrl = dl.url,
+                        label = dl.fileName,
+                        fileName = dl.fileName,
+                        sha1 = dl.sha1,
+                    )
+                    _coreUpdate.value = when (r) {
+                        is CoreUpdate.Result.Available -> CoreUpdateState.Available(instance.id, r)
+                        is CoreUpdate.Result.UpToDate -> CoreUpdateState.UpToDate(instance.id, r.current)
+                        is CoreUpdate.Result.Unsupported -> CoreUpdateState.Unsupported(instance.id, r.reason)
+                    }
+                }
+            } catch (e: Exception) {
+                _coreUpdate.value = CoreUpdateState.Failed(
+                    instance.id, e.message ?: e.javaClass.simpleName,
+                )
+            }
+        }
+    }
+
+    /** 清掉检查结果（界面消费完调用，避免重进页面又看到旧结论） */
+    fun clearCoreUpdateState() {
+        _coreUpdate.value = CoreUpdateState.Idle
+    }
+
+    /**
+     * 下载并替换核心 jar。
+     *
+     * ## 安全前提（每条都对应一种真实的数据丢失）
+     * 1. **必须停服**：运行中的进程还占着 jar（Linux 上能删但进程仍跑旧代码，
+     *    用户会以为升级成功、其实跑的是旧的）。
+     * 2. **先把旧 jar 改名备份**，新的下完并校验通过才删备份 —— 下载中断时能被还原，
+     *    绝不会出现"jar 没了、服也起不来"。
+     * 3. **校验 SHA-1**（上游给了就必须对）：镜像返回 HTML 错误页时靠它拦下。
+     * 4. **Forge/NeoForge 的 installer 例外**：那种 jar 要跑 `--installServer` 生成
+     *    libraries，直接替换会把已装好的库变成"半装"状态（见 ServerInstance.forgeInstalled
+     *    的注释）。所以这两类核心只做**提示**，不自动替换。
+     */
+    fun upgradeCore(instance: ServerInstance, info: CoreUpdate.Result.Available) {
+        if (coreUpgradeRunning) return
+        val state = serverManager.states.value[instance.id] ?: ServerState.Idle
+        if (state == ServerState.Running || state.isBusy()) {
+            _coreUpdate.value = CoreUpdateState.Failed(instance.id, "请先停止服务端再升级核心")
+            return
+        }
+        if (instance.coreType == CoreType.FORGE || instance.coreType == CoreType.NEOFORGE) {
+            _coreUpdate.value = CoreUpdateState.Failed(
+                instance.id,
+                "Forge / NeoForge 的新版要重跑安装器才能生成依赖库，自动替换会让实例变成「半装」状态。" +
+                    "请新建一个同版本实例并把 world / config 搬过去。",
+            )
+            return
+        }
+        coreUpgradeRunning = true
+        _coreUpdate.value = CoreUpdateState.Upgrading(instance.id, 0f, "准备下载…")
+        viewModelScope.launch(Dispatchers.IO) {
+            val target = File(instance.dir, info.fileName)
+            val part = File(instance.dir, info.fileName + ".part")
+            val backup = File(instance.dir, info.fileName + ".old")
+            var replaced = false
+            try {
+                runCatching { part.delete() }
+                val used = Downloader.downloadFromSources(
+                    listOf(info.downloadUrl),
+                    part,
+                    onProgress = { done, total ->
+                        _coreUpdate.value = CoreUpdateState.Upgrading(
+                            instance.id,
+                            if (total > 0) done.toFloat() / total else -1f,
+                            "下载 ${info.fileName}…",
+                        )
+                    },
+                    validate = { f ->
+                        f.length() > 0 && Downloader.isZip(f) &&
+                            (info.sha1 == null ||
+                                Downloader.sha1Of(f)?.equals(info.sha1, ignoreCase = true) == true)
+                    },
+                ) ?: throw RuntimeException("下载失败（网络或源站问题）")
+
+                _coreUpdate.value = CoreUpdateState.Upgrading(instance.id, 1f, "替换核心 jar…")
+                // 旧 jar 改名备份（同目录 rename 是原子的）
+                val oldJar = instance.jarFile
+                if (oldJar.exists()) {
+                    runCatching { backup.delete() }
+                    if (!oldJar.renameTo(backup)) {
+                        throw RuntimeException("无法移开旧核心（可能被占用）：${oldJar.name}")
+                    }
+                }
+                if (!part.renameTo(target)) {
+                    // 换入失败：立刻把旧 jar 放回去
+                    runCatching { backup.renameTo(oldJar) }
+                    throw RuntimeException("无法写入新核心（可用空间不足？）")
+                }
+                replaced = true
+                runCatching { backup.delete() }
+                _coreUpdate.value = CoreUpdateState.Upgraded(
+                    instance.id,
+                    "已升级到 ${info.label}（来源 $used）。建议先看一下控制台的启动日志确认能起来。",
+                )
+            } catch (e: Exception) {
+                // 未成功换入 → 还原旧 jar，避免"jar 没了"
+                if (!replaced) runCatching { if (backup.exists()) backup.renameTo(File(instance.dir, info.fileName)) }
+                runCatching { part.delete() }
+                _coreUpdate.value = CoreUpdateState.Failed(
+                    instance.id, e.message ?: e.javaClass.simpleName,
+                )
+            } finally {
+                coreUpgradeRunning = false
+            }
+        }
+    }
+
     fun downloadAndCreate(
         name: String,
         type: CoreType,
@@ -1249,6 +1430,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     part.delete()
                 }
                 val instance = ServerInstance(
+                    // 记下构建信息，供日后「检查核心更新」判断是否落后
+                    coreBuild = buildId,
+                    coreDownloadUrl = dl.url,
                     name = name,
                     coreType = type,
                     mcVersion = mcVersion,
