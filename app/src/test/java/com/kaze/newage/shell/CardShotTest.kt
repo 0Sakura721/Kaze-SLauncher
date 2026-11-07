@@ -23,7 +23,7 @@ import java.io.FileOutputStream
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = "w320dp-h640dp-mdpi")
+@Config(sdk = [35], qualifiers = "zh-rCN-w320dp-h640dp-mdpi")
 class CardShotTest {
 
     private val outDir = File("build/shell-shots").apply { mkdirs() }
