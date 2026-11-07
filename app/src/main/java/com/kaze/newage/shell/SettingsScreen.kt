@@ -94,11 +94,15 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
 
         card.addView(
             c.settingRow(
-                t("界面语言"),
-                t("跟随系统 / 简体中文 / English"),
-                c.txt(currentLabel, Type.body, ShellTheme.current.accent, medium = true),
-                c.chevron(),
-            ) {
+                title = t("界面语言"),
+                subtitle = t("跟随系统 / 简体中文 / English"),
+                trailing = c.row().apply {
+                    addView(
+                        c.txt(currentLabel, Type.body, ShellTheme.current.accent, medium = true),
+                    )
+                    addView(c.chevron())
+                },
+                onClick = {
                 Sheet(c, t("界面语言"), t("选中后立即生效，整壳会重建一次")).apply {
                     AppLanguage.entries.forEach { lang ->
                         val label = if (lang == AppLanguage.SYSTEM) t("跟随系统") else lang.label
@@ -116,7 +120,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                             },
                         )
                     }
-                    buttons(t("关闭"), { dismiss() }, secondaryLabel = null, onSecondary = null)
+                    buttons(t("关闭"), { dismiss() })
                     show()
                 }
             },
