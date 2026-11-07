@@ -1396,7 +1396,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                         _download.value = DownloadState(
                             running = true,
                             progress = progress,
-                            message = t("下载中 %sMB\${if (total > 0) ", (done / 1024 / 1024)) / ${(total / 1024 / 1024)}MB" else ""}",
+                            message = "下载中 ${(done / 1024 / 1024)}MB${if (total > 0) " / ${(total / 1024 / 1024)}MB" else ""}",
                         )
                     },
                     shouldCancel = { downloadCancelRequested },
@@ -1618,7 +1618,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         if (_addonUpdate.value is AddonUpdateState.Checking) return
         if (!AddonManager.supports(instance, kind)) {
             _addonUpdate.value = AddonUpdateState.Failed(
-                t("%s 不支持\${if (kind == AddonKind.PLUGIN) ", instance.coreType.displayName)插件" else "模组"}",
+                "${instance.coreType.displayName} 不支持${if (kind == AddonKind.PLUGIN) "插件" else "模组"}",
             )
             return
         }
@@ -2202,7 +2202,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 ModpackManifest.Loader.FORGE, ModpackManifest.Loader.NEOFORGE -> {
                     val pair = ModpackImporter.loaderInstallerUrl(plan.loader, mc, plan.loaderVersion)
                     if (pair == null) {
-                        t("%s 的版本信息不全（清单只给了 \${plan.loaderVersion.ifEmpty { ", loaderName)空" }}），" +
+                        "${loaderName} 的版本信息不全（清单只给了 ${plan.loaderVersion.ifEmpty { "空" }}），" +
                             t("未能自动下载安装器；请手动放入 %s-*-installer.jar 后启动一次", loaderName)
                     } else {
                         val (url, fileName) = pair
