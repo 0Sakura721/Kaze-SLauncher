@@ -124,6 +124,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                     show()
                 }
             },
+            ),
         )
         body.addView(card, c.stackMargin(bottom = 0f))
     }
