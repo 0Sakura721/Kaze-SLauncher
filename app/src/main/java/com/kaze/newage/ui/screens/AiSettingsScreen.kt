@@ -448,13 +448,14 @@ private fun SkillsSection(viewModel: AppViewModel) {
     var importError by remember { mutableStateOf<String?>(null) }
     var importNotice by remember { mutableStateOf<String?>(null) }
 
-    // 读文件走系统选择器：不申请存储权限，也不访问用户没选的文件
+    // 读文件走系统选择器：不申请存储权限，也不访问用户没选的文件。
+    // Context 必须在**组合期**取出来存进变量：launcher 的回调不是 @Composable 上下文，
+    // 在里面写 LocalContext.current 会编译失败（上一版就栽在这）。
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.compose.contracts
-            .ActivityResultContracts.OpenDocument(),
-    ) { uri ->
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri: android.net.Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val ctx = androidx.compose.ui.platform.LocalContext.current
         val read = runCatching {
             ctx.contentResolver.openInputStream(uri)?.use { ins ->
                 ins.readBytes().toString(Charsets.UTF_8)
@@ -464,13 +465,13 @@ private fun SkillsSection(viewModel: AppViewModel) {
             importError = t("无法读取所选文件（授权可能已失效，请重新选择）")
             return@rememberLauncherForActivityResult
         }
-        // 从 URI 里取一个像文件名的片段作为技能名
+        // 从 URI 里取显示名作为技能名（取不到就退回路径末段）
         val name = runCatching {
             ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
                 val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
                 if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
             }
-        }.getOrNull() ?: uri.lastPathSegment.orEmpty()
+        }.getOrNull() ?: uri.lastPathSegment ?: "imported-skill"
         val err = viewModel.importSkill(name, read)
         if (err != null) {
             importError = err
