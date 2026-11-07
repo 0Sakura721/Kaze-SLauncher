@@ -24,7 +24,7 @@ import java.io.FileOutputStream
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = "w411dp-h891dp-xhdpi")
+@Config(sdk = [35], qualifiers = "zh-rCN-w411dp-h891dp-xhdpi")
 class ShellActivitySmokeTest {
 
     private val outDir = File("build/shell-shots").apply { mkdirs() }

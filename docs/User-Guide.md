@@ -193,7 +193,9 @@ App logs plus an environment self-check: key rootfs files, permissions, containe
 >
 > Text that can grow longer in English (titles, list items, metric labels) uses ellipsis truncation, so nothing is cut mid-word when a translation is longer than the Chinese original.
 
-> The default is **简体中文**: Chinese is the original text of this app's UI and English is the translation layer, so a fresh install looks exactly like previous versions. Switch to English here (or pick "follow system") at any time — it takes effect immediately, without restarting the app or the server.
+> The default is **Follow system**: a Chinese system language shows Chinese, anything else shows English. Pick 简体中文 or English to override it at any time — the change takes effect immediately, without restarting the app or the server.
+>
+> Chinese is the original text of this app's UI and English is the translation layer, so on a Chinese device a fresh install looks exactly like previous versions.
 
 ### Other
 

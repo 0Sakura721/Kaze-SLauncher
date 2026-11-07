@@ -23,7 +23,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = "w360dp-h640dp-xhdpi")
+@Config(sdk = [35], qualifiers = "zh-rCN-w360dp-h640dp-xhdpi")
 class SettingRowClickTest {
 
     private fun layout(v: View, w: Int = 720, h: Int = 120) {
