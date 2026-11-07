@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+（暂无）
+
+---
+
+## [0.9.0] - 2026-11-07
+
 ### Fixed
 
 - **备份期间取消会让服务端永久停止自动存盘（数据丢失）**
@@ -99,6 +105,32 @@
 - **玩家离开名单仍是读-改-写**：`_onlinePlayers.value = _onlinePlayers.value - name`
   与上面"加入"侧的 `update{}` 不一致，并发时后写覆盖前写，名单少/多人且只有
   `list` 命令能纠回来。改为 `update { it - name }`。
+
+- **切换界面语言后界面不刷新**（v0.9.0 体检）
+  `LanguageState.revision` 是 `@Volatile var Int`，Compose 观察不到 —— 而且全仓
+  **没有任何地方读它**（注释写着「见 AppRoot 的用法」，那机制并不存在）。于是
+  `setAppLanguage` + `apply` 之后一张像素都不变：点 English 没反应，退出重进才生效。
+  `Dest` 枚举更糟：label 在**类初始化时**就 `t()` 求值了（静态单例只算一次），即便
+  界面重组，底栏「主页/服务端/控制台/设置」也永远是启动时那一套。改为 `mutableStateOf`
+  + AppRoot 订阅；枚举只存中文原文，`val label get() = t(...)`。
+
+- **自动重启次数提前用完（本该恢复的崩溃变成彻底停服）**（v0.9.0 体检）
+  `launchServer` 重置了 `exitHandled` / `stopTimeoutJob` / `launchedAtMs`，唯独漏了
+  `restartCount`；而它只在 `finalizeStop` 归零，自动重启路径用 `putIfAbsent` 复用
+  槽位、从不经过那里。崩溃 → 重启成功(count=1) → 稳定跑几小时 → 再崩溃时计数仍在累加，
+  反复几次后 `maxRestarts` 用完。
+
+- **精确输入内存被静默取整**（v0.9.0 体检）
+  `MemoryLimits.clamp()` 向下对齐 256MB，实例详情的「精确输入」直接 `clamp(typed)`：
+  用户输 700 实际存 512（少 188MB），界面只有一行小字「每 256MB 一档」。而创建向导
+  那处用的是 `coerceIn`（不取整），两处行为不一致。现在越界就地报错不关框，并实时
+  提示「会按 256MB 对齐为 N MB」。
+
+- **实例目录可越界到所选卷之外**（v0.9.0 体检）
+  `StorageDirUtil.treeUriToFile` 没拦 `..` 段：`primary:../etc` 按字符串拼出
+  `/storage/emulated/0/../etc`，规范化后是 `/storage/emulated/etc` —— **跑出所选卷**。
+  `File.absolutePath` 不归一化，后面那句 `contains("/android/data")` 也拦不住。
+  `LanIp.rank()` 同时清掉一个穷举证明不可达的 `else -> 3` 死分支。
 
 ### Fixed（上一轮 Miuix 改造自身的 4 处缺陷）
 
@@ -687,7 +719,10 @@ StateFlow 读-改-写 0 处、SharedPreferences 改完漏 apply 0 处；8 处空
 - 修正第三方声明三处失准：`materialkolor` 实际未使用、`ui/theme/blur|shader` 路径已删除、armhf 的 proot 实际来自 `app/src/armhf/assets/proot-armhf.tar.gz`
 - 构建新增 `syncLicenseAssets`（`preBuild` 依赖）：从仓库根目录自动复制许可证文本进 assets，避免根目录与 APK 内文本脱节
 
-## [Unreleased]
+## [草稿 · 未发布]
+
+> 以下条目是 v0.8.x 开发过程中的草稿，实际已在 [0.8.0] 发布；
+> 保留在此仅作追溯，**不属于当前未发布内容**。
 
 ### Added
 
