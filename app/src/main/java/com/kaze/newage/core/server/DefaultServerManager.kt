@@ -588,6 +588,16 @@ class DefaultServerManager(
         slot.stopTimeoutJob?.cancel()
         slot.stopTimeoutJob = null
         slot.launchedAtMs = System.currentTimeMillis()
+        // 自动重启计数器在这里归零，**不能只在 finalizeStop 里归零**。
+        //
+        // 场景：服务崩溃 → handleExit 自动重启（restartCount=1）→ 新进程起来了、
+        // 稳定跑了很久 → 又崩溃。此时 start() 用 putIfAbsent 复用了同一个槽位
+        // （自动重启路径槽位一直存在，不会走 finalizeStop），restartCount 仍是 1，
+        // 于是 maxRestarts=3 只剩 2 次 —— 本该能恢复的崩溃提前变成彻底停服。
+        //
+        // 语义上"成功启动"就是新一轮生命周期，计数理应从头开始；
+        // 只有**连续**启动失败才该累计到上限。
+        slot.restartCount = 0
         slot.setState(ServerState.Running)
         slot.log("> 服务器启动中", LineType.System)
         // 开服即把连接地址送到控制台：这是用户接下来最需要的信息，
@@ -780,7 +790,13 @@ class DefaultServerManager(
             return
         }
         val earlyExit = System.currentTimeMillis() - slot.launchedAtMs < 30_000
-        if (!earlyExit && slot.instance.autoRestart && slot.restartCount < slot.instance.maxRestarts) {
+        if (shouldAutoRestart(
+                earlyExit = earlyExit,
+                autoRestart = slot.instance.autoRestart,
+                restartCount = slot.restartCount,
+                maxRestarts = slot.instance.maxRestarts,
+            )
+        ) {
             slot.restartCount++
             slot.log("> 服务器异常退出，第 ${slot.restartCount} 次自动重启", LineType.Warn)
             // 必须先把状态退回 Stopped 再重启：start() 的防重入判定把 Starting 也算作"已在运行"
@@ -944,6 +960,27 @@ class DefaultServerManager(
          */
         internal fun extraJvmArgList(extra: String): List<String> =
             extra.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+
+        /**
+         * 这一轮异常退出是否该自动重启。
+         *
+         * 抽成纯函数是为了能被单测覆盖 —— 它背后有一个很容易复发的缺陷：
+         * `restartCount` 必须在**每次成功启动**后归零（见 launchServer），否则自动重启
+         * 成功、服务稳定跑一段、再崩溃时，计数会从上次的值继续累加，maxRestarts 提前用完，
+         * 本该能自动恢复的崩溃直接变成彻底停服。
+         *
+         * @param earlyExit 进程是否在启动后 30 秒内就退出（那说明是配置/环境问题，
+         *   重启只会无限循环，所以不自动重启）
+         * @param autoRestart 用户是否开启自动重启
+         * @param restartCount 本轮**连续**已重启次数（成功启动即清零）
+         * @param maxRestarts 用户设定的上限
+         */
+        internal fun shouldAutoRestart(
+            earlyExit: Boolean,
+            autoRestart: Boolean,
+            restartCount: Int,
+            maxRestarts: Int,
+        ): Boolean = !earlyExit && autoRestart && restartCount < maxRestarts
     }
 
     /**

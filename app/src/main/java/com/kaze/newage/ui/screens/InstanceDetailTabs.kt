@@ -911,6 +911,8 @@ internal fun EditMemoryDialog(
     }
     var showExact by remember { mutableStateOf(false) }
     var exactText by remember { mutableStateOf("") }
+    // 精确输入的越界/非法标记：不关框、就地报错
+    var exactBad by remember { mutableStateOf(false) }
     val fmtGb: (Float) -> String = { String.format(java.util.Locale.US, "%.1f GB", it / 1024f) }
     val exceeded = totalMb > 0f && mb > totalMb * 0.8f
 
@@ -952,10 +954,31 @@ internal fun EditMemoryDialog(
                         onValueChange = { t -> exactText = t.filter { it.isDigit() }.take(5) },
                         label = { Text("MB") },
                         singleLine = true,
+                        isError = exactBad,
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
                             keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
                         ),
                     )
+                    // 越界/非法输入就地报错，而不是静默夹到别的值。
+                    // 旧行为：输入 700 → clamp() 向下取整成 512，用户以为设了 700。
+                    // 也顺手说明"每 256MB 一档"意味着会被对齐 —— 让用户知道会发生什么。
+                    if (exactBad) {
+                        Text(
+                            t("请输入 %s ~ %s 之间的整数（MB）", MemoryLimits.MIN_MB, MemoryLimits.MAX_MB),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    } else if (exactText.isNotBlank()) {
+                        val typedNow = exactText.toIntOrNull()
+                        val aligned = typedNow?.let { MemoryLimits.clamp(it) }
+                        if (aligned != null && aligned != typedNow) {
+                            Text(
+                                t("会按 256MB 对齐为 %s MB", aligned),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
                 Text(
                     t("范围 %s ~ %s MB，每 %s MB 一档；", MemoryLimits.MIN_MB, MemoryLimits.MAX_MB, MemoryLimits.STEP_MB) +
@@ -966,8 +989,19 @@ internal fun EditMemoryDialog(
             }
         },
         confirmButton = {
-            val typed = if (showExact) exactText.toIntOrNull() else null
-            TextButton(onClick = { onConfirm(MemoryLimits.clamp(typed ?: mb.toInt())) }) { Text(t("保存")) }
+            TextButton(onClick = {
+                if (showExact) {
+                    val typed = exactText.toIntOrNull()
+                    // 非法/越界 → 就地报错、不关框（与向导的精确输入同一套行为）
+                    if (typed == null || typed !in MemoryLimits.MIN_MB..MemoryLimits.MAX_MB) {
+                        exactBad = true
+                    } else {
+                        onConfirm(MemoryLimits.clamp(typed))
+                    }
+                } else {
+                    onConfirm(mb.toInt())
+                }
+            }) { Text(t("保存")) }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(t("取消")) } },
     )

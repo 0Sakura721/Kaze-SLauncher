@@ -41,6 +41,13 @@ object StorageDirUtil {
         // 接受的话实例扫描会把存储根下任何直接含 .jar 的顶层目录登记成"实例"
         // （Download、Documents、其它应用的数据目录都会中招），而且每次启动都要浅扫一遍存储根。
         if (rel.isBlank()) return null
+        // `..` 段必须整条拒绝：docId 是 URI 里带过来的字符串，`primary:../etc`
+        // 按字符串拼出来是 /storage/emulated/0/../etc，规范化后**跑出所选卷**到
+        // /storage/emulated/etc。File.absolutePath 不归一化，所以下面的
+        // "Android/data" 之类字符串检查也拦不住它。
+        // 正常 SAF 选择器给不出这种 docId，但它由外部 URI 构造，不能只靠"应该不会出现"。
+        val relSegments = rel.split('/', '\\')
+        if (relSegments.any { it == ".." }) return null
         val dir = File(base, rel)
         // 系统目录同样拒绝：即便写得进去，也不该把实例放在这里
         val lower = dir.absolutePath.lowercase()

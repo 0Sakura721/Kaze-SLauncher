@@ -52,7 +52,21 @@ object LanIp {
             .distinctBy { it.address }
     }.getOrDefault(emptyList())
 
-    /** 越小越优先 */
+    /**
+     * 越小越优先。
+     *
+     * 分支顺序就是优先级本身（Kotlin 的 when 从上往下匹配），改动前请先看下面这个
+     * 穷举表 —— 旧写法末尾有个 `else -> 3`，而 rank=3 的取值域已经被上面的条件
+     * 全部覆盖（私网/非私网 × 是否 home × 是否隧道，穷举后没有任何组合落到 else），
+     * 那是一条永远走不到的死分支，容易让人误以为存在"第 3 档地址"。
+     *
+     *   priv home tunnel cgnat → rank
+     *   T    T    *      *     → 0   自家 Wi-Fi / 热点 / 以太网（最可能是对的）
+     *   T    F    F      *     → 1   私网但非 Wi-Fi 口（如 USB 网络共享）
+     *   F    *    F      F     → 2   公网地址（做过端口转发才有意义）
+     *   *    *    *      T     → 4   运营商 CGNAT（100.64/10，外部连不进来）
+     *   *    *    T      F     → 5   VPN / 蜂窝隧道（最不可能是朋友要的地址）
+     */
     private fun rank(c: Candidate): Int {
         val priv = isPrivate(c.address)
         val home = isHomeIface(c.iface)
@@ -63,8 +77,7 @@ object LanIp {
             priv && !tunnel -> 1
             !priv && !cgnat && !tunnel -> 2
             cgnat -> 4
-            tunnel -> 5
-            else -> 3
+            else -> 5   // 剩下的一定是隧道（tunnel=true），等价于旧的 tunnel -> 5
         }
     }
 
