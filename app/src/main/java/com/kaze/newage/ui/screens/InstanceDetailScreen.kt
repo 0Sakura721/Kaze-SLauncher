@@ -187,9 +187,9 @@ fun InstanceDetailScreen(
                     appContext.contentResolver.openOutputStream(uri)?.use { out ->
                         BackupManager.export(src, out)
                     }
-                    "已导出：${src.name}"
+                    t("已导出：%s", src.name)
                 } catch (e: Exception) {
-                    "导出失败：${e.message}"
+                    t("导出失败：%s", e.message)
                 }
                 exportTarget = null
             }
@@ -209,10 +209,10 @@ fun InstanceDetailScreen(
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "imported.zip"
                     appContext.contentResolver.openInputStream(uri)?.use { ins ->
                         val f = BackupManager.import(instance, ins, name)
-                        "已导入：${f.name}"
+                        t("已导入：%s", f.name)
                     } ?: t("导入失败：无法读取文件")
                 } catch (e: Exception) {
-                    "导入失败：${e.message}"
+                    t("导入失败：%s", e.message)
                 }
                 backupRefresh++
                 backupBusy = false
@@ -331,14 +331,14 @@ fun InstanceDetailScreen(
                                         }
                                         try {
                                             val f = BackupManager.backup(instance)
-                                            "已备份：${f.name}"
+                                            t("已备份：%s", f.name)
                                         } finally {
                                             if (wasRunning) {
                                                 viewModel.serverManager.sendCommand(instance, "save-on")
                                             }
                                         }
                                     } catch (e: Exception) {
-                                        "备份失败：${e.message}"
+                                        t("备份失败：%s", e.message)
                                     }
                                     backupRefresh++
                                     backupBusy = false
@@ -475,9 +475,9 @@ fun InstanceDetailScreen(
                         backupScope.launch(Dispatchers.IO) {
                             backupMsg = try {
                                 BackupManager.restore(instance, f)
-                                "已恢复：${f.name}"
+                                t("已恢复：%s", f.name)
                             } catch (e: Exception) {
-                                "恢复失败：${e.message}"
+                                t("恢复失败：%s", e.message)
                             }
                             backupRefresh++
                             backupBusy = false

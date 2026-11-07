@@ -340,7 +340,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         // 发布日期：更新判定现在以它为准（版本号不再参与比较），亮出来让用户可核对
                         if (releaseInfo.publishedAtText.isNotBlank()) {
                             Text(
-                                "发布于 ${releaseInfo.publishedAtText}",
+                                t("发布于 %s", releaseInfo.publishedAtText),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

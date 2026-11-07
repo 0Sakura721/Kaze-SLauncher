@@ -116,7 +116,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                             null
                         }
                         layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                        tappable("主题 ${mode.label}") {
+                        tappable(t("主题 %s", mode.label)) {
                             if (mode != host.themeMode()) {
                                 host.setThemeMode(mode)
                             } else {
@@ -188,7 +188,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         card.addView(c.splitter())
         val fontRow = c.settingRow(
             t("控制台字号"),
-            "等宽字体，${host.themePrefs.consoleFont.toInt()} sp",
+            t("等宽字体，%s sp", host.themePrefs.consoleFont.toInt()),
         )
         card.addView(fontRow)
         card.addView(
@@ -203,7 +203,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                         host.themePrefs.consoleFont = v
                         (fontRow.getChildAt(0) as? LinearLayout)
                             ?.getChildAt(1)
-                            ?.let { (it as? TextView)?.text = "等宽字体，${v.toInt()} sp" }
+                            ?.let { (it as? TextView)?.text = t("等宽字体，%s sp", v.toInt()) }
                     }
                 }
                 addView(slider)
@@ -292,7 +292,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 })
                 addView(
                     c.txt(
-                        "范围 ${MemoryLimits.MIN_MB}–${MemoryLimits.MAX_MB} MB，按 ${MemoryLimits.STEP_MB} MB 对齐",
+                        t("范围 %s–%s MB，按 %s MB 对齐", MemoryLimits.MIN_MB, MemoryLimits.MAX_MB, MemoryLimits.STEP_MB),
                         Type.micro, ShellTheme.current.ink3,
                     ).apply { setPadding(0, dp(4f), 0, dp(6f)) },
                 )
@@ -438,7 +438,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             card.addView(
                 c.settingRow(
                     t("MCP 端口与令牌"),
-                    "端口 ${host.vm.uiPrefs.mcpPort.value} · ${host.vm.uiPrefs.mcpBindAddress.value}",
+                    t("端口 %s · %s", host.vm.uiPrefs.mcpPort.value, host.vm.uiPrefs.mcpBindAddress.value),
                     c.chevron(),
                 ) { showMcpSheet() },
             )
@@ -661,7 +661,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             }
             copyButton.setOnClickListener(null)
             copyButton.tappable(t("复制日志")) {
-                host.copy(lines.joinToString("\n"), "已复制 ${lines.size} 行")
+                host.copy(lines.joinToString("\n"), t("已复制 %s 行", lines.size))
             }
         }
         sheet.show()

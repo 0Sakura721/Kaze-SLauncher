@@ -497,7 +497,7 @@ private fun ChatMessageRow(
                 // 联网搜索的情况先交代：搜到了什么词 / 为什么没搜成
                 if (msg.searchError != null) {
                     Text(
-                        "联网搜索失败：${msg.searchError}（按本地信息回答）",
+                        t("联网搜索失败：%s（按本地信息回答）", msg.searchError),
                         style = MaterialTheme.typography.labelSmall,
                         color = scheme.onSurfaceVariant,
                     )
@@ -513,7 +513,7 @@ private fun ChatMessageRow(
                             tint = scheme.onSurfaceVariant,
                         )
                         Text(
-                            "已搜索：${msg.searchQuery}（${msg.searchCount} 条结果）",
+                            t("已搜索：%s（%s 条结果）", msg.searchQuery, msg.searchCount),
                             style = MaterialTheme.typography.labelSmall,
                             color = scheme.onSurfaceVariant,
                             maxLines = 2,
@@ -589,8 +589,8 @@ private fun LiveStreamRow(stream: AppViewModel.AiLiveStream) {
                         reasoningScroll.scrollTo(reasoningScroll.maxValue)
                     }
                     Text(
-                        if (stream.thinking) "思考中（${stream.reasoning.length} 字）…"
-                        else "推理中（${stream.reasoning.length} 字）…",
+                        if (stream.thinking) t("思考中（%s 字）…", stream.reasoning.length)
+                        else t("推理中（%s 字）…", stream.reasoning.length),
                         style = MaterialTheme.typography.labelMedium,
                         color = scheme.onSurfaceVariant,
                     )
@@ -640,7 +640,7 @@ private fun ThinkingPanel(reasoning: String) {
                     tint = scheme.onSurfaceVariant,
                 )
                 Text(
-                    "思考过程（${reasoning.length} 字）",
+                    t("思考过程（%s 字）", reasoning.length),
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -790,7 +790,7 @@ private fun WriteRequestRow(
                 )
                 if (req.absPath.isNotBlank() && req.absPath != req.path) {
                     Text(
-                        "（相对路径：${AiSanitize.displayOneLine(req.path)}）",
+                        t("（相对路径：%s）", AiSanitize.displayOneLine(req.path)),
                         style = MaterialTheme.typography.labelSmall,
                         color = scheme.onSurfaceVariant,
                     )
@@ -814,7 +814,7 @@ private fun WriteRequestRow(
                     }
                 }
                 Text(
-                    "${req.bytes} 字节 · 共 ${req.content.lines().size} 行 · 覆盖已有文件时会自动留备份",
+                    t("%s 字节 · 共 %s 行 · 覆盖已有文件时会自动留备份", req.bytes, req.content.lines().size),
                     style = MaterialTheme.typography.labelSmall,
                     color = scheme.onSurfaceVariant,
                 )
@@ -843,8 +843,8 @@ private fun WriteRequestRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            if (showFull) "已显示全文（${req.content.length} 字符）"
-                            else "预览已截断：仅显示前 $previewLimit 字符，共 ${req.content.length} 字符",
+                            if (showFull) t("已显示全文（%s 字符）", req.content.length)
+                            else t("预览已截断：仅显示前 %s 字符，共 %s 字符", previewLimit, req.content.length),
                             style = MaterialTheme.typography.labelSmall,
                             color = consoleLineColor(LineType.Warn),
                             modifier = Modifier.weight(1f),
@@ -951,7 +951,7 @@ private fun ReadRequestRow(
                     color = scheme.onSurfaceVariant,
                 )
                 Text(
-                    "原因：${AiSanitize.display(req.reason)}",
+                    t("原因：%s", AiSanitize.display(req.reason)),
                     style = MaterialTheme.typography.labelMedium,
                     color = scheme.error,
                 )

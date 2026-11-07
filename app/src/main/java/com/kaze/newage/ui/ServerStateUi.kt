@@ -35,8 +35,8 @@ fun formatUptime(totalSec: Long): String {
     val m = (totalSec % 3600) / 60
     val s = totalSec % 60
     return when {
-        h > 0 -> "${h} 小时 ${m} 分"
-        m > 0 -> "${m} 分 ${s} 秒"
+        h > 0 -> t("%s 小时 %s 分", h, m)
+        m > 0 -> t("%s 分 %s 秒", m, s)
         else -> "${s} 秒"
     }
 }

@@ -352,7 +352,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
                     if (lines.isEmpty()) {
                         host.toast(t("控制台是空的"))
                     } else {
-                        host.copy(lines.joinToString("\n") { it.text }, "已复制 ${lines.size} 行")
+                        host.copy(lines.joinToString("\n") { it.text }, t("已复制 %s 行", lines.size))
                     }
                 }
             })
@@ -481,7 +481,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
                                 LinearLayout.LayoutParams.WRAP_CONTENT,
                                 LinearLayout.LayoutParams.WRAP_CONTENT,
                             ).apply { marginEnd = dp(6f) }
-                            tappable("快捷命令 $cmd") {
+                            tappable(t("快捷命令 %s", cmd)) {
                                 if (cmd.endsWith(" ")) {
                                     input.setText(cmd)
                                     input.setSelection(cmd.length)
@@ -544,7 +544,7 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
             host.vm.procStats.collect { renderStats(it) }
         })
         jobs.add(scope.launch {
-            host.vm.onlinePlayers.collect { players -> playerValue.text = "在线 ${players.size}" }
+            host.vm.onlinePlayers.collect { players -> playerValue.text = t("在线 %s", players.size) }
         })
 
         // 首次进来没有选中实例：接上次看的，再退化到第一个

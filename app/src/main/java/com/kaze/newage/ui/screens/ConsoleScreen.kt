@@ -504,8 +504,8 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             var showCountDetail by remember { mutableStateOf(false) }
             Text(
                 // 过滤/搜索生效时同时报出"命中 / 总数"，否则用户以为过滤没起作用
-                if (shown === lines) "${CountFormat.short(lines.size.toLong())} 行"
-                else "${CountFormat.short(shown.size.toLong())} / ${CountFormat.short(lines.size.toLong())} 行",
+                if (shown === lines) t("%s 行", CountFormat.short(lines.size.toLong()))
+                else t("%s / %s 行", CountFormat.short(shown.size.toLong()), CountFormat.short(lines.size.toLong())),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 // 行数是常驻信息，任何情况下都不许被压成两行：
@@ -957,7 +957,7 @@ private fun DisplaySettingsDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "字号 ${fontSp.toInt()}sp",
+                    t("字号 %ssp", fontSp.toInt()),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1091,9 +1091,9 @@ private fun QuickCommandChip(
             .clip(M3Shape.groupSingle(100f))
             .combinedClickable(
                 onClick = onClick,
-                onClickLabel = "发送 $command",
+                onClickLabel = t("发送 %s", command),
                 onLongClick = onRemove,
-                onLongClickLabel = "删除快捷命令 $command",
+                onLongClickLabel = t("删除快捷命令 %s", command),
             ),
         shape = M3Shape.groupSingle(100f),
         color = if (enabled) scheme.secondaryContainer else scheme.surfaceContainerHighest,

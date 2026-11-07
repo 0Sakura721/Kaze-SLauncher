@@ -259,7 +259,7 @@ fun HomeScreen(
                                 Icon(
                                     if (instRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow,
                                     contentDescription =
-                                        if (instRunning) "停止 ${inst.name}" else "启动 ${inst.name}",
+                                        if (instRunning) t("停止 %s", inst.name) else t("启动 %s", inst.name),
                                     tint = if (instRunning) MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.primary,
                                 )
@@ -415,7 +415,7 @@ fun HomeScreen(
                     if (!com.kaze.newage.util.StorageDirUtil.openInFileManager(context, current.dir)) {
                         android.widget.Toast.makeText(
                             context,
-                            "无法调起文件管理器，目录：${current.dir.absolutePath}",
+                            t("无法调起文件管理器，目录：%s", current.dir.absolutePath),
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     }

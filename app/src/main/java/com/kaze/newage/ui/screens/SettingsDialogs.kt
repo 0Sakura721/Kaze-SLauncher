@@ -293,7 +293,7 @@ internal fun AboutDialog(onDismiss: () -> Unit) {
                     runCatching {
                         ctx.assets.open(if (legalDoc == "gpl") "LICENSE-GPL-3.0.txt" else "THIRD_PARTY_NOTICES.md")
                             .bufferedReader().use { it.readText() }
-                    }.getOrElse { "许可证文本读取失败：${it.message}" }
+                    }.getOrElse { t("许可证文本读取失败：%s", it.message) }
                 }
                 Text(
                     body,
@@ -380,7 +380,7 @@ internal fun UpdateStatusCard(
 
         is AppUpdateState.Found -> M3ECard(
             variant = M3ECardVariant.Elevated,
-            title = "发现新版本 ${state.info.tag}",
+            title = t("发现新版本 %s", state.info.tag),
             // 设置页的检查更新**不显示 changelog**（真机要求）：这里只做"手动检查 + 一键更新"，
             // 不再把 Release 正文摊开。想看更新说明，去应用启动时的更新弹窗。
             supporting = t("点「下载并安装」开始更新"),

@@ -130,8 +130,8 @@ fun LogsScreen(
                 val err = runCatching {
                     val text = buildString {
                         appendLine(t("KAZE SLauncher 日志导出"))
-                        appendLine("实例：${instance.name}")
-                        appendLine("目录：${instance.dir.absolutePath}")
+                        appendLine(t("实例：%s", instance.name))
+                        appendLine(t("目录：%s", instance.dir.absolutePath))
                         appendLine("导出时间：${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}")
                         exportable.forEach { f ->
                             appendLine()
@@ -147,7 +147,7 @@ fun LogsScreen(
                     withContext(Dispatchers.Main) {
                         android.widget.Toast.makeText(
                             context,
-                            "导出失败：${err.message ?: err.javaClass.simpleName}",
+                            t("导出失败：%s", err.message ?: err.javaClass.simpleName),
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     }
@@ -180,7 +180,7 @@ fun LogsScreen(
         M3EScreenHeader(
             title = openFile?.name ?: t("启动日志"),
             subtitle = if (openFile != null) {
-                "${instance.name} · 修改于 ${fileTime(openFile)}"
+                t("%s · 修改于 %s", instance.name, fileTime(openFile))
             } else {
                 instance.name
             },
@@ -211,7 +211,7 @@ fun LogsScreen(
             // 几万 dp，巨型文本还每帧参与整页布局。
             val content = remember(openFile, refresh) { readTail(openFile) }
             Text(
-                "${content.length / 1024} KB · 显示末尾 ${content.lines().size} 行",
+                t("%s KB · 显示末尾 %s 行", content.length / 1024, content.lines().size),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
@@ -258,8 +258,8 @@ fun LogsScreen(
                 // ── 失败记录：崩过的服务端都会在 crash-reports 里留下一份 txt ──
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 SectionLabel(
-                    if (filter == LogFilter.Failure) "启动失败记录（${crashReports.size}）"
-                    else "崩溃报告（${crashReports.size}）"
+                    if (filter == LogFilter.Failure) t("启动失败记录（%s）", crashReports.size)
+                    else t("崩溃报告（%s）", crashReports.size)
                 )
                 if (crashReports.isEmpty()) {
                     M3ECard(
@@ -360,7 +360,7 @@ fun LogsScreen(
             title = { Text(t("清空崩溃报告？")) },
             text = {
                 Text(
-                    "将删除 ${crashReports.size} 份崩溃报告（crash-reports/*.txt），删除后无法恢复。\n" +
+                    t("将删除 %s 份崩溃报告（crash-reports/*.txt），删除后无法恢复。\\n", crashReports.size) +
                         t("latest.log 与 console-output.log 是服务端正在写入的日志，不会被删除。")
                 )
             },
@@ -499,7 +499,7 @@ private fun readTail(file: File, maxBytes: Int = 300 * 1024): String {
         }
         val bytes = ins.readBytes()
         val text = String(bytes, Charsets.UTF_8)
-        if (skip > 0) "…（已截断，仅显示末尾）\n$text" else text
+        if (skip > 0) t("…（已截断，仅显示末尾）\\n%s", text) else text
     }
 }
 
