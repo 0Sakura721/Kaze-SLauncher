@@ -118,6 +118,8 @@ Safety measures during an upgrade: the old jar is renamed to `.old` first, the n
 > **Forge / NeoForge are not replaced automatically**: new versions need the installer re-run to generate `libraries/`, and a straight jar swap leaves the instance half-installed.
 >
 > **Older instances show "build unknown"**: instances created before v0.8.0 did not record a build number. The check then offers the latest version for you to decide, rather than falsely claiming "up to date".
+>
+> If upstream has deleted the version you are running (uncommon, but happens with cleaned-up build lists), the check treats it as "newer available" and says so, rather than silently reporting nothing.
 
 ### Connection address
 
@@ -150,6 +152,8 @@ Upgrades download **one at a time**: a failure does not abort the rest, and the 
 > **Why "unrecognized" happens**: when the app installs a plugin it records its source in `plugins/.kaze-addons.json` (or `mods/`). Plugins installed by older versions have no such record, so the app hashes the file with SHA-512 and asks Modrinth — if it was originally downloaded from Modrinth it is recognized, **no reinstall needed**. Only files that also fail that lookup (downloaded elsewhere, self-compiled) end up as "unrecognized".
 >
 > The registry only records which project and version a file came from; it contains no personal data. Deleting it only means the next check has to re-identify the files.
+>
+> **Downgrades are never treated as updates.** The check compares positions in the upstream version list, so an older-but-newer-looking version number (a beta followed by a stable release) cannot silently replace something newer.
 
 ## 8. Logs and troubleshooting
 
@@ -183,9 +187,13 @@ App logs plus an environment self-check: key rootfs files, permissions, containe
 
 ### Language
 
-**App language** offers **Follow system / 简体中文 / English**. The current choice is highlighted; the subtitle shows what "follow system" resolves to.
+**App language** offers **Follow system / 简体中文 / English**. The current choice is highlighted; the subtitle shows what "follow system" resolves to, so you always know which one will actually be used.
 
-> The default is **简体中文**: Chinese is the original text of this app's UI and English is the translation layer, so a fresh install looks exactly like previous versions. Switch to English here (or pick "follow system") at any time — it takes effect immediately.
+> **Translation coverage**: interface text is translated through a runtime dictionary, and coverage is currently **99.7%** (1051 of 1054 strings). The few untranslated spots fall back to Chinese rather than showing blanks or raw keys. Two cases are intentional: AI system prompts (sent to the model, not shown to you) and a handful of strings that embed nested Kotlin expressions, where rewriting them would risk behaviour.
+>
+> Text that can grow longer in English (titles, list items, metric labels) uses ellipsis truncation, so nothing is cut mid-word when a translation is longer than the Chinese original.
+
+> The default is **简体中文**: Chinese is the original text of this app's UI and English is the translation layer, so a fresh install looks exactly like previous versions. Switch to English here (or pick "follow system") at any time — it takes effect immediately, without restarting the app or the server.
 
 ### Other
 
