@@ -52,21 +52,21 @@ class StorageDirUtilTest {
     // ══════════ 拒绝：越界与系统目录 ══════════
 
     @Test
-    fun `带 .. 的 docId 被拒绝（防止跑出所选卷）`() {
+    fun `带上一级引用（两个点）的 docId 被拒绝_防止跑出所选卷`() {
         val base = android.os.Environment.getExternalStorageDirectory()
-        // 造一个 `..` 之后真实存在的目标，确保"拒绝"不是因为目录不存在
+        // 造一个上一级引用之后真实存在的目标，确保"拒绝"不是因为目录不存在
         File(base.parentFile, "etc").mkdirs()
 
         assertNull(
-            "primary:../etc 必须拒绝",
+            "带两个点的 docId 必须拒绝",
             StorageDirUtil.treeUriToFile(treeUri("primary:../etc")),
         )
         assertNull(
-            "多级 .. 必须拒绝",
+            "多级上一级引用必须拒绝",
             StorageDirUtil.treeUriToFile(treeUri("primary:MCServer/../../etc")),
         )
         assertNull(
-            "Windows 风格分隔符的 .. 也要拒绝",
+            "反斜杠分隔的上一级引用也要拒绝",
             StorageDirUtil.treeUriToFile(treeUri("primary:..\\etc")),
         )
     }
