@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -149,12 +150,14 @@ fun HomeScreen(
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     serverState.toLabel(),
                     style = MaterialTheme.typography.bodySmall,
                     color = stateColor,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (running) {
@@ -234,6 +237,7 @@ fun HomeScreen(
                                         text = inst.name,
                                         style = MaterialTheme.typography.bodyLarge,
                                         maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
                                         text = "MC ${inst.mcVersion.ifBlank { "自定义" }} · " +
@@ -241,6 +245,7 @@ fun HomeScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }

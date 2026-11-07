@@ -553,6 +553,7 @@ internal fun BuildRow(label: String, hint: String, selected: Boolean, onClick: (
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -721,6 +722,7 @@ internal fun VersionRow(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -729,6 +731,7 @@ internal fun VersionRow(
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 M3EStatusChip(
                     text = version.type.displayName,

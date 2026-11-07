@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -498,7 +499,7 @@ private fun RowScope.GroupButton(
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

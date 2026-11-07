@@ -362,12 +362,13 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                                     ) {
                                         Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
                                         Column(Modifier.weight(1f)) {
-                                            Text(inst.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                                            Text(inst.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             Text(
                                                 s.toLabel(),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
                                             )
                                         }
                                     }

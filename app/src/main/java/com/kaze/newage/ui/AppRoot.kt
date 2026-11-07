@@ -97,6 +97,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import com.kaze.newage.core.i18n.t
+import androidx.compose.ui.text.style.TextOverflow
 
 enum class Dest(
     val route: String,
@@ -535,6 +536,7 @@ private fun LiquidGlassNavBar(
                             color = if (selected) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
