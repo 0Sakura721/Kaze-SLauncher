@@ -223,7 +223,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                             strokeWidth = Dim.line,
                         )
                         layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                        tappable("启动当前筛选的 ${startable.size} 个实例") {
+                        tappable(t("启动当前筛选的 %s 个实例", startable.size)) {
                             // 串行启动：多实例同时冷启会一起抢 CPU 与磁盘，
                             // 在手机上表现为每个都慢、还可能超时。逐个来。
                             host.startSequentially(startable)
@@ -246,7 +246,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                             strokeWidth = Dim.line,
                         )
                         layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                        tappable("停止当前筛选的 ${stoppable.size} 个实例") {
+                        tappable(t("停止当前筛选的 %s 个实例", stoppable.size)) {
                             stoppable.forEach { host.stop(it) }
                         }
                     },
@@ -338,7 +338,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                     c.txt("⋯", 16f, ShellTheme.current.ink3, medium = true).apply {
                         gravity = Gravity.CENTER
                         background = c.rip(ShellTheme.current.surfaceAlt, 9f)
-                        tappable("${inst.name} 的更多操作") { openMenu(inst) }
+                        tappable(t("%s 的更多操作", inst.name)) { openMenu(inst) }
                     },
                     LinearLayout.LayoutParams(dp(30f), dp(30f)),
                 )
@@ -402,7 +402,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             }
             is ImportJarProgress.Running -> {
                 importLabel.visibility = View.VISIBLE
-                importLabel.text = "导入中 · ${progress.detail}"
+                importLabel.text = t("导入中 · %s", progress.detail)
                 importProgress.visibility = View.VISIBLE
                 if (progress.fraction < 0f) {
                     importProgress.indeterminate = true
@@ -415,7 +415,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 importProgress.indeterminate = false
                 importProgress.fraction = 1f
                 importLabel.visibility = View.VISIBLE
-                importLabel.text = "导入完成 · ${progress.name}"
+                importLabel.text = t("导入完成 · %s", progress.name)
                 host.toast("已导入 ${progress.name}")
                 scheduleImportReset(progress, 2500L)
             }
@@ -424,7 +424,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 importProgress.fraction = 0f
                 importLabel.visibility = View.VISIBLE
                 importLabel.setTextColor(ShellTheme.current.danger)
-                importLabel.text = "导入失败 · ${progress.reason}"
+                importLabel.text = t("导入失败 · %s", progress.reason)
                 host.toast("导入失败：${progress.reason}", error = true)
                 // 失败给长一点让用户看清原因，然后同样清回 Idle
                 scheduleImportReset(progress, 6000L)

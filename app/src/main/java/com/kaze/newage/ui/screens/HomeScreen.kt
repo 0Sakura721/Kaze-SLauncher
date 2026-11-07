@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -149,12 +150,14 @@ fun HomeScreen(
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     serverState.toLabel(),
                     style = MaterialTheme.typography.bodySmall,
                     color = stateColor,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             if (running) {
@@ -234,6 +237,7 @@ fun HomeScreen(
                                         text = inst.name,
                                         style = MaterialTheme.typography.bodyLarge,
                                         maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                     Text(
                                         text = "MC ${inst.mcVersion.ifBlank { "自定义" }} · " +
@@ -241,6 +245,7 @@ fun HomeScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
                                 }
                             }
@@ -259,7 +264,7 @@ fun HomeScreen(
                                 Icon(
                                     if (instRunning) Icons.Filled.Stop else Icons.Filled.PlayArrow,
                                     contentDescription =
-                                        if (instRunning) "停止 ${inst.name}" else "启动 ${inst.name}",
+                                        if (instRunning) t("停止 %s", inst.name) else t("启动 %s", inst.name),
                                     tint = if (instRunning) MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.primary,
                                 )
@@ -415,7 +420,7 @@ fun HomeScreen(
                     if (!com.kaze.newage.util.StorageDirUtil.openInFileManager(context, current.dir)) {
                         android.widget.Toast.makeText(
                             context,
-                            "无法调起文件管理器，目录：${current.dir.absolutePath}",
+                            t("无法调起文件管理器，目录：%s", current.dir.absolutePath),
                             android.widget.Toast.LENGTH_LONG,
                         ).show()
                     }

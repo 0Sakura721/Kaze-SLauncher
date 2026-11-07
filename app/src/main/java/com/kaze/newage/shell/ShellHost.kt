@@ -236,7 +236,7 @@ class ShellHost(
 
     /** 删除确认（带世界保留说明） */
     fun confirmDelete(instance: ServerInstance, onDone: () -> Unit = {}) {
-        val sheet = Sheet(context, "删除「${instance.name}」", scrollable = false)
+        val sheet = Sheet(context, t("删除「%s」", instance.name), scrollable = false)
         sheet.add(
             context.txt(
                 "只移除应用里的实例记录；目录 ${instance.dir.name} 与世界存档仍在磁盘上，" +

@@ -124,7 +124,7 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                         }.onFailure {
                             android.widget.Toast.makeText(
                                 context,
-                                "分享失败：${it.message}",
+                                t("分享失败：%s", it.message),
                                 android.widget.Toast.LENGTH_LONG,
                             ).show()
                         }
@@ -168,7 +168,7 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
             M3ECard(
                 variant = M3ECardVariant.Outlined,
                 title = t("应用日志"),
-                supporting = "logcat 只存在内存里（重启即失），这里留存最近 ${com.kaze.newage.core.log.AppLogStore.KEEP_FILES} 天；分享可得全文",
+                supporting = t("logcat 只存在内存里（重启即失），这里留存最近 %s 天；分享可得全文", com.kaze.newage.core.log.AppLogStore.KEEP_FILES),
             ) {
                 // 高度必须有界：tail(1200) 满载约 19000dp，不设上限会把「环境自检」卡
                 // 挤出几屏之外、根本触达不到。内滚 + 「分享」拿全文。

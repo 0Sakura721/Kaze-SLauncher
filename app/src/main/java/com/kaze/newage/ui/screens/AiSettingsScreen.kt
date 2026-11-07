@@ -458,7 +458,7 @@ private fun SkillsSection(viewModel: AppViewModel) {
             Column(Modifier.weight(1f)) {
                 Text(t("刷新技能列表"), style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "当前实例：${scan.skills.size} 个技能" +
+                    t("当前实例：%s 个技能", scan.skills.size) +
                         if (scan.warnings.isNotEmpty()) "，${scan.warnings.size} 个有问题" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

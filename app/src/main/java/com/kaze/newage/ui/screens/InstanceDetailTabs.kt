@@ -258,7 +258,7 @@ internal fun RunTab(
                     clipboard.setText(AnnotatedString(addr))
                     android.widget.Toast.makeText(
                         ctx,
-                        "已复制${label}地址 $addr",
+                        t("已复制%s地址 %s", label, addr),
                         Toast.LENGTH_SHORT,
                     ).show()
                 }
@@ -340,7 +340,7 @@ internal fun RunTab(
             // 画一个百分比会是在编数据；「正在进行」这一点是真实的
             if (busy) {
                 Text(
-                    "正在处理：${state.toLabel()}，可随时取消",
+                    t("正在处理：%s，可随时取消", state.toLabel()),
                     style = MaterialTheme.typography.labelMedium,
                     color = stateColor,
                     modifier = Modifier.padding(top = 12.dp),
@@ -364,7 +364,7 @@ internal fun RunTab(
                 supporting = if (latestBackup == null) {
                     t("还没有备份 · 世界数据珍贵，建议现在就备一份")
                 } else {
-                    "最近 ${backupStamp(latestBackup)} · 共 ${backups.size} 份 · 点一下再备一份"
+                    t("最近 %s · 共 %s 份 · 点一下再备一份", backupStamp(latestBackup), backups.size)
                 },
                 leadingIcon = Icons.Filled.History,
                 iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -424,7 +424,7 @@ internal fun WorldTab(
                 Column(Modifier.weight(1f)) {
                     Text(t("停服自动备份"), style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "服务端退出后自动打包（auto_ 前缀），保留最近 ${BackupManager.AUTO_KEEP} 份",
+                        t("服务端退出后自动打包（auto_ 前缀），保留最近 %s 份", BackupManager.AUTO_KEEP),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -595,7 +595,7 @@ internal fun PlayerManageCard(
     fun setProp(key: String, value: String) {
         props = props.toMutableMap().apply { this[key] = value } as LinkedHashMap
         runCatching { ServerProperties.save(instance.dir, props) }
-            .onFailure { msg = "保存失败：${it.message}" }
+            .onFailure { msg = t("保存失败：%s", it.message) }
     }
 
     fun reload() {
@@ -700,7 +700,7 @@ internal fun PlayerManageCard(
 
             // ── 白名单内容 ──
             Text(
-                "白名单（${whitelist.size} 人）",
+                t("白名单（%s 人）", whitelist.size),
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.padding(top = 12.dp),
             )
@@ -743,7 +743,7 @@ internal fun PlayerManageCard(
                                 ) {
                                     Icon(
                                         Icons.Filled.Close,
-                                        contentDescription = "从白名单移除 ${e.name}",
+                                        contentDescription = t("从白名单移除 %s", e.name),
                                         modifier = Modifier.size(16.dp),
                                     )
                                 }
@@ -776,7 +776,7 @@ internal fun PlayerManageCard(
                     onClick = {
                         when (val r = WhitelistFile.add(instance.dir, name)) {
                             is WhitelistFile.AddResult.Added -> {
-                                msg = "已加入白名单：${name.trim()}"
+                                msg = t("已加入白名单：%s", name.trim())
                                 name = ""
                             }
                             WhitelistFile.AddResult.AlreadyThere -> msg = t("已经在白名单里了")
@@ -793,7 +793,7 @@ internal fun PlayerManageCard(
                         val n = name.trim()
                         val removed = WhitelistFile.remove(instance.dir, n)
                         reload()
-                        msg = if (removed) "已从白名单移除 $n" else "名单里没有 $n"
+                        msg = if (removed) t("已从白名单移除 %s", n) else t("名单里没有 %s", n)
                     },
                     enabled = WhitelistFile.isValidName(name),
                 ) { Text(t("移出白名单")) }
@@ -838,7 +838,7 @@ internal fun PlayerManageCard(
             title = { Text(t("清空白名单？")) },
             text = {
                 Text(
-                    "将删除全部 ${whitelist.size} 条记录。" +
+                    t("将删除全部 %s 条记录。", whitelist.size) +
                         if (whitelistOn) t("白名单当前已启用 —— 清空后没人能进服。") else "",
                 )
             },
@@ -900,7 +900,7 @@ internal fun EditMemoryDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "「$instanceName」当前 ${currentMb} MB",
+                    t("「%s」当前 %s MB", instanceName, currentMb),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -912,8 +912,8 @@ internal fun EditMemoryDialog(
                     onMemoryMb = { mb = it },
                 )
                 Text(
-                    if (exceeded) "超过设备内存的 80%（设备共 ${fmtGb(totalMb)}）"
-                    else "设备共 ${fmtGb(totalMb)} · 建议 ${suggestMb.toInt()} MB",
+                    if (exceeded) t("超过设备内存的 80%（设备共 %s）", fmtGb(totalMb))
+                    else t("设备共 %s · 建议 %s MB", fmtGb(totalMb), suggestMb.toInt()),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (exceeded) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -938,7 +938,7 @@ internal fun EditMemoryDialog(
                     )
                 }
                 Text(
-                    "范围 ${MemoryLimits.MIN_MB} ~ ${MemoryLimits.MAX_MB} MB，每 ${MemoryLimits.STEP_MB} MB 一档；" +
+                    t("范围 %s ~ %s MB，每 %s MB 一档；", MemoryLimits.MIN_MB, MemoryLimits.MAX_MB, MemoryLimits.STEP_MB) +
                         if (isRunning) t("服务器运行中，重启后生效。") else t("下次启动生效。"),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1005,7 +1005,7 @@ internal fun CoreVersionCard(
         when (val st = state) {
             is AppViewModel.CoreUpdateState.Available -> {
                 Text(
-                    "有新版本：${st.info.label}（当前 ${st.info.current}）",
+                    t("有新版本：%s（当前 %s）", st.info.label, st.info.current),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -1027,7 +1027,7 @@ internal fun CoreVersionCard(
 
             is AppViewModel.CoreUpdateState.UpToDate -> {
                 Text(
-                    "已是最新（${st.current}）",
+                    t("已是最新（%s）", st.current),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1045,7 +1045,7 @@ internal fun CoreVersionCard(
 
             is AppViewModel.CoreUpdateState.Failed -> {
                 Text(
-                    "检查/升级失败：${st.reason}",
+                    t("检查/升级失败：%s", st.reason),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -1121,7 +1121,7 @@ internal fun AdvancedSettingsCard(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "当前 Java ${instance.javaMajor}" +
+                t("当前 Java %s", instance.javaMajor) +
                     (if (instance.mcVersion.isNotEmpty()) {
                         " · MC ${instance.mcVersion} 推荐 Java ${
                             com.kaze.newage.data.model.JavaVersionInference.infer(instance.mcVersion)
@@ -1208,7 +1208,7 @@ internal fun PropertiesEditor(
                 if (!com.kaze.newage.util.openFileExternally(ctx, propsFile)) {
                     android.widget.Toast.makeText(
                         ctx,
-                        "无法交给外部应用打开（实例目录不在可共享范围）：${propsFile.absolutePath}",
+                        t("无法交给外部应用打开（实例目录不在可共享范围）：%s", propsFile.absolutePath),
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -1337,19 +1337,19 @@ internal fun PropertiesEditor(
         title = t("性能与暂停"),
         content = {
             SettingSlider(
-                label = "视距：$viewDistance 区块",
+                label = t("视距：%s 区块", viewDistance),
                 value = viewDistance,
                 range = 3f..32f,
                 onChange = { set("view-distance", it.toString()) },
             )
             SettingSlider(
-                label = "模拟距离：$simDistance 区块",
+                label = t("模拟距离：%s 区块", simDistance),
                 value = simDistance,
                 range = 3f..32f,
                 onChange = { set("simulation-distance", it.toString()) },
             )
             SettingSlider(
-                label = "出生点保护：$spawnProtection 格",
+                label = t("出生点保护：%s 格", spawnProtection),
                 value = spawnProtection,
                 range = 0f..64f,
                 onChange = { set("spawn-protection", it.toString()) },
@@ -1510,11 +1510,11 @@ internal fun backupStamp(f: File): String {
     val today = Calendar.getInstance()
     val sameDay = today.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
         today.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
-    if (sameDay) return "今天 $clock"
+    if (sameDay) return t("今天 %s", clock)
     today.add(Calendar.DAY_OF_YEAR, -1)
     val yesterday = today.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
         today.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
-    if (yesterday) return "昨天 $clock"
+    if (yesterday) return t("昨天 %s", clock)
     return SimpleDateFormat("MM-dd HH:mm", Locale.US).format(Date(f.lastModified()))
 }
 
@@ -1570,7 +1570,7 @@ internal fun AddressCopyRow(label: String, address: String, onCopy: () -> Unit) 
         IconButton(onClick = onCopy, modifier = Modifier.size(32.dp)) {
             Icon(
                 Icons.Filled.ContentCopy,
-                contentDescription = "复制 $address",
+                contentDescription = t("复制 %s", address),
                 modifier = Modifier.size(16.dp),
             )
         }

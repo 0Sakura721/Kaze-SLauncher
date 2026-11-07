@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -223,7 +224,7 @@ fun ServerScreen(
             subtitle = if (instances.isEmpty()) {
                 t("还没有服务端实例")
             } else {
-                "共 ${instances.size} 个实例 · $runningCount 个运行中"
+                t("共 %s 个实例 · %s 个运行中", instances.size, runningCount)
             },
             // AI 助手入口：钉在顶栏而不是塞进下面那排动作按钮 ——
             // 动作按钮组是「对实例做什么」（新建/导入），AI 是「问怎么办」，
@@ -498,7 +499,7 @@ private fun RowScope.GroupButton(
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(8.dp))
-            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -742,7 +743,7 @@ private fun InstanceRow(
                             if (!com.kaze.newage.util.StorageDirUtil.openInFileManager(context, instance.dir)) {
                                 android.widget.Toast.makeText(
                                     context,
-                                    "无法调起文件管理器，目录：${instance.dir.absolutePath}",
+                                    t("无法调起文件管理器，目录：%s", instance.dir.absolutePath),
                                     android.widget.Toast.LENGTH_LONG,
                                 ).show()
                             }

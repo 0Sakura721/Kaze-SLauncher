@@ -97,6 +97,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
 import com.kaze.newage.core.i18n.t
+import androidx.compose.ui.text.style.TextOverflow
 
 enum class Dest(
     val route: String,
@@ -340,7 +341,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         // 发布日期：更新判定现在以它为准（版本号不再参与比较），亮出来让用户可核对
                         if (releaseInfo.publishedAtText.isNotBlank()) {
                             Text(
-                                "发布于 ${releaseInfo.publishedAtText}",
+                                t("发布于 %s", releaseInfo.publishedAtText),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -535,6 +536,7 @@ private fun LiquidGlassNavBar(
                             color = if (selected) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }

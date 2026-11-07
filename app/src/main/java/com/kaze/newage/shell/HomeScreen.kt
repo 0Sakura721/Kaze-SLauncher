@@ -186,12 +186,12 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             }            running > 0 -> {
                 overviewTitle.text = t("运行中")
                 overviewSub.text = "${focus.name} · ${focus.mcVersion.ifBlank { "自定义" }}"
-                overviewHint.text = "${running} / ${instances.size} 个实例在跑 · 内存 ${focus.memoryMb} MB"
+                overviewHint.text = t("%s / %s 个实例在跑 · 内存 %s MB", running, instances.size, focus.memoryMb)
                 overviewPrimary.text = t("停止")
             }
             else -> {
                 overviewTitle.text = t("全部停止")
-                overviewSub.text = "${instances.size} 个实例待命"
+                overviewSub.text = t("%s 个实例待命", instances.size)
                 overviewHint.text = t("点圆盘或右侧按钮启动最近使用的实例")
                 overviewPrimary.text = t("启动")
             }
@@ -244,7 +244,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         if (failed != null) {
             alertSlot.addView(
                 c.banner(
-                    "「${failed.name}」启动失败，进控制台看具体原因。",
+                    t("「%s」启动失败，进控制台看具体原因。", failed.name),
                     ShellTheme.current.danger,
                     t("查看"),
                 ) { host.openConsoleAction(failed) },
@@ -389,7 +389,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             if (busy && state != ServerState.Stopping) {
                 alpha = 0.55f
             } else {
-                tappable(if (running) "停止 ${instance.name}" else "启动 ${instance.name}") {
+                tappable(if (running) t("停止 %s", instance.name) else t("启动 %s", instance.name)) {
                     if (running || state == ServerState.Stopping) host.stop(instance)
                     else host.start(instance)
                 }
@@ -446,7 +446,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
     }
 
     private fun confirmDelete(instance: ServerInstance) {
-        val sheet = Sheet(c, "删除「${instance.name}」", scrollable = false)
+        val sheet = Sheet(c, t("删除「%s」", instance.name), scrollable = false)
         sheet.add(
             c.txt(
                 "只移除应用里的实例记录；目录 ${instance.dir.name} 与世界存档仍在磁盘上，" +
@@ -596,7 +596,7 @@ internal class CreateWizard(
             }
         }
         add(memorySlider)
-        note("设备可分配给单个实例的上限约 $maxMem MB。分配偏小会在生成区块时卡顿，偏大会挤占系统。")
+        note(t("设备可分配给单个实例的上限约 %s MB。分配偏小会在生成区块时卡顿，偏大会挤占系统。", maxMem))
 
         status = c.txt("", Type.micro, ShellTheme.current.ink3).apply {
             setPadding(0, c.dp(12f), 0, 0)
@@ -685,7 +685,7 @@ internal class CreateWizard(
             return
         }
         // 首次拉取是网络请求：给一个可见的等待态，而不是让点击静默失败
-        setStatus("正在拉取 ${coreType.displayName} 的版本列表…", ShellTheme.current.ink3)
+        setStatus(t("正在拉取 %s 的版本列表…", coreType.displayName), ShellTheme.current.ink3)
         progress.visibility = View.VISIBLE
         progress.indeterminate = true
         host.awaitVersions { list ->
@@ -710,7 +710,7 @@ internal class CreateWizard(
         }
         c.choiceSheet(
             t("选择版本"),
-            "${coreType.displayName} · 共 ${list.size} 个",
+            t("%s · 共 %s 个", coreType.displayName, list.size),
             options,
             options.indexOfFirst { it.first == mcVersion },
         ) { index ->
@@ -745,7 +745,7 @@ internal class CreateWizard(
         val options = builds.map { it.name to (it.fileName ?: "") }
         c.choiceSheet(
             t("选择构建"),
-            "$mcVersion · 共 ${builds.size} 个",
+            t("%s · 共 %s 个", mcVersion, builds.size),
             options,
             options.indexOfFirst { it.first == buildId },
         ) { index ->
@@ -794,7 +794,7 @@ internal class CreateWizard(
                 setPrimaryBusy(false, t("重试下载"))
             } else {
                 progress.fraction = 1f
-                setStatus("创建完成：${instance.name}", ShellTheme.current.good)
+                setStatus(t("创建完成：%s", instance.name), ShellTheme.current.good)
                 host.select(instance)
                 host.toast("已创建 ${instance.name}")
                 dismiss()

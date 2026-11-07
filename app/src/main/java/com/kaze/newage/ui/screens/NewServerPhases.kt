@@ -127,7 +127,7 @@ import com.kaze.newage.core.i18n.t
 @Composable
 internal fun WizardProgress(step: Int, total: Int, title: String) {
     Text(
-        "第 $step 步，共 $total 步 · $title",
+        t("第 %s 步，共 %s 步 · %s", step, total, title),
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.fillMaxWidth(),
@@ -553,6 +553,7 @@ internal fun BuildRow(label: String, hint: String, selected: Boolean, onClick: (
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -639,8 +640,8 @@ internal fun VersionListPage(
             if (!loading && versions.isNotEmpty()) {
                 Text(
                     buildString {
-                        append("匹配 ${filtered.size} 个版本")
-                        if (filtered.size != versions.size) append("（共 ${versions.size} 个）")
+                        append(t("匹配 %s 个版本", filtered.size))
+                        if (filtered.size != versions.size) append(t("（共 %s 个）", versions.size))
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -721,6 +722,7 @@ internal fun VersionRow(
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -729,6 +731,7 @@ internal fun VersionRow(
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 M3EStatusChip(
                     text = version.type.displayName,
@@ -872,7 +875,7 @@ internal fun ConfigPage(
             M3ECard(
                 variant = M3ECardVariant.Outlined,
                 title = t("游戏内存"),
-                supporting = "设备中已使用 ${fmtGb(usedMemGb * 1024f)} / 设备总内存 ${fmtGb(totalMemGb * 1024f)}",
+                supporting = t("设备中已使用 %s / 设备总内存 %s", fmtGb(usedMemGb * 1024f), fmtGb(totalMemGb * 1024f)),
             ) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -898,10 +901,10 @@ internal fun ConfigPage(
                 val statusText = if (autoMemory) {
                     t("根据设备可用内存自动分配，不可手动修改")
                 } else {
-                    "游戏分配 ${fmtGb(effectiveMb)}"
+                    t("游戏分配 %s", fmtGb(effectiveMb))
                 }
                 Text(
-                    if (exceeded) "超过设备内存的 80%（设备仅 ${fmtGb(totalMemGb * 1024f)}）" else statusText,
+                    if (exceeded) t("超过设备内存的 80%（设备仅 %s）", fmtGb(totalMemGb * 1024f)) else statusText,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (exceeded) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -936,9 +939,9 @@ internal fun ConfigPage(
                 variant = M3ECardVariant.Outlined,
                 title = t("Java 版本"),
                 supporting = if (javaOverride > 0) {
-                    "已指定 Java $javaOverride（推荐 $autoJava）"
+                    t("已指定 Java %s（推荐 %s）", javaOverride, autoJava)
                 } else {
-                    "自动：按 MC 版本推荐 Java $autoJava"
+                    t("自动：按 MC 版本推荐 Java %s", autoJava)
                 },
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -970,11 +973,11 @@ internal fun ConfigPage(
             // ── 节④ 核心构建 / 加载器（有列表的核心才出现；FCL「加载器版本」的对应物）──
             if (buildsLoading || builds.isNotEmpty()) {
                 M3EListItem(
-                    headline = "核心${buildNounOf(coreType)}",
+                    headline = t("核心%s", buildNounOf(coreType)),
                     supporting = when {
                         buildsLoading -> t("正在获取列表…")
                         buildId.isBlank() -> "最新（${builds.firstOrNull()?.name ?: "?"}）"
-                        else -> "已选：${builds.firstOrNull { it.id == buildId }?.name ?: buildId}"
+                        else -> t("已选：%s", builds.firstOrNull { it.id == buildId }?.name ?: buildId)
                     },
                     leadingIcon = Icons.Filled.Tune,
                     iconContainer = MaterialTheme.colorScheme.secondaryContainer,
@@ -1008,7 +1011,7 @@ internal fun ConfigPage(
                                     portText.isBlank() -> t("留空自动分配")
                                     invalid -> t("端口需在 1024 ~ 65535")
                                     conflict -> t("该端口已被其它实例占用")
-                                    else -> "将使用端口 $p"
+                                    else -> t("将使用端口 %s", p)
                                 },
                                 color = if (invalid || conflict) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.onSurfaceVariant,

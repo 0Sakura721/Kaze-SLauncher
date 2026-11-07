@@ -52,6 +52,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -179,7 +180,7 @@ fun AddonsScreen(
                 Text(
                     "${installState.message}\n\n" +
                         t("继续安装会用它替换掉原文件（Bukkit / Fabric 按文件名加载，改名会让同一个") +
-                        "${kindLabel}被加载两遍，所以只能替换）。原文件将被覆盖，无法撤销。"
+                        t("%s被加载两遍，所以只能替换）。原文件将被覆盖，无法撤销。", kindLabel)
                 )
             },
             confirmButton = {
@@ -202,9 +203,9 @@ fun AddonsScreen(
     ) {
         // ── 顶部栏 ──
         M3EScreenHeader(
-            title = "${kindLabel}管理",
+            title = t("%s管理", kindLabel),
             subtitle = "${instance.name} · MC ${instance.mcVersion.ifBlank { "自定义" }} · " +
-                "安装时按 ${AddonManager.loaderFor(instance, kind)} 过滤",
+                t("安装时按 %s 过滤", AddonManager.loaderFor(instance, kind)),
             leading = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = t("返回"))
@@ -222,12 +223,12 @@ fun AddonsScreen(
             if (!AddonManager.supports(instance, kind)) {
                 M3ECard(
                     variant = M3ECardVariant.Filled,
-                    title = "当前核心不支持$kindLabel",
+                    title = t("当前核心不支持%s", kindLabel),
                     titleIcon = Icons.Filled.WarningAmber,
                     supporting = if (kind == AddonKind.PLUGIN) {
-                        "插件适用于 Paper / Purpur / Spigot 类服务端（当前：${instance.coreType.displayName}）。"
+                        t("插件适用于 Paper / Purpur / Spigot 类服务端（当前：%s）。", instance.coreType.displayName)
                     } else {
-                        "模组适用于 Fabric / Forge / NeoForge 类服务端（当前：${instance.coreType.displayName}）。"
+                        t("模组适用于 Fabric / Forge / NeoForge 类服务端（当前：%s）。", instance.coreType.displayName)
                     },
                 )
             }
@@ -328,7 +329,7 @@ fun AddonsScreen(
             // 上一批插件结果，行尾「安装」还会按模组（fabric 过滤）去装配件 —— 错装。
             if (searched && shown.isNotEmpty()) {
                 Text(
-                    "搜索结果（${shown.size}）",
+                    t("搜索结果（%s）", shown.size),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
@@ -337,7 +338,7 @@ fun AddonsScreen(
                     M3EListItem(
                         headline = hit.title,
                         // 下载数放前面：辅助文本只有两行，长描述会把行尾的计数挤掉
-                        supporting = "${formatDownloads(hit.downloads)} 次下载 · " +
+                        supporting = t("%s 次下载 · ", formatDownloads(hit.downloads)) +
                             hit.description.ifBlank { t("（无描述）") },
                         leadingIcon = if (kind == AddonKind.PLUGIN) Icons.Filled.Extension
                         else Icons.Filled.ViewInAr,
@@ -365,7 +366,7 @@ fun AddonsScreen(
             } else if (searched && !searching && results.isEmpty() && installState.error == null) {
                 // 空状态：搜过了、不在搜、没结果、也没报错
                 M3EListItem(
-                    headline = "没有找到相关$kindLabel",
+                    headline = t("没有找到相关%s", kindLabel),
                     supporting = t("换个关键词试试（支持 Modrinth 上的项目名，如 EssentialsX、lithium）"),
                     leadingIcon = Icons.Filled.SearchOff,
                     iconContainer = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -390,7 +391,7 @@ fun AddonsScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "已安装（${installed.size}）",
+                    t("已安装（%s）", installed.size),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.weight(1f),
@@ -416,30 +417,30 @@ fun AddonsScreen(
                 ) {
                     CheckChip(
                         selected = installedFilter == 0,
-                        label = "全部 ${installed.size}",
+                        label = t("全部 %s", installed.size),
                         onClick = { installedFilter = 0 },
                     )
                     CheckChip(
                         selected = installedFilter == 1,
-                        label = "已启用 $enabledCount",
+                        label = t("已启用 %s", enabledCount),
                         onClick = { installedFilter = 1 },
                     )
                     CheckChip(
                         selected = installedFilter == 2,
-                        label = "已禁用 ${installed.size - enabledCount}",
+                        label = t("已禁用 %s", installed.size - enabledCount),
                         onClick = { installedFilter = 2 },
                     )
                 }
             }
             if (installed.isEmpty()) {
                 Text(
-                    "还没有安装$kindLabel。搜索并安装后在此管理启用状态。",
+                    t("还没有安装%s。搜索并安装后在此管理启用状态。", kindLabel),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             } else if (shownInstalled.isEmpty()) {
                 Text(
-                    "当前筛选下没有$kindLabel。",
+                    t("当前筛选下没有%s。", kindLabel),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -562,6 +563,7 @@ private fun SearchField(
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 BasicTextField(
@@ -636,7 +638,7 @@ private fun AddonUpdatePanel(
 
         is AppViewModel.AddonUpdateState.Checking -> {
             Text(
-                "正在检查（${state.done}/${state.total}）${state.current}",
+                t("正在检查（%s/%s）%s", state.done, state.total, state.current),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
@@ -645,7 +647,7 @@ private fun AddonUpdatePanel(
 
         is AppViewModel.AddonUpdateState.Upgrading -> {
             Text(
-                "正在更新（${state.done}/${state.total}）${state.current}",
+                t("正在更新（%s/%s）%s", state.done, state.total, state.current),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 4.dp),
             )
@@ -653,7 +655,7 @@ private fun AddonUpdatePanel(
 
         is AppViewModel.AddonUpdateState.Failed -> {
             Text(
-                "检查失败：${state.reason}",
+                t("检查失败：%s", state.reason),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(top = 4.dp),
@@ -664,9 +666,9 @@ private fun AddonUpdatePanel(
         is AppViewModel.AddonUpdateState.Upgraded -> {
             Text(
                 if (state.failed.isEmpty()) {
-                    "已更新 ${state.okCount} 个$kindLabel（重启服务端生效）"
+                    t("已更新 %s 个%s（重启服务端生效）", state.okCount, kindLabel)
                 } else {
-                    "已更新 ${state.okCount} 个，${state.failed.size} 个失败"
+                    t("已更新 %s 个，%s 个失败", state.okCount, state.failed.size)
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (state.failed.isEmpty()) {
@@ -690,7 +692,7 @@ private fun AddonUpdatePanel(
             val s = state.summary
             if (s.total == 0) {
                 Text(
-                    "没有已装的$kindLabel 可检查。",
+                    t("没有已装的%s 可检查。", kindLabel),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -699,7 +701,7 @@ private fun AddonUpdatePanel(
             }
             if (s.hasAny) {
                 Text(
-                    "${s.updates.size} 个$kindLabel 有新版本",
+                    t("%s 个%s 有新版本", s.updates.size, kindLabel),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 4.dp),
@@ -717,7 +719,7 @@ private fun AddonUpdatePanel(
                 ) { Text(t("全部更新")) }
             } else {
                 Text(
-                    "已是最新（${s.latest.size} 个已检查）",
+                    t("已是最新（%s 个已检查）", s.latest.size),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -726,7 +728,7 @@ private fun AddonUpdatePanel(
             // 认不出来源的必须单独说明：这些不在管理范围内
             if (s.unknown.isNotEmpty()) {
                 Text(
-                    "${s.unknown.size} 个认不出来源，未纳入检查",
+                    t("%s 个认不出来源，未纳入检查", s.unknown.size),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
@@ -748,7 +750,7 @@ private fun AddonUpdatePanel(
             }
             if (s.noCompatible.isNotEmpty()) {
                 Text(
-                    "${s.noCompatible.size} 个在当前核心/MC 版本下没有可用的新版本",
+                    t("%s 个在当前核心/MC 版本下没有可用的新版本", s.noCompatible.size),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
