@@ -556,9 +556,22 @@ emember(path) 缓存位图的话，
         val scaled = if (scale < 1f) {
             Bitmap.createScaledBitmap(src, (src.width * scale).toInt(), (src.height * scale).toInt(), true)
         } else src
-        runCatching { bgFile.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) } }
+        // 写盘失败必须让调用方知道：compress() 返回 false（编码失败）与
+        // outputStream 抛 IO（内部存储满）都被 runCatching 吃掉的后果是
+        // 紧接着无条件 bgExists = true + 版本号自增，于是 BackdropLayer 重新
+        // 解码得到**旧的/空的**文件 —— 用户看到上一张背景（或黑屏），
+        // 以为是"没生效"或主题坏了，而 SettingsScreen 那条 catch → Toast
+        // 永远走不到（它等的是这里抛异常）。
+        val ok = runCatching {
+            bgFile.outputStream().use { scaled.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+        }.getOrDefault(false)
         if (scaled != src) scaled.recycle()
         src.recycle()
+        if (!ok || bgFile.length() == 0L) {
+            // 删掉可能写了一半的残文件，避免下次解码读到损坏图
+            bgFile.delete()
+            throw java.io.IOException(t("背景图写入失败（存储空间不足？）"))
+        }
         bgExists.value = true
         // 让依赖背景图的 UI（AppBackground 的位图缓存）知道内容变了
         bgRevision.value = bgRevision.value + 1
@@ -688,7 +701,12 @@ emember(path) 缓存位图的话，
             val cleanup = legacy.edit()
                 .remove("ai_profiles")
                 .remove(OLD_CORRUPT_BACKUP_KEY)
-            cleanup.commit()
+            // 这里刻意用 apply()：与上面那条 commit() 不同，清理**不需要**同步落盘。
+            // 顺序不变量的两头都在上面：secrets 那笔必须 commit 成功才轮到这里；
+            // 而清理本身是幂等的（下次启动发现 secret 已有 key 就会跳过复制、再清一次），
+            // 所以哪怕进程在 apply 落盘前被杀，最坏也只是这次没清干净。
+            // 用 commit() 反而会让调用线程（可能是主线程）多做一次同步磁盘写。
+            cleanup.apply()
         }
 
         /** 背景图保存后的最长边：显示端只做 Crop，超过这个尺寸纯属浪费内存与磁盘 */

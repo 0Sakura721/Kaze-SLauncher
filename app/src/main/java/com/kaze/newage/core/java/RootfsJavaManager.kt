@@ -260,21 +260,42 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
             onProgress(1f, "解压 OpenJDK $majorVersion…")
             // 主方案：系统 tar（久经验证，Termux/pkg 同款路径）；失败回退内置 TarExtractor（带进度）
             val systemTarOk = runCatching {
-                val proc = Runtime.getRuntime().exec(
-                    arrayOf("/system/bin/sh", "-c", "tar xf '${tarFile.absolutePath}' -C '${tmpDir.absolutePath}'")
-                )
+                // redirectErrorStream(true) 是**必须**的：JDK tar 包里必然有大量
+                // `Cannot create symlink` / `Cannot hard link` / `Permission denied`
+                // （Android 沙箱下无法创建某些链接），stderr 的 64KB 管道写满后
+                // tar 会阻塞在 write() 永不退出 —— 而下面的 waitFor(500ms) 轮询
+                // 永远拿不到退出码，表现为"解压 OpenJDK 17…"一直不动（v7a 真机实测
+                // 同一条命令不消费 stderr 会卡 6 分钟以上）。
+                // ProotEnvironment.runCommand 对同类 tar 命令也是这么处理的。
+                val pb = ProcessBuilder(
+                    "/system/bin/sh", "-c",
+                    "tar xf '${tarFile.absolutePath}' -C '${tmpDir.absolutePath}'",
+                ).redirectErrorStream(true)
+                val proc = pb.start()
+                // 即便合并了流，也必须**持续读**：只合并不读，管道同样会满。
+                val sink = object : java.io.OutputStream() {
+                    override fun write(b: Int) {}
+                    override fun write(b: ByteArray, off: Int, len: Int) {}
+                }
+                val reader = kotlin.concurrent.thread(isDaemon = true, name = "jdk-tar-sink") {
+                    runCatching { proc.inputStream.use { it.copyTo(sink) } }
+                }
                 // 轮询等待 + 可取消：裸 waitFor() 无超时不可中断——FUSE 卡死会永久
                 // 占住 Java 互斥锁，后续所有实例全排队超时
-                var done = false
-                while (!done) {
-                    if (proc.waitFor(500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                        done = true
-                    } else if (shouldCancel()) {
-                        proc.destroyForcibly()
-                        throw InterruptedException("解压已取消")
+                try {
+                    var done = false
+                    while (!done) {
+                        if (proc.waitFor(500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                            done = true
+                        } else if (shouldCancel()) {
+                            proc.destroyForcibly()
+                            throw InterruptedException("解压已取消")
+                        }
                     }
+                    proc.exitValue() == 0
+                } finally {
+                    reader.interrupt()
                 }
-                proc.exitValue() == 0
             }.getOrDefault(false)
             if (!systemTarOk) {
                 if (shouldCancel()) return@withContext null

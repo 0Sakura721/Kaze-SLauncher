@@ -1,0 +1,144 @@
+name: Verify (compile · test · lint)
+
+# 一次性验证工作流：编译 + 全量单测 + 截图 + lint 全部在云端跑。
+#
+# 为什么单列一个而不是只靠 ci.yml：
+#  - ci.yml 在 push/PR 时跑，改一堆底层模块（core/、data/、util/）时想**手动**
+#    单独跑一次完整验证，不该去改代码制造提交；
+#  - 本工作流把三个原本分散的门（编译、测试、lint）放在**同一份 checkout** 里
+#    顺序跑，失败时能一次看全，而不是三个 job 各自重下一次依赖；
+#  - 支持 workflow_dispatch 里挑目标（只编译 / 全量），修 bug 时先跑编译能省几分钟。
+#
+# 本地约定：不在开发机上跑 gradle 编译/测试/lint（性能都放这里）。
+#
+# 触发方式刻意**只保留 workflow_dispatch**：ci.yml 已经在 push/PR 时覆盖同样的
+# 编译+测试+lint，这里再挂 push 就是重复消耗 CI 配额（同一份代码跑两遍）。
+# 本工作流的定位是"手动按需跑一次完整验证"，以及修 bug 时按 scope 只跑其中一环。
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: '验证范围'
+        type: choice
+        options:
+          - full      # 编译 + 全量单测 + 截图 + lint（默认）
+          - compile   # 只编译主源码与单测源码（最快，改完先看能不能过）
+          - test      # 只跑单测 + 截图
+          - lint      # 只跑 lint
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}-${{ github.event.inputs.scope || 'full' }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 编译 + 测试 + lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      # 必须是 21，不是 17：miuix 0.7.2 的 class 是 major 65（Java 21），
+      # Robolectric 在**测试 JVM**里加载它，17 会直接 UnsupportedClassVersionError
+      # （现象是"编译通过、测试全红"，报错还指向 miuix 的 ColorsKt，很容易误判成
+      # 依赖问题）。应用自身仍编译到 Java 17 字节码（见 jvmTarget），
+      # 这一项只影响跑 Gradle/测试的那个 JVM。
+
+      - name: 安装 Android SDK 组件
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          CMDLINE="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$CMDLINE" ]; then
+            echo "找不到 cmdline-tools，SDK 目录内容："; ls -la "$SDK" 2>&1 || true; exit 1
+          fi
+          export PATH="$CMDLINE:$PATH"
+          sdkmanager --version
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$CMDLINE" >> "$GITHUB_PATH"
+
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Robolectric 的 android-all jar 约 190MB，不缓存每次都要重下
+      - name: 缓存 Robolectric 运行时
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: robolectric-${{ runner.os }}-
+
+      # ── 1. 编译 ──
+      # 主源码 + 单测源码一起编。单测源码也必须编译：只编主源码会漏掉
+      # "测试里引用了被删/改签名的 API" 这类问题，而那要等到跑测试才暴露。
+      - name: 编译（主源码 + 单测源码）
+        if: ${{ github.event.inputs.scope != 'test' && github.event.inputs.scope != 'lint' }}
+        run: |
+          ./gradlew :app:compileArm64DebugKotlin :app:compileArm64DebugUnitTestKotlin \
+            --console=plain --stacktrace
+
+      # ── 2. 单测 + 截图 ──
+      # 用 -Droborazzi.test.record=true（已由 app/build.gradle.kts 的 testOptions 透传）
+      # 而不是 recordRoborazzi* 聚合任务：后者会连带跑全部单测，且无法与 --tests 组合。
+      - name: 全量单元测试 + 渲染截图
+        if: ${{ github.event.inputs.scope == 'full' || github.event.inputs.scope == 'test' || github.event.inputs.scope == '' }}
+        run: |
+          ./gradlew :app:testArm64DebugUnitTest \
+            -Droborazzi.test.record=true \
+            --console=plain --stacktrace
+
+      # ── 3. lint ──
+      # 这道门此前是**完全失效**的（Compose detector 与 Kotlin 2.1 分析 API 不兼容，
+      # 崩溃让整个任务失败，于是没有任何一条检查真正跑过）。见 app/lint.xml 与
+      # gradle.properties 里 android.lint.useK2Uast 的说明。
+      - name: Android Lint
+        if: ${{ github.event.inputs.scope == 'full' || github.event.inputs.scope == 'lint' || github.event.inputs.scope == '' }}
+        run: ./gradlew :app:lintArm64Debug --console=plain --stacktrace
+
+      # ── 产物 ──
+      - name: 上传截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-screenshots-${{ github.run_id }}
+          path: app/build/screenshots
+          if-no-files-found: warn
+
+      - name: 上传 lint 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-lint-${{ github.run_id }}
+          path: |
+            app/build/reports/lint-results-*.html
+            app/build/reports/lint-results-*.txt
+          if-no-files-found: ignore
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-test-report-${{ github.run_id }}
+          path: app/build/reports/tests
+          if-no-files-found: ignore
+
+      # 失败时把 XML 带出来：HTML 报告在 CI 页面里不好翻
+      - name: 上传原始测试结果
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-test-xml-${{ github.run_id }}
+          path: app/build/test-results
+          if-no-files-found: ignore

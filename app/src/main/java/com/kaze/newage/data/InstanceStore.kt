@@ -308,7 +308,9 @@ class InstanceStore(
 
     @Synchronized
     fun remove(id: String) {
-        _instances.value = _instances.value.filterNot { it.id == id }
+        // update{} 与 add 保持同一套写法：即便将来去掉 @Synchronized，
+        // 读-改-写也不会互相覆盖
+        _instances.update { list -> list.filterNot { it.id == id } }
         save()
     }
 
@@ -317,8 +319,8 @@ class InstanceStore(
     fun rename(id: String, newName: String) {
         val trimmed = newName.trim()
         if (trimmed.isEmpty()) return
-        _instances.value = _instances.value.map {
-            if (it.id == id) it.copy(name = trimmed) else it
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(name = trimmed) else it }
         }
         save()
     }
@@ -356,7 +358,10 @@ class InstanceStore(
         // UnsupportedClassVersionError（实测 bundler class file 69.0）
         return merged.map { inst ->
             val m = Regex("""(\d+)\.(\d+)""").find(inst.mcVersion)
-            if (m != null && m.groupValues[1].toInt() >= 26 && inst.javaMajor < 25) {
+            // toIntOrNull：instances.json 是用户可手改的（同文件注释已承认），
+            // 一个 "mcVersion": "99999999999.1" 会让 toInt() 抛 NumberFormatException，
+            // 而调用链上游是 UI 的「重新扫描」入口且无 try/catch —— 直接闪退。
+            if (m != null && (m.groupValues[1].toIntOrNull() ?: 0) >= 26 && inst.javaMajor < 25) {
                 inst.copy(javaMajor = 25)
             } else inst
         }
@@ -479,18 +484,34 @@ class InstanceStore(
      *
      * 注意：内存是**启动参数**，这里只落盘，不影响正在跑的进程（生效时机由调用方说明）。
      */
+    /**
+     * 下面六个 setter 此前**既无 @Synchronized、又用 `_instances.value = …` 读-改-写**，
+     * 而 add/remove/rename 三者都有 @Synchronized。后果是真实会踩到的两类错误：
+     *
+     *  1. **删除被回滚**：详情页/世界页用 `remember(instance.id)` 持有自己的组合，
+     *     用户在列表页删掉实例（remove 已落盘）后，详情页那次 setNogui 仍拿着
+     *     "含已删实例"的旧快照写回并 save() —— 已删实例被重新写进 instances.json，
+     *     表现为"删了又回来"。
+     *  2. **字段丢失**：两个 setter 并发时后写覆盖前写，另一处修改静默丢失。
+     *
+     * 现在统一 `@Synchronized` + `update{}`（与 add 的做法一致；@Synchronized 可重入，
+     * 内部再调 save() 是安全的）。
+     */
+
+    @Synchronized
     fun setMemory(id: String, memoryMb: Int) {
         val mb = com.kaze.newage.core.server.MemoryLimits.clamp(memoryMb)
-        _instances.value = _instances.value.map {
-            if (it.id == id) it.copy(memoryMb = mb) else it
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(memoryMb = mb) else it }
         }
         save()
     }
 
     /** nogui 开关（启动参数） */
+    @Synchronized
     fun setNogui(id: String, nogui: Boolean) {
-        _instances.value = _instances.value.map {
-            if (it.id == id) it.copy(nogui = nogui) else it
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(nogui = nogui) else it }
         }
         save()
     }
@@ -499,17 +520,20 @@ class InstanceStore(
      * 自定义 JVM 附加参数（空格分隔；启动时拼进 java 命令行）。
      * 只落盘不改在跑进程 —— 生效时机由调用方说明（"重启后生效"）。
      */
+    @Synchronized
     fun setExtraJvmArgs(id: String, args: String) {
-        _instances.value = _instances.value.map {
-            if (it.id == id) it.copy(extraJvmArgs = args.trim().replace(Regex("\\s+"), " ")) else it
+        val normalized = args.trim().replace(Regex("\\s+"), " ")
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(extraJvmArgs = normalized) else it }
         }
         save()
     }
 
     /** 置顶：服务端列表排序时置顶的排最前（组内保持原顺序） */
+    @Synchronized
     fun setPinned(id: String, pinned: Boolean) {
-        _instances.value = _instances.value.map {
-            if (it.id == id) it.copy(pinned = pinned) else it
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(pinned = pinned) else it }
         }
         save()
     }
@@ -520,6 +544,7 @@ class InstanceStore(
      * 只落盘，不改正在跑的进程 —— 生效时机由调用方在控制台说明（"重启后生效"）。
      * 允许用户覆盖自动推断值，是因为同一台设备可能装了多个 Java，也有整合包明确要求特定版本。
      */
+    @Synchronized
     fun setJavaMajor(id: String, javaMajor: Int) {
         if (javaMajor <= 0) return
         _instances.update { list ->
@@ -529,9 +554,10 @@ class InstanceStore(
     }
 
     /** 停服自动备份开关（见 BackupManager.autoBackup：进程退出收尾处调用） */
+    @Synchronized
     fun setAutoBackup(id: String, enabled: Boolean) {
-        _instances.value = _instances.value.map {
-            if (it.id == id) it.copy(autoBackup = enabled) else it
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(autoBackup = enabled) else it }
         }
         save()
     }

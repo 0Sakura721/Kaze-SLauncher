@@ -98,17 +98,9 @@ android {
         }
     }
     lint {
-        // 本应用不通过 Google Play 分发，而 targetSdk 必须压在 28（见 defaultConfig 的说明：
-        // ≥30 的 SELinux 域禁止 execve 私有目录，proot 无法执行 rootfs 里的 guest 二进制）。
-        // 不关掉这条 Play 政策检查，release 构建会被 lintVital 直接拦下。
-        disable += "ExpiredTargetSdkVersion"
-        // release 的 lintVital 在分析 miuix 0.7.2 的字节码时，**Lint 自己**崩溃：
-        // IncompatibleClassChangeError in NonNullableMutableLiveDataDetector
-        // （AGP 8.7 内置的 Lint 与 miuix 的 Kotlin 元数据不兼容，不是本工程代码问题）。
-        //
-        // 这里只禁用那一个 detector，保留 release 的其余全部 lint 检查 ——
-        // 比 checkReleaseBuilds=false（一刀切关掉所有 release 检查）紧得多。
-        disable += "NullSafeMutableLiveData"
+        // 具体禁用了哪些检查、为什么，全部写在 app/lint.xml 里（单一真源，
+        // 避免 build.gradle.kts 与 lint.xml 两处各写一份、迟早不一致）。
+        lintConfig = file("lint.xml")
     }
     buildTypes {
         release {
@@ -145,6 +137,12 @@ android {
             listOf("kaze.patch.dir", "kaze.notes.file").forEach { key ->
                 it.systemProperty(key, System.getProperty(key) ?: "")
             }
+            // Roborazzi 的 record 开关同样要透传：Gradle 的 -D 只作用于守护进程，
+            // 不转发的话 `testXxx -Droborazzi.test.record=true` 会**全部通过却一张图都不产出**。
+            // 有了这条，才能只跑某个测试类的同时真的把 PNG 写出来
+            // （recordRoborazzi* 是聚合任务，没法与 --tests 过滤组合使用）。
+            it.systemProperty("roborazzi.test.record", System.getProperty("roborazzi.test.record") ?: "")
+            it.systemProperty("roborazzi.test.verify", System.getProperty("roborazzi.test.verify") ?: "")
         }
         // 单测只覆盖纯逻辑（版本比较 / server.properties 读写 / 控制台解析），不触碰 Android API
         unitTests.isReturnDefaultValues = true

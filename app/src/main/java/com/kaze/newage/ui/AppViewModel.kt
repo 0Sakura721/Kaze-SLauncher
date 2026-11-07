@@ -287,7 +287,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                     _onlinePlayers.update { cur -> if (name in cur) cur else cur + name }
                     }
                     ConsoleParser.parseLeave(line.text)?.let { name ->
-                        _onlinePlayers.value = _onlinePlayers.value - name
+                        // 与上面"加入"保持一致用 update{}：读-改-写在并发时后写覆盖前写，
+                        // 名单里会少一个人/多一个人，而只有 list 命令能纠回来
+                        _onlinePlayers.update { cur -> cur - name }
                     }
                 }
                 } finally {
@@ -1059,13 +1061,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         val text = _consoleLines.value.joinToString("\n") { it.text }
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                container.appContext.contentResolver.openOutputStream(uri)?.use { out ->
-                    out.write(text.toByteArray(Charsets.UTF_8))
-                }
+                // 必须显式判 null：`openOutputStream` 在 SAF 授权失效/目标卷卸载时返回
+                // null，老写法 `?.use{}` 会静默跳过写入且不抛异常 —— 用户以为存了，
+                // 打开一看是空文件或根本没有文件。LogsScreen 里已有同样的正确写法。
+                val out = container.appContext.contentResolver.openOutputStream(uri)
+                    ?: throw IllegalStateException(t("无法写入所选位置（授权可能已失效）"))
+                out.use { it.write(text.toByteArray(Charsets.UTF_8)) }
             } catch (e: Exception) {
                 android.util.Log.w("KazeApp", t("导出控制台日志失败"), e)
                 // 静默失败会让用户以为"已经保存了"。导出是明确的一次用户操作，失败必须说出来
-                viewModelScope.launch(Dispatchers.Main) {
+                withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(
                         container.appContext,
                         t("保存失败：%s", e.message ?: e.javaClass.simpleName),
@@ -1135,7 +1140,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 }
             }
             instanceStore.remove(instance.id)
-            runCatching { instance.dir.deleteRecursively() }
+            // 目录删不掉就**必须告诉用户**：InstanceStore.load() → recoverFromDirs()
+            // 会扫到残留目录里的核心 jar，把这条实例"原地复活"（并且 id 变成目录名）。
+            // 用户删了服务端、重启应用它又回来了，存档还在 —— 而 runCatching 把
+            // IOException/SecurityException 全吞了，界面上一个字都没有。
+            // SD 卡/FUSE 上这很常见：console-output.log 仍被进程句柄持有、只读挂载、
+            // 权限变更，都会让 deleteRecursively 返回 false。
+            val dirRemoved = runCatching { instance.dir.deleteRecursively() }.getOrDefault(false)
+            if (!dirRemoved && instance.dir.exists()) {
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(
+                        container.appContext,
+                        t("实例已从列表移除，但目录未能删除（%s），重启后可能被重新识别", instance.dir.name),
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
             // AI 的每实例长期记忆笔记在应用私有目录（不在实例目录里），一并清理防孤儿文件
             runCatching { File(container.appContext.filesDir, "ai_memory_${instance.id}.md").delete() }
             // 备份目录在实例目录之外，删除实例后无任何入口再能访问——一并清理防死数据
@@ -1671,11 +1691,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         if (_addonUpdate.value is AddonUpdateState.Checking) return
         if (!AddonManager.supports(instance, kind)) {
             _addonUpdate.value = AddonUpdateState.Failed(
-                "${instance.coreType.displayName} 不支持${if (kind == AddonKind.PLUGIN) "插件" else "模组"}",
+                // 必须走 t()：原来这里是裸字符串模板，英文用户看到整句中文；
+                // 而「插件 / 模组」也是**拼进去的词**，得各自可翻译 —— 所以拆成两个 %s。
+                t("%s 不支持%s", instance.coreType.displayName, if (kind == AddonKind.PLUGIN) t("插件") else t("模组")),
             )
             return
         }
-        val files = runCatching { AddonManager.installed(instance, kind) }.getOrDefault(emptyList())
+        // 读取失败必须与"确实一个都没装"区分开：老写法和空目录走同一条分支，
+        // 于是目录不可读（FAT 损坏、权限丢失）时 UI 显示 Done（全部最新），
+        // 用户点"检查更新"得到"没有可更新的" —— 其实一个都没检查。
+        val files = runCatching { AddonManager.installed(instance, kind) }.getOrElse { err ->
+            _addonUpdate.value = AddonUpdateState.Failed(
+                t("读取插件目录失败：%s", err.message ?: err.javaClass.simpleName),
+            )
+            return
+        }
         if (files.isEmpty()) {
             _addonUpdate.value = AddonUpdateState.Done(
                 instance.id, kind, AddonUpdate.summarize(emptyList()),
@@ -2255,7 +2285,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 ModpackManifest.Loader.FORGE, ModpackManifest.Loader.NEOFORGE -> {
                     val pair = ModpackImporter.loaderInstallerUrl(plan.loader, mc, plan.loaderVersion)
                     if (pair == null) {
-                        "${loaderName} 的版本信息不全（清单只给了 ${plan.loaderVersion.ifEmpty { "空" }}），" +
+                        // 走 t()：原来这里是裸字符串模板，英文用户整句看不懂。
+                        // 两个可变部分都拆成 %s，加载器名与「空」各自可翻译。
+                        t(
+                            "%s 的版本信息不全（清单只给了 %s），",
+                            loaderName,
+                            plan.loaderVersion.ifEmpty { t("空") },
+                        ) +
                             t("未能自动下载安装器；请手动放入 %s-*-installer.jar 后启动一次", loaderName)
                     } else {
                         val (url, fileName) = pair

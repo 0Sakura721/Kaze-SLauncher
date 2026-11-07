@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  项目级 lint 配置。
+
+  为什么需要这个文件（2026-11 实测）
+
+  Compose 的 lint detector 组（androidx.compose.runtime.lint.*）与本项目锁定的
+  Kotlin 2.1 分析 API **二进制不兼容**，它们在分析任意 Kotlin 文件时会抛：
+
+      IncompatibleClassChangeError:
+        Found class org.jetbrains.kotlin.analysis.api.resolution.KaSimpleVariableAccessCall,
+        but interface was expected
+
+  这不是"报出一条问题"，而是让**整个 lint 任务直接失败**。已实测到的崩溃点依次是：
+
+      FrequentlyChangingValueDetector.kt:65
+      RememberInCompositionDetector.kt:190
+      AutoboxingStateCreationDetector
+
+  也就是说：只要 Compose 的 lint 组还在参与分析，`lintArm64Debug` /
+  `lintVitalRelease` 就必然崩在其中一个 detector 上，**其余几百条检查一条也跑不到**。
+  逐个 disable 没有尽头（每修一个就暴露下一个），所以这里按 group 整组关掉。
+
+  关闭的是「检测器」，不是「检查项」：
+    - `AndroidCompose` 之外的所有 lint 检查（可空性、权限、资源泄漏、API 版本、
+      NewApi / MissingPermission / RecyclerView / 明文流量 等）**仍然全部生效**；
+    - 本文件的 disable 范围写作 `lint/AndroidCompose` 的**只崩掉的几个 id**，
+      而非整组 —— 见下方逐条理由。之所以仍要单个列举，是因为整组里其余 detector
+      （ComposableNaming、UnrememberedMutableState 等）并不崩，保留它们能继续抓
+      「@Composable 命名不合规」「状态没 remember」这类真实问题。
+
+  等 AGP / Compose BOM / Kotlin 三者升到版本兼容的一组后，应把这些 disable 删掉
+  并重新打开 —— 遗留的 disable 会让真实的 Compose 缺陷漏过检查。
+-->
+<lint>
+
+    <!-- ── Compose lint 组里与 Kotlin 2.1 分析 API 不兼容的 detector ──
+         这些全部以「让 lint 进程崩溃」的方式失败，保留它们等于让整道质量门失效。 -->
+    <issue id="FrequentlyChangingValue" severity="ignore" />
+    <issue id="RememberInComposition" severity="ignore" />
+    <issue id="AutoboxingStateCreation" severity="ignore" />
+
+    <!-- ── RememberReturnType：K1 UAST 模式下的 detector 误报 ──
+         走 K1（见 gradle.properties 的 android.lint.useK2Uast=false）时，这个
+         detector 把 `remember` 的返回值一律判成 Unit，实测 6 处全部是误报：
+
+           AppRoot.kt:357            remember(...) { ReleaseNotes.toPlainText(...) }   → String
+           InstanceDetailTabs.kt:881 remember { ...; read("MemTotal") to read(...) }   → Pair
+           LogsScreen.kt:113/114     remember(...) { File(dir, "logs/latest.log") }    → File
+           NewServerPhases.kt:333    remember { ...; totalKb to availKb }             → Pair
+           ServerScreen.kt:124       remember(filtered) { filtered.sortedBy... }      → List
+
+         共同点是块里出现了**局部函数声明**或尾随 lambda（`ifBlank {}`），K1 的
+         返回类型解析把最后那个 lambda 当成了结果。这不是代码错，是 detector 错。
+         在 K2 模式下这条 detector 本身就会崩溃（见上），所以两种模式都不可用。
+
+         这条检查针对的真实缺陷是「在 remember 里做副作用并返回 Unit」——那种写法
+         确实常见且有害。因此**不能长期保持禁用**：等工具链升到 lint 支持 K2 的
+         组合后，应删掉这里的 ignore 并把 gradle.properties 的 useK2Uast 去掉。 -->
+    <issue id="RememberReturnType" severity="ignore" />
+
+    <!-- ── 已知的、有意的取舍（不是缺陷）── -->
+
+    <!-- targetSdk 必须压在 28：Android 按 targetSdk 选 SELinux 域，≥30 的域由 AOSP
+         neverallow 禁止 execve 应用私有目录（W^X），而 proot 必须执行 rootfs 里的
+         guest 二进制。见 app/build.gradle.kts 的 defaultConfig 注释。
+         本应用不通过 Google Play 分发，这条 Play 政策检查没有意义。 -->
+    <issue id="ExpiredTargetSdkVersion" severity="ignore" />
+
+    <!-- AGP 8.7 内置 Lint 分析 miuix 字节码时自身崩溃
+         （IncompatibleClassChangeError in NonNullableMutableLiveDataDetector），
+         不是本工程代码的问题。 -->
+    <issue id="NullSafeMutableLiveData" severity="ignore" />
+
+</lint>

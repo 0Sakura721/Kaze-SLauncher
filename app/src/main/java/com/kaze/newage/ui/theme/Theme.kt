@@ -14,6 +14,7 @@ import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
@@ -352,7 +353,11 @@ fun NewAgeTheme(
     // 深色可读性保险：中性文字角色不依赖动态色板，统一使用验证过的亮色系；
     // 主/次/第三色仍保留动态取色。（历史根因：M3 1.3 MaterialTheme 不提供
     // LocalContentColor，默认文字色=Color.Black，深色下整段文字与黑底融为一体。）
-    val effectiveScheme = if (darkTheme) {
+    //
+    // MIUIX 例外：那一套中性色是 HyperOS 的固定令牌（#F2F2F7 / #9E9EA4 / #3A3A3C），
+    // 已经被上方 MiuixTheme.dark() 定义过，再用 M3 的 #E8ECF4/#AEB8CC 覆盖会让
+    // 「M3 文字」与「Miuix 组件文字」在同一屏里色温不一致（偏冷 vs 偏暖白）。
+    val effectiveScheme = if (darkTheme && mode != AppThemeMode.MIUIX) {
         amoledAdjusted.copy(
             onSurface = Color(0xFFE8ECF4),
             onBackground = Color(0xFFE8ECF4),
@@ -381,6 +386,18 @@ fun NewAgeTheme(
         FgColorMode.AUTO -> effectiveScheme
     }
 
+    // MIUIX：排版改用 HyperOS 标尺。Miuix 组件读的是它自己的 TextStyles（正文 16/14/13/11），
+    // 若 M3 这边仍用 Expressive 的强调字阶，同一屏里「Miuix 开关旁的 M3 文字」会明显大一号、
+    // 而且 titleMedium 以下是 Bold（比 HyperOS 的 Medium 重一档），两种语言拼在一起很别扭。
+    //
+    // 必须 remember：miuixTypography()/expressiveTypography() 每次都 new 出一个
+    // Typography，而 MaterialTheme 用的是 `equals` 比较 —— Typography 没有实现 equals，
+    // 身份不等就等于"值变了"，于是每次 NewAgeTheme 重组都会让**所有**读
+    // LocalTypography 的节点失效（MIUIX 下等于全屏重排一次）。
+    val typography = remember(mode) {
+        if (mode == AppThemeMode.MIUIX) miuixTypography() else expressiveTypography()
+    }
+
     CompositionLocalProvider(
         LocalAppTheme provides mode,
         LocalDarkTheme provides darkTheme,
@@ -392,14 +409,28 @@ fun NewAgeTheme(
         // 未显式指定颜色的 Text 在深色下会整段渲染成纯黑——这里按 scheme 显式补上
         LocalContentColor provides fgAdjusted.onBackground,
     ) {
-        // 排版走 M3 Expressive 的强调字阶：字号/行高与 M3 基线完全一致，
-        // 只有字重与字距变（titleMedium 及以下加粗到 Bold）。
-        // 这是「四轴」里的 typography 一轴，材料见 m3e-canvas 生成的 prompt。
-        MaterialTheme(
-            colorScheme = fgAdjusted,
-            typography = expressiveTypography(),
-            content = content,
-        )
+        if (mode == AppThemeMode.MIUIX) {
+            // Miuix 自己的组件（Switch / Slider / Checkbox / ProgressIndicator）读的是
+            // top.yukonga.miuix.kmp.theme.LocalColors，与本项目的 M3 ColorScheme 不互通。
+            // 不在这里提供一份 HyperOS 令牌，它们就会用 miuix 内置的**浅色**默认值——
+            // 深色主题下开关仍是灰轨白钮、滑块仍是浅灰条（真机上几乎看不见）。
+            MiuixTheme.Provide(dark = darkTheme, pureBlack = darkTheme && amoledDark) {
+                MaterialTheme(
+                    colorScheme = fgAdjusted,
+                    typography = typography,
+                    content = content,
+                )
+            }
+        } else {
+            // 排版走 M3 Expressive 的强调字阶：字号/行高与 M3 基线完全一致，
+            // 只有字重与字距变（titleMedium 及以下加粗到 Bold）。
+            // 这是「四轴」里的 typography 一轴，材料见 m3e-canvas 生成的 prompt。
+            MaterialTheme(
+                colorScheme = fgAdjusted,
+                typography = typography,
+                content = content,
+            )
+        }
     }
 }
 

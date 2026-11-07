@@ -67,6 +67,7 @@ import com.kaze.newage.ui.components.M3ECardVariant
 import com.kaze.newage.ui.components.M3EConnectedList
 import com.kaze.newage.ui.components.M3EListItem
 import com.kaze.newage.ui.components.M3EScreenHeader
+import com.kaze.newage.ui.components.M3ESwitch
 import com.kaze.newage.ui.components.WavyLinearProgress
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
@@ -458,7 +459,7 @@ fun AddonsScreen(
                         shape = shape,
                         trailing = {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(
+                                M3ESwitch(
                                     checked = enabled,
                                     onCheckedChange = {
                                         AddonManager.toggleEnabled(file)

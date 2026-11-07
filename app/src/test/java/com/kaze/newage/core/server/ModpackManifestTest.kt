@@ -2,6 +2,7 @@ package com.kaze.newage.core.server
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -299,19 +300,64 @@ class ModpackManifestTest {
         assertNull("必须拦住 ../", ModpackImporter.resolveRemoteDest(root, "../../evil.txt"))
         assertNull("嵌套的 ../ 也要拦", ModpackImporter.resolveRemoteDest(root, "mods/../../evil.txt"))
         assertNull("空路径要拦", ModpackImporter.resolveRemoteDest(root, ""))
+        assertNull("只有斜杠要拦", ModpackImporter.resolveRemoteDest(root, "///"))
+        assertNull("根目录本身要拦（`.` 段不改变落点，归一后为空）", ModpackImporter.resolveRemoteDest(root, "."))
+        assertNull("只有 ./ 也要拦", ModpackImporter.resolveRemoteDest(root, "./"))
+        // `./mods/x.jar` 是合法写法，`. ` 段应被丢掉而不是当成文件名
+        assertEquals(
+            "mods/x.jar",
+            ModpackImporter.resolveRemoteDest(root, "./mods/x.jar")!!.relativeTo(root).path.replace('\\', '/'),
+        )
 
         // 关于"看起来像绝对路径"的输入：这里**不拒绝**，而是把前导 `/` 规范化成
         // 实例目录内的相对路径。理由：很多整合包清单把路径写成 `/mods/x.jar`，
         // 直接拒绝会让这些包装不上；而规范化之后它仍然落在实例目录内，
         // 真正的安全属性（**不能写到实例目录之外**）没有被破坏。
-        // 所以断言的是"落在了实例里"，而不是"返回 null"。
+        //
+        // 但盘符形状的 `C:/...` 还多一层坑：Android 上它会被当成文件名的一部分
+        // （生成名叫 `C:` 的目录），Windows 上 `getCanonicalPath()` 直接抛 IOException。
+        // 老实现把那个异常吞成 false（= 当成越界）→ 同一个清单在真机与 CI 上行为不一致。
+        // 现在冒号被规范化成 `_`，两个平台都会得到 `C_/Windows/...` 落在实例目录内。
         for (raw in listOf("/etc/passwd", "C:/Windows/system32/x.dll", "//weird//double.txt")) {
             val dest = ModpackImporter.resolveRemoteDest(root, raw)
+            assertNotNull("「$raw」规范化后应能解析出目标文件", dest)
             assertTrue(
                 "「$raw」规范化后仍必须落在实例目录内",
-                dest != null && dest.canonicalPath.startsWith(root.canonicalPath + File.separator),
+                dest!!.canonicalPath.startsWith(root.canonicalPath + File.separator),
+            )
+            // 文件名里不能残留 Windows/Android 打架的字符（只看相对部分：
+            // 绝对路径前缀本身就带盘符冒号，那是宿主的事，不是清单数据的事）
+            val rel = dest.relativeTo(root).path
+            assertTrue(
+                "「$raw」的规范化结果不应再含冒号等非法字符，实际为 「$rel」",
+                rel.none { it in charArrayOf('<', '>', ':', '"', '|', '?', '*') },
             )
         }
+    }
+
+    @Test
+    fun `盘符形状的路径被规范化成目录内的普通文件名`() {
+        val root = dir()
+        val dest = ModpackImporter.resolveRemoteDest(root, "C:/Windows/system32/x.dll")!!
+        // 冒号 → `_`，于是 `C:` 变成一个正常目录名；这一点在 Android 与 Windows 上一致
+        assertEquals("C_", dest.relativeTo(root).path.split(File.separator)[0])
+        assertTrue(dest.canonicalPath.startsWith(root.canonicalPath + File.separator))
+        // 前导斜杠仍然照旧去掉
+        assertEquals(
+            "mods/x.jar",
+            ModpackImporter.resolveRemoteDest(root, "/mods/x.jar")!!.relativeTo(root).path.replace('\\', '/'),
+        )
+    }
+
+    @Test
+    fun `Windows 保留设备名不会作为文件名落到磁盘`() {
+        val root = dir()
+        // `NUL.txt`：Windows 上创建会失败；规整后应变成 `_NUL.txt`
+        val dest = ModpackImporter.resolveRemoteDest(root, "mods/NUL.txt")
+        assertNotNull(dest)
+        assertEquals("_NUL.txt", dest!!.name)
+        // 段尾的点与空格会被 Windows 自动剥掉（写完文件名对不上），这里应提前规整
+        assertEquals("weird", ModpackImporter.resolveRemoteDest(root, "mods/weird. ")!!.name)
     }
 
     @Test

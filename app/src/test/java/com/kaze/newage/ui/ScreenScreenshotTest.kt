@@ -51,9 +51,14 @@ class ScreenScreenshotTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    private fun captureScreen(name: String, dark: Boolean = false, content: @Composable () -> Unit) {
+    private fun captureScreen(
+        name: String,
+        dark: Boolean = false,
+        theme: AppThemeMode = AppThemeMode.M3,
+        content: @Composable () -> Unit,
+    ) {
         composeRule.setContent {
-            NewAgeTheme(mode = AppThemeMode.M3, darkTheme = dark, colorSource = "custom") {
+            NewAgeTheme(mode = theme, darkTheme = dark, colorSource = "custom") {
                 // 必须自己铺上主题背景层。真机上这一层由 AppRoot 的 AppBackground 负责，
                 // 测试里直接渲染屏幕 Composable 的话背景是宿主给的默认白底——
                 // 深色模式下内容用浅色文字、背景却是白的，截出来像"主题坏了"，
@@ -151,6 +156,38 @@ class ScreenScreenshotTest {
     @Test
     fun screen_settings_dark() = captureScreen("screen_settings_dark", dark = true) {
         SettingsScreen(vm())
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // MIUIX（HyperOS）主题：同一屏在四个主题里必须都成立
+    //
+    // 之前只有 M3 的屏幕截图，MIUIX 的改动**一张图都没有覆盖** ——
+    // 分组卡化、行高 56dp、图标变方块、底栏实心胶囊、开关换 Miuix 这些
+    // 全部是"编译过了就当好了"。这几张图是它们的真实验收面。
+    // ══════════════════════════════════════════════════════════════
+    @Test
+    fun screen_settings_miuix() = captureScreen("screen_settings_miuix", theme = AppThemeMode.MIUIX) {
+        SettingsScreen(vm())
+    }
+
+    @Test
+    fun screen_settings_miuix_dark() = captureScreen("screen_settings_miuix_dark", dark = true, theme = AppThemeMode.MIUIX) {
+        SettingsScreen(vm())
+    }
+
+    @Test
+    fun screen_server_miuix_with_instances() {
+        val viewModel = vm()
+        seedInstance(viewModel, name = "生存服", core = CoreType.PAPER, mc = "1.21.4", java = 21, memory = 4096)
+        seedInstance(viewModel, name = "模组服", core = CoreType.FABRIC, mc = "1.21.1", java = 21, memory = 6144)
+        captureScreen("screen_server_miuix_with_instances", theme = AppThemeMode.MIUIX) {
+            ServerScreen(viewModel, onOpenInstance = {}, onNewServer = {})
+        }
+    }
+
+    @Test
+    fun screen_console_miuix_dark() = captureScreen("screen_console_miuix_dark", dark = true, theme = AppThemeMode.MIUIX) {
+        ConsoleScreen(vm())
     }
 
     // ── 新建服务端向导：第 1 步（选择核心类型）──

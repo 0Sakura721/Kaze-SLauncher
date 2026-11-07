@@ -96,10 +96,12 @@ import com.kaze.newage.ui.DownloadState
 import com.kaze.newage.ui.components.InstanceIcon
 import com.kaze.newage.ui.components.M3ECard
 import com.kaze.newage.ui.components.M3ECardVariant
+import com.kaze.newage.ui.components.M3ECheckbox
 import com.kaze.newage.ui.components.M3EListItem
 import com.kaze.newage.ui.components.M3EScreenHeader
 import com.kaze.newage.ui.components.M3ESegmentedRow
 import com.kaze.newage.ui.components.M3EStatusChip
+import com.kaze.newage.ui.components.M3ESwitch
 import com.kaze.newage.ui.components.WavyLinearProgress
 import com.kaze.newage.ui.theme.M3Motion
 import com.kaze.newage.ui.components.MemorySliderRow
@@ -357,7 +359,6 @@ internal fun VersionConfigPhase(
     // 端口建议与占用集合仍是上一个实例时的旧值（freePort 更是连 remember key 都没有，
     // 算一次就定死），用户可能选到已被别的实例占用的端口。
     val allInstances by viewModel.instances.collectAsStateWithLifecycle()
-    val freePort = remember(allInstances) { ServerProperties.findFreePort(allInstances) }
     // 占用集合要在 **IO 线程**上算：`ServerProperties.load` 是实打实的磁盘读，而实例目录
     // 完全可能在共享存储或 SD 卡上（FUSE / sdcardfs 单次读几十到几百毫秒）。原来用
     // `remember { allInstances.map { load(it.dir) } }` 是在**组合期**逐个读，实例一多就卡首帧，
@@ -367,6 +368,18 @@ internal fun VersionConfigPhase(
             allInstances.mapNotNull { inst ->
                 ServerProperties.load(inst.dir)["server-port"]?.toIntOrNull()
             }.toSet()
+        }
+    }
+    // 空闲端口也必须**基于已经算好的 usedPorts**，不能再用
+    // `remember(allInstances) { ServerProperties.findFreePort(allInstances) }`：
+    // findFreePort 内部对每个实例各做一次 `ServerProperties.load` —— 和上面被特意
+    // 挪到 IO 的完全是同一批磁盘读，却留在组合线程上跑（注释和代码自相矛盾）。
+    // 实例目录在慢卡上时这就是首帧卡顿的直接来源。
+    val freePort by produceState(initialValue = ServerProperties.DEFAULT_SERVER_PORT, usedPorts) {
+        value = withContext(Dispatchers.IO) {
+            var p = ServerProperties.DEFAULT_SERVER_PORT
+            while (p in usedPorts && p < 65535) p++
+            p
         }
     }
 
@@ -886,7 +899,7 @@ internal fun ConfigPage(
                         if (autoMemory) t("自动分配内存") else t("手动分配"),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Switch(checked = autoMemory, onCheckedChange = onAutoMemory)
+                    M3ESwitch(checked = autoMemory, onCheckedChange = onAutoMemory)
                 }
 
                 SliderRow(
@@ -1044,7 +1057,7 @@ internal fun ConfigPage(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = onlineMode, onCheckedChange = onOnlineModeChange)
+                    M3ESwitch(checked = onlineMode, onCheckedChange = onOnlineModeChange)
                 }
                 Text(t("默认游戏模式"), style = MaterialTheme.typography.bodyMedium)
                 GameModePicker(gameMode = gameMode, onGameModeChange = onGameModeChange)
@@ -1214,7 +1227,7 @@ internal fun EulaCard(agreed: Boolean, onAgreedChange: (Boolean) -> Unit) {
                 .padding(vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Checkbox(checked = agreed, onCheckedChange = null)
+            M3ECheckbox(checked = agreed, onCheckedChange = null)
             Text(t("我已阅读并同意 Minecraft EULA"), style = MaterialTheme.typography.bodyMedium)
         }
         // 条款链接独立成行：不在上面那个 toggleable 的范围内，点它只开浏览器

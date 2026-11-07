@@ -167,7 +167,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         val target = focused() ?: run { openCreate(); return }
         when (val state = stateOf(target)) {
             ServerState.Running, ServerState.Stopping -> host.stop(target)
-            else -> if (state.isBusy()) host.toast("正在${state.toLabel()}，请稍候") else host.start(target)
+            else -> if (state.isBusy()) host.toast(t("正在%s，请稍候", state.toLabel())) else host.start(target)
         }
     }
 
@@ -185,7 +185,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 overviewPrimary.text = t("新建")
             }            running > 0 -> {
                 overviewTitle.text = t("运行中")
-                overviewSub.text = "${focus.name} · ${focus.mcVersion.ifBlank { "自定义" }}"
+                overviewSub.text = "${focus.name} · ${focus.mcVersion.ifBlank { t("自定义") }}"
                 overviewHint.text = t("%s / %s 个实例在跑 · 内存 %s MB", running, instances.size, focus.memoryMb)
                 overviewPrimary.text = t("停止")
             }
@@ -459,7 +459,7 @@ class HomeScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             {
                 sheet.dismiss()
                 host.remove(instance)
-                host.toast("已删除 ${instance.name}")
+                host.toast(t("已删除 %s", instance.name))
             },
             secondaryLabel = t("取消"),
             onSecondary = { sheet.dismiss() },
@@ -796,7 +796,7 @@ internal class CreateWizard(
                 progress.fraction = 1f
                 setStatus(t("创建完成：%s", instance.name), ShellTheme.current.good)
                 host.select(instance)
-                host.toast("已创建 ${instance.name}")
+                host.toast(t("已创建 %s", instance.name))
                 dismiss()
                 host.openConsoleAction(instance)
             }

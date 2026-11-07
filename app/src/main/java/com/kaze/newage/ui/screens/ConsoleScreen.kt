@@ -93,7 +93,9 @@ import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.ExpressiveLoadingGlyph
 import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
 import com.kaze.newage.ui.components.M3EScreenHeader
+import com.kaze.newage.ui.components.M3ESlider
 import com.kaze.newage.ui.components.M3EStatusChip
+import com.kaze.newage.ui.components.M3ESwitch
 import com.kaze.newage.ui.components.StatusTone
 import com.kaze.newage.ui.isBusy
 import com.kaze.newage.ui.theme.M3Shape
@@ -962,7 +964,7 @@ private fun DisplaySettingsDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Slider(
+                M3ESlider(
                     value = fontSp,
                     onValueChange = onFont,
                     valueRange = 10f..20f,
@@ -977,7 +979,7 @@ private fun DisplaySettingsDialog(
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Switch(checked = timestamps, onCheckedChange = onTimestamps)
+                    M3ESwitch(checked = timestamps, onCheckedChange = onTimestamps)
                 }
                 Text(
                     t("时间戳为 [HH:mm:ss] 前缀，只影响控制台显示，不写入日志文件。") +

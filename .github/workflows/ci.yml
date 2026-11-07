@@ -1,5 +1,17 @@
 name: CI
 
+# 主质量门：push/PR 时跑全量单测 + 截图，以及 Android Lint。
+#
+# 与本仓库其它工作流的分工：
+#   ci.yml          全量（单测 + 截图 + lint）—— 主力，push/PR 必跑
+#   verify.yml      同一套的**手动**版本，可用 scope 只跑编译/测试/lint 之一
+#   theme-ui.yml    只跑主题与组件层（路径过滤，3–5 分钟，改 UI 时反馈更快）
+#   shell-ui.yml    只跑「岚」手写视图层
+#   apk-build.yml   只出可安装的 release APK（不发版）
+#   release.yml     打 tag 时发版（含增量补丁）
+#
+# 本地约定：编译/测试/lint 一律不在开发机上跑，性能都放这些工作流里。
+
 on:
   push:
     branches: [ main ]
@@ -22,11 +34,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 JDK 17
+      - name: 安装 JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
+      # JDK 21：miuix 0.7.2 的 class 是 major 65（Java 21），
+      # Robolectric 在**测试 JVM**里加载它，17 会直接 UnsupportedClassVersionError
+      # （现象是「编译通过、测试全红」，且报错指向 miuix 的 ColorsKt）。
+      # 应用自身仍编译到 Java 17 字节码（见 app/build.gradle.kts 的 jvmTarget），
+      # 这里只影响跑 Gradle/测试的那个 JVM。
 
       # 不用 android-actions/setup-android：它内部会安装已被 Google 下架的旧 `tools` 包，
       # 现在必定失败（Failed to find package 'tools' → sdkmanager 退出码 1）。
@@ -85,3 +102,67 @@ jobs:
           name: test-report
           path: app/build/reports/tests
           if-no-files-found: ignore
+
+      - name: 上传原始测试结果
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-xml
+          path: app/build/test-results
+          if-no-files-found: ignore
+
+  # ── Android Lint ──
+  #
+  # 这道门此前是**完全失效**的：lint 在分析 Kotlin 2.1 源码时会抛
+  # IncompatibleClassChangeError（Compose 的几个 detector），或
+  # InvalidFirElementTypeException（K2 UAST 桥接层），让整个 lint 任务失败。
+  # 崩溃被当成"构建噪音"忽略之后，没有任何一条 lint 检查真正跑过。
+  #
+  # 现在用 gradle.properties 的 android.lint.useK2Uast=false 让它走 K1 分析，
+  # 并只抑制确实误报/无意义的少数 detector（见 app/lint.xml 的逐条理由）。
+  # 结果是 lint 能完整跑完并作为 CI 门禁 —— 换来的真实收益已经体现在
+  # 修掉的 ProduceStateDoesNotAssignValue / ObsoleteSdkInt / ApplySharedPref
+  # / DrawAllocation / InlinedApi 等问题上。
+  lint:
+    name: Android Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: 安装 Android SDK 组件
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          CMDLINE="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | sort -V | tail -1)"
+          if [ -z "$CMDLINE" ]; then
+            echo "找不到 cmdline-tools，SDK 目录内容："; ls -la "$SDK" 2>&1 || true; exit 1
+          fi
+          export PATH="$CMDLINE:$PATH"
+          sdkmanager --version
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$CMDLINE" >> "$GITHUB_PATH"
+
+      - name: 配置 Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # debug 变体的 lint 覆盖主源码 + 单测源码；release 的 lintVital 另行覆盖
+      # R8/资源收缩相关的检查（由 release.yml 的打包流程触发）。
+      - name: 跑 lint
+        run: ./gradlew :app:lintArm64Debug --console=plain --stacktrace
+
+      - name: 上传 lint 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-*.html
+          if-no-files-found: warn

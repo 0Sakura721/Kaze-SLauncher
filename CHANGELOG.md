@@ -7,9 +7,237 @@
 
 ## [Unreleased]
 
-（暂无）
+### Fixed
+
+- **备份期间取消会让服务端永久停止自动存盘（数据丢失）**
+  `InstanceDetailScreen` 的「立即备份」在**运行中**备份时会先发 `save-off`、
+  `save-all flush`、`delay(1500)` 再打包，成功或失败都发 `save-on`。但 `save-off`
+  与 `delay` 位于 `try` 块**外面**，而 `backupScope` 是 `rememberCoroutineScope` ——
+  用户点完备份立刻按返回/切页就会取消。一旦取消落在 `delay` 上，
+  `CancellationException` 从 `try` 之前抛出，内层 `finally` 根本没进入，`save-on`
+  永不发送：服务端从此不再落盘，此时崩溃或被系统杀进程 = 上次 save 之后的**全部
+  进度丢失**，而且界面上完全看不出"自动保存被关了"（要重启服务端才恢复）。
+  现在 `save-off` → `flush` → `delay` → 备份 → `save-on` 整体包进
+  `withContext(NonCancellable)`，并单独 `catch (CancellationException)` 显示
+  「备份已取消」而不是把取消当成失败。
+
+- **导入 26.x 版服务端会被配成 Java 8，启动必崩**
+  `JarInspector.javaForMc` 的版本正则 `1\.\d+(?:\.\d+)?` **没锚定**，
+  `"26.1.1"` 会从偏移 3 匹配到子串 `"1.1"` → major=1/minor=1 → 落到 `else -> 8`。
+  同一个版本号在创建路径（`ServerInstance.infer`）得到的是 25，两处自相矛盾；
+  导入路径拿 8 去启动，直接 `UnsupportedClassVersionError`。
+  正则改为按数字边界锚定（`(?<!\d)…(?!\d)`），并补上 `24+` 新命名的分档。
+
+- **删了实例、重启后又回来；字段修改互相覆盖**
+  `InstanceStore` 的 6 个 setter（`setMemory`/`setNogui`/`setExtraJvmArgs`/
+  `setPinned`/`setJavaMajor`/`setAutoBackup`）**既无 `@Synchronized`、又用
+  `_instances.value = …` 读-改-写**，而 `add`/`remove`/`rename` 三者都有锁。
+  两条真实后果：① 用户删实例（已落盘）后，详情页残留组合里的一次 `setNogui`
+  仍拿着"含已删实例"的旧快照写回并 `save()` —— 已删实例被重新写进 JSON；
+  ② 两个 setter 并发时后写覆盖前写。现在全部 `@Synchronized` + `update{}`。
+
+- **删实例的目录删不掉却一声不吭**
+  `runCatching { dir.deleteRecursively() }` 把失败全吞了。而 `InstanceStore.load()`
+  的 `recoverFromDirs()` 会扫到残留目录里的核心 jar，把实例**原地复活**。
+  SD 卡/FUSE 上这很常见（日志文件仍被句柄持有、只读挂载）。现在删不掉会提示
+  「实例已从列表移除，但目录未能删除，重启后可能被重新识别」。
+
+- **装 Java 卡在"解压 OpenJDK…"（进程永久 pipe_wait）**
+  `RootfsJavaManager` 调系统 `tar` 时既没 `redirectErrorStream`，也没有任何线程
+  读 `errorStream`。JDK 包里必然有大量 `Cannot create symlink` / `Permission denied`，
+  stderr 的 64KB 管道写满后 tar 阻塞在 `write()` 永不退出 —— 而 `waitFor(500ms)`
+  轮询永远拿不到退出码。同仓 `ProotEnvironment` 对**同一条 tar 命令**早已专门写了
+  sink 线程并留了"不消费则进程永久卡死"的注释，这条路径漏了。现在合并流 + sink 线程。
+
+- **并发部署会互相踩掉 rootfs（锁被放错）**
+  `ProotEnvironment.setup` 里没抢到锁的等待路径，用 `reachedTail` 判断是否释放标志，
+  而两个分支都反了：真正持锁时被取消反而不释放（锁永久为 true，之后每次部署白等
+  15 分钟）；**没持锁时**却在 `finally` 执行 `isSetupRunning.set(false)` ——
+  把别人持有的锁放掉，第三次 `setup()` 立刻能 CAS 成功，两套部署同时往同一个
+  `rootfsDir` 解压/apt，彼此删掉对方的目录。改为显式 `ownsLock` + `enteringTail`。
+
+- **进程退出收尾可能跑两遍（双启动 / 重复打包大世界）**
+  `handleExit` 的 `if (slot.exitHandled) return; slot.exitHandled = true` 是
+  check-then-act，而盯同一个进程的有两条线程（`waitJob` 与 init 的每秒巡检），
+  几乎同时触发时都会通过闸门。改为 `AtomicBoolean.compareAndSet`。
+
+- **三处"写盘失败却报成功"**
+  - 备份导出：`openOutputStream` 返回 null（SAF 授权失效、目标卷卸载）时老写法
+    `?.use{}` 直接跳过写入且不抛异常，却继续报「已导出」+ 成功色；拔卡后才发现没文件。
+  - 控制台导出：同一模式，用户以为存了，打开是空文件。
+  - 换背景图：`compress()` 返回 false / IO 失败被 `runCatching` 吞掉后仍置
+    `bgExists = true` + 版本号自增 → 重新解码拿到旧图/空图，唯一提示路径走不到。
+  三处都改为显式判失败并抛给调用方。
+
+- **插件目录读不出来却报"全部已是最新"**
+  `checkAddonUpdate` 里 `runCatching { installed(...) }.getOrDefault(emptyList())`
+  让"目录不可读"和"确实一个没装"走同一条分支，UI 显示 Done。现在读取失败
+  单独成 `Failed`。
+
+- **26.x 的 `instances.json` 手改后"重新扫描"直接闪退**
+  `InstanceStore.load()` 里的 `m.groupValues[1].toInt()` 无兜底，
+  一个手改的 `"mcVersion": "99999999999.1"` 就会 `NumberFormatException`，
+  而调用链上游是 UI 入口且没有 try/catch。改为 `toIntOrNull()`。
+
+- **新建服务端首帧在组合期做磁盘读（慢卡 ANR）**
+  `freePort` 用 `remember(allInstances) { ServerProperties.findFreePort(...) }`，
+  而 `findFreePort` 内部对**每个实例**各做一次 `ServerProperties.load` ——
+  与紧邻其下、被特意挪到 IO 线程的 `usedPorts` 是同一批磁盘读。注释与代码自相矛盾。
+  改为基于已算好的 `usedPorts` 用 `produceState` 在 IO 上求值（并新增
+  `ServerProperties.DEFAULT_SERVER_PORT` 供界面取初值）。
+
+- **路径穿越防线在 Windows 上静默失效（安全）**
+  `ModpackImporter.resolveRemoteDest` 用 `runCatching { canonicalPath }.getOrDefault(false)`
+  判断"是否落在实例目录内"。而 `C:/Windows/system32/x.dll` 这类盘符形状的路径会让
+  `getCanonicalPath()` **抛 IOException**，异常被吞成 `false`，于是同一个整合包清单
+  在真机（Android，冒号合法、会生成名叫 `C:` 的畸形目录）与开发机/CI（Windows，直接
+  判定失败）行为不一致。现在把 Windows/Android 双方都不接受的字符（`< > : " | ? *`
+  与控制字符）、段尾空格与点、以及 Windows 保留设备名（`NUL` / `COM1` …）统一规整，
+  不再依赖"抛异常恰好被吞"这种隐式行为；`.` 段按常规丢弃（`./mods/x.jar` 仍可用），
+  `..` 段继续整条拒绝。新增 3 条测试覆盖盘符、保留名与点段。
+
+- **玩家离开名单仍是读-改-写**：`_onlinePlayers.value = _onlinePlayers.value - name`
+  与上面"加入"侧的 `update{}` 不一致，并发时后写覆盖前写，名单少/多人且只有
+  `list` 命令能纠回来。改为 `update { it - name }`。
+
+### Fixed（上一轮 Miuix 改造自身的 4 处缺陷）
+
+- `M3ESegmentedRow` 在 MIUIX 分支**忽略调用方传入的 `height`**（写死 32dp），
+  6 个调用点里传 38/44dp 的弹窗会被静默压矮 12dp、与旁边控件基线错位。
+  改为 `height: Dp? = null` + 函数体内解析主题默认值。
+- `M3EListItem` 在 MIUIX 下只把 `graphicsLayer` 的 scale 覆盖成 1f，
+  `animateFloatAsState` 仍在每次按下时跑弹簧 —— 白算一帧。`targetValue` 一并改。
+- `SettingNote` 的 `top = if (isMiuix) 0.dp else 0.dp` 两支恒等，删掉。
+- `NewAgeTheme` 每次重组都重建 `Typography`，`MiuixTheme.Provide` 每次重建
+  `Colors`（50+ 个 Color）。两者都没实现 `equals`，身份不等即视为"值变了"，
+  于是每次重组都让所有读 `LocalTypography`/`LocalColors` 的节点失效（MIUIX 下
+  等于全屏重排）。改为 `remember(mode)` / `remember(dark, pureBlack)`。
+
+### Added
+
+- **`.github/workflows/verify.yml`**：手动触发的完整验证（`workflow_dispatch`
+  可选 scope：`compile` / `test` / `lint` / `full`），编译 + 全量单测 + 截图 + lint
+  在同一份 checkout 里顺序跑。只保留手动触发，避免与 `ci.yml` 在 push/PR 时重复消耗配额。
 
 ---
+
+
+  `ModpackImporter.resolveRemoteDest` 用 `runCatching { canonicalPath }.getOrDefault(false)`
+  判断"是否落在实例目录内"。而 `C:/Windows/system32/x.dll` 这类盘符形状的路径会让
+  `getCanonicalPath()` **抛 IOException**，异常被吞成 `false`，于是同一个整合包清单
+  在真机（Android，冒号合法、会生成名叫 `C:` 的畸形目录）与开发机/CI（Windows，直接
+  判定失败）行为不一致。现在把 Windows/Android 双方都不接受的字符（`< > : " | ? *`
+  与控制字符）、段尾空格与点、以及 Windows 保留设备名（`NUL` / `COM1` …）统一规整，
+  不再依赖"抛异常恰好被吞"这种隐式行为；`.` 段按常规丢弃（`./mods/x.jar` 仍可用），
+  `..` 段继续整条拒绝。新增 3 条测试覆盖盘符、保留名与点段。
+
+- **备份状态用字符串前缀判断成功/失败（会给出错误的成功提示）**
+  `InstanceDetailTabs` 里写的是 `color = if (it.startsWith(t("已"))) primary else error`。
+  而英文表把 `"已"` 映射成**空串**，`startsWith("")` 恒为 true —— 于是英文环境下
+  「导入失败：…」「恢复失败：…」「备份失败：…」**全部显示成成功色**。中文下也只在
+  消息以"已"开头时才成立，换成「备份完成」这类措辞就翻车。
+  现在 `WorldTab` 增加显式 `messageOk: Boolean?`（true 成功 / false 失败 /
+  null 中性提醒用次要色），由调用方在每个 try/catch 分支里给出，不再靠文本形状猜。
+
+- **`t("已")` 空译文条目**：key 命中却返回空串（空串非 null，不会回退中文），
+  已随上一并删除。
+
+- **lint 质量门长期失效（如今恢复为 CI 门禁）**
+  Compose 的 lint detector 组与 Kotlin 2.1 的分析 API 二进制不兼容，在分析任意
+  Kotlin 文件时抛 `IncompatibleClassChangeError`（FrequentlyChangingValue /
+  RememberInComposition / AutoboxingStateCreation）或
+  `InvalidFirElementTypeException`（K2 UAST 桥接层），让**整个 lint 任务**失败。
+  由于它一直崩，没有任何一条 lint 检查真正跑过。
+  修法：`gradle.properties` 设 `android.lint.useK2Uast=false` 让 lint 走 K1 分析；
+  把确实崩溃/误报的少数 detector 连理由一起集中到 `app/lint.xml`（原先散在
+  `build.gradle.kts` 里）；`ci.yml` 新增独立 `lint` job。
+  恢复后立刻抓出并修掉 6 类真实问题：
+  - `ObsoleteSdkInt`：`AppLanguage` 里 `SDK_INT >= N` 恒真（minSdk 27），删掉死分支；
+  - `ApplySharedPref`：幂等清理不需要同步落盘，`commit()` 换成 `apply()`；
+  - `DrawAllocation`：`Atoms` 的 `onDraw` 每帧 `new Path()`，改为复用字段；
+  - `InlinedApi`：`FOREGROUND_SERVICE_TYPE_SPECIAL_USE` 是 API 34 常量，
+    显式按版本分支（低版本传 0 即"按清单走"）；
+  - `PrivateApi`：`ProotEnvironment` 自检反射读 `android.os.SELinux` 是刻意为之，
+    局部 `@SuppressLint` 并注明用途；
+  - `ProduceStateDoesNotAssignValue` 与 `RememberReturnType` 经逐条核对是
+    K1 detector 的误报（6 处都返回真实值），按误报记录在 `app/lint.xml` 里。
+
+### Changed
+
+- **Miuix（HyperOS）主题重做：从「换色」推进到「换版式」**
+  0.8.0 只做了两件事：把 M3 ColorScheme 换成 HyperOS 色、把开关本体换成 Miuix 的
+  Switch。屏幕骨架仍是 Material 3 Expressive 的，所以整个主题看起来像"套了一层皮"。
+  本次按 HyperOS 的真实令牌补齐了三块缺口：
+
+  - **Miuix 组件终于共享同一套颜色（真缺陷修复）**
+    此前从未提供 `MiuixTheme(colors = …)`，Miuix 的 Switch/Slider/Checkbox/Progress
+    读的都是库里**内置的浅色默认板**（primary #3482FF、未选中轨道 #E6E6E6）。后果是
+    **深色主题下开关仍是灰轨白钮贴在黑底上，几乎看不见**，滑块是一条浅灰条。
+    现在 `NewAgeTheme` 在 MIUIX 分支里提供一份 HyperOS 令牌
+    （`MiuixTheme.colorsLight()` / `colorsDark(pureBlack = …)`），并连带提供
+    `LocalIndication`（HyperOS 的矩形按压高亮，取代水波纹）。
+  - **背景层换成纯色**：MIUIX 不再复用 M3 的纵向渐变（#F7F9FC → #EEF1F7），
+    改为 HyperOS 的平面分组灰 #F2F2F7 / 深色纯黑。灰白渐变会把「白卡 vs 灰底」
+    的对比抹掉，而 HyperOS 的分层完全靠这一个色差。
+  - **列表改成 HyperOS 的分组卡**：`M3EConnectedList` 在 MIUIX 下画成
+    「一个 16dp 圆角白卡 + 行间 0.5dp 缩进分隔线」，不再是每行一张 28dp 大圆角小卡
+    （后者是 M3 Expressive 的相连列表语言，跟 HyperOS 的分组完全不同）。
+    行高从 72dp 收到 56dp（Miuix `BasicComponent` 的实测值），图标容器从 40dp 正圆
+    改成 32dp / 8dp 圆角的方块，按压反馈从水波纹换成矩形高亮。
+
+- **交互控件补全**：新增 `M3ESlider` / `M3ECheckbox` / `M3ELinearProgress` /
+  `M3EDivider` / `M3ECategoryChip`（`ui/components/MiuixComponents.kt`），MIUIX 下
+  分别落到 Miuix 的 Slider（30dp 高、细轨）、Checkbox（圆角方块 + 勾选弹簧）、
+  ProgressIndicator（6dp 条、单侧扫光），以及 HyperOS 的 0.5dp 细线与小圆角标签。
+  9 个屏幕里的 13 处 Switch、4 处 Slider、1 处 Checkbox、6 处进度条、
+  1 处分隔线、1 处分类条全部接上。
+
+- **版式标尺换成 HyperOS 的**：新增 `miuixTypography()`，MIUIX 下 M3 Typography
+  改用 HyperOS 的字号（正文 16/14/13/11、标题 20 SemiBold）。此前 MIUIX 仍用
+  M3 Expressive 的强调字阶（titleMedium 及以下 Bold、正文 17sp），结果
+  「Miuix 开关旁边的 M3 文字」比 Miuix 自带文字大一号、重一档，两套语言拼在一屏。
+  `GroupHeader` 在 MIUIX 下不再画卡，改为保留一个 0dp 高的位置锚点
+  （`onGloballyPositioned` 是顶部分类条 `sectionOffsets` 的唯一上报点，直接删掉
+  会让分类条的点击跳转与滚动高亮全部失效），分区标题改由**顶部分类条**表达
+  ——HyperOS 设置页本来就是这样，同一个「外观」不该在 chips 与卡片上方各出现一次。
+  顶部分类条在 MIUIX 下也从 Material 的全圆 `FilterChip` 换成 HyperOS 的小圆角标签
+  （`M3ECategoryChip`：30dp 高、8dp 圆角、选中浅蓝底）：8 个分区从「一屏 4 个半」
+  变成一屏全部可见。
+
+- **底栏**：MIUIX 下改为实心胶囊（56dp、白/深灰底、0.5dp 描边、浅投影），
+  选中项用一块 `primaryContainer` 浅蓝圆角底 + 对应前景色。原先是 50% 半透明底、
+  只有图标变色，前者会让卡片边线透过底栏，后者辨识度太低。
+
+- **shell（岚）层的操作反馈接入 i18n**：`toast` 里 12 处中文字面量此前直接拼接
+  （`"已删除 ${instance.name}"` 等），英文用户看到整句中文。统一改为
+  `t("已删除 %s", instance.name)` 形式，并补齐英文条目。
+- `AppViewModel` 两处版本/能力提示同样改为走 `t()`（含把「插件 / 模组」「空」
+  这类可变词拆成独立 `%s`，而不是拼进中文句子）。
+- 清掉英文表里 2 条**插值污染**的坏 key（转换脚本把 Kotlin `${...}` 模板塞进了 key，
+  与源码真实串永远对不上、等于没翻译），并补上对应正确 key。
+
+### Added
+
+- **`MiuixThemeTest`（组件级截图 + 不变量断言）**
+  此前 MIUIX 主题**一张截图都没有**，改动全靠"编译过了"验收。新测试同时给出：
+  - 截图：`miuix_components_{light,dark,amoled}`（开关/勾选框/滑块/分段/进度/卡片全套）；
+  - 断言：深色令牌必须是深底（防退回内置浅色板）、HyperOS 主色与 miuix 默认值确实
+    不同源、`miuixTypography()` 的四个字号、MIUIX 上下文里的 `StatusPalette` 与
+    `MiuixIndication` 确实生效。
+- **屏幕级 MIUIX 截图**：设置页（浅色 / 深色）、服务端列表（两个实例）、控制台（深色），
+  与既有 M3 截图对照。
+- **`.github/workflows/theme-ui.yml`**：主题与组件层的独立工作流（路径过滤，
+  只跑 `MiuixThemeTest` / `ExpressiveComponentsTest` / `ScreenshotTest`，3–5 分钟）。
+  重量级的全量截图与打包仍留在 `ci.yml` / `release.yml`，本地不跑。
+- **`ci.yml` 新增 `lint` job**：lint 恢复后作为门禁，并上传 `lint-report`；
+  测试失败时额外上传 `test-xml`，便于在 CI 里直接看。
+
+- `testOptions.unitTests.all` 透传 `roborazzi.test.record` / `.verify`：
+  Gradle 的 `-D` 只作用于守护进程，不转发的话 `testXxx -Droborazzi.test.record=true`
+  会**全部通过却一张 PNG 都不产出**——这条是主题 UI 工作流能独立跑的前提。
+
+---
+
 
 ## [0.8.5] - 2026-11-07
 

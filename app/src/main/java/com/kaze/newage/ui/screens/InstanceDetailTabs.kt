@@ -40,7 +40,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -83,15 +82,19 @@ import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.util.LanIp
 import com.kaze.newage.ui.AppViewModel
+import com.kaze.newage.ui.components.M3ELinearProgress
 import com.kaze.newage.ui.components.M3ESegmentedRow
 import com.kaze.newage.ui.components.ForceStopConfirmDialog
 import com.kaze.newage.core.server.MemoryLimits
+import com.kaze.newage.ui.components.M3ESlider
+import com.kaze.newage.ui.components.M3ESwitch
 import com.kaze.newage.ui.components.MemorySliderRow
 import com.kaze.newage.ui.components.CheckChip
 import com.kaze.newage.ui.components.ExpressiveLoadingIndicator
 import com.kaze.newage.ui.components.M3ECard
 import com.kaze.newage.ui.components.M3ECardVariant
 import com.kaze.newage.ui.components.M3EConnectedList
+import com.kaze.newage.ui.components.M3EDivider
 import com.kaze.newage.ui.components.M3EListItem
 import com.kaze.newage.ui.components.M3EMetric
 import com.kaze.newage.ui.components.M3EScreenHeader
@@ -390,12 +393,23 @@ internal fun RunTab(
     )
 }
 
-/** 「世界」页：备份的创建 / 导入 / 恢复 / 导出 / 删除 */
+/**
+ * 「世界」页：备份的创建 / 导入 / 恢复 / 导出 / 删除
+ *
+ * [messageOk] 必须由调用方**明确**给出，不能像老实现那样靠
+ * `message.startsWith(t("已"))` 猜：那句判断在中英文下都不可靠 ——
+ *   - 英文里 `t("已")` 曾映射成空串，于是 `startsWith("")` **恒为 true**，
+ *     连「导入失败：…」都会显示成成功色（真机上一眼看不出来，还会误导用户）；
+ *   - 中文里也只覆盖"已…"开头的成功消息，换成「备份完成」这类措辞就翻车。
+ * 成功/失败是**状态**，不是字符串形状，所以由调用方按 try/catch 分支传布尔。
+ */
 @Composable
 internal fun WorldTab(
     backups: List<File>,
     busy: Boolean,
     message: String?,
+    /** 上一条 [message] 是成功(true)还是失败(false)；null = 中性提示（用次要色） */
+    messageOk: Boolean?,
     autoBackup: Boolean,
     onAutoBackup: (Boolean) -> Unit,
     onBackup: () -> Unit,
@@ -429,7 +443,7 @@ internal fun WorldTab(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = autoBackup, onCheckedChange = onAutoBackup)
+                M3ESwitch(checked = autoBackup, onCheckedChange = onAutoBackup)
             }
             if (backups.isEmpty()) {
                 Text(
@@ -502,8 +516,13 @@ internal fun WorldTab(
                 Text(
                     it,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (it.startsWith(t("已"))) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.error,
+                    color = when (messageOk) {
+                        true -> MaterialTheme.colorScheme.primary
+                        false -> MaterialTheme.colorScheme.error
+                        // 中性提示（例如「请先停止服务端再恢复备份」）：既不是成功也不是失败，
+                        // 用次要色，别让一句提醒看起来像报错
+                        null -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     modifier = Modifier.padding(top = 12.dp),
                 )
             }
@@ -631,7 +650,7 @@ internal fun PlayerManageCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = whitelistOn, onCheckedChange = { setProp("white-list", it.toString()) })
+                M3ESwitch(checked = whitelistOn, onCheckedChange = { setProp("white-list", it.toString()) })
             }
             if (whitelistOn) {
                 Row(
@@ -646,7 +665,7 @@ internal fun PlayerManageCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(checked = enforceOn, onCheckedChange = { setProp("enforce-whitelist", it.toString()) })
+                    M3ESwitch(checked = enforceOn, onCheckedChange = { setProp("enforce-whitelist", it.toString()) })
                 }
                 if (running) {
                     Text(
@@ -658,7 +677,8 @@ internal fun PlayerManageCard(
                 }
             }
 
-            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+            // 主题感知分隔线：MIUIX 下换成 HyperOS 的 0.5dp 细线（M3 仍是 1dp 实线）
+            M3EDivider(Modifier.padding(vertical = 10.dp))
 
             // ── 在线玩家 ──
             if (running) {
@@ -1055,12 +1075,12 @@ internal fun CoreVersionCard(
             is AppViewModel.CoreUpdateState.Upgrading -> {
                 Text(st.message, style = MaterialTheme.typography.bodySmall)
                 if (st.progress >= 0f) {
-                    LinearProgressIndicator(
-                        progress = { st.progress },
+                    M3ELinearProgress(
+                        progress = st.progress,
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     )
                 } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                    M3ELinearProgress(progress = null, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
                 }
             }
 
@@ -1075,7 +1095,7 @@ internal fun CoreVersionCard(
 
             is AppViewModel.CoreUpdateState.Checking -> {
                 Text(t("正在检查…"), style = MaterialTheme.typography.bodySmall)
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                M3ELinearProgress(progress = null, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             }
 
             AppViewModel.CoreUpdateState.Idle -> {
@@ -1151,7 +1171,7 @@ internal fun AdvancedSettingsCard(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
-            Switch(checked = nogui, onCheckedChange = { nogui = it })
+            M3ESwitch(checked = nogui, onCheckedChange = { nogui = it })
         }
         TextButton(
             onClick = {
@@ -1416,7 +1436,7 @@ internal fun SettingSwitchRow(label: String, checked: Boolean, onChange: (Boolea
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.weight(1f).padding(end = 12.dp),
         )
-        Switch(checked = checked, onCheckedChange = onChange)
+        M3ESwitch(checked = checked, onCheckedChange = onChange)
     }
 }
 
@@ -1430,7 +1450,7 @@ internal fun SettingSlider(
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
         Text(label, style = MaterialTheme.typography.labelLarge)
-        Slider(
+        M3ESlider(
             value = value.toFloat(),
             onValueChange = { onChange(it.toInt()) },
             valueRange = range,

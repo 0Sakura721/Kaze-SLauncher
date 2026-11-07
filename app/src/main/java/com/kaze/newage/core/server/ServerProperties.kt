@@ -11,6 +11,12 @@ object ServerProperties {
 
     private val DEFAULT_PORT = 25565
 
+    /**
+     * 默认端口（MC 服务的约定端口）：界面需要在**不读盘**的情况给出一个初值时用它，
+     * 避免各调用点各写一个 25565。
+     */
+    val DEFAULT_SERVER_PORT: Int get() = DEFAULT_PORT
+
     /** 读取为有序 Map（保留原文件顺序；缺失返回空） */
     fun load(dir: File): LinkedHashMap<String, String> {
         val map = LinkedHashMap<String, String>()

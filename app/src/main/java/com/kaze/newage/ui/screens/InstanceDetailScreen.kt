@@ -106,8 +106,10 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.Surface
 import com.kaze.newage.core.i18n.t
@@ -165,6 +167,10 @@ fun InstanceDetailScreen(
     var backupRefresh by remember { mutableIntStateOf(0) }
     var backupBusy by remember { mutableStateOf(false) }
     var backupMsg by remember { mutableStateOf<String?>(null) }
+    // 上一条 backupMsg 是成功还是失败。**必须显式记**，不能靠消息文本前缀去猜：
+    // 老实现用 `message.startsWith(t("已"))`，而英文表里 "已" 的译文是空串，
+    // 于是 `startsWith("")` 恒为 true —— 连「导入失败」都会显示成成功色。
+    var backupMsgOk by remember { mutableStateOf<Boolean?>(null) }
     var exportTarget by remember { mutableStateOf<File?>(null) }
     var restoreTarget by remember { mutableStateOf<File?>(null) }
     // 配置保存的版本号：状态卡里的端口要跟着它重读（见 RunTab），否则改完端口仍显示旧值
@@ -183,13 +189,19 @@ fun InstanceDetailScreen(
         val src = exportTarget
         if (uri != null && src != null) {
             backupScope.launch(Dispatchers.IO) {
-                backupMsg = try {
-                    appContext.contentResolver.openOutputStream(uri)?.use { out ->
-                        BackupManager.export(src, out)
-                    }
-                    t("已导出：%s", src.name)
+                backupMsgOk = try {
+                    // `openOutputStream` 返回 null 是**真实存在**的：SAF 授权被回收、
+                    // 目标卷被卸载、个别 ROM 的 DocumentsProvider 直接返回 null。
+                    // 老写法 `?.use{}` 会把整段写入跳过且不抛异常，于是继续报
+                    // 「已导出」并显示成功色 —— 用户拔掉 SD 卡后才发现文件不存在。
+                    val out = appContext.contentResolver.openOutputStream(uri)
+                        ?: throw IllegalStateException(t("无法写入所选位置（授权可能已失效，请重新选择）"))
+                    out.use { BackupManager.export(src, it) }
+                    backupMsg = t("已导出：%s", src.name)
+                    true
                 } catch (e: Exception) {
-                    t("导出失败：%s", e.message)
+                    backupMsg = t("导出失败：%s", e.message)
+                    false
                 }
                 exportTarget = null
             }
@@ -205,14 +217,23 @@ fun InstanceDetailScreen(
             if (backupBusy) return@rememberLauncherForActivityResult
             backupBusy = true
             backupScope.launch(Dispatchers.IO) {
-                backupMsg = try {
+                backupMsgOk = try {
                     val name = uri.lastPathSegment?.substringAfterLast('/') ?: "imported.zip"
-                    appContext.contentResolver.openInputStream(uri)?.use { ins ->
+                    val imported = appContext.contentResolver.openInputStream(uri)?.use { ins ->
                         val f = BackupManager.import(instance, ins, name)
                         t("已导入：%s", f.name)
-                    } ?: t("导入失败：无法读取文件")
+                    }
+                    if (imported == null) {
+                        // 打不开流：明确失败（原来是「导入失败：无法读取文件」混在成功分支里返回）
+                        backupMsg = t("导入失败：无法读取文件")
+                        false
+                    } else {
+                        backupMsg = imported
+                        true
+                    }
                 } catch (e: Exception) {
-                    t("导入失败：%s", e.message)
+                    backupMsg = t("导入失败：%s", e.message)
+                    false
                 }
                 backupRefresh++
                 backupBusy = false
@@ -320,28 +341,56 @@ fun InstanceDetailScreen(
                             if (!backupBusy) {
                                 backupBusy = true
                                 backupScope.launch(Dispatchers.IO) {
-                                    backupMsg = try {
+                                    backupMsgOk = try {
                                         // 运行中备份：先让服务端把世界数据完整落盘（MC 标准做法），
                                         // 否则直接拷 region 文件可能备出损坏世界
                                         val wasRunning = state == ServerState.Running
-                                        if (wasRunning) {
-                                            viewModel.serverManager.sendCommand(instance, "save-off")
-                                            viewModel.serverManager.sendCommand(instance, "save-all flush")
-                                            delay(1500)
-                                        }
-                                        try {
-                                            val f = BackupManager.backup(instance)
-                                            t("已备份：%s", f.name)
-                                        } finally {
+                                        //
+                                        // ⚠️ 从 `save-off` 到 `save-on` 之间**必须**是
+                                        // NonCancellable 临界区。
+                                        //
+                                        // backupScope 是 rememberCoroutineScope：用户点完
+                                        // 「立即备份」立刻按返回/切页就会取消这个协程。
+                                        // 老实现里 `save-off` 与 `delay(1500)` 在 try 块**外面**，
+                                        // 取消一旦落在 delay 上，CancellationException 从 try
+                                        // 之前抛出 —— 内层 finally 根本没进入，`save-on` 永不
+                                        // 发送。后果是服务端从此不再自动存盘：这段时间崩溃或
+                                        // 被系统杀进程 = 上次 save 之后的所有进度丢失，而且界面
+                                        // 上完全看不出"自动保存被关了"（要重启服务端才恢复）。
+                                        //
+                                        // 这比"备份失败"严重得多，所以宁可让这段多跑 1.5 秒
+                                        // 也不允许它被取消打断；withContext(NonCancellable)
+                                        // 同时保证 finally 一定执行。
+                                        withContext(NonCancellable) {
                                             if (wasRunning) {
-                                                viewModel.serverManager.sendCommand(instance, "save-on")
+                                                viewModel.serverManager.sendCommand(instance, "save-off")
+                                                viewModel.serverManager.sendCommand(instance, "save-all flush")
+                                                delay(1500)
+                                            }
+                                            try {
+                                                val f = BackupManager.backup(instance)
+                                                backupMsg = t("已备份：%s", f.name)
+                                                true
+                                            } finally {
+                                                // 无条件恢复自动保存：无论备份成功、失败还是
+                                                // 被取消，都不能让服务端停在 save-off 状态
+                                                if (wasRunning) {
+                                                    viewModel.serverManager.sendCommand(instance, "save-on")
+                                                }
                                             }
                                         }
+                                    } catch (e: kotlinx.coroutines.CancellationException) {
+                                        // 取消 ≠ 失败：不要把 "Job was cancelled" 当成
+                                        // 「备份失败」显示给用户（也避免吞掉取消信号）
+                                        backupMsg = t("备份已取消")
+                                        false
                                     } catch (e: Exception) {
-                                        t("备份失败：%s", e.message)
+                                        backupMsg = t("备份失败：%s", e.message)
+                                        false
+                                    } finally {
+                                        backupRefresh++
+                                        backupBusy = false
                                     }
-                                    backupRefresh++
-                                    backupBusy = false
                                 }
                             }
                         }
@@ -383,6 +432,7 @@ fun InstanceDetailScreen(
                             backups = backups,
                             busy = backupBusy,
                             message = backupMsg,
+                            messageOk = backupMsgOk,
                             autoBackup = instance.autoBackup,
                             onAutoBackup = { viewModel.setInstanceAutoBackup(instance, it) },
                             onBackup = doBackup,
@@ -403,6 +453,7 @@ fun InstanceDetailScreen(
                                     state == ServerState.AcceptingEula
                                 ) {
                                     backupMsg = t("请先停止服务端再恢复备份")
+                                    backupMsgOk = null   // 中性提醒：不是错误，别染成红色
                                 } else {
                                     restoreTarget = f
                                 }
@@ -440,7 +491,8 @@ fun InstanceDetailScreen(
                         val f = target
                         deleteTarget = null
                         BackupManager.delete(f)
-                        backupMsg = "已删除备份：${f.name.removeSuffix(".zip")}"
+                        backupMsg = t("已删除备份：%s", f.name.removeSuffix(".zip"))
+                        backupMsgOk = true
                         backupRefresh++
                     }
                 ) { Text(t("删除"), color = MaterialTheme.colorScheme.error) }
@@ -469,15 +521,18 @@ fun InstanceDetailScreen(
                         // 轻则备份里混进半截 tmp 内容，重则两边互相删对方的中间目录。
                         if (backupBusy) {
                             backupMsg = t("有其它备份任务正在进行，请稍后再恢复")
+                            backupMsgOk = null   // 中性提醒
                             return@TextButton
                         }
                         backupBusy = true
                         backupScope.launch(Dispatchers.IO) {
-                            backupMsg = try {
+                            backupMsgOk = try {
                                 BackupManager.restore(instance, f)
-                                t("已恢复：%s", f.name)
+                                backupMsg = t("已恢复：%s", f.name)
+                                true
                             } catch (e: Exception) {
-                                t("恢复失败：%s", e.message)
+                                backupMsg = t("恢复失败：%s", e.message)
+                                false
                             }
                             backupRefresh++
                             backupBusy = false

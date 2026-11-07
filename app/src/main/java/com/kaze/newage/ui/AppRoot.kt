@@ -1,6 +1,8 @@
 package com.kaze.newage.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -74,6 +76,7 @@ import com.kaze.newage.core.update.UpdateChecker
 import com.kaze.newage.core.update.UpdateInstaller
 import com.kaze.newage.ui.components.AppBackground
 import com.kaze.newage.ui.components.BackdropLayer
+import com.kaze.newage.ui.components.M3ELinearProgress
 import com.kaze.newage.ui.screens.AddonsScreen
 import com.kaze.newage.ui.screens.AiScreen
 import com.kaze.newage.ui.screens.AiSettingsScreen
@@ -385,12 +388,12 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                             // 才退回不确定的滚动条 —— 一直转圈会让人以为卡死了
                             val percent = updateDownloading?.progress ?: 0f
                             if (percent > 0f) {
-                                LinearProgressIndicator(
-                                    progress = { percent },
+                                M3ELinearProgress(
+                                    progress = percent,
                                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                                 )
                             } else {
-                                LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+                                M3ELinearProgress(progress = null, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
                             }
                         }
                     }
@@ -459,13 +462,17 @@ private fun LiquidGlassNavBar(
     val pillShape = CircleShape
     // 玻璃链只属于液态玻璃主题；M3 主题底栏保持原样式（不透明表面板，不参与模糊映射）
     val glassActive = isGlass && blurEnabled
-    // 底栏背景：玻璃主题=极淡磨砂（自研 RenderEffect 模糊成型）；M3 主题=50% 透光表面
-    // （普通黑/AMOLED 纯黑两种深色样式统一起效：滚动内容可从底栏透出）
-    val containerColor = if (isGlass) {
-        // 0.12 极淡表面：折射与模糊主导"液态"观感，磨砂太厚会盖住折射弯曲
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.12f)
-    } else {
-        MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f)
+    // Miuix（HyperOS）：底栏是一块**实心**的浮起胶囊——白底（深色下 #1C1C1E）、
+    // 12% 不透明容差、0.5dp 描边、几乎没有投影。原来 M3 的 50% 半透明底在灰白分组底上
+    // 会透出下面的卡片边线，HyperOS 的底栏是完全遮住内容的。
+    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
+    val containerColor = when {
+        isGlass -> {
+            // 0.12 极淡表面：折射与模糊主导"液态"观感，磨砂太厚会盖住折射弯曲
+            MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.12f)
+        }
+        isMiuix -> MaterialTheme.colorScheme.surface
+        else -> MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f)
     }
 
     Box(
@@ -477,9 +484,18 @@ private fun LiquidGlassNavBar(
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(64.dp)
-                .shadow(10.dp, pillShape, clip = false)
+                // HyperOS 的底栏略矮（56dp），选中项用一块浅蓝圆角底而不是只有变色图标
+                .height(if (isMiuix) 56.dp else 64.dp)
+                .shadow(if (isMiuix) 6.dp else 10.dp, pillShape, clip = false)
                 .clip(pillShape)
+                .then(
+                    if (isMiuix) {
+                        Modifier.border(
+                            BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                            pillShape,
+                        )
+                    } else Modifier
+                )
         ) {
             // 层①：玻璃背景——软件模糊（vivo 唯一生效路径）+ Kyant0 折射透镜在外
             Box(
@@ -518,7 +534,14 @@ private fun LiquidGlassNavBar(
                         Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .clip(RoundedCornerShape(20.dp))
+                            // HyperOS 的选中项是**整块浅蓝圆角**（primaryContainer），
+                            // 只有图标变色是 Material 的做法，两者的辨识度差别很大。
+                            .clip(RoundedCornerShape(if (isMiuix) 16.dp else 20.dp))
+                            .then(
+                                if (isMiuix && selected) {
+                                    Modifier.background(MaterialTheme.colorScheme.primaryContainer)
+                                } else Modifier
+                            )
                             .clickable { onNavigate(dest) },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(1.dp, Alignment.CenterVertically),
@@ -526,15 +549,27 @@ private fun LiquidGlassNavBar(
                         Icon(
                             if (selected) dest.iconSelected else dest.icon,
                             contentDescription = dest.label,
-                            modifier = Modifier.size(22.dp),
-                            tint = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(if (isMiuix) 20.dp else 22.dp),
+                            tint = if (isMiuix) {
+                                if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurface
+                            } else if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
                         )
                         Text(
                             dest.label,
                             fontSize = 11.sp,
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (isMiuix) {
+                                if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            } else if (selected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

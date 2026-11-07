@@ -120,7 +120,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                             if (mode != host.themeMode()) {
                                 host.setThemeMode(mode)
                             } else {
-                                host.toast("已经是${mode.label}")
+                                host.toast(t("已经是%s", mode.label))
                             }
                         }
                     },
@@ -287,7 +287,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                         val mb = MemoryLimits.clamp(v.toInt())
                         host.vm.setInstanceMemory(inst, mb)
                         memLabel.text = "$mb MB"
-                        host.toast("内存改为 $mb MB，重启生效")
+                        host.toast(t("内存改为 %s MB，重启生效", mb))
                     }
                 })
                 addView(
@@ -313,7 +313,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 ) { index ->
                     val major = listOf(8, 17, 21, 25)[index]
                     host.vm.setInstanceJava(inst, major)
-                    host.toast("Java $major，重启生效")
+                    host.toast(t("Java %s，重启生效", major))
                     renderInstance()
                 }
             }),
@@ -540,7 +540,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                                 .apply { setPadding(dp(6f), 0, 0, 0) },
                         ) {
                             host.vm.uninstallJava(major)
-                            host.toast("正在卸载 Java $major")
+                            host.toast(t("正在卸载 Java %s", major))
                             scheduleRebuild(800L)
                         },
                     )
@@ -564,7 +564,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                             .apply { setPadding(dp(6f), 0, 0, 0) },
                     ) {
                         host.vm.installJava(major)
-                        host.toast("开始安装 Java $major")
+                        host.toast(t("开始安装 Java %s", major))
                         scheduleRebuild(1200L)
                     },
                 )

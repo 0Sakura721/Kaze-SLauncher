@@ -8,6 +8,7 @@ import android.content.Context
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
@@ -49,11 +50,23 @@ class ServerGuardService : Service() {
             )
         }
         // ② 立即前台化（必须在 5 秒窗口内，且类型权限已由 manifest 提供）
+        //
+        // FOREGROUND_SERVICE_TYPE_SPECIAL_USE 是 API 34 才有的常量（值是 1 shl 30）。
+        // 这里判断在**编译期不算错**（常量内联，minSdk 27 也能引用），但语义上只对
+        // 34+ 有意义：低于 34 时该位不在 `ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST`
+        // 的认识范围内，传上去会被忽略。所以显式按版本分支，别让"27 上也在用 34 的常量"
+        // 变成靠运气的事（lint: InlinedApi 指的就是这条）。
+        val fgsType = if (Build.VERSION.SDK_INT >= 34) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        } else {
+            // 34 以下：由 manifest 的 foregroundServiceType 决定，传 0 即「按清单走」
+            0
+        }
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
             buildNotification("Kaze SLauncher", "服务端运行中"),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            fgsType,
         )
         // ③ 部分唤醒锁（manifest 的 WAKE_LOCK 权限即为此声明）
         acquireWakeLock()

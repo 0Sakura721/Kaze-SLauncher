@@ -298,15 +298,18 @@ fun Context.chevron(color: Int = ShellTheme.current.ink3): View {
             )
         }
 
+        /** 复用的 Path：onDraw 每帧都会被调用，在里面 new Path() 等于每帧一次分配 */
+        private val arrowPath = android.graphics.Path()
+
         override fun onDraw(canvas: android.graphics.Canvas) {
             val w = width.toFloat()
             val h = height.toFloat()
-            val path = android.graphics.Path().apply {
-                moveTo(w * 0.36f, h * 0.26f)
-                lineTo(w * 0.64f, h * 0.5f)
-                lineTo(w * 0.36f, h * 0.74f)
-            }
-            canvas.drawPath(path, p)
+            // 复用同一个 Path 并 reset，避免每帧分配（lint: DrawAllocation）
+            arrowPath.reset()
+            arrowPath.moveTo(w * 0.36f, h * 0.26f)
+            arrowPath.lineTo(w * 0.64f, h * 0.5f)
+            arrowPath.lineTo(w * 0.36f, h * 0.74f)
+            canvas.drawPath(arrowPath, p)
         }
     }
 }

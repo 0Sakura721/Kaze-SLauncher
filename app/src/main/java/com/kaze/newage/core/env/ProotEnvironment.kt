@@ -516,9 +516,19 @@ class ProotEnvironment(
             // 之后每一次部署都会走"没抢到锁"分支，白等 15 分钟才超时，
             // 环境再也部署不起来（只能杀进程）。所以取消路径必须自己把标志放掉。
             //
-            // 注意区分两种身份：走到这里说明**这次调用没有拿到锁**，等待期间并不持有它；
-            // 但等待结束时若抢到了锁（下面的 CAS 成功），就必须由这条 finally 负责释放。
-            var reachedTail = false
+            // 注意区分两种身份：走到这里说明**这次调用最初没有拿到锁**，等待期间并不持有它。
+            //
+            // ownsLock：**本协程现在是否真的持有部署锁**（只有 CAS 成功才置 true）。
+            // 旧实现用的是 `reachedTail`，两个分支都反了：
+            //   - reachedTail=true（已抢到锁、正要进公共尾段）时 finally 什么都不做 ——
+            //     若在尾段被取消，锁永久停在 true，后续每次部署都要白等 15 分钟；
+            //   - reachedTail=false（**没有**抢到锁）时 finally 执行
+            //     isSetupRunning.set(false) —— 把**别人正在持有的锁**放掉。
+            //     后果：等待方超时返回的那一刻，第三次 setup() 立刻能 CAS 成功，
+            //     两套部署同时往同一个 rootfsDir 解压/apt-get，彼此删掉对方的目录，
+            //     最终两边都坏，用户只看到"apt 初始化失败"。
+            var ownsLock = false
+            var enteringTail = false
             try {
                 val deadline = System.currentTimeMillis() + 900_000
                 // timedOut 只在「deadline 真的到期」时置位。
@@ -550,14 +560,13 @@ class ProotEnvironment(
                     onProgress(0f, "等待并发部署完成…")
                     return@withContext
                 }
-                // 抢到锁了就往下走公共尾段（它自己会负责释放标志；被取消时那条路径由
-                // finally 兜底，见下）
-                reachedTail = true
+                // 抢到了：标记持有，然后直接落到公共尾段（尾段每条退出路径都会释放）
+                ownsLock = true
+                enteringTail = true
             } finally {
-                // 只兜"没能走到公共尾段"的取消/异常路径：此时锁是我们抢到的，
-                // 却再也没有别人会去释放它 —— 不还回去，后续每次部署都要白等 15 分钟。
-                // 置 false 让公共尾段自己决定什么时候还（它每条退出路径都还）。
-                if (reachedTail) reachedTail = false else isSetupRunning.set(false)
+                // 只有当「确实持有锁、却**不会**进入公共尾段」时（等待中被取消/抛异常）
+                // 才在这里归还。其余情况一律不许动标志 —— 动一下就是放掉别人的锁。
+                if (ownsLock && !enteringTail) isSetupRunning.set(false)
             }
         }
         if (isReady) {
@@ -777,6 +786,15 @@ class ProotEnvironment(
     fun diagnosticsFile(): File =
         File(context.getExternalFilesDir(null) ?: context.filesDir, "diagnostics.txt")
 
+    /**
+     * 自检：把环境状态写成一份文本，供"设置 → 诊断日志"与 adb 排查。
+     *
+     * 里面**刻意**用反射读 `android.os.SELinux`（@hide API）：自检的目的就是
+     * 在真机上定位「SELinux 域是否禁止 execve rootfs 里的二进制」这类问题，
+     * 拿不到就回落到 null，不影响其余部分。因此这里抑制 lint 的 PrivateApi 告警
+     * （只看这一次，不全局关）。
+     */
+    @android.annotation.SuppressLint("PrivateApi")
     suspend fun dumpDiagnostics(): File = withContext(Dispatchers.IO) {
         val sb = StringBuilder()
         fun line(s: String) = sb.appendLine(s)

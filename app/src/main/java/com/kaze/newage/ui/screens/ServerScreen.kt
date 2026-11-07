@@ -70,6 +70,7 @@ import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.ForceStopConfirmDialog
 import com.kaze.newage.ui.components.M3EConnectedList
+import com.kaze.newage.ui.components.M3ELinearProgress
 import com.kaze.newage.ui.components.M3EListItem
 import com.kaze.newage.ui.components.M3EScreenHeader
 import com.kaze.newage.ui.components.M3ESegmentedRow
@@ -319,12 +320,12 @@ fun ServerScreen(
                     .padding(bottom = M3Spacing.betweenGroups),
             ) {
                 if (st.fraction >= 0f) {
-                    LinearProgressIndicator(
-                        progress = { st.fraction },
+                    M3ELinearProgress(
+                        progress = st.fraction,
                         modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    M3ELinearProgress(progress = null, modifier = Modifier.fillMaxWidth())
                 }
                 Text(
                     st.detail,

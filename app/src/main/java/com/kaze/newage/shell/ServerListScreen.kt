@@ -375,7 +375,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
         sheet.add(c.splitter())
         sheet.add(c.settingRow(t("删除实例"), t("世界与目录保留在磁盘上"), c.chevron(ShellTheme.current.danger)) {
             sheet.dismiss()
-            host.confirmDelete(inst) { host.toast("已删除 ${inst.name}") }
+            host.confirmDelete(inst) { host.toast(t("已删除 %s", inst.name)) }
         })
         sheet.footerText(t("关闭"), ShellTheme.current.ink3) { sheet.dismiss() }
         sheet.show()
@@ -416,7 +416,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 importProgress.fraction = 1f
                 importLabel.visibility = View.VISIBLE
                 importLabel.text = t("导入完成 · %s", progress.name)
-                host.toast("已导入 ${progress.name}")
+                host.toast(t("已导入 %s", progress.name))
                 scheduleImportReset(progress, 2500L)
             }
             is ImportJarProgress.Failed -> {
@@ -425,7 +425,7 @@ class ServerListScreen(private val host: ShellHost) : ScreenRoot(host.context) {
                 importLabel.visibility = View.VISIBLE
                 importLabel.setTextColor(ShellTheme.current.danger)
                 importLabel.text = t("导入失败 · %s", progress.reason)
-                host.toast("导入失败：${progress.reason}", error = true)
+                host.toast(t("导入失败：%s", progress.reason), error = true)
                 // 失败给长一点让用户看清原因，然后同样清回 Idle
                 scheduleImportReset(progress, 6000L)
             }

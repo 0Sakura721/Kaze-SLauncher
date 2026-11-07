@@ -86,9 +86,29 @@ fun ThemeBackdrop(modifier: Modifier = Modifier) {
         // View 构建，Compose 的背板根本不存在。分支留着只为 when 穷尽 ——
         // 万一将来有人把 SHELL 接进 Compose，回退到 M3 背板也比崩溃好。
         AppThemeMode.SHELL -> ClearBackdrop(modifier)
-        // Miuix：沿用 M3 背板（分组灰底/纯黑已由 ColorScheme 表达）
-        AppThemeMode.MIUIX -> ClearBackdrop(modifier)
+        // Miuix：HyperOS 的分组灰底是**纯色**，不是渐变
+        AppThemeMode.MIUIX -> MiuixBackdrop(modifier)
     }
+}
+
+/**
+ * MIUIX（HyperOS）的背景层。
+ *
+ * HyperOS 的设置页底色是**一块纯色**：浅色 #F2F2F7（分组灰）、深色 #000（纯黑）。
+ * 原来这里复用了 M3 的 ClearBackdrop（#F7F9FC → #EEF1F7 的纵向渐变），
+ * 淡蓝渐变叠在灰白卡片上会让「白卡 vs 灰底」的对比变浑——HyperOS 的分组感
+ * 全靠这一个平面的色差，渐变把它抹掉了。
+ */
+@Composable
+private fun MiuixBackdrop(modifier: Modifier = Modifier) {
+    val dark = LocalDarkTheme.current
+    val amoled = LocalAmoledDark.current
+    val color = when {
+        amoled -> Color.Black
+        dark -> MiuixTheme.BackgroundDark
+        else -> MiuixTheme.BackgroundLight
+    }
+    Box(modifier.background(color))
 }
 
 /** CLEAR：轻微纵向渐变，保持克制；AMOLED 纯黑时全黑 */

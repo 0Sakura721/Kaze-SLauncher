@@ -60,6 +60,7 @@ import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.ui.AppViewModel
 import com.kaze.newage.ui.components.M3EScreenHeader
 import com.kaze.newage.ui.components.M3EStatusChip
+import com.kaze.newage.ui.components.M3ESwitch
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
 import com.kaze.newage.core.i18n.t
@@ -610,7 +611,7 @@ private fun SkillsSection(viewModel: AppViewModel) {
                         tint = MaterialTheme.colorScheme.error,
                     )
                 }
-                Switch(
+                M3ESwitch(
                     checked = enabled,
                     onCheckedChange = { viewModel.setSkillEnabled(skill.id, it) },
                 )

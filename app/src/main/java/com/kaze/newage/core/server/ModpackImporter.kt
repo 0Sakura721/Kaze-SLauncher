@@ -322,13 +322,48 @@ object ModpackImporter {
     fun resolveRemoteDest(root: File, path: String): File? {
         val clean = path.replace('\\', '/').trimStart('/')
         if (clean.isEmpty()) return null
-        // 逐段检查：不允许任何 `..` 段（哪怕最终 canonical 恰好落在目录内）
-        if (clean.split('/').any { it == ".." }) return null
-        val dest = File(root, clean)
+        // `.` 段在整合包里很常见（`./mods/x.jar`），它本身不改变落点，直接丢掉；
+        // 而 `..` 会跳出目录，必须整条拒绝。
+        val segments = clean.split('/').filter { it.isNotEmpty() && it != "." }
+        if (segments.isEmpty()) return null
+        if (segments.any { it == ".." }) return null
+        // 文件名非法字符（`< > : " | ? *` 与控制字符）：Android 上它们合法，会生成
+        // 名叫 `C:` 的怪文件；Windows 上 `getCanonicalPath()` 直接抛 IOException，
+        // 而下面的 runCatching 会把这个异常**误判成"越界"**静默返回 null ——
+        // 于是同一个清单在真机（Android）与开发机（Windows 单测/CI）行为不一致。
+        // 统一替换成 `_`：仍然落在实例目录内，且不再依赖「抛异常恰好被吞」的隐式行为。
+        val safePath = segments.joinToString("/") { seg -> sanitizeSegment(seg) }
+        if (safePath.isEmpty()) return null
+        val dest = File(root, safePath)
         val ok = runCatching {
             dest.canonicalPath.startsWith(root.canonicalPath + File.separator)
         }.getOrDefault(false)
         return dest.takeIf { ok }
+    }
+
+    /** Windows/Android 双方都不接受的文件名字符（含 NTFS 备用数据流 `a:b` 与控制字符） */
+    private val ILLEGAL_FILE_CHARS = charArrayOf('<', '>', ':', '"', '|', '?', '*')
+
+    /** Windows 保留设备名：当**文件名或目录名**用时创建会失败（`CON`、`NUL`、`COM1`…） */
+    private val RESERVED_NAMES = setOf(
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    )
+
+    /**
+     * 把单个路径段规整成跨平台安全的名字。
+     *
+     * 注意 Windows 还有两条容易漏的规则：段尾不能是空格或点（`a.` / `a ` 会被系统
+     * 自动剥掉，导致"写进去了但文件名叫成了另一个"），以及保留设备名不能作为文件名。
+     */
+    private fun sanitizeSegment(seg: String): String {
+        val replaced = seg.map { c -> if (c in ILLEGAL_FILE_CHARS || c.code < 0x20) '_' else c }.joinToString("")
+        val trimmed = replaced.trimEnd(' ', '.')
+        if (trimmed.isEmpty()) return "_"
+        // 保留名判断只看点之前的部分（`NUL.txt` 同样是设备）
+        val stem = trimmed.substringBefore('.').uppercase()
+        return if (stem in RESERVED_NAMES) "_$trimmed" else trimmed
     }
 
     /** 把 [from] 下的子项移到 [to]（同名已存在时**保留 [to] 的**，不覆盖用户已放的文件） */

@@ -141,7 +141,17 @@ class DefaultServerManager(
          * 这一轮进程退出是否已经处理过（见 [handleExit] 的幂等闸门）。
          * 每次 [launchServer] 拉起新进程时复位。
          */
-        var exitHandled = false
+        /**
+         * 退出是否已被处理。
+         *
+         * **必须是原子的 CAS**：`if (x) return; x = true` 是 check-then-act，
+         * 而盯同一个进程的有两条线程（`launchServer` 的 waitJob 与 init 的每秒
+         * 巡检），`proc.waitFor()` 返回与巡检判定 `!isAlive` 几乎同时发生，
+         * 两线程都可能读到 false 而一起通过闸门。那会把一次崩溃处理两遍：
+         * restartCount 多算一次、日志重复、autoBackupAfterStop 打包两次大世界，
+         * 严重时并发起两个 java 进程共写同一个 world 目录。
+         */
+        val exitHandled = java.util.concurrent.atomic.AtomicBoolean(false)
 
         /**
          * 排定中的自动重启（崩溃后 `delay(3000)` 再拉起）。
@@ -573,7 +583,7 @@ class DefaultServerManager(
             ?: throw RuntimeException("无法启动 proot 进程（环境异常）")
         slot.process = proc
         // 新进程 = 新的一轮生命周期：幂等闸门必须复位，否则第二次退出会被当成"已处理"而漏掉
-        slot.exitHandled = false
+        slot.exitHandled.set(false)
         // 上一轮的「10s 强杀」若还挂着，必须取消：它捕获的是旧进程，留着只会误杀本次新进程
         slot.stopTimeoutJob?.cancel()
         slot.stopTimeoutJob = null
@@ -761,8 +771,9 @@ class DefaultServerManager(
      * "服务器进程退出"这类日志重复、甚至并发起两个 [start]。
      */
     private fun handleExit(slot: RuntimeSlot) {
-        if (slot.exitHandled) return
-        slot.exitHandled = true
+        // compareAndSet：只有真正把 false 翻成 true 的那一次调用才继续，
+        // 另一条线程立刻返回（详见 RuntimeSlot.exitHandled 的说明）
+        if (!slot.exitHandled.compareAndSet(false, true)) return
         if (slot.manualStop) {
             autoBackupAfterStop(slot)
             finalizeStop(slot)

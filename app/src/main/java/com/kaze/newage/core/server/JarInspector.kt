@@ -239,7 +239,17 @@ object JarInspector {
         return cls?.let { classMajorOf(zip, it) } ?: 0
     }
 
-    /** MC 版本 → 官方要求的 Java 大版本（1.20.5+ 要 21，1.18–1.20.4 要 17，更早 8） */
+    /**
+     * MC 版本 → 官方要求的 Java 大版本。
+     *
+     * **规则必须与 `ServerInstance.infer` 一致**：同一个 MC 版本号，导入路径（本函数）
+     * 与创建路径（`infer`）应当给出同一个 Java。此前 `MC_VERSION = Regex("1\\.\\d+…")`
+     * 没锚定，`"26.1.1"` 会在偏移 3 处匹配到子串 `"1.1"` → major=1/minor=1 → 落到
+     * `else -> 8`，于是导入的 26.x 服务端被配成 Java 8，一启动就
+     * `UnsupportedClassVersionError`；而同版本号在 `infer` 里得到 25，两处自相矛盾。
+     *
+     * 现在正则按**数字边界**锚定（`(?<!\d)…(?!\d)`），并把 24+ 的新命名单独分档。
+     */
     fun javaForMc(mcVersion: String): Int {
         val m = MC_VERSION.find(mcVersion) ?: return 17
         val parts = m.value.split('.').mapNotNull { it.toIntOrNull() }
@@ -248,6 +258,9 @@ object JarInspector {
         val minor = parts[1]
         val patch = parts.getOrNull(2) ?: 0
         return when {
+            // 24.x / 25.x / 26.x：MC 从 2025 起改用年份式版本号，26.x 需要 Java 25
+            major >= 26 -> 25
+            major >= 24 -> 21
             major > 1 -> 21
             minor >= 21 -> 21          // 1.21+
             minor >= 20 && patch >= 5 -> 21  // 1.20.5+
@@ -275,9 +288,18 @@ object JarInspector {
     }.getOrDefault("")
 
     private val META_ID = Regex(""""id"\s*:\s*"([^"]+)"""")
-    private val MC_VERSION = Regex("""1\.\d+(?:\.\d+)?""")
-    private val MC_VERSION_IN_MF = Regex("""(?:Implementation-Version|Specification-Version):\s*.*?(1\.\d+(?:\.\d+)?)""",
-        RegexOption.IGNORE_CASE)
+    /**
+     * MC 版本号：`1.20.5` 这类老命名，以及 `24.x` / `25.x` / `26.1.1` 这类新命名。
+     *
+     * 两端用数字边界锚定 —— 老写法 `1\.\d+(?:\.\d+)?` 没锚定，`"26.1.1"` 会从偏移 3
+     * 匹配出子串 `"1.1"`，把新版本号解析成 "1.1"（进而推出 Java 8）。
+     * `(?<!\d)` / `(?!\d)` 保证不会从更长的数字串中间截取。
+     */
+    private val MC_VERSION = Regex("""(?<!\d)\d{1,2}\.\d{1,2}(?:\.\d{1,2})?(?!\d)""")
+    private val MC_VERSION_IN_MF = Regex(
+        """(?:Implementation-Version|Specification-Version):\s*.*?(?<!\d)(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)(?!\d)""",
+        RegexOption.IGNORE_CASE,
+    )
     private val MF_MAIN = Regex("""(?mi)^Main-Class:\s*(.+)$""")
     private val MF_TITLE = Regex("""(?mi)^Implementation-Title:\s*(.+)$""")
 }

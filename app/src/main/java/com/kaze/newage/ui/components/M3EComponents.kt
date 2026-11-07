@@ -1,8 +1,10 @@
 package com.kaze.newage.ui.components
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Indication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -34,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -48,6 +52,7 @@ import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.M3Motion
 import com.kaze.newage.ui.theme.M3Shape
 import com.kaze.newage.ui.theme.M3Spacing
+import com.kaze.newage.ui.theme.MiuixSpec
 
 /*
  * ══════════════════════════════════════════════════════════════════════════════
@@ -112,7 +117,10 @@ fun M3ECard(
         else -> null
     }
     val elevation = if (!isMiuix && variant == M3ECardVariant.Elevated) 1.dp else 0.dp
-    val cardShape = if (isMiuix) RoundedCornerShape(18.dp) else M3Shape.largeIncreased
+    // Miuix 的卡片圆角取它的真实 token（CardDefaults.CornerRadius = 16dp），不再用 18dp
+    // 这种「看起来差不多」的值 —— 同一屏里 Miuix 自带组件与 M3E 卡片必须同圆角，
+    // 否则分组卡与行内控件会差 2dp，眼睛看得出来。
+    val cardShape = if (isMiuix) RoundedCornerShape(MiuixSpec.cardCorner) else M3Shape.largeIncreased
 
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -205,11 +213,26 @@ fun M3EListItem(
     val scheme = MaterialTheme.colorScheme
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
+    // MIUIX 用 HyperOS 的矩形高亮代替缩放反馈，所以缩放恒为 1f —— 但 targetValue
+    // 也必须一起改：老写法只把 graphicsLayer 里的 scale 覆盖成 1f，而
+    // animateFloatAsState 仍在每次按下时跑一个弹簧动画，等于每按一行白算一帧
+    // （列表长时是可见的掉帧）。
     val scale by animateFloatAsState(
-        targetValue = if (pressed) M3Motion.PRESS_SCALE else 1f,
+        targetValue = if (isMiuix) 1f else if (pressed) M3Motion.PRESS_SCALE else 1f,
         animationSpec = M3Motion.fastSpatial(),
         label = "item-press",
     )
+    // Miuix：行要么是「分组卡里的一条」（平角，由外层卡片剪裁 + 分隔线），
+    // 要么是独立卡片（16dp 连续圆角）。这里用 RectangleShape 作为「平角」的哨兵，
+    // 传进来的是平角就保持平角，否则统一归到 HyperOS 的 16dp。
+    val resolvedShape = if (!isMiuix) {
+        shape
+    } else if (shape == RectangleShape) {
+        RectangleShape
+    } else {
+        androidx.compose.foundation.shape.RoundedCornerShape(MiuixSpec.cardCorner)
+    }
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -218,15 +241,15 @@ fun M3EListItem(
                 if (onClick != null) {
                     Modifier.clickable(
                         interactionSource = interaction,
-                        indication = ripple(),
+                        indication = if (isMiuix) themedIndication() else ripple(),
                         onClick = onClick,
                     )
                 } else Modifier
             ),
-        shape = shape,
+        shape = resolvedShape,
         // Miuix（HyperOS 观感）：列表行坐在白卡片上，行底=卡片色；高亮用浅蓝主容器
         // （secondaryContainer 在 Miuix 灰白体系里偏灰，高亮辨识度不足）。
-        color = if (LocalAppTheme.current == AppThemeMode.MIUIX) {
+        color = if (isMiuix) {
             if (highlighted) scheme.primaryContainer else scheme.surface
         } else if (highlighted) {
             scheme.secondaryContainer
@@ -237,7 +260,7 @@ fun M3EListItem(
         // 沿用 onSecondaryContainer（灰）会变成「浅蓝底 + 灰字」，对比度不足、
         // 字看起来发闷（M3 那边底是 secondaryContainer，配 onSecondaryContainer 才对）。
         contentColor = when {
-            LocalAppTheme.current == AppThemeMode.MIUIX ->
+            isMiuix ->
                 if (highlighted) scheme.onPrimaryContainer else scheme.onSurface
             highlighted -> scheme.onSecondaryContainer
             else -> scheme.onSurface
@@ -249,21 +272,36 @@ fun M3EListItem(
                 // 用 heightIn 而不是 height：supporting 允许 2 行，固定 72dp 会把第二行压掉，
                 // 出现「Java 21 · 4096 M…」这种断词（真机截图实锤）。官方 72dp 是「标题+一行正文」的规格，
                 // 需要两行时让行高自然增长，而不是裁掉内容。
-                .heightIn(min = 72.dp)
-                .padding(horizontal = 16.dp),
+                //
+                // Miuix：HyperOS 的行高是 heightIn(min = 56.dp)（BasicComponent 实测值），
+                // 不是 M3 Expressive 的 72dp —— 那一档在 HyperOS 观感里显得松散。
+                .heightIn(min = if (isMiuix) MiuixSpec.rowMinHeight else 72.dp)
+                .padding(horizontal = if (isMiuix) MiuixSpec.rowPadding else 16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             if (leadingIcon != null) {
                 if (iconContainer != null) {
+                    // Miuix：HyperOS 用 32dp 圆角方块（8dp 圆角），不是 M3 的 40dp 正圆。
+                    val box = if (isMiuix) MiuixSpec.iconBox else 40.dp
+                    val boxShape = if (isMiuix) {
+                        androidx.compose.foundation.shape.RoundedCornerShape(MiuixSpec.iconBoxCorner)
+                    } else {
+                        CircleShape
+                    }
                     Box(
                         Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
+                            .size(box)
+                            .clip(boxShape)
                             .background(iconContainer),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(leadingIcon, contentDescription = null, tint = scheme.onPrimaryContainer, modifier = Modifier.size(22.dp))
+                        Icon(
+                            leadingIcon,
+                            contentDescription = null,
+                            tint = if (isMiuix) scheme.onSurface else scheme.onPrimaryContainer,
+                            modifier = Modifier.size(if (isMiuix) 18.dp else 22.dp),
+                        )
                     }
                 } else {
                     Icon(
@@ -292,10 +330,15 @@ fun M3EListItem(
                     Text(
                         supporting,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = if (highlighted) {
-                            scheme.onSecondaryContainer.copy(alpha = 0.8f)
-                        } else {
-                            scheme.onSurfaceVariant
+                        // 辅助文字的色角色必须跟着底色走：
+                        //  - MIUIX 高亮底 = primaryContainer（浅蓝/深蓝）→ 用 onPrimaryContainer；
+                        //    原来这里漏了 MIUIX 分支，浅蓝底上压 onSecondaryContainer 的灰字，
+                        //    深色下更是「深蓝底 + 灰字」，几乎读不出来（截图核对时发现）。
+                        //  - M3 高亮底 = secondaryContainer → 用 onSecondaryContainer。
+                        color = when {
+                            isMiuix && highlighted -> scheme.onPrimaryContainer.copy(alpha = 0.8f)
+                            highlighted -> scheme.onSecondaryContainer.copy(alpha = 0.8f)
+                            else -> scheme.onSurfaceVariant
                         },
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -311,8 +354,32 @@ fun M3EListItem(
 val M3EConnectedListGap: Dp = 3.dp
 
 /**
- * 把若干列表项画成「一串」：首尾 28dp、相邻内侧 8dp、项间 3dp。
- * 官方 Expressive 列表样式。
+ * 主题感知的按压反馈。
+ *
+ * - M3 / GLASS / SHELL：Material 的圆形水波纹（`ripple()`）
+ * - MIUIX：HyperOS 的**矩形按压高亮**（整个行/卡范围内均匀加深，Miuix 的
+ *   `MiuixIndication` 就是这套，120ms 淡入淡出）—— 这是 HyperOS 观感里
+ *   最容易被认出来的触感细节，水波纹一眼就是 Material。
+ */
+@Composable
+fun themedIndication(): Indication {
+    val pressColor = MaterialTheme.colorScheme.onSurface
+    return if (LocalAppTheme.current == AppThemeMode.MIUIX) {
+        // 颜色必须显式给：MiuixIndication 的默认值是 Color.Black，
+        // 深色主题下黑色高亮压在黑底上等于没有反馈。
+        remember(pressColor) { top.yukonga.miuix.kmp.utils.MiuixIndication(pressColor) }
+    } else {
+        ripple()
+    }
+}
+
+/**
+ * 把若干列表项画成「一串」。
+ *
+ * - M3：官方 Expressive 相连列表（首尾 28dp、相邻内侧 8dp、项间 3dp）。
+ * - MIUIX：HyperOS 的**分组卡**——一个 16dp 圆角的白底容器，行与行之间用
+ *   一条左侧缩进的分隔线，行本身是平角。这是 HyperOS 设置页的标准形态，
+ *   与 M3 的「每行一张小卡」完全不同。
  */
 @Composable
 fun M3EConnectedList(
@@ -320,6 +387,34 @@ fun M3EConnectedList(
     modifier: Modifier = Modifier,
     item: @Composable (index: Int, shape: Shape) -> Unit,
 ) {
+    if (LocalAppTheme.current == AppThemeMode.MIUIX) {
+        val scheme = MaterialTheme.colorScheme
+        val cardShape = RoundedCornerShape(MiuixSpec.cardCorner)
+        Column(
+            modifier
+                .fillMaxWidth()
+                .clip(cardShape)
+                .background(scheme.surface)
+                .then(
+                    // 0.5dp 细描边：HyperOS 的白卡靠描边与灰底分层，不靠投影
+                    Modifier.border(BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = 0.6f)), cardShape)
+                ),
+        ) {
+            repeat(count) { i ->
+                item(i, RectangleShape)
+                if (i < count - 1) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = MiuixSpec.dividerInset)
+                            .height(0.5.dp)
+                            .background(scheme.outlineVariant.copy(alpha = 0.7f))
+                    )
+                }
+            }
+        }
+        return
+    }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(M3EConnectedListGap)) {
         repeat(count) { i ->
             val shape = when {
@@ -379,10 +474,15 @@ fun M3EScreenHeader(
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
+    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
     Row(
         modifier
             .fillMaxWidth()
-            .padding(horizontal = M3Spacing.screenMargin, vertical = 12.dp),
+            .padding(
+                horizontal = M3Spacing.screenMargin,
+                // HyperOS 的页头更紧凑：标题与首卡片之间不留 Expressive 那么大的呼吸
+                vertical = if (isMiuix) 10.dp else 12.dp,
+            ),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -390,8 +490,10 @@ fun M3EScreenHeader(
         Column(Modifier.weight(1f)) {
             Text(
                 title,
+                // MIUIX 下 headlineSmall 已被 miuixTypography() 改写为 HyperOS 的
+                // 20sp / 26sp / SemiBold（见 theme/MiuixTheme.kt），这里只需给出字重。
                 style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Medium,
+                fontWeight = if (isMiuix) FontWeight.SemiBold else FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -413,6 +515,8 @@ fun M3EScreenHeader(
 /**
  * 状态胶囊：小圆点 + 文案 + 容器色底。
  * 官方没有这个组件，但它是本应用的签名元素（服务端状态要一眼可见）。
+ *
+ * MIUIX：HyperOS 的标签是**小圆角方块**（6dp）+ 12% 同色底，不是全圆的 Material 胶囊。
  */
 @Composable
 fun M3EStatusChip(
@@ -421,14 +525,15 @@ fun M3EStatusChip(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
 ) {
+    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
     Surface(
         modifier = modifier,
-        shape = CircleShape,
-        color = color.copy(alpha = 0.16f),
+        shape = if (isMiuix) RoundedCornerShape(6.dp) else CircleShape,
+        color = color.copy(alpha = if (isMiuix) 0.12f else 0.16f),
         contentColor = color,
     ) {
         Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            Modifier.padding(horizontal = if (isMiuix) 8.dp else 10.dp, vertical = if (isMiuix) 3.dp else 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -473,8 +578,11 @@ fun M3EMetric(
 
 /**
  * 分段选择（segmented button）：Expressive 里常用的「一组互斥选项」。
- * 官方没有独立的 segmented token 表；这里按 connected button group 的规则实现：
- * 间隙 2dp、外角全圆、内角 8dp、选中用 secondaryContainer。
+ *
+ * - M3：官方 connected button group（间隙 2dp、外角全圆、内角 8dp、选中用 secondaryContainer）。
+ * - MIUIX：HyperOS 的分段控件是**一个胶囊轨道 + 一个白色滑块**——轨道整体是浅灰底
+ *   （surfaceContainerHigh），选中项浮起一块白底圆角，未选中项没有描边。这是它和
+ *   Material 分段按钮最容易分辨的差异（后者每一项都是独立带描边的按钮）。
  */
 @Composable
 fun <T> M3ESegmentedRow(
@@ -483,9 +591,69 @@ fun <T> M3ESegmentedRow(
     label: (T) -> String,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
-    height: Dp = 40.dp,
+    /**
+     * 轨道高度。默认值刻意留 null，表示"按主题取默认" —— `@Composable` 的默认参数
+     * 不能读 Compose 状态（`LocalAppTheme`），所以主题默认值只能在函数体内解析：
+     * MIUIX 用 `MiuixSpec.segmentedHeight`(32dp)，其它用 M3 的 40dp。
+     * 调用方显式传值时（弹窗里的 38/44dp）一律以传入为准，不覆盖。
+     */
+    height: Dp? = null,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
+    val resolvedHeight = height ?: if (isMiuix) MiuixSpec.segmentedHeight else 40.dp
+    if (isMiuix) {
+        // 用 resolvedHeight：老实现写死 MiuixSpec.segmentedHeight(32dp)，
+        // 6 个调用点里传 38dp / 44dp 的（弹窗内）会被**静默忽略** ——
+        // 于是 MIUIX 下这些弹窗的分段控件比 M3 主题矮 12dp、与旁边 44dp 的
+        // 控件基线错位。参数存在却无效，是典型的"改主题时忘了读参数"。
+        val trackHeight = resolvedHeight
+        val trackShape = RoundedCornerShape(trackHeight / 2)
+        // 轨道与滑块的明暗关系必须跟深浅方向一致：
+        //  - 浅色：轨道比页面底略深（#EBEBF0），选中项是**更亮的白**
+        //  - 深色：轨道比黑色页面底略亮（#1C1C1E），选中项是**更亮的 #2C2C2E**
+        // 直接写死「轨道=surfaceContainerHigh、滑块=surface」在深色下会反过来
+        // （选中项比轨道更黑，看着像"没选中"），截图核对时发现了这一点。
+        val dark = LocalDarkTheme.current
+        val trackColor = if (dark) scheme.surface else scheme.surfaceContainerHigh
+        val pillColor = if (dark) scheme.surfaceContainerHigh else scheme.surface
+        Row(
+            modifier
+                .fillMaxWidth()
+                .height(trackHeight)
+                .clip(trackShape)
+                .background(trackColor)
+                .padding(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            options.forEach { option ->
+                val isSelected = option == selected
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape((trackHeight - 4.dp) / 2))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = themedIndication(),
+                        ) { onSelect(option) },
+                    shape = RoundedCornerShape((trackHeight - 4.dp) / 2),
+                    color = if (isSelected) pillColor else Color.Transparent,
+                    contentColor = if (isSelected) scheme.primary else scheme.onSurfaceVariant,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            label(option),
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        return
+    }
     Row(
         modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -494,15 +662,15 @@ fun <T> M3ESegmentedRow(
         options.forEachIndexed { i, option ->
             val isSelected = option == selected
             val shape = when {
-                options.size == 1 -> M3Shape.groupSingle(height.value)
-                i == 0 -> M3Shape.groupFirst(height.value)
-                i == options.lastIndex -> M3Shape.groupLast(height.value)
+                options.size == 1 -> M3Shape.groupSingle(resolvedHeight.value)
+                i == 0 -> M3Shape.groupFirst(resolvedHeight.value)
+                i == options.lastIndex -> M3Shape.groupLast(resolvedHeight.value)
                 else -> M3Shape.groupMiddle()
             }
             Surface(
                 modifier = Modifier
                     .weight(1f)
-                    .height(height)
+                    .height(resolvedHeight)
                     .clip(shape)
                     .clickable { onSelect(option) },
                 shape = shape,

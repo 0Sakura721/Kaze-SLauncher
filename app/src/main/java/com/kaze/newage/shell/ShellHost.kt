@@ -184,7 +184,7 @@ class ShellHost(
             toast(t("没有可启动的实例"))
             return
         }
-        toast("开始依次启动 ${todo.size} 个实例")
+        toast(t("开始依次启动 %s 个实例", todo.size))
         launchTracked {
             todo.forEach { inst ->
                 vm.startInstance(inst)
@@ -228,7 +228,7 @@ class ShellHost(
             } else {
                 vm.renameInstance(instance.id, name)
                 sheet.dismiss()
-                toast("已重命名为 $name")
+                toast(t("已重命名为 %s", name))
             }
         }, secondaryLabel = t("取消"), onSecondary = { sheet.dismiss() })
         sheet.show()
@@ -322,7 +322,7 @@ class ShellHost(
                     .setData(Uri.parse("package:${context.packageName}"))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             )
-        }.onFailure { toast("无法打开电池优化设置：${it.message}", error = true) }
+        }.onFailure { toast(t("无法打开电池优化设置：%s", it.message), error = true) }
     }
 
     fun openUrl(url: String) {

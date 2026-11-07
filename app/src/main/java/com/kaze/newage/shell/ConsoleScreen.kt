@@ -368,7 +368,8 @@ class ConsoleScreen(private val host: ShellHost) : ScreenRoot(host.context, scro
             else -> 10.5f
         }
         host.themePrefs.consoleFont = next
-        host.toast("字号 $next")
+        // 走 t()：字号是数字，但「字号」这个词要能翻译（英文用户此前看到的是中文 toast）
+        host.toast(t("字号 %s", next))
         renderedSeq = Long.MIN_VALUE
         renderLines(host.vm.consoleLines.value, forceFull = true)
     }

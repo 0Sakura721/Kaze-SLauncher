@@ -96,6 +96,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -111,10 +112,12 @@ import com.kaze.newage.ui.components.M3EListItem
 import com.kaze.newage.ui.components.M3EScreenColumn
 import com.kaze.newage.ui.components.M3EScreenHeader
 import com.kaze.newage.ui.components.M3ESegmentedRow
+import com.kaze.newage.ui.components.M3ESlider
 import com.kaze.newage.ui.components.M3EStatusChip
 import com.kaze.newage.ui.components.WavyLinearProgress
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.FgColorMode
+import com.kaze.newage.ui.theme.LocalAppTheme
 import com.kaze.newage.ui.theme.LocalDarkTheme
 import com.kaze.newage.ui.theme.M3Spacing
 import com.kaze.newage.ui.theme.parseSeedColor
@@ -151,19 +154,32 @@ internal fun GroupHeader(
     section: SettingsSection? = null,
     sectionOffsets: MutableMap<SettingsSection, Int>? = null,
 ) {
-    M3ECard(
-        modifier = modifier.then(
-            if (section != null && sectionOffsets != null) {
-                Modifier.onGloballyPositioned { coords ->
-                    // positionInParent 相对 M3EScreenColumn，不受滚动影响；
-                    // 与 columnTop 相加即得它在滚动内容里的绝对位置
-                    val v = coords.positionInParent().y.toInt()
-                    if (sectionOffsets[section] != v) sectionOffsets[section] = v
-                }
-            } else {
-                Modifier
+    val positioned = modifier.then(
+        if (section != null && sectionOffsets != null) {
+            Modifier.onGloballyPositioned { coords ->
+                // positionInParent 相对 M3EScreenColumn，不受滚动影响；
+                // 与 columnTop 相加即得它在滚动内容里的绝对位置
+                val v = coords.positionInParent().y.toInt()
+                if (sectionOffsets[section] != v) sectionOffsets[section] = v
             }
-        ),
+        } else {
+            Modifier
+        }
+    )
+
+    // MIUIX：HyperOS 的分区由**顶部分类条**表达，卡片外面再写一遍同名标题是冗余的
+    // （截图核对时 "外观" 同时出现在 chips 和卡片上方两处）。
+    //
+    // 但这里**不能直接 return**：GroupHeader 是分区位置的唯一上报点，
+    // 它消失后顶部分类条的点击跳转与滚动高亮就全部失效（sectionOffsets 拿不到值）。
+    // 所以保留一个 0dp 高的位置锚点，既有布局位置、又不产生视觉元素。
+    if (LocalAppTheme.current == AppThemeMode.MIUIX) {
+        Box(positioned.fillMaxWidth().height(0.dp))
+        return
+    }
+
+    M3ECard(
+        modifier = positioned,
         variant = M3ECardVariant.Elevated,
         title = title,
         titleIcon = icon,
@@ -181,14 +197,23 @@ internal fun RowChevron() {
     )
 }
 
-/** 分组脚注：长说明（为什么这么做）放在行组之后完整换行，不塞进 72dp 的列表行 */
+/**
+ * 分组脚注：长说明（为什么这么做）放在行组之后完整换行，不塞进 56/72dp 的列表行。
+ *
+ * MIUIX：HyperOS 的脚注是**卡片外的一小段灰字**，左缩进对齐行内文字起点（16dp），
+ * 字号 12sp；原来 4dp 缩进 + bodySmall 在 HyperOS 布局里像是"贴着卡片边"。
+ */
 @Composable
 internal fun SettingNote(text: String) {
+    val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
     Text(
         text,
-        style = MaterialTheme.typography.bodySmall,
+        style = if (isMiuix) MaterialTheme.typography.labelSmall else MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 4.dp),
+        modifier = Modifier.padding(
+            start = if (isMiuix) MiuixSpec.rowPadding else 4.dp,
+            end = if (isMiuix) MiuixSpec.rowPadding else 4.dp,
+        ),
     )
 }
 
@@ -258,7 +283,7 @@ internal fun SliderDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Slider(
+                M3ESlider(
                     value = value,
                     onValueChange = onValueChange,
                     valueRange = range,
@@ -690,10 +715,12 @@ internal fun SettingsCategoryBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         SettingsSection.entries.forEach { section ->
-            FilterChip(
+            // 主题感知：MIUIX 下换成 HyperOS 的小圆角标签（见 M3ECategoryChip）。
+            // 胶囊 Chip 一屏只放得下 4 个半分区，而设置页有 8 个。
+            com.kaze.newage.ui.components.M3ECategoryChip(
                 selected = section == current,
+                label = section.label,
                 onClick = { onSelect(section) },
-                label = { Text(section.label) },
                 modifier = Modifier.onGloballyPositioned { coords ->
                     val x = coords.positionInParent().x.toInt()
                     if (chipOffsets[section] != x) chipOffsets[section] = x

@@ -37,7 +37,12 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
+      # JDK 21：miuix 0.7.2 的 class 是 major 65（Java 21），
+      # Robolectric 在**测试 JVM**里加载它，17 会直接 UnsupportedClassVersionError
+      # （现象是「编译通过、测试全红」，且报错指向 miuix 的 ColorsKt）。
+      # 应用自身仍编译到 Java 17 字节码（见 app/build.gradle.kts 的 jvmTarget），
+      # 这里只影响跑 Gradle/测试的那个 JVM。
 
       # 与 ci.yml 同一套做法：不用 android-actions/setup-android（它装的旧 `tools` 包已被下架）。
       - name: 安装 Android SDK 组件

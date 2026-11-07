@@ -92,12 +92,10 @@ object LanguageState {
     /** 读系统语言（不跟随应用的 per-app language，避免自我循环） */
     fun systemLocaleOf(context: Context): Locale {
         val cfg: Configuration = context.resources.configuration
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
-            cfg.locales.takeIf { !it.isEmpty }?.get(0) ?: Locale.getDefault()
-        } else {
-            @Suppress("DEPRECATION")
-            cfg.locale ?: Locale.getDefault()
-        }
+        // minSdk 是 27（Android 8.1），`Configuration.getLocales()` 从 API 24 就有，
+        // 所以下面的 24 判断恒真、else 分支是永远走不到的死代码 ——
+        // `cfg.locale` 那一支早已过时（lint: ObsoleteSdkInt 就是指着这条）。
+        return cfg.locales.takeIf { !it.isEmpty }?.get(0) ?: Locale.getDefault()
     }
 
     /** 当前模式（设置页显示用） */
