@@ -99,28 +99,50 @@ import com.kaze.newage.ui.theme.liquidGlassLensSafe
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
+import com.kaze.newage.core.i18n.LanguageState
 import com.kaze.newage.core.i18n.t
 import androidx.compose.ui.text.style.TextOverflow
 
 enum class Dest(
     val route: String,
-    val label: String,
+    /**
+     * 标签的**中文原文**（不是译文）。
+     *
+     * 不能在枚举构造时调 t() —— 枚举是静态单例，只在类初始化时求值一次，
+     * 于是切换语言后底栏/标题栏的文案永远是启动时那一套（而且若启动时是英文，
+     * 后面切回中文也变不回来）。所以这里只存原文，取值一律走 [label]。
+     */
+    private val labelZh: String,
     val icon: ImageVector,
     val iconSelected: ImageVector,
 ) {
-    Home("home", t("主页"), Icons.Outlined.Home, Icons.Filled.Home),
-    Server("server", t("服务端"), Icons.Outlined.Dns, Icons.Filled.Dns),
-    Console("console", t("控制台"), Icons.Outlined.Terminal, Icons.Filled.Terminal),
-    Settings("settings", t("设置"), Icons.Outlined.Settings, Icons.Filled.Settings),
+    Home("home", "主页", Icons.Outlined.Home, Icons.Filled.Home),
+    Server("server", "服务端", Icons.Outlined.Dns, Icons.Filled.Dns),
+    Console("console", "控制台", Icons.Outlined.Terminal, Icons.Filled.Terminal),
+    Settings("settings", "设置", Icons.Outlined.Settings, Icons.Filled.Settings),
+    ;
+
+    /** 当前语言下的标签（每次调用都查一次表，随语言切换即时生效） */
+    val label: String get() = t(labelZh)
 }
 
 @Composable
 fun AppRoot(viewModel: AppViewModel = viewModel()) {
+    // ── 语言切换的触发点 ──
+    // LanguageState.revision 是 mutableStateOf：读它 = 订阅它。语言一变，AppRoot 重组，
+    // 整棵树跟着重取 t()，界面立刻变成新语言（不需要重启 Activity）。
+    // 只读不用的变量会被编译器警告「never used」，所以显式取值后交给 showBottomBar 的
+    // 同一行做一次无害的引用（见下），避免 @Suppress。
+    val languageRevision = LanguageState.revision
+
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val uiPrefs = viewModel.uiPrefs
-    val showBottomBar = Dest.entries.any { it.route == currentRoute }
+    // languageRevision 参与 key：语言变化时 Dest.label 需要被重新读取
+    val showBottomBar = remember(currentRoute, languageRevision) {
+        Dest.entries.any { it.route == currentRoute }
+    }
 
     /**
      * 所有"切换主页面"都走这一条。

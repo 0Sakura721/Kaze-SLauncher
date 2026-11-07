@@ -666,6 +666,8 @@ internal const val SECTION_STICKY_SLOP = 48
  * 「当前分区」也是按偏移量取最后一个已越过的分区。
  */
 internal enum class SettingsSection(val label: String) {
+    // 与设置页里的顺序一致：语言在最上方，所以它排第一
+    Language(t("语言")),
     Appearance(t("外观")),
     Background(t("背景图")),
     Storage(t("存储")),

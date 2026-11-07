@@ -372,6 +372,23 @@ class ShellHost(
         com.kaze.newage.shell.ShellSwitch.restart(context, com.kaze.newage.shell.ShellSwitch.M3)
     }
 
+    /**
+     * 切换界面语言并**重建整壳**。
+     *
+     * 为什么要重建而不是就地刷新：岚是自绘 View，每个控件在构造时就把文案
+     * 写进了 TextView（`c.txt(t("…"))`），没有 Compose 的 mutableStateOf 可订阅。
+     * 热更新就得给每个 View 补一遍 refresh()，漏一个就是"半中文半英文"的界面 ——
+     * 与主题切换同样的取舍（见 ShellActivity 注释），重建一次几十毫秒，代价远小于维护。
+     */
+    fun setAppLanguage(id: String) {
+        vm.uiPrefs.setAppLanguage(id)
+        com.kaze.newage.core.i18n.LanguageState.apply(
+            com.kaze.newage.core.i18n.AppLanguage.fromId(id),
+            context,
+        )
+        com.kaze.newage.shell.ShellSwitch.restart(context, com.kaze.newage.shell.ShellSwitch.SHELL)
+    }
+
     fun consoleLines(): List<ConsoleLine> = vm.consoleLines.value
 
     // ── 一次性异步等待 ────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import com.kaze.newage.core.server.ServerState
 import com.kaze.newage.data.model.CoreType
 import com.kaze.newage.data.model.ServerInstance
 import com.kaze.newage.ui.toLabel
+import com.kaze.newage.core.i18n.AppLanguage
 import com.kaze.newage.core.i18n.t
 
 /**
@@ -53,6 +54,7 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
             },
         )
 
+        buildLanguage()
         buildAppearance()
         instanceTitle = c.sectionHeader(t("当前实例"))
         body.addView(instanceTitle, c.stackMargin(top = 20f, bottom = 7f))
@@ -78,6 +80,49 @@ class SettingsScreen(private val host: ShellHost) : ScreenRoot(host.context) {
     }
 
     // ── 外观 ───────────────────────────────────────────────────────────
+
+    // ── 语言（放在最上方：它是"要用哪种语言读这一屏"的元设置）────────────
+    //
+    // 岚是自绘 View，没有 Compose 的 mutableStateOf 可订阅，所以切换语言后
+    // **整壳重建**（与主题切换同一套机制，见 ShellActivity 的注释：重建一次几十毫秒，
+    // 比给每个 View 写 refresh() 便宜得多，也不会漏掉某个没刷新的控件）。
+    private fun buildLanguage() {
+        body.addView(c.sectionHeader(t("语言")), c.stackMargin(top = 16f, bottom = 7f))
+        val card = c.bareCard()
+        val current = AppLanguage.fromId(host.vm.uiPrefs.appLanguage.value)
+        val currentLabel = if (current == AppLanguage.SYSTEM) t("跟随系统") else current.label
+
+        card.addView(
+            c.settingRow(
+                t("界面语言"),
+                t("跟随系统 / 简体中文 / English"),
+                c.txt(currentLabel, Type.body, ShellTheme.current.accent, medium = true),
+                c.chevron(),
+            ) {
+                Sheet(c, t("界面语言"), t("选中后立即生效，整壳会重建一次")).apply {
+                    AppLanguage.entries.forEach { lang ->
+                        val label = if (lang == AppLanguage.SYSTEM) t("跟随系统") else lang.label
+                        add(
+                            c.settingRow(
+                                label,
+                                if (lang == current) t("当前使用") else t("点一下切换"),
+                                c.txt(
+                                    if (lang == current) "✓" else "",
+                                    Type.body, ShellTheme.current.accent, medium = true,
+                                ),
+                            ) {
+                                dismiss()
+                                host.setAppLanguage(lang.id)
+                            },
+                        )
+                    }
+                    buttons(t("关闭"), { dismiss() }, secondaryLabel = null, onSecondary = null)
+                    show()
+                }
+            },
+        )
+        body.addView(card, c.stackMargin(bottom = 0f))
+    }
 
     private fun buildAppearance() {
         body.addView(c.sectionHeader(t("外观")), c.stackMargin(top = 16f, bottom = 7f))

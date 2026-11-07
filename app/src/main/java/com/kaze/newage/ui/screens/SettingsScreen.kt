@@ -408,6 +408,30 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         M3EScreenColumn(
             modifier = Modifier.onGloballyPositioned { columnTop = it.positionInParent().y.toInt() },
         ) {
+            // ═══ 语言 ═══
+            // 放在最上方：语言是"要用哪种语言读这一屏"的元设置，用户找不到它就得
+            // 在满是陌生语言的列表里翻 —— 放在第一组顺手得多。
+            // 形态与其它分组一致（GroupHeader + 列表行），点开再选，避免三个按钮
+            // 挤在一行里、英文标签（Follow system / English）被压窄。
+            GroupHeader(
+                title = t("语言"),
+                icon = Icons.Filled.Translate,
+                supporting = t("界面语言 · 切换后立即生效"),
+                section = SettingsSection.Language,
+                sectionOffsets = sectionOffsets,
+            )
+            M3EConnectedList(count = 1) { _, shape ->
+                M3EListItem(
+                    headline = t("界面语言"),
+                    supporting = appLanguageLabel(uiPrefs.appLanguage.value),
+                    leadingIcon = Icons.Filled.Translate,
+                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = shape,
+                    onClick = { openDialog = SettingsDialog.Language },
+                    trailing = { RowChevron() },
+                )
+            }
+
             // ═══ 外观 ═══
             // 「标题与标签使用强调字重」「表现力弹簧动效」两个开关没有落地：SettingsPrefs
             // 里没有对应的持久化项，主题与组件层目前恒为强调字阶 + 表现力弹簧；要加开关
@@ -935,40 +959,6 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
                 onDismiss = { viewModel.resetUpdateState() },
             )
 
-            // ═══ 界面语言 ═══
-            // 单独一块而不是塞进「外观」的列表：语言是全局设置，与那些视觉选项不是一类；
-            // 独立成块也让「跟随系统」的解析结果有地方展示（见 supporting）。
-            M3ECard(
-                modifier = Modifier.padding(top = M3Spacing.betweenParts),
-                variant = M3ECardVariant.Filled,
-                title = t("界面语言"),
-                supporting = appLanguageLabel(uiPrefs.appLanguage.value),
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    com.kaze.newage.core.i18n.AppLanguage.entries.forEach { lang ->
-                        val on = com.kaze.newage.core.i18n.AppLanguage.fromId(
-                            uiPrefs.appLanguage.value,
-                        ) == lang
-                        if (on) {
-                            Button(onClick = {}) { Text(appLanguageLabel(lang.id)) }
-                        } else {
-                            OutlinedButton(
-                                onClick = {
-                                    uiPrefs.setAppLanguage(lang.id)
-                                    com.kaze.newage.core.i18n.LanguageState.apply(lang, appContext)
-                                },
-                            ) { Text(appLanguageLabel(lang.id)) }
-                        }
-                    }
-                }
-                Text(
-                    t("切换后立即生效，不需要重启"),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
-            }
-
             // ═══ 关于与许可证 ═══
             GroupHeader(
                 modifier = Modifier.padding(top = M3Spacing.betweenParts),
@@ -1007,7 +997,21 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenDiagnostics: () -> Unit = {}) 
         when (openDialog) {
             null -> Unit
 
-            SettingsDialog.Language -> Unit
+            SettingsDialog.Language -> ChoiceDialog(
+                title = t("界面语言"),
+                options = com.kaze.newage.core.i18n.AppLanguage.entries,
+                selected = com.kaze.newage.core.i18n.AppLanguage.fromId(uiPrefs.appLanguage.value),
+                label = { appLanguageLabel(it.id) },
+                note = t("「跟随系统」跟随手机的系统语言；选中后立即生效，不需要重启"),
+                onSelect = { lang ->
+                    uiPrefs.setAppLanguage(lang.id)
+                    // apply() 会自增 LanguageState.revision（mutableStateOf），
+                    // AppRoot 订阅了它 → 整棵树重组、所有 t() 重新查表
+                    com.kaze.newage.core.i18n.LanguageState.apply(lang, appContext)
+                    openDialog = null
+                },
+                onDismiss = { openDialog = null },
+            )
 
             SettingsDialog.ThemeStyle -> ChoiceDialog(
                 title = t("主题样式"),

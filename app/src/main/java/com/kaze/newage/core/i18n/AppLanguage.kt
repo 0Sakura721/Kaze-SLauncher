@@ -1,6 +1,8 @@
 package com.kaze.newage.core.i18n
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.content.res.Configuration
 import java.util.Locale
 
@@ -62,9 +64,18 @@ object LanguageState {
     var resolved: Locale = Locale.SIMPLIFIED_CHINESE
         private set
 
-    /** 每次切换自增，界面用它当 key 触发重组 */
-    @Volatile
-    var revision: Int = 0
+    /**
+     * 每次切换自增，界面读它来触发重组。
+     *
+     * **必须是 `mutableStateOf`**：旧实现是 `@Volatile var Int`，Compose 完全观察不到
+     * 普通字段的写入，于是 `setAppLanguage` + `apply` 之后界面一张像素都不会变 ——
+     * 表现就是「点了 English 没反应，退出重进才生效」。文件头注释写着「见 AppRoot 的用法」，
+     * 但当时根本没有任何地方读它，注释描述的是一个并不存在的机制。
+     *
+     * 读法：在需要跟随语言重组的 Composable 里 `LanguageState.revision` 一下即可
+     * （见 AppRoot 顶部的 `val languageRevision = LanguageState.revision`）。
+     */
+    var revision by androidx.compose.runtime.mutableStateOf(0)
         private set
 
     /** 当前是否显示中文 */
