@@ -18,6 +18,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.TravelExplore
@@ -437,6 +439,83 @@ private fun SkillsSection(viewModel: AppViewModel) {
     // 每次进入设置页重新扫一次：用户可能刚把技能目录拷进 /sdcard
     var scan by remember { mutableStateOf(viewModel.installedSkills()) }
 
+    // ── 快捷添加：新建 / 导入 / 删除 ──
+    //
+    // 之前只能自己把 md 拷进 skills/<名字>/SKILL.md —— 手机上既没有趁手的 md 编辑器，
+    // 还要记住目录结构与 frontmatter 格式。这里给应用内入口，格式由 SkillWriter 保证。
+    var showCreate by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<AiSkills.Skill?>(null) }
+    var importError by remember { mutableStateOf<String?>(null) }
+    var importNotice by remember { mutableStateOf<String?>(null) }
+
+    // 读文件走系统选择器：不申请存储权限，也不访问用户没选的文件。
+    // Context 必须在**组合期**取出来存进变量：launcher 的回调不是 @Composable 上下文，
+    // 在里面写 LocalContext.current 会编译失败（上一版就栽在这）。
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri: android.net.Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val read = runCatching {
+            ctx.contentResolver.openInputStream(uri)?.use { ins ->
+                ins.readBytes().toString(Charsets.UTF_8)
+            }
+        }.getOrNull()
+        if (read == null) {
+            importError = t("无法读取所选文件（授权可能已失效，请重新选择）")
+            return@rememberLauncherForActivityResult
+        }
+        // 从 URI 里取显示名作为技能名（取不到就退回路径末段）
+        val name = runCatching {
+            ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val idx = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment ?: "imported-skill"
+        val err = viewModel.importSkill(name, read)
+        if (err != null) {
+            importError = err
+        } else {
+            scan = viewModel.installedSkills()
+            importNotice = t("已导入技能：%s", name)
+        }
+    }
+
+    if (showCreate) {
+        SkillCreateDialog(
+            onDismiss = { showCreate = false },
+            onSubmit = { n, d, b ->
+                val err = viewModel.createSkill(n, d, b)
+                if (err == null) scan = viewModel.installedSkills()
+                err
+            },
+        )
+    }
+    deleteTarget?.let { target ->
+        SkillDeleteDialog(
+            skillName = target.name,
+            onDismiss = { deleteTarget = null },
+            onConfirm = {
+                val err = viewModel.deleteSkill(target.id)
+                if (err == null) scan = viewModel.installedSkills()
+                err
+            },
+        )
+    }
+    importError?.let { r ->
+        SkillImportErrorDialog(reason = r, onDismiss = { importError = null })
+    }
+    importNotice?.let { n ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { importNotice = null },
+            confirmButton = {
+                TextButton(onClick = { importNotice = null }) { Text(t("知道了")) }
+            },
+            title = { Text(t("导入成功")) },
+            text = { Text(n, style = MaterialTheme.typography.bodySmall) },
+        )
+    }
+
     SectionTitle(t("技能"))
     SectionNote(
         t("把技能放进实例目录的 skills/<名字>/SKILL.md，AI 就会知道它、需要时自己读取。") +
@@ -472,8 +551,30 @@ private fun SkillsSection(viewModel: AppViewModel) {
         }
     }
 
+    // 新建 / 导入：放在刷新卡下面，一行两个按钮
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = M3Spacing.screenMargin, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(onClick = { showCreate = true }, modifier = Modifier.weight(1f)) {
+            Icon(Icons.Filled.Add, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text(t("新建技能"))
+        }
+        OutlinedButton(
+            onClick = {
+                importLauncher.launch(arrayOf("text/markdown", "text/plain", "application/octet-stream"))
+            },
+            modifier = Modifier.weight(1f),
+        ) {
+            Icon(Icons.Filled.FileOpen, contentDescription = null)
+            Spacer(Modifier.width(6.dp))
+            Text(t("从文件导入"))
+        }
+    }
+
     if (scan.skills.isEmpty()) {
-        SectionNote(t("还没有技能。在实例目录下建 skills/<名字>/SKILL.md 即可（可以从别处拷）。"))
+        SectionNote(t("还没有技能：点上面的「新建技能」写一份，或「从文件导入」挑一个 md。"))
     }
     scan.skills.forEach { skill ->
         val enabled = skill.id !in disabled
@@ -500,6 +601,13 @@ private fun SkillsSection(viewModel: AppViewModel) {
                         skill.relativePath,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                IconButton(onClick = { deleteTarget = skill }) {
+                    Icon(
+                        Icons.Filled.DeleteOutline,
+                        contentDescription = t("删除技能"),
+                        tint = MaterialTheme.colorScheme.error,
                     )
                 }
                 Switch(

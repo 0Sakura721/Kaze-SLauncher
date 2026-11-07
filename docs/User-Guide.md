@@ -224,6 +224,32 @@ Optional. It can read status, read logs, change config (writes need your confirm
 | **Command execution** | Three levels; every execution is written to the audit log |
 | **Tool permissions** | Per tool: automatic / ask every time / forbidden. Reading sensitive files (credentials, `ops.json`, `server.properties` with rcon) always requires confirmation |
 
+
+### Skills
+
+Skills are **your own local documents** the AI can consult. Put one at `skills/<name>/SKILL.md` inside the instance folder and it appears in the AI's list; when it needs that knowledge it reads the file itself.
+
+- They are plain text on your device — no network, no downloads.
+- Each skill is per instance: a build guide for one server is useless for another.
+- Disable a skill and it stops appearing in the AI's list; nothing is deleted.
+
+#### Adding skills quickly
+
+Above the skill list there are three entries, so you no longer need to hunt for a file manager:
+
+| Action | What it does |
+|---|---|
+| **Create skill** | Fill in a name, a one-line description and the body, then tap Create. The frontmatter is generated for you, so a malformed one cannot happen |
+| **Import from file** | Pick a `.md` with the system file picker. **An existing frontmatter is kept as-is**; if there is none, one is added using the filename and the first line |
+| **Delete** (right of each skill) | Asks for confirmation, then removes the whole `skills/<name>/` folder |
+
+A few rules worth knowing:
+
+- **Existing skills are never overwritten.** Creating a name that already exists fails with an explanation — skills are documents you wrote by hand, and a silent overwrite loses data. Delete and recreate, or pick another name.
+- **Names are normalised into folder names.** Letters, digits, CJK characters, `-`, `_` and spaces are kept; anything else becomes `-` (so `../evil` turns into an ordinary name — that is the boundary keeping writes inside `skills/`).
+- **The body is capped at 20,000 characters.** Skills are injected into the AI's prompt; an oversized one would crowd out the live information that actually matters.
+- **Newly created or imported skills start enabled.** Whatever you disabled before stays disabled.
+
 ## 13. MCP service
 
 Exposes a local endpoint so external AI clients can control the server. You configure the listen address, port and access token (Bearer auth). Binding `0.0.0.0` lets devices on your LAN connect; use `127.0.0.1` for local-only.
