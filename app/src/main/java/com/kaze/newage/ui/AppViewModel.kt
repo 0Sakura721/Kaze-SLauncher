@@ -14,6 +14,7 @@ import com.kaze.newage.core.addons.ModrinthApi
 import com.kaze.newage.core.addons.ModrinthSearchHit
 import com.kaze.newage.core.ai.AiToolStep
 import com.kaze.newage.core.ai.AiSkills
+import com.kaze.newage.core.ai.SkillWriter
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.console.ConsoleLine
 import com.kaze.newage.core.console.CONSOLE_MAX_LINES
@@ -319,6 +320,58 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     fun setSkillEnabled(skillId: String, enabled: Boolean) = uiPrefs.setAiSkillEnabled(skillId, enabled)
 
     fun isSkillEnabled(skillId: String): Boolean = skillId !in uiPrefs.aiDisabledSkills.value
+
+    // ── 技能的写入（新建 / 导入 / 删除）──
+    //
+    // 之前只能让用户自己把 md 拷进 <实例目录>/skills/<名字>/SKILL.md，
+    // 手机上没有趁手的 md 编辑器，还得记住目录结构与 frontmatter 格式。
+    // 这里给出应用内入口，格式由 SkillWriter 保证（也负责防止越界与覆盖）。
+
+    /** 当前实例的目录（写技能用）；没有选中实例时返回 null */
+    private fun currentInstanceDir(): java.io.File? =
+        currentInstanceId.value?.let { instanceStore.get(it) }?.dir
+
+    /**
+     * 新建技能。
+     *
+     * @return 失败原因（可直接展示）；成功返回 null
+     */
+    fun createSkill(name: String, description: String, body: String): String? {
+        val dir = currentInstanceDir() ?: return "请先选中一个实例"
+        return when (val r = SkillWriter.create(dir, name, description, body)) {
+            is SkillWriter.Result.Ok -> {
+                // 新建的技能默认启用：从禁用名单里摘掉（同名可能被删过又重建）
+                uiPrefs.setAiSkillEnabled(r.id, true)
+                null
+            }
+            is SkillWriter.Result.Failed -> r.reason
+        }
+    }
+
+    /** 从文件文本导入技能；返回失败原因或 null */
+    fun importSkill(fileName: String, text: String): String? {
+        val dir = currentInstanceDir() ?: return "请先选中一个实例"
+        return when (val r = SkillWriter.importText(dir, fileName, text)) {
+            is SkillWriter.Result.Ok -> {
+                uiPrefs.setAiSkillEnabled(r.id, true)
+                null
+            }
+            is SkillWriter.Result.Failed -> r.reason
+        }
+    }
+
+    /** 删除技能；返回失败原因或 null */
+    fun deleteSkill(id: String): String? {
+        val dir = currentInstanceDir() ?: return "请先选中一个实例"
+        return when (val r = SkillWriter.delete(dir, id)) {
+            is SkillWriter.Result.Ok -> {
+                // 清掉禁用名单里的残留，免得同名重建后被当成"已禁用"
+                uiPrefs.setAiSkillEnabled(r.id, true)
+                null
+            }
+            is SkillWriter.Result.Failed -> r.reason
+        }
+    }
 
     fun refreshJava() {
         // 扫描 rootfs 的 usr/lib/jvm 得出实际安装情况（装了什么就报什么，
