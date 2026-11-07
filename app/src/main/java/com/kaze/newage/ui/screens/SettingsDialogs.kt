@@ -115,6 +115,7 @@ import com.kaze.newage.ui.components.M3ESegmentedRow
 import com.kaze.newage.ui.components.M3ESlider
 import com.kaze.newage.ui.components.M3EStatusChip
 import com.kaze.newage.ui.components.WavyLinearProgress
+import com.kaze.newage.ui.theme.MiuixSpec
 import com.kaze.newage.ui.theme.AppThemeMode
 import com.kaze.newage.ui.theme.FgColorMode
 import com.kaze.newage.ui.theme.LocalAppTheme

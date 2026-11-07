@@ -10,12 +10,14 @@ import com.kaze.newage.core.ai.AiConfig
 import com.kaze.newage.core.ai.AiProfile
 import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiToolPolicy
+import com.kaze.newage.core.i18n.t
 import com.kaze.newage.core.mcp.McpPorts
 import com.kaze.newage.core.mcp.McpServer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 
 /**
  * UI 设置存储（SharedPreferences）：背景图、毛玻璃参数。
@@ -570,7 +572,7 @@ emember(path) 缓存位图的话，
         if (!ok || bgFile.length() == 0L) {
             // 删掉可能写了一半的残文件，避免下次解码读到损坏图
             bgFile.delete()
-            throw java.io.IOException(t("背景图写入失败（存储空间不足？）"))
+            throw IOException(t("背景图写入失败（存储空间不足？）"))
         }
         bgExists.value = true
         // 让依赖背景图的 UI（AppBackground 的位图缓存）知道内容变了
