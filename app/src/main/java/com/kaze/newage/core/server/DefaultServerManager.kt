@@ -1079,6 +1079,9 @@ class DefaultServerManager(
         //    否则会把安装器正在输出的正常日志顶掉。
         val startedAt = System.currentTimeMillis()
         var lastLineAt = System.currentTimeMillis()
+        // 安装器的完整输出，供失败时归因用（TLS / DNS / 超时的处理方式完全不同，
+        // 而安装器给的原话是 Java 异常，手机用户看不懂也照着做不了 —— 见 ForgeInstallDiagnostics）
+        val transcript = StringBuilder()
         val code = coroutineScope {
             val ticker = launch {
                 while (isActive) {
@@ -1111,6 +1114,8 @@ class DefaultServerManager(
                             sb.setLength(0)
                             if (text.isNotEmpty()) {
                                 lastLineAt = System.currentTimeMillis()
+                                // 只留尾部 32KB：安装器刷屏时不撑爆内存，归因只需末尾的报错段
+                                if (transcript.length < 32_768) transcript.append(text).append('\n')
                                 slot.log(text, classify(text))
                             }
                         }
@@ -1150,14 +1155,27 @@ class DefaultServerManager(
         val elapsedMin = (System.currentTimeMillis() - startedAt) / 60_000
         // 安装期间用户可能点了停止
         slot.checkCancelled()
-        if (code != 0) {
-            throw RuntimeException("${instance.coreType.displayName} 安装失败（退出码 $code），请看上方日志")
-        }
-        // 入口文件必须真的生成了
-        if (instance.forgeArgsFile() == null && instance.legacyForgeJar() == null) {
+        // ── 失败归因 ──
+        // 退出码非 0，或退出码是 0 却没生成入口（安装器遇到网络错误时可能"正常退出"），
+        // 都当作失败；先归类，把可执行的建议写进控制台，再抛出带归因的异常。
+        val entryMissing = instance.forgeArgsFile() == null && instance.legacyForgeJar() == null
+        if (code != 0 || entryMissing) {
+            val verdict = ForgeInstallDiagnostics.diagnose(transcript.toString())
+            if (verdict != null) {
+                slot.log("> 诊断：${verdict.cause}", LineType.Error)
+                verdict.advice.lineSequence().filter { it.isNotBlank() }.forEach {
+                    slot.log(">   $it", LineType.Warn)
+                }
+            }
             throw RuntimeException(
-                "${instance.coreType.displayName} 安装器已退出，但没有生成启动入口" +
-                    "（unix_args.txt / forge-*.jar），请查看上方安装日志"
+                if (verdict != null) {
+                    "${instance.coreType.displayName} 安装失败：${verdict.cause}（详见上方建议）"
+                } else if (entryMissing) {
+                    "${instance.coreType.displayName} 安装器已退出，但没有生成启动入口" +
+                        "（unix_args.txt / forge-*.jar），请查看上方安装日志"
+                } else {
+                    "${instance.coreType.displayName} 安装失败（退出码 $code），请看上方日志"
+                },
             )
         }
         // 成功标记必须**在这里**写：forgeInstalled() 认的就是它。

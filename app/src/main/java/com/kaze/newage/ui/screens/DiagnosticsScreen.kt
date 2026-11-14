@@ -59,6 +59,10 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     var text by remember { mutableStateOf(t("读取中…")) }
     var envText by remember { mutableStateOf("") }
     var reload by remember { mutableStateOf(0) }
+    // 网络与时间自检：Forge 安装失败最常见的两类根因（时钟偏差 / 代理 fake-ip）
+    // 在这里能一眼看出来，不必等安装器抛 Java 异常再猜
+    var netReport by remember { mutableStateOf<com.kaze.newage.core.net.NetworkSelfCheck.Report?>(null) }
+    var netRunning by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     val appLog = viewModel.appLog
     // 触发一次重读（刷新按钮 / 清空后）
@@ -183,6 +187,62 @@ fun DiagnosticsScreen(viewModel: AppViewModel, onBack: () -> Unit) {
                             .heightIn(max = 320.dp)
                             .verticalScroll(rememberScrollState()),
                     )
+                }
+            }
+
+            M3ECard(
+                variant = M3ECardVariant.Outlined,
+                title = t("网络与时间"),
+                supporting = t("开服/装 Forge 前的三项检查：时区校准、DNS 是否被代理接管、TLS 能否握手"),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        enabled = !netRunning,
+                        onClick = {
+                            netRunning = true
+                            scope.launch {
+                                netReport = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        val serverTime = com.kaze.newage.core.net.NetworkSelfCheck
+                                            .fetchServerTimeMillis()
+                                        com.kaze.newage.core.net.NetworkSelfCheck
+                                            .run(System.currentTimeMillis(), serverTime)
+                                    }.getOrNull()
+                                }
+                                netRunning = false
+                            }
+                        },
+                    ) {
+                        Text(
+                            if (netRunning) t("检测中…") else t("开始检测"),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    val r = netReport
+                    if (r != null) {
+                        SelectionContainer {
+                            Text(
+                                com.kaze.newage.core.net.NetworkSelfCheck.format(r),
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (r.hasProblem) {
+                                    MaterialTheme.colorScheme.error
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    } else {
+                        Text(
+                            t("点上面的按钮运行检测。安装 Forge 失败时先看这里：\n" +
+                                "· 时间偏差超过 5 分钟会让 TLS 直接握手失败\n" +
+                                "· 解析出 198.18.x.x 说明 DNS 被代理的 fake-ip 接管\n" +
+                                "· 系统时间不准时，应用内所有联网操作都会受影响"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
 
