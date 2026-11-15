@@ -249,10 +249,12 @@ object TarExtractor {
         try {
             // Os.symlink(oldPath=目标, newPath=链接本身)：API 21 起可用，
             // 比 java.nio.file（API 26）更适合低版本；语义与 createSymbolicLink 一致。
+            // 诊断：临时抛异常看 Os.symlink 是否真的执行成功
             android.system.Os.symlink(link.linkRel, link.target.absolutePath)
-            System.err.println("[TarExtractor-debug] Os.symlink 成功: ${link.linkRel} -> ${link.target}")
+            throw IllegalStateException("[TarExtractor-debug-symlink-ok] linkRel=${link.linkRel} target=${link.target}")
                 } catch (e: Throwable) {
-                    System.err.println("[TarExtractor-debug] Os.symlink 失败: ${e.javaClass.name}: ${e.message}")
+                    // 诊断：Os.symlink 的失败原因带进异常消息
+                    throw IllegalStateException("[TarExtractor-debug-symlink-fail] ${e.javaClass.name}:${e.message}", e)
                     // Os.symlink 在 Android 真机上抛的是 checked IOException；
                     // 但在 JVM（单测/Robolectric）上 android.system.Os 根本不存在，
                     // 抛的是 NoClassDefFoundError / UnsatisfiedLinkError —— **不是 Exception**，
@@ -274,8 +276,10 @@ object TarExtractor {
                                 }
                             }
                         }
-                    // 刻意吞掉：目录型链接交上层修复（见上方说明），不算解压失败
-                    } catch (_: Throwable) { }
+                    } catch (e: Throwable) {
+                        // 诊断：fallback 失败原因写进 pendingLinks 旁的异常，便于 CI 堆栈看到
+                        throw IllegalStateException("[TarExtractor-debug-fallback] link.target=${link.target} linkRel=${link.linkRel} cause=${e.javaClass.name}:${e.message}", e)
+                    }
                 }
             }
 
