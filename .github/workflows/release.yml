@@ -109,6 +109,14 @@ jobs:
             exit 1
           fi
 
+      - name: 校验 CHANGELOG 有该版本段
+        run: |
+          # v0.9.1 的真实教训：只改了 versionCode/versionName、打了 tag，却忘了写
+          # CHANGELOG，结果 release 正文是空的（正文就是从 CHANGELOG 取的）。
+          # 这一步把「先写 CHANGELOG、再打 tag」固化成硬性检查。
+          # 本地打 tag 前跑同一个脚本（tools/pre-release-check.py），只有一份逻辑。
+          python3 tools/pre-release-check.py --tag ${{ steps.t.outputs.version }}
+
       - name: 跑单元测试
         run: ./gradlew :app:testArm64DebugUnitTest --console=plain
 
