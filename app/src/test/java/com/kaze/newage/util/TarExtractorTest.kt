@@ -103,7 +103,17 @@ class TarExtractorTest {
             assertFalse("越界链接不得创建", File(dir, "evil").exists())
             assertTrue("正常条目不受影响", File(dir, "target.txt").exists())
             // 正常链接：能建链就建链；建不了（部分沙箱/文件系统）走复制兜底 —— 两种路径下都必须存在
-            assertTrue("正常相对链接应可用（建链或复制兜底）", File(dir, "alias").exists())
+            // 诊断：alias 没创建时，把目录内容塞进失败消息
+            val aliasFile = File(dir, "alias")
+            if (!aliasFile.exists()) {
+                val listing = dir.listFiles()?.map { it.name }?.sorted() ?: emptyList()
+                assertTrue(
+                    "alias 未创建。目录内容: $listing  " +
+                        "target.txt存在=${File(dir, "target.txt").exists()}",
+                    false,
+                )
+            }
+            assertTrue("正常相对链接应可用（建链或复制兜底）", aliasFile.exists())
         } finally {
             dir.deleteRecursively()
         }

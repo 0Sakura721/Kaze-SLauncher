@@ -261,8 +261,8 @@ object TarExtractor {
                     // 在测试环境里根本走不到（TarExtractorTest 的「正常相对链接应可用」会失败）。
                     try {
                         val resolved = File(link.target.parentFile ?: destDir, link.linkRel)
-                        // 调试：确认 fallback 是否执行、resolved 是否存在
-                        System.err.println("[TarExtractor-debug] link.target=${link.target} parent=${link.target.parentFile} linkRel=${link.linkRel} resolved=${resolved} isFile=${resolved.isFile} isDir=${resolved.isDirectory}")
+                        // 调试：用异常消息带出状态（System.err 在 Gradle 测试里看不到）
+                        if (false) throw RuntimeException("[TarExtractor-debug] link.target=${link.target} parent=${link.target.parentFile} linkRel=${link.linkRel} resolved=${resolved} isFile=${resolved.isFile} isDir=${resolved.isDirectory}")
                         // ../ 型链接目标同样禁止逃逸
                         // destCanonical 已带 File.separator（见 L89），这里不要再拼
                         if (resolved.canonicalPath.startsWith(destCanonical)) {
