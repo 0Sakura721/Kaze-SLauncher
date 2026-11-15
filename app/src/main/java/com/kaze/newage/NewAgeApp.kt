@@ -2,6 +2,8 @@ package com.kaze.newage
 
 import android.app.Application
 import android.content.Context
+import com.kaze.newage.core.addons.ModIconCache
+import com.kaze.newage.core.content.ContentSources
 import com.kaze.newage.core.console.ConsoleStream
 import com.kaze.newage.core.i18n.AppLanguage
 import com.kaze.newage.core.i18n.LanguageState
@@ -69,6 +71,13 @@ class AppContainer(context: Context) {
         // 后面所有调用都只是几次 stat。ProotEnvironment 自己的 init 里也会判一次就绪状态，
         // 两处都跑在 IO 上且幂等。
         env.warmUp()
+
+        // 模组图标缓存目录：列表里显示图标要用它存从 jar 里抽出来的小图。
+        // init 只建目录、不做 IO 重活，放在这里最省事（任何界面都可能先打开模组列表）。
+        ModIconCache.init(appContext.cacheDir)
+
+        // 内容源（官方/镜像/自定义）：越早配置越好，附加搜索与资源中心都依赖它
+        ContentSources.configure(uiPrefs.contentSource.value, uiPrefs.contentSourceCustomUrl.value)
     }
 
     val serverManager: DefaultServerManager = DefaultServerManager(env, javaManager, console, appContext)

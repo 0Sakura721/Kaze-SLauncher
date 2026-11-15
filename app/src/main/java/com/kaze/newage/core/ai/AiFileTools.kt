@@ -349,27 +349,22 @@ object AiFileTools {
      */
     private fun scanListing(dir: File, filter: (String) -> Boolean): Listing {
         val out = Listing()
-        java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
-            for (p in stream) {
-                val name = p.fileName?.toString() ?: continue
-                if (!filter(name)) continue
-                if (java.nio.file.Files.isDirectory(p)) {
-                    out.dirsTotal++
-                    if (out.dirs.size < MAX_LIST) out.dirs += name
-                } else {
-                    out.filesTotal++
-                }
+        // 用 java.io.File 而不是 java.nio.file：后者是 API 26 才有的，
+        // 为了把 minSdk 降到 24 必须换掉（目录/文件语义与 NIO 默认「跟随链接」一致）。
+        val entries = dir.listFiles()?.filter { filter(it.name) } ?: emptyList()
+        for (f in entries) {
+            if (f.isDirectory) {
+                out.dirsTotal++
+                if (out.dirs.size < MAX_LIST) out.dirs += f.name
+            } else {
+                out.filesTotal++
             }
         }
         if (out.dirs.size >= MAX_LIST) return out
-        java.nio.file.Files.newDirectoryStream(dir.toPath()).use { stream ->
-            for (p in stream) {
-                val name = p.fileName?.toString() ?: continue
-                if (!filter(name)) continue
-                if (java.nio.file.Files.isDirectory(p)) continue
-                if (out.dirs.size + out.files.size >= MAX_LIST) break
-                out.files += name to runCatching { java.nio.file.Files.size(p) }.getOrDefault(0L)
-            }
+        for (f in entries) {
+            if (f.isDirectory) continue
+            if (out.dirs.size + out.files.size >= MAX_LIST) break
+            out.files += f.name to runCatching { f.length() }.getOrDefault(0L)
         }
         return out
     }

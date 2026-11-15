@@ -34,6 +34,18 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Rule
+import androidx.compose.material.icons.filled.Schedule
+import com.kaze.newage.core.console.QuickCommandGroup
+import com.kaze.newage.core.console.QuickCommands
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Terminal
@@ -70,6 +82,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -673,7 +686,8 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                                 if (tone == StatusTone.Busy) {
                                     "正在启动服务端，日志马上就来\n首次启动会自动生成 eula.txt 并接受条款后重启"
                                 } else {
-                                    "启动服务端后，日志将实时显示在这里\n首次启动会自动生成 eula.txt 并接受条款后重启"
+                                    "服务端未运行，启动后日志会实时显示在这里\n" +
+                                        "现在也能用下面的输入框执行离线命令（输入 help 查看）"
                                 },
                                 color = emptyColor.copy(alpha = 0.75f),
                                 style = MaterialTheme.typography.bodySmall,
@@ -743,6 +757,17 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             }
         }
 
+        // ── 常用指令面板：分组、可收起 ──
+        //
+        // 放在终端与输入框之间：它服务的是"发命令"这个动作，离输入框最近最顺手。
+        // 收起时只占一行，不跟日志抢地方；展开后按场景分组（玩家/时间/世界/规则/维护），
+        // 点一下即发送。停止态整体禁用 —— 离线控制台不认 MC 命令。
+        QuickCommandPanel(
+            enabled = serverState == ServerState.Running,
+            onSend = { viewModel.sendCommand(it) },
+            onFill = { input = it },
+        )
+
         // ── 快捷命令 chip 行：点 = 发送，长按 = 删除，「＋」打开编辑器 ──
         //
         // 只在「运行中」或「已有命令」时出现：它服务的动作（发命令）停止态做不了，
@@ -767,6 +792,20 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                     QuickCommandAddChip(onClick = { showQuickCommandEditor = true })
                 }
             }
+        }
+
+        // 离线模式提示：不说明的话，这个输入框在停止态看起来仍然像"只能等服务器"
+        if (current != null && serverState != ServerState.Running) {
+            Text(
+                t("离线模式：命令直接作用于实例文件（配置 / 白名单 / 模组）；sh <命令> 可执行 Linux 命令"),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = M3Spacing.screenMargin),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
 
         // ── 命令输入：描边输入框 fused 主色填充发送键（相连按钮组：外侧外角全圆、内侧 8dp）──
@@ -795,11 +834,17 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
             }
 
             // 只有运行中才可发送：与按钮的可用性同源，键盘上的发送键也走同一守卫
-            val sendEnabled = serverState == ServerState.Running && input.isNotBlank()
+            //
+            // 停止态**不再禁用**：输入框现在同时是「离线控制台」的入口（见 AppViewModel.runOfflineCommand）。
+            // 原来停止时整块禁用，用户想改 server.properties / 加白名单 / 停用模组，
+            // 只能先把服务端启动起来 —— 那恰恰是最不该被强制的时刻。
+            val offline = serverState != ServerState.Running
+            val sendEnabled = input.isNotBlank() && current != null
             fun submit() {
-                if (serverState != ServerState.Running) return
+                if (current == null) return
                 if (input.isNotBlank()) {
-                    viewModel.sendCommand(input.trim())
+                    if (offline) viewModel.runOfflineCommand(input.trim())
+                    else viewModel.sendCommand(input.trim())
                     input = ""
                 }
             }
@@ -810,13 +855,13 @@ fun ConsoleScreen(viewModel: AppViewModel, onOpenAi: () -> Unit = {}) {
                 modifier = Modifier.weight(1f),
                 placeholder = {
                     Text(
-                        if (serverState == ServerState.Running) t("输入命令（stop / op…）")
-                        else t("服务端运行后可输入命令")
+                        if (offline) t("离线控制台：help 看命令，或 sh ls")
+                        else t("输入命令（stop / op…）")
                     )
                 },
                 singleLine = true,
                 // 停止时禁用：避免能输入但发不出去，且残留文字顶掉 placeholder
-                enabled = serverState == ServerState.Running,
+                enabled = current != null,
                 shape = M3Shape.groupFirst(56f),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { submit() }),
@@ -1147,3 +1192,143 @@ private fun QuickCommandAddChip(onClick: () -> Unit) {
 
 /** 指标文本的小工具：统一用 US locale，避免某些系统区域把小数点写成逗号 */
 private fun fmt(pattern: String, v: Float): String = String.format(java.util.Locale.US, pattern, v)
+
+/**
+ * 常用指令面板（可收起）。
+ *
+ * 标题行常驻一行高度，展开后按场景分组、组内是可直接点击的胶囊：
+ * 点一下 = 立刻发送（`say` 这类需要文本的只把命令填进输入框）。
+ * 停止态整块禁用 —— MC 命令得服务端在跑才有意义，离线控制台不认。
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun QuickCommandPanel(
+    enabled: Boolean,
+    onSend: (String) -> Unit,
+    onFill: (String) -> Unit,
+) {
+    var open by rememberSaveable { mutableStateOf(false) }
+    var openGroup by rememberSaveable { mutableStateOf(0) }
+    val scheme = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth().padding(horizontal = M3Spacing.screenMargin)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().height(44.dp),
+            shape = M3Shape.groupSingle(22f),
+            color = scheme.surfaceContainerHigh,
+            onClick = { open = !open },
+        ) {
+            Row(
+                Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Bolt, contentDescription = null, modifier = Modifier.size(18.dp), tint = scheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text(t("常用指令"), style = MaterialTheme.typography.labelLarge, color = scheme.onSurface)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    t("%s 条", QuickCommands.totalCount),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                if (!enabled) {
+                    Text(
+                        t("服务端运行后可点"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = scheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = t("展开/收起常用指令"),
+                    modifier = Modifier.size(20.dp),
+                    tint = scheme.onSurfaceVariant,
+                )
+            }
+        }
+        AnimatedVisibility(
+            visible = open,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .heightIn(max = 240.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                QuickCommands.GROUPS.forEachIndexed { index, group ->
+                    val expanded = openGroup == index
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(M3Shape.groupSingle(12f))
+                            .clickable { openGroup = if (expanded) -1 else index }
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            groupIcon(group.icon),
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = scheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            t(group.title),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = scheme.onSurface,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            t("%s 条", group.items.size),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = scheme.onSurfaceVariant,
+                        )
+                        Icon(
+                            if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                            tint = scheme.onSurfaceVariant,
+                        )
+                    }
+                    if (expanded) {
+                        FlowRow(
+                            Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            group.items.forEach { item ->
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (enabled) scheme.secondaryContainer else scheme.surfaceContainerHighest,
+                                    contentColor = if (enabled) scheme.onSecondaryContainer else scheme.onSurfaceVariant,
+                                    enabled = enabled,
+                                    onClick = {
+                                        if (item.fillOnly) onFill(item.command) else onSend(item.command)
+                                    },
+                                ) {
+                                    Text(
+                                        t(item.label),
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 分组图标映射（core 层只给语义枚举，不依赖 Compose） */
+private fun groupIcon(icon: QuickCommandGroup.GroupIcon): ImageVector = when (icon) {
+    QuickCommandGroup.GroupIcon.Players -> Icons.Filled.Person
+    QuickCommandGroup.GroupIcon.Time -> Icons.Filled.Schedule
+    QuickCommandGroup.GroupIcon.World -> Icons.Filled.Public
+    QuickCommandGroup.GroupIcon.Rules -> Icons.Filled.Rule
+    QuickCommandGroup.GroupIcon.Maintenance -> Icons.Filled.Build
+}

@@ -2,10 +2,20 @@ package com.kaze.newage.ui
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.kaze.newage.container
+import com.kaze.newage.core.addons.AddonImporter
 import com.kaze.newage.core.addons.AddonKind
+import com.kaze.newage.core.addons.ModAudit
+import com.kaze.newage.core.addons.ModrinthProject
+import com.kaze.newage.core.content.ContentCatalog
+import com.kaze.newage.core.content.ContentKind
+import com.kaze.newage.core.console.OfflineConsole
+import com.kaze.newage.core.sync.ClientPack
+import com.kaze.newage.core.sync.ModSyncServer
 import kotlinx.serialization.Serializable
 import com.kaze.newage.core.addons.AddonRegistry
 import com.kaze.newage.core.addons.AddonUpdate
@@ -146,6 +156,28 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     val prootEnv get() = container.env
     override val instanceStore = container.instanceStore
     override val uiPrefs = container.uiPrefs
+
+    /**
+     * 内容中心（搜索 / 推荐 / 资源包 / 地图 / 基岩版）的业务逻辑。
+     *
+     * 依赖只有 Context、InstanceStore 和协程作用域，跟服务端生命周期无关，
+     * 所以单独成类而不是继续堆在 AppViewModel 里（见 ContentController 的注释）。
+     */
+    val contentController: ContentController = ContentController(
+        context = container.appContext,
+        instanceStore = container.instanceStore,
+        scope = viewModelScope,
+        prefs = container.uiPrefs,
+        onInstanceCreated = { inst -> selectInstance(inst) },
+    )
+
+    /** 公网访问（Tailscale / 樱花映射 / 自建 frp） */
+    val networkController: NetworkController = NetworkController(
+        context = container.appContext,
+        env = container.env,
+        prefs = container.uiPrefs,
+        scope = viewModelScope,
+    )
 
     // ── 状态暴露 ──
     val envState: StateFlow<ProotEnvironment.State> = env.state
@@ -672,6 +704,144 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         instanceStore.setAutoBackup(instance.id, enabled)
     }
 
+    /**
+     * 崩溃自动重启开关。
+     *
+     * 逻辑本来就在 DefaultServerManager.handleExit 里（连续次数、成功启动清零都有），
+     * 但一直没有界面入口，用户根本开不了。这里只在控制台写一句生效说明。
+     */
+    fun setInstanceAutoRestart(instance: ServerInstance, enabled: Boolean) {
+        instanceStore.setAutoRestart(instance.id, enabled)
+        serverManager.consoleFor(instance.id).emit(
+            if (enabled) {
+                t("> 已开启崩溃自动重启（最多连续 %s 次，成功启动后计数清零）", instance.maxRestarts)
+            } else {
+                t("> 已关闭崩溃自动重启")
+            },
+            LineType.System,
+        )
+    }
+
+    fun setInstanceMaxRestarts(instance: ServerInstance, value: Int) {
+        instanceStore.setMaxRestarts(instance.id, value)
+        serverManager.consoleFor(instance.id).emit(
+            t("> 自动重启上限已改为 %s 次", value.coerceIn(1, 20)),
+            LineType.System,
+        )
+    }
+
+    // ── 模组体检：客户端专用模组 ──
+
+    data class ModAuditState(
+        val running: Boolean = false,
+        val progress: Float = 0f,
+        val message: String = "",
+        val items: List<ModAudit.Item> = emptyList(),
+        /** 勾选中的文件绝对路径 */
+        val selected: Set<String> = emptySet(),
+        val error: String? = null,
+        val doneMessage: String? = null,
+    )
+
+    private val _modAudit = MutableStateFlow(ModAuditState())
+    val modAudit: StateFlow<ModAuditState> = _modAudit.asStateFlow()
+
+    /**
+     * 检测 mods/ 里有没有"客户端专用"模组。
+     *
+     * 结果默认**全选**客户端专用的那些，用户仍可以逐项取消勾选 —— 这就是需求里的
+     * "手动一键停用和选择停用"：一键指的是默认选择，不是不给选择。
+     */
+    fun auditMods(instance: ServerInstance) {
+        if (_modAudit.value.running) return
+        _modAudit.value = ModAuditState(running = true, message = t("扫描 mods/ …"))
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val items = ModAudit.audit(instance) { p, m ->
+                    _modAudit.value = _modAudit.value.copy(progress = p, message = m)
+                }
+                _modAudit.value = ModAuditState(
+                    running = false,
+                    progress = 1f,
+                    message = "",
+                    items = items,
+                    selected = items.filter { it.clientOnly && it.enabled }.map { it.file.absolutePath }.toSet(),
+                    doneMessage = if (items.none { it.clientOnly }) {
+                        t("没有发现客户端专用模组（共检查 %s 个）", items.size)
+                    } else {
+                        t("发现 %s 个客户端专用模组，已默认勾选，可逐项取消", items.count { it.clientOnly })
+                    },
+                )
+            } catch (e: Exception) {
+                _modAudit.value = ModAuditState(
+                    error = t("检测失败：%s", e.message ?: e.javaClass.simpleName),
+                )
+            }
+        }
+    }
+
+    fun toggleAuditSelection(path: String) {
+        val current = _modAudit.value
+        if (current.running) return
+        val selected = current.selected.toMutableSet()
+        if (!selected.add(path)) selected.remove(path)
+        _modAudit.value = current.copy(selected = selected)
+    }
+
+    /** 停用勾选项（不删文件，随时能在列表里再启用） */
+    fun disableAuditSelected(instance: ServerInstance) {
+        val current = _modAudit.value
+        if (current.running) return
+        val targets = current.items.filter { it.file.absolutePath in current.selected && it.enabled }
+        if (targets.isEmpty()) {
+            _modAudit.value = current.copy(doneMessage = t("没有勾选可停用的模组"))
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val count = ModAudit.disable(targets)
+            _modAudit.value = current.copy(
+                selected = emptySet(),
+                items = current.items.map { item ->
+                    if (item.file.absolutePath in current.selected) item.copy(file = refreshedAuditFile(item.file)) else item
+                },
+                doneMessage = t("已停用 %s 个模组（重启服务端生效）", count),
+            )
+        }
+    }
+
+    /** 一键停用全部客户端专用模组 */
+    fun disableAllAuditClientOnly(instance: ServerInstance) {
+        val current = _modAudit.value
+        val targets = current.items.filter { it.clientOnly && it.enabled }
+        if (targets.isEmpty() || current.running) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val count = ModAudit.disable(targets)
+            _modAudit.value = current.copy(
+                selected = emptySet(),
+                items = current.items.map { item ->
+                    if (item.clientOnly) item.copy(file = refreshedAuditFile(item.file)) else item
+                },
+                doneMessage = t("已停用 %s 个客户端专用模组（重启服务端生效）", count),
+            )
+        }
+    }
+
+    fun clearModAudit() {
+        _modAudit.value = ModAuditState()
+    }
+
+    /** 停用后把条目指到磁盘上真实存在的那个文件（`x.jar` 或 `x.jar.disabled`） */
+    private fun refreshedAuditFile(file: File): File {
+        val base = file.absolutePath.removeSuffix(".disabled")
+        val disabled = File("$base.disabled")
+        val enabled = File(base)
+        return when {
+            disabled.isFile -> disabled
+            enabled.isFile -> enabled
+            else -> file
+        }
+    }
+
     fun sendCommand(command: String) {
         val id = _currentInstanceId.value ?: return
         instanceStore.get(id)?.let { serverManager.sendCommand(it, command) }
@@ -1140,6 +1310,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 }
             }
             instanceStore.remove(instance.id)
+            // 同步服务与客户端包缓存跟着实例一起释放：端口不关会一直占着，
+            // 缓存目录里的 zip 也不再有任何入口能再生成/命中
+            runCatching {
+                syncServers.remove(instance.id)?.stop()
+                _modSyncStates.update { it - instance.id }
+                ClientPack.invalidate(instance.id)
+            }
             // 目录删不掉就**必须告诉用户**：InstanceStore.load() → recoverFromDirs()
             // 会扫到残留目录里的核心 jar，把这条实例"原地复活"（并且 id 变成目录名）。
             // 用户删了服务端、重启应用它又回来了，存档还在 —— 而 runCatching 把
@@ -1551,6 +1728,82 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         _addonSearchError.value = null
     }
 
+    // ── 推荐列表（模组页顶部，PCL2 那种"没下载过也看得到图标"的列表）──
+
+    /**
+     * 推荐状态。
+     *
+     * [expanded] 是界面上的"展开/收起"，放在这里而不是 composition 里：
+     * 用户切到别的页面再回来，展开状态不该被重置（列表一收一开很跳）。
+     */
+    data class AddonRecommendState(
+        val loading: Boolean = false,
+        val error: String? = null,
+        val items: List<ModrinthProject> = emptyList(),
+        val expanded: Boolean = true,
+    )
+
+    private val _addonRecommend = MutableStateFlow(AddonRecommendState())
+    val addonRecommend: StateFlow<AddonRecommendState> = _addonRecommend.asStateFlow()
+
+    /** 已经为哪个实例/类型加载过推荐，避免每次重组都打网络 */
+    private var recommendKey: String? = null
+
+    fun loadRecommendedAddons(instance: ServerInstance, kind: AddonKind, force: Boolean = false) {
+        val key = "${instance.id}|${kind.name}"
+        if (!force) {
+            val current = _addonRecommend.value
+            if (recommendKey == key && (current.items.isNotEmpty() || current.loading)) return
+        }
+        recommendKey = key
+        _addonRecommend.value = _addonRecommend.value.copy(loading = true, error = null)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val contentKind = if (kind == AddonKind.MOD) ContentKind.MOD else ContentKind.PLUGIN
+                val list = ContentCatalog.recommended(instance, contentKind)
+                _addonRecommend.value = AddonRecommendState(
+                    loading = false,
+                    items = list,
+                    error = if (list.isEmpty()) t("没有可推荐的条目（网络或区域限制？）") else null,
+                    expanded = _addonRecommend.value.expanded,
+                )
+            } catch (e: Exception) {
+                _addonRecommend.value = _addonRecommend.value.copy(
+                    loading = false,
+                    error = t("推荐列表加载失败：%s", e.message ?: e.javaClass.simpleName),
+                )
+            }
+        }
+    }
+
+    fun setRecommendedExpanded(expanded: Boolean) {
+        _addonRecommend.value = _addonRecommend.value.copy(expanded = expanded)
+    }
+
+    /**
+     * 从推荐列表安装（与搜索安装共用同一个进度槽位 [addonInstall]，
+     * 界面上的进度条/错误/完成提示一处就够）。
+     */
+    fun installRecommendedAddon(instance: ServerInstance, kind: AddonKind, project: ModrinthProject) {
+        if (_addonInstall.value.running) return
+        _addonInstall.value = DownloadState(running = true, message = t("安装 %s…", project.title))
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val contentKind = if (kind == AddonKind.MOD) ContentKind.MOD else ContentKind.PLUGIN
+                val installed = ContentCatalog.install(instance, contentKind, project) { p, m ->
+                    _addonInstall.value = DownloadState(running = true, progress = p, message = m)
+                }
+                _addonInstall.value = DownloadState(
+                    done = true,
+                    message = t("已安装 %s（重启服务端生效）", installed.file.name),
+                )
+            } catch (e: Exception) {
+                _addonInstall.value = DownloadState(error = e.message ?: t("安装失败"))
+            }
+        }
+    }
+
+
     /**
      * 搜索 Modrinth。
      *
@@ -1648,6 +1901,314 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
 
     fun clearAddonInstallState() {
         _addonInstall.value = DownloadState()
+    }
+
+    // ── 动作：本地导入（SAF 选文件）──
+
+    /**
+     * 本地导入的进度与结果。
+     *
+     * 与 [addonInstall] 分开两个槽位：一边在从 Modrinth 下载、一边在导入本地文件时，
+     * 共用状态会让界面上的进度条互相覆盖（看起来像下载卡住）。
+     */
+    data class AddonImportState(
+        val running: Boolean = false,
+        val progress: Float = 0f,
+        val message: String = "",
+        val report: AddonImporter.Report? = null,
+        /** > 0 表示有同名文件冲突，界面可以给「覆盖并导入」 */
+        val conflictCount: Int = 0,
+        val error: String? = null,
+    )
+
+    private val _addonImport = MutableStateFlow(AddonImportState())
+    val addonImport: StateFlow<AddonImportState> = _addonImport.asStateFlow()
+
+    /** 冲突重试要重新打开这些 URI（SAF 授权只在当前界面会话内有效） */
+    private var pendingImportUris: List<Uri> = emptyList()
+    private var pendingImportKind: AddonKind? = null
+    private var pendingImportInstanceId: String? = null
+
+    fun clearAddonImportState() {
+        _addonImport.value = AddonImportState()
+        pendingImportUris = emptyList()
+        pendingImportKind = null
+        pendingImportInstanceId = null
+    }
+
+    /**
+     * 导入用户从文件管理器 / 浏览器选中的 jar（可多选）。
+     *
+     * 流程：
+     *  1. 逐个打开 SAF 流交给 [AddonImporter]（它负责校验、去重、原子落盘、兼容性提示）；
+     *  2. 有同名冲突时**不自动覆盖**，把来源留在 [pendingImportUris]，由界面确认后
+     *     调 [confirmImportOverwrite] 用同一批文件重跑；
+     *  3. 导入完成后清掉客户端包清单缓存 —— 否则玩家拿到的还是旧清单，
+     *     同步脚本会认为"没有变化"。
+     *
+     * @param overwrite 允许覆盖同名文件（仅由确认框触发）
+     */
+    fun importAddonsFromUris(
+        instance: ServerInstance,
+        kind: AddonKind,
+        uris: List<Uri>,
+        overwrite: Boolean = false,
+    ) {
+        if (uris.isEmpty() || _addonImport.value.running) return
+        if (!overwrite) {
+            pendingImportUris = uris
+            pendingImportKind = kind
+            pendingImportInstanceId = instance.id
+        }
+        _addonImport.value = AddonImportState(
+            running = true,
+            message = t("准备导入 %s 个文件…", uris.size),
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            var report = AddonImporter.Report()
+            try {
+                uris.forEachIndexed { index, uri ->
+                    val name = displayNameOf(uri) ?: "import-${index + 1}.jar"
+                    _addonImport.value = _addonImport.value.copy(
+                        progress = index.toFloat() / uris.size,
+                        message = t("导入 %s…", name),
+                    )
+                    val input = runCatching { appContext.contentResolver.openInputStream(uri) }.getOrNull()
+                    if (input == null) {
+                        report = report.merge(
+                            AddonImporter.Report(
+                                failed = listOf(
+                                    AddonImporter.Skipped(name, "打不开这个文件（权限被收回或文件已被移动）"),
+                                ),
+                            ),
+                        )
+                        return@forEachIndexed
+                    }
+                    input.use { ins ->
+                        report = report.merge(
+                            AddonImporter.importFromStream(instance, kind, name, ins, overwrite) { _, _ -> },
+                        )
+                    }
+                }
+                ClientPack.invalidate(instance.id)
+                _addonImport.value = AddonImportState(
+                    running = false,
+                    progress = 1f,
+                    message = importSummary(report),
+                    report = report,
+                    conflictCount = if (report.hasConflict) uris.size else 0,
+                )
+            } catch (e: Exception) {
+                _addonImport.value = AddonImportState(
+                    error = t("导入失败：%s", e.message ?: e.javaClass.simpleName),
+                )
+            }
+        }
+    }
+
+    /** 确认「覆盖同名文件」后，用同一批来源重跑导入 */
+    fun confirmImportOverwrite() {
+        val id = pendingImportInstanceId ?: return
+        val kind = pendingImportKind ?: return
+        val instance = instanceStore.get(id) ?: return
+        val uris = pendingImportUris
+        if (uris.isEmpty()) return
+        importAddonsFromUris(instance, kind, uris, overwrite = true)
+    }
+
+    private fun importSummary(r: AddonImporter.Report): String = buildString {
+        append(t("导入完成：成功 %s 个", r.okCount))
+        if (r.skipped.isNotEmpty()) append(t("，跳过 %s 个", r.skipped.size))
+        if (r.failed.isNotEmpty()) append(t("，失败 %s 个", r.failed.size))
+    }
+
+    /** SAF 的展示名（可能为空：有些来源只给流不给名字） */
+    private fun displayNameOf(uri: Uri): String? = runCatching {
+        appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    // ── 动作：客户端模组同步（服务端把模组分发给玩家）──
+
+    /** 每个实例一个 HTTP 同步服务（多开时互不影响） */
+    private val syncServers = java.util.concurrent.ConcurrentHashMap<String, ModSyncServer>()
+
+    private val _modSyncStates = MutableStateFlow<Map<String, ModSyncServer.Snapshot>>(emptyMap())
+    val modSyncStates: StateFlow<Map<String, ModSyncServer.Snapshot>> = _modSyncStates.asStateFlow()
+
+    /** 取（必要时创建）实例的同步服务 */
+    fun modSyncServer(instance: ServerInstance): ModSyncServer = syncServers.getOrPut(instance.id) {
+        val server = ModSyncServer(
+            instance = instance,
+            cacheDir = appContext.cacheDir,
+            remote = object : ModSyncServer.RemoteBridge {
+                override fun statusJson(): String {
+                    val state = serverManager.states.value[instance.id] ?: ServerState.Idle
+                    val uptime = serverManager.uptimeSec(instance.id).value
+                    val mods = runCatching {
+                        AddonManager.installed(instance, AddonKind.MOD).count { AddonManager.isEnabled(it) }
+                    }.getOrDefault(0)
+                    val name = instance.name.replace("\\", "\\\\").replace("\"", "\\\"")
+                    return "{\"instance\":\"$name\",\"state\":\"${state.name}\",\"uptimeSec\":$uptime," +
+                        "\"mods\":$mods,\"mcVersion\":\"${instance.mcVersion}\",\"bedrock\":${instance.bedrock}}"
+                }
+
+                override fun logs(maxLines: Int): String =
+                    serverManager.consoleFor(instance.id).snapshot()
+                        .takeLast(maxLines)
+                        .joinToString("\n") { it.text }
+
+                override fun command(cmd: String): String {
+                    serverManager.sendCommand(instance, cmd)
+                    return "ok: $cmd"
+                }
+
+                override fun start(): String {
+                    viewModelScope.launch { serverManager.start(instance) }
+                    return "starting"
+                }
+
+                override fun stop(): String {
+                    viewModelScope.launch { serverManager.stop(instance) }
+                    return "stopping"
+                }
+            },
+        )
+        viewModelScope.launch {
+            server.state.collect { snap ->
+                _modSyncStates.update { it + (instance.id to snap) }
+            }
+        }
+        server
+    }
+
+    /**
+     * 打开客户端同步。
+     *
+     * 端口与令牌来自设置（端口被占用时服务会顺延，实际端口以返回的状态为准）。
+     * 启动前清一次清单缓存：用户刚导入/删掉模组时，第一个请求必须看到最新文件。
+     */
+    fun startModSync(instance: ServerInstance) {
+        val server = modSyncServer(instance)
+        ClientPack.invalidate(instance.id)
+        viewModelScope.launch(Dispatchers.IO) {
+            server.start(uiPrefs.modSyncPort.value, uiPrefs.modSyncToken.value)
+        }
+    }
+
+    fun stopModSync(instance: ServerInstance) {
+        syncServers[instance.id]?.stop()
+    }
+
+    // ── 动作：导出客户端整合包 ──
+
+    data class PackExportState(
+        val running: Boolean = false,
+        val message: String = "",
+        val done: Boolean = false,
+        val error: String? = null,
+    )
+
+    private val _packExport = MutableStateFlow(PackExportState())
+    val packExport: StateFlow<PackExportState> = _packExport.asStateFlow()
+
+    fun clearPackExport() {
+        _packExport.value = PackExportState()
+    }
+
+    /**
+     * 把当前启用中的模组导出成客户端整合包（[mrpack] = true 时用 Modrinth 格式）。
+     *
+     * 输出直接写进用户通过 SAF 选的位置：手机上"先写到缓存再让用户去文件管理器找"
+     * 是行不通的（Android/data 里的文件玩家看不到）。
+     */
+    fun exportClientPack(instance: ServerInstance, uri: Uri, mrpack: Boolean = false) {
+        if (_packExport.value.running) return
+        _packExport.value = PackExportState(running = true, message = t("准备打包…"))
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val out = appContext.contentResolver.openOutputStream(uri)
+                    ?: throw RuntimeException(t("打不开所选位置"))
+                out.use { stream ->
+                    val progress: (Float, String) -> Unit = { p, m ->
+                        _packExport.value = PackExportState(
+                            running = true,
+                            // 百分比直接拼，不走 t()：t() 只处理 %s/%d，`%%` 会原样吐出来
+                            message = if (p > 0f) "$m（${(p * 100).toInt()}%）" else m,
+                        )
+                    }
+                    if (mrpack) {
+                        ClientPack.writeMrpack(instance, stream, progress)
+                    } else {
+                        ClientPack.writeZip(instance, stream, includeConfig = false, onProgress = progress)
+                    }
+                }
+                _packExport.value = PackExportState(done = true, message = t("已导出客户端整合包"))
+            } catch (e: Exception) {
+                _packExport.value = PackExportState(
+                    error = t("导出失败：%s", e.message ?: e.javaClass.simpleName),
+                )
+            }
+        }
+    }
+
+    // ── 动作：离线控制台（服务端未运行时也能用）──
+
+    /**
+     * 执行一行控制台输入。
+     *
+     * 运行中 → 照旧写进服务端 stdin；未运行 → 交给 [OfflineConsole] 直接操作实例文件。
+     * 这样控制台输入框在**任何状态**下都有意义，而不是停止时整块禁用
+     *（用户想改 server.properties / 加白名单 / 停用模组，本来就不该被迫先启动服务端）。
+     */
+    fun runOfflineCommand(input: String) {
+        val id = _currentInstanceId.value ?: return
+        val instance = instanceStore.get(id) ?: return
+        val text = input.trim()
+        if (text.isEmpty()) return
+        if (text.equals("clear", ignoreCase = true) || text.equals("cls", true)) {
+            clearConsole()
+            return
+        }
+        if (serverManager.states.value[id] == ServerState.Running) {
+            sendCommand(text)
+            return
+        }
+        val stream = serverManager.consoleFor(id)
+        stream.emit("> $text", LineType.Command)
+        viewModelScope.launch(Dispatchers.IO) {
+            val shell: (suspend (String) -> Result<String>)? = if (env.isReady) {
+                { cmd ->
+                    val sb = StringBuilder()
+                    val exit = withTimeoutOrNull(120_000) {
+                        env.execute(
+                            command = listOf("/usr/bin/sh", "-c", cmd),
+                            workDir = instance.dir,
+                            env = emptyMap(),
+                            onLine = { line -> if (sb.length < 200_000) sb.appendLine(line) },
+                        )
+                    }
+                    val body = sb.toString()
+                    when {
+                        exit == null -> Result.failure(RuntimeException("命令超时（120 秒）"))
+                        exit == 0 -> Result.success(body)
+                        else -> Result.success(body.trimEnd() + "\n（退出码 $exit）")
+                    }
+                }
+            } else {
+                null
+            }
+            val lines = runCatching { OfflineConsole.run(instance, text, shell) }
+                .getOrElse {
+                    listOf(
+                        OfflineConsole.Line(
+                            t("离线命令执行失败：%s", it.message ?: "未知错误"),
+                            LineType.Error,
+                        ),
+                    )
+                }
+            lines.forEach { stream.emit(it.text, it.type) }
+        }
     }
 
     // ── 插件 / 模组更新（已装附加组件的升级）──

@@ -98,7 +98,34 @@ object Downloader {
      *                 部分镜像对不存在的大文件会返回 200+HTML 错误页，必须靠内容校验拦截。
      */
     @Throws(Exception::class)
+    /**
+     * 下载入口：对 `cdn.modrinth.com` 的地址自动带上 MCIM 镜像候选。
+     *
+     * 顺序是"原地址优先、失败再换镜像"：海外用户直连 CDN 更快，国内用户第一次失败后
+     * 会立刻落到镜像；切换源前会删掉半截文件，避免 Range 续传把两个源的字节拼在一起。
+     */
     fun download(
+        urlStr: String,
+        dest: File,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+        shouldCancel: () -> Boolean = { false },
+        validate: (File) -> Boolean,
+    ) {
+        val candidates = com.kaze.newage.core.content.ContentSources.preferredFileCandidates(urlStr)
+        var lastError: Exception? = null
+        for ((index, candidate) in candidates.withIndex()) {
+            try {
+                downloadOne(candidate, dest, onProgress, shouldCancel, validate)
+                return
+            } catch (e: Exception) {
+                lastError = e
+                if (index < candidates.lastIndex) runCatching { dest.delete() }
+            }
+        }
+        throw lastError ?: RuntimeException("下载失败：没有可用地址")
+    }
+
+    private fun downloadOne(
         urlStr: String,
         dest: File,
         onProgress: (Long, Long) -> Unit = { _, _ -> },

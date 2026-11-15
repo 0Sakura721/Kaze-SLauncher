@@ -78,6 +78,8 @@ import com.kaze.newage.ui.components.AppBackground
 import com.kaze.newage.ui.components.BackdropLayer
 import com.kaze.newage.ui.components.M3ELinearProgress
 import com.kaze.newage.ui.screens.AddonsScreen
+import com.kaze.newage.ui.screens.ContentScreen
+import com.kaze.newage.ui.screens.NetworkScreen
 import com.kaze.newage.ui.screens.AiScreen
 import com.kaze.newage.ui.screens.AiSettingsScreen
 import com.kaze.newage.ui.screens.ConsoleScreen
@@ -225,7 +227,11 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 composable(Dest.Home.route) {
                     HomeScreen(
                         viewModel,
-                        onNavigate = navigateTab,
+                        // 资源中心不是底栏 tab：走普通 navigate，别套 navigateTab 的
+                        // popUpTo/restoreState（那套是给四个主页面互相切换用的）
+                        onNavigate = { route ->
+                            if (route == "content" || route == "network") navController.navigate(route) else navigateTab(route)
+                        },
                         // 首页大按钮在"没有实例"时显示的是「新建服务端」，
                         // 就必须真的进新建向导——此前跳到服务端列表页，用户还得再点一次「新建」
                         onNewServer = { navController.navigate("server/new") },
@@ -266,6 +272,17 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                 }
                 composable("ai/settings") {
                     AiSettingsScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+                }
+                // 公网与远程：Tailscale / 樱花映射 / 自建 frp / 远程管理面板
+                composable("network") {
+                    NetworkScreen(viewModel = viewModel, onBack = { navController.popBackStack() })
+                }                // 资源中心：模组/插件/资源包/地图/基岩版（从主页的「资源」入口进入）
+                composable("content") {
+                    ContentScreen(
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() },
+                        onOpenServers = { navigateTab(Dest.Server.route) },
+                    )
                 }
                 composable(Dest.Settings.route) {
                     SettingsScreen(

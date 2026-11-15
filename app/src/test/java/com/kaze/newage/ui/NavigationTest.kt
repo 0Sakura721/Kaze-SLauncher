@@ -79,8 +79,10 @@ class NavigationTest {
     }
 
     private fun assertOnConsole() {
-        // 控制台页的输入框占位文案（其它页面没有）
-        composeRule.onNodeWithText("服务端运行后可输入命令").assertIsDisplayed()
+        // 控制台页的输入框占位文案（其它页面没有）。
+        // 未运行时是「离线控制台」的提示 —— 控制台输入框在停止态也可用（离线命令），
+        // 所以这里断言的是离线占位文案，而不是运行态的「输入命令（stop / op…）」。
+        composeRule.onNodeWithText("离线控制台：help 看命令，或 sh ls").assertIsDisplayed()
     }
 
 

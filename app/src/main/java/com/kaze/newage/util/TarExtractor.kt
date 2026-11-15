@@ -246,11 +246,10 @@ object TarExtractor {
                     android.util.Log.w("KazeSLauncher", "拒绝越界符号链接：${link.target.name} -> ${link.linkRel}")
                     continue
                 }
-                try {
-                    java.nio.file.Files.createSymbolicLink(
-                        link.target.toPath(),
-                        java.nio.file.Paths.get(link.linkRel)
-                    )
+        try {
+            // Os.symlink(oldPath=目标, newPath=链接本身)：API 21 起可用，
+            // 比 java.nio.file（API 26）更适合低版本；语义与 createSymbolicLink 一致。
+            android.system.Os.symlink(link.linkRel, link.target.absolutePath)
                 } catch (_: Exception) {
                     // 沙箱限制符号链接时，复制链接目标，保证 soname 存在
                     try {

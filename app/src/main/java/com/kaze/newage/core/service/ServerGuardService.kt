@@ -44,7 +44,10 @@ class ServerGuardService : Service() {
         super.onCreate()
         // ① 通知渠道
         val nm = getSystemService(NotificationManager::class.java)
-        if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+        // 通知渠道是 API 26 才有的概念：24/25 上直接跳过，否则会 NoSuchMethodError。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            nm.getNotificationChannel(CHANNEL_ID) == null
+        ) {
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, "服务端守护", NotificationManager.IMPORTANCE_LOW)
             )
