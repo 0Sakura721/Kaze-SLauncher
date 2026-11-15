@@ -70,6 +70,15 @@ data class ServerInstance(
      * 的更新判定 —— 这些核心的地址里带版本号，地址变了就说明上游发了新包。
      */
     val coreDownloadUrl: String = "",
+    /**
+     * 是否是**基岩版**服务端（PowerNukkitX）。
+     *
+     * 刻意不做成 [CoreType] 的一员：基岩版与 Java 版在端口、协议、插件形态上全都不同，
+     * 硬塞进同一个枚举会让"Java 版核心更新/Java 版本推断/模组加载器"这些逻辑到处长分支。
+     * 它本质上就是一个"用 Java 跑的第三方 jar"，所以复用 CUSTOM 的启动路径，
+     * 只用一个标记位让界面/内容中心知道"该显示基岩版的东西"。
+     */
+    val bedrock: Boolean = false,
 ) {
     /** 实例目录下的 jar 文件 */
     val jarFile: File

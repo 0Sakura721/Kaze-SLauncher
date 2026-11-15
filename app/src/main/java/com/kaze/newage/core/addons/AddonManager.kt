@@ -101,7 +101,29 @@ object AddonManager {
      * 界面在真正下载前先用它算一次，才能对"会替换同名文件"这件事给出确认；
      * 规则与 [install] 完全一致，不允许外部把路径直接传进来。
      */
-    @Throws(Exception::class)
+    /**
+ * 版本选择用的列表（安装对话框）。
+ *
+ * 默认只列**兼容当前实例**的版本（加载器 + MC 版本）；`includeAll=true` 时只按加载器过滤，
+ * 用于"这个 MC 版本没有适配、但我想装个旧版本试试"的场景。
+ */
+@Throws(Exception::class)
+fun versionsForPicker(
+    instance: ServerInstance,
+    kind: AddonKind,
+    projectId: String,
+    includeAll: Boolean = false,
+): List<ModrinthVersion> {
+    val loader = loaderFor(instance, kind)
+    val gv = instance.mcVersion.takeIf { it.isNotBlank() && !it.startsWith("bedrock", true) }
+    return if (includeAll || gv == null) {
+        ModrinthApi.versions(projectId, loader)
+    } else {
+        ModrinthApi.versions(projectId, loader, gv)
+    }
+}
+
+@Throws(Exception::class)
     fun targetFile(instance: ServerInstance, kind: AddonKind, projectId: String, gameVersion: String?): File {
         val version = pickVersion(instance, kind, projectId, gameVersion)
         val file = version.files.firstOrNull { it.primary } ?: version.files.firstOrNull()

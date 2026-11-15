@@ -1208,8 +1208,15 @@ class ProotEnvironment(
         }
     }
     /** 判断是否真符号链接：File.exists() 对断链返回 false，必须用 NIO 判断 */
-    private fun isSymlink(f: File): Boolean =
-        runCatching { java.nio.file.Files.isSymbolicLink(f.toPath()) }.getOrDefault(false)
+    /**
+     * 判断是否真符号链接：File.exists() 对断链返回 false，必须看 lstat。
+     *
+     * 用 [android.system.Os.lstat]（API 21）而不是 java.nio.file（API 26）：
+     * 断链也能识别，同时把 minSdk 降到 24。
+     */
+    private fun isSymlink(f: File): Boolean = runCatching {
+        android.system.OsConstants.S_ISLNK(android.system.Os.lstat(f.absolutePath).st_mode)
+    }.getOrDefault(false)
 
     companion object {
         /** usrmerge：Ubuntu 24.04 里这些顶层目录是指向 usr/ 的符号链接 */

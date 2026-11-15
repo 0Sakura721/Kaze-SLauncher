@@ -25,7 +25,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Storefront
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -413,6 +415,10 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 HomeSecondaryAction(Icons.Filled.Terminal, t("控制台")) { onNavigate(Dest.Console.route) }
+                // 资源中心：模组/资源包/地图/基岩版的下载入口（以前这些入口散在各页，主页没有聚合点）
+                HomeSecondaryAction(Icons.Filled.Storefront, t("资源")) { onNavigate("content") }
+                // 公网与远程：Tailscale / 樱花映射 / frp / 远程管理
+                HomeSecondaryAction(Icons.Filled.Router, t("远程")) { onNavigate("network") }
                 HomeSecondaryAction(Icons.Filled.FolderOpen, t("实例目录")) {
                     // 必须走 FileProvider 的 content://：targetSdk≥24 传 file:// 会抛
                     // FileUriExposedException，异常一吞按钮就"点了没反应"（此处原样）。

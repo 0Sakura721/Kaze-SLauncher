@@ -31,6 +31,8 @@ data class StoredInstance(
     // 核心更新用：旧存档没有这两个键，默认值 + ignoreUnknownKeys 保证读得出来（视为未知）
     val coreBuild: String = "",
     val coreDownloadUrl: String = "",
+    /** 基岩版服务端标记（旧存档没有该键，默认 false → 视为 Java 版） */
+    val bedrock: Boolean = false,
 ) {
     fun toInstance(): ServerInstance = ServerInstance(
         id = id,
@@ -48,6 +50,7 @@ data class StoredInstance(
         autoBackup = autoBackup,
         coreBuild = coreBuild,
         coreDownloadUrl = coreDownloadUrl,
+        bedrock = bedrock,
     )
 
     companion object {
@@ -67,6 +70,7 @@ data class StoredInstance(
             autoBackup = instance.autoBackup,
             coreBuild = instance.coreBuild,
             coreDownloadUrl = instance.coreDownloadUrl,
+            bedrock = instance.bedrock,
         )
     }
 }
@@ -558,6 +562,30 @@ class InstanceStore(
     fun setAutoBackup(id: String, enabled: Boolean) {
         _instances.update { list ->
             list.map { if (it.id == id) it.copy(autoBackup = enabled) else it }
+        }
+        save()
+    }
+
+    /**
+     * 崩溃自动重启开关（实现见 DefaultServerManager.handleExit：按 restartCount/maxRestarts
+     * 决定是否拉起，成功启动后计数清零）。
+     *
+     * 以前这个字段只有持久化与启动逻辑，**界面上没有任何入口** —— 等于功能存在但没人能开。
+     */
+    @Synchronized
+    fun setAutoRestart(id: String, enabled: Boolean) {
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(autoRestart = enabled) else it }
+        }
+        save()
+    }
+
+    /** 连续自动重启上限（1..20） */
+    @Synchronized
+    fun setMaxRestarts(id: String, maxRestarts: Int) {
+        val limit = maxRestarts.coerceIn(1, 20)
+        _instances.update { list ->
+            list.map { if (it.id == id) it.copy(maxRestarts = limit) else it }
         }
         save()
     }

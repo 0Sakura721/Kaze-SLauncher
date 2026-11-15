@@ -12,6 +12,7 @@ import com.kaze.newage.core.ai.AiProfileStore
 import com.kaze.newage.core.ai.AiToolPolicy
 import com.kaze.newage.core.i18n.t
 import com.kaze.newage.core.mcp.McpPorts
+import com.kaze.newage.core.content.ContentSources
 import com.kaze.newage.core.mcp.McpServer
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -290,6 +291,158 @@ emember(path) 缓存位图的话，
 
     private fun newMcpToken(): String =
         java.util.UUID.randomUUID().toString().replace("-", "")
+
+    // ── 公网访问：樱花映射 / 自建 frp ──
+    //
+    // 樱花访问密钥与 MCP 令牌同一套加密存储（AiKeyCipher）；frp 其余字段是普通配置。
+    val sakuraToken = mutableStateOf(loadSecret("sakura_token"))
+
+    /** 上次登录的账号名：重启后先显示"已保存登录：xxx"，网络回来再刷新隧道 */
+    val sakuraUserName = mutableStateOf(prefs.getString("sakura_user_name", "") ?: "")
+
+    /** 上次选中的隧道 id：重启后仍然选中那条 */
+    val sakuraTunnelId = mutableStateOf(prefs.getLong("sakura_tunnel_id", 0L))
+
+    val frpServer = mutableStateOf(prefs.getString("frp_server", "") ?: "")
+    val frpServerPort = mutableStateOf(prefs.getInt("frp_server_port", 7000))
+    val frpToken = mutableStateOf(prefs.getString("frp_token", "") ?: "")
+    val frpRemotePort = mutableStateOf(prefs.getInt("frp_remote_port", 25565))
+
+    fun setSakuraToken(v: String) {
+        val t = v.trim()
+        sakuraToken.value = t
+        prefs.edit().putString("sakura_token", if (t.isEmpty()) "" else (AiKeyCipher.encrypt(t) ?: t)).apply()
+        // 清空密钥时连带清掉会话痕迹，避免下次显示"已保存登录"却没有密钥可用
+        if (t.isEmpty()) clearSakuraSession()
+    }
+
+    /** 登录成功后记住账号名与所选隧道（保持登录的关键：密钥 + 会话元数据） */
+    fun setSakuraSession(userName: String, tunnelId: Long? = null) {
+        sakuraUserName.value = userName
+        if (tunnelId != null && tunnelId > 0) sakuraTunnelId.value = tunnelId
+        prefs.edit()
+            .putString("sakura_user_name", sakuraUserName.value)
+            .putLong("sakura_tunnel_id", sakuraTunnelId.value)
+            .apply()
+    }
+
+    /** 退出登录 / 令牌失效：把密钥与会话元数据一起清掉 */
+    fun clearSakuraSession() {
+        sakuraToken.value = ""
+        sakuraUserName.value = ""
+        sakuraTunnelId.value = 0L
+        prefs.edit()
+            .putString("sakura_token", "")
+            .putString("sakura_user_name", "")
+            .putLong("sakura_tunnel_id", 0L)
+            .apply()
+    }
+
+    fun setFrp(server: String, serverPort: Int, token: String, remotePort: Int) {
+        frpServer.value = server.trim()
+        frpServerPort.value = serverPort.coerceIn(1, 65535)
+        frpToken.value = token.trim()
+        frpRemotePort.value = remotePort.coerceIn(1, 65535)
+        prefs.edit()
+            .putString("frp_server", frpServer.value)
+            .putInt("frp_server_port", frpServerPort.value)
+            .putString("frp_token", frpToken.value)
+            .putInt("frp_remote_port", frpRemotePort.value)
+            .apply()
+    }
+
+    private fun loadSecret(key: String): String {
+        val raw = prefs.getString(key, "")?.trim().orEmpty()
+        return if (raw.isEmpty()) "" else AiKeyCipher.decrypt(raw).orEmpty()
+    }
+    // ── 资源中心收藏 ──
+    //
+    // 存项目 id 的 JSON 数组：ZalithLauncher2 的下载页有"收藏"入口，
+    // 这里给资源中心加一个轻量版（星标 + 只看收藏）。
+    val favoriteProjects = mutableStateOf(loadFavorites())
+
+    private fun loadFavorites(): Set<String> = runCatching {
+        val raw = prefs.getString("favorite_projects", "") ?: ""
+        if (raw.isBlank()) emptySet()
+        else raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }.getOrDefault(emptySet())
+
+    fun toggleFavorite(projectId: String): Boolean {
+        val id = projectId.trim()
+        if (id.isEmpty()) return false
+        val next = favoriteProjects.value.toMutableSet()
+        val nowFavorite = if (id in next) {
+            next.remove(id)
+            false
+        } else {
+            next.add(id)
+            true
+        }
+        favoriteProjects.value = next
+        prefs.edit().putString("favorite_projects", next.joinToString(",")).apply()
+        return nowFavorite
+    }
+
+    // ── 内容源（资源中心 / 附加搜索用的 Modrinth 域名）──
+
+    //
+    // 默认 auto：官方优先、失败自动切 MCIM 镜像。国内网络直连 api.modrinth.com
+    // 经常超时，写死官方会让整个资源中心变成"没有可用条目"。
+    val contentSource = mutableStateOf(
+        prefs.getString("content_source", ContentSources.MODE_AUTO) ?: ContentSources.MODE_AUTO,
+    )
+    val contentSourceCustomUrl = mutableStateOf(prefs.getString("content_source_custom", "") ?: "")
+
+    fun setContentSource(mode: String, customUrl: String = contentSourceCustomUrl.value) {
+        val m = mode.trim().ifBlank { ContentSources.MODE_AUTO }
+        val url = customUrl.trim()
+        contentSource.value = m
+        contentSourceCustomUrl.value = url
+        prefs.edit().putString("content_source", m).putString("content_source_custom", url).apply()
+        ContentSources.configure(m, url)
+    }
+    // ── 客户端模组同步（core/sync/ModSyncServer）──
+    //
+    // 与 MCP 的取舍不同：这个服务的用途就是让**同一个局域网的玩家**来拉模组，
+    // 所以默认带令牌、端口固定可预测（方便用户口头告诉朋友），但允许清空令牌
+    //（内网自用），界面上会明确警告"同网段任何人都能下载"。
+
+    /** 首选端口；被占用时服务会顺延，实际端口以 ModSyncServer.state 为准 */
+    val modSyncPort = mutableStateOf(prefs.getInt("mod_sync_port", 8123))
+
+    /** 访问令牌（空串 = 不校验）；Keystore 加密存储，与 MCP 令牌同一套机制 */
+    val modSyncToken = mutableStateOf(loadModSyncToken())
+
+    fun setModSyncPort(v: Int) {
+        val p = v.coerceIn(1024, 65535)
+        modSyncPort.value = p
+        prefs.edit().putInt("mod_sync_port", p).apply()
+    }
+
+    fun setModSyncToken(v: String) {
+        val t = v.trim()
+        modSyncToken.value = t
+        // 空令牌必须原样存空串：走 encrypt("") 会在读回时被当作"未设置"重新生成，
+        // 用户明明清空了却被系统又塞了一个令牌（设置页会显示成改了个没用的东西）
+        val stored = if (t.isEmpty()) "" else (AiKeyCipher.encrypt(t) ?: t)
+        prefs.edit().putString("mod_sync_token", stored).apply()
+    }
+
+    fun regenerateModSyncToken(): String {
+        val t = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        setModSyncToken(t)
+        return t
+    }
+
+    private fun loadModSyncToken(): String {
+        if (prefs.contains("mod_sync_token")) {
+            val raw = prefs.getString("mod_sync_token", "")?.trim().orEmpty()
+            return if (raw.isEmpty()) "" else AiKeyCipher.decrypt(raw).orEmpty()
+        }
+        val t = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        prefs.edit().putString("mod_sync_token", AiKeyCipher.encrypt(t) ?: t).apply()
+        return t
+    }
 
     // ── AI 助手（OpenAI 兼容接口 + 联网搜索，见 core/ai/）──
     //

@@ -199,6 +199,11 @@ fun M3EListItem(
     modifier: Modifier = Modifier,
     supporting: String? = null,
     leadingIcon: ImageVector? = null,
+    /**
+     * 自定义左侧内容（模组图标等真实图片）。
+     * 给定时**优先于** [leadingIcon]：图标要按内容渲染，ImageVector 表达不了位图。
+     */
+    leading: (@Composable () -> Unit)? = null,
     /** 左侧图标的圆底颜色角色；null = 不用圆底，裸图标 */
     iconContainer: Color? = null,
     onClick: (() -> Unit)? = null,
@@ -280,7 +285,9 @@ fun M3EListItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (leadingIcon != null) {
+            if (leading != null) {
+                leading()
+            } else if (leadingIcon != null) {
                 if (iconContainer != null) {
                     // Miuix：HyperOS 用 32dp 圆角方块（8dp 圆角），不是 M3 的 40dp 正圆。
                     val box = if (isMiuix) MiuixSpec.iconBox else 40.dp

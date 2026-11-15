@@ -1195,6 +1195,28 @@ internal fun AdvancedSettingsCard(
                 height = 38.dp,
             )
         }
+        // ── 崩溃后自动重启 ──
+        // 逻辑在 DefaultServerManager.handleExit（连续次数上限、成功启动后清零），
+        // 这里只是把开关摆出来：字段早就存在，但此前界面上没有任何入口。
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(t("崩溃后自动重启"), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    t("异常退出时自动拉起，最多连续 %s 次（成功启动后计数清零）", instance.maxRestarts),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            M3ESwitch(
+                checked = instance.autoRestart,
+                onCheckedChange = { viewModel.setInstanceAutoRestart(instance, it) },
+            )
+        }
+
         Row(
             Modifier.fillMaxWidth().padding(top = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

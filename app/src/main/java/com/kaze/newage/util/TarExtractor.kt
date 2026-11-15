@@ -246,31 +246,40 @@ object TarExtractor {
                     android.util.Log.w("KazeSLauncher", "拒绝越界符号链接：${link.target.name} -> ${link.linkRel}")
                     continue
                 }
+                // 建链 + 兜底：Os.symlink 在部分环境（如 Robolectric 的 stub、某些受限文件
+                // 系统）可能**静默失败**——既不抛异常、也不真正创建链接。因此不能只靠异常驱动
+                // fallback，而是建链后**主动确认目标存在**，不存在才复制兜底（保证 soname 型
+                // 相对链接在任何环境下都可用）。
+                var linked = false
                 try {
-                    java.nio.file.Files.createSymbolicLink(
-                        link.target.toPath(),
-                        java.nio.file.Paths.get(link.linkRel)
-                    )
-                } catch (_: Exception) {
-                    // 沙箱限制符号链接时，复制链接目标，保证 soname 存在
+                    // Os.symlink(oldPath=目标, newPath=链接本身)：API 21 起可用，
+                    // 比 java.nio.file（API 26）更适合低版本；语义与 createSymbolicLink 一致。
+                    android.system.Os.symlink(link.linkRel, link.target.absolutePath)
+                    linked = link.target.exists()
+                } catch (_: Throwable) {
+                    linked = false
+                }
+                if (!linked) {
+                    // 复制兜底：与建链同源的 resolved 计算，规避逃逸
                     try {
                         val resolved = File(link.target.parentFile ?: destDir, link.linkRel)
                         // ../ 型链接目标同样禁止逃逸
+                        // destCanonical 已带 File.separator（见 L89），这里不要再拼
                         if (resolved.canonicalPath.startsWith(destCanonical)) {
                             when {
                                 resolved.isFile -> resolved.copyTo(link.target, overwrite = true)
                                 resolved.isDirectory -> {
                                     // 目录型链接（usrmerge 的 bin/lib/sbin 等）：文件副本代价过高，
-                                    // 交上层修复（Os.symlink 尝试或运行时 proot -b 绑定）
+                                    // 交上层修复（运行时 proot -b 绑定）
                                 }
                             }
                         }
                     // 刻意吞掉：目录型链接交上层修复（见上方说明），不算解压失败
-                    } catch (_: Exception) { }
+                    } catch (_: Throwable) { }
                 }
             }
 
-            onProgress(total, total, 0)
+        onProgress(total, total, 0)
 
             // 全局 sync：真机内部 FUSE 会丢目录项（文件数据 fsync 后 dentry 仍可能丢失，
             // 症状=解压后 usr/bin 目录空）。系统级 sync() 强制 FUSE/F2FS 全量回刷。
