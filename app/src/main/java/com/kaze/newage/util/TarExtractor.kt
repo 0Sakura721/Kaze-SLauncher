@@ -250,11 +250,17 @@ object TarExtractor {
             // Os.symlink(oldPath=目标, newPath=链接本身)：API 21 起可用，
             // 比 java.nio.file（API 26）更适合低版本；语义与 createSymbolicLink 一致。
             android.system.Os.symlink(link.linkRel, link.target.absolutePath)
-                } catch (_: Exception) {
-                    // 沙箱限制符号链接时，复制链接目标，保证 soname 存在
+                } catch (e: Throwable) {
+                    // Os.symlink 在 Android 真机上抛的是 checked IOException；
+                    // 但在 JVM（单测/Robolectric）上 android.system.Os 根本不存在，
+                    // 抛的是 NoClassDefFoundError / UnsatisfiedLinkError —— **不是 Exception**，
+                    // 于是 catch (_: Exception) 抓不住、fallback 不执行、符号链接静默丢失。
+                    // 必须抓 Throwable（或至少加 Error），否则「建链失败时复制兜底」这条路径
+                    // 在测试环境里根本走不到（TarExtractorTest 的「正常相对链接应可用」会失败）。
                     try {
                         val resolved = File(link.target.parentFile ?: destDir, link.linkRel)
                         // ../ 型链接目标同样禁止逃逸
+                        // destCanonical 已带 File.separator（见 L89），这里不要再拼
                         if (resolved.canonicalPath.startsWith(destCanonical)) {
                             when {
                                 resolved.isFile -> resolved.copyTo(link.target, overwrite = true)
@@ -265,7 +271,7 @@ object TarExtractor {
                             }
                         }
                     // 刻意吞掉：目录型链接交上层修复（见上方说明），不算解压失败
-                    } catch (_: Exception) { }
+                    } catch (_: Throwable) { }
                 }
             }
 
