@@ -246,25 +246,23 @@ object TarExtractor {
                     android.util.Log.w("KazeSLauncher", "拒绝越界符号链接：${link.target.name} -> ${link.linkRel}")
                     continue
                 }
-        try {
-            // Os.symlink(oldPath=目标, newPath=链接本身)：API 21 起可用，
-            // 比 java.nio.file（API 26）更适合低版本；语义与 createSymbolicLink 一致。
-            // 诊断：临时抛异常看 Os.symlink 是否真的执行成功
-            android.system.Os.symlink(link.linkRel, link.target.absolutePath)
-            throw IllegalStateException("[TarExtractor-debug-symlink-ok] linkRel=${link.linkRel} target=${link.target}")
-                } catch (e: Throwable) {
-                    // 诊断：Os.symlink 的失败原因带进异常消息
-                    throw IllegalStateException("[TarExtractor-debug-symlink-fail] ${e.javaClass.name}:${e.message}", e)
-                    // Os.symlink 在 Android 真机上抛的是 checked IOException；
-                    // 但在 JVM（单测/Robolectric）上 android.system.Os 根本不存在，
-                    // 抛的是 NoClassDefFoundError / UnsatisfiedLinkError —— **不是 Exception**，
-                    // 于是 catch (_: Exception) 抓不住、fallback 不执行、符号链接静默丢失。
-                    // 必须抓 Throwable（或至少加 Error），否则「建链失败时复制兜底」这条路径
-                    // 在测试环境里根本走不到（TarExtractorTest 的「正常相对链接应可用」会失败）。
+                // 建链 + 兜底：Os.symlink 在部分环境（如 Robolectric 的 stub、某些受限文件
+                // 系统）可能**静默失败**——既不抛异常、也不真正创建链接。因此不能只靠异常驱动
+                // fallback，而是建链后**主动确认目标存在**，不存在才复制兜底（保证 soname 型
+                // 相对链接在任何环境下都可用）。
+                var linked = false
+                try {
+                    // Os.symlink(oldPath=目标, newPath=链接本身)：API 21 起可用，
+                    // 比 java.nio.file（API 26）更适合低版本；语义与 createSymbolicLink 一致。
+                    android.system.Os.symlink(link.linkRel, link.target.absolutePath)
+                    linked = link.target.exists()
+                } catch (_: Throwable) {
+                    linked = false
+                }
+                if (!linked) {
+                    // 复制兜底：与建链同源的 resolved 计算，规避逃逸
                     try {
                         val resolved = File(link.target.parentFile ?: destDir, link.linkRel)
-                        // 调试：用异常消息带出状态（System.err 在 Gradle 测试里看不到）
-                        if (false) throw RuntimeException("[TarExtractor-debug] link.target=${link.target} parent=${link.target.parentFile} linkRel=${link.linkRel} resolved=${resolved} isFile=${resolved.isFile} isDir=${resolved.isDirectory}")
                         // ../ 型链接目标同样禁止逃逸
                         // destCanonical 已带 File.separator（见 L89），这里不要再拼
                         if (resolved.canonicalPath.startsWith(destCanonical)) {
@@ -272,18 +270,16 @@ object TarExtractor {
                                 resolved.isFile -> resolved.copyTo(link.target, overwrite = true)
                                 resolved.isDirectory -> {
                                     // 目录型链接（usrmerge 的 bin/lib/sbin 等）：文件副本代价过高，
-                                    // 交上层修复（Os.symlink 尝试或运行时 proot -b 绑定）
+                                    // 交上层修复（运行时 proot -b 绑定）
                                 }
                             }
                         }
-                    } catch (e: Throwable) {
-                        // 诊断：fallback 失败原因写进 pendingLinks 旁的异常，便于 CI 堆栈看到
-                        throw IllegalStateException("[TarExtractor-debug-fallback] link.target=${link.target} linkRel=${link.linkRel} cause=${e.javaClass.name}:${e.message}", e)
-                    }
+                    // 刻意吞掉：目录型链接交上层修复（见上方说明），不算解压失败
+                    } catch (_: Throwable) { }
                 }
             }
 
-            onProgress(total, total, 0)
+        onProgress(total, total, 0)
 
             // 全局 sync：真机内部 FUSE 会丢目录项（文件数据 fsync 后 dentry 仍可能丢失，
             // 症状=解压后 usr/bin 目录空）。系统级 sync() 强制 FUSE/F2FS 全量回刷。
