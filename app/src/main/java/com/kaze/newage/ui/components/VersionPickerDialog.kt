@@ -39,7 +39,7 @@ import com.kaze.newage.core.i18n.t
 @Composable
 fun VersionPickerDialog(
     projectTitle: String,
-    state: ContentController.VersionPickerState,
+    state: ContentController.VersionsPanel,
     onToggleAll: (Boolean) -> Unit,
     onInstall: (ModrinthVersion) -> Unit,
     onDismiss: () -> Unit,
