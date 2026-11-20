@@ -180,8 +180,13 @@ object UpdateChecker {
         val applicable = releases.filter { channel != "stable" || !it.prerelease }
         val candidate = applicable.filter { it.publishedAt > 0 }.maxByOrNull { it.publishedAt }
             ?: return null
+        // 基线 = tag 与当前 versionName 匹配的那条 Release 的发布日期。
+        // ⚠️ 必须是**日期有效（>0）**的那条：若匹配到的 Release 恰好 published_at
+        // 解析失败（publishedAt=0），旧写法会把 0 当基线，于是任何候选（哪怕比当前版本
+        // 更旧）都会被判成"有更新" —— 用户看到永远提示更新、反复下载同一个旧包。
+        // 遇到无效日期时退回 installedAt（安装时间）兜底，与"tag 匹配不到"走同一路径。
         val baseline = releases
-            .firstOrNull { sameRelease(it.tag, currentVersion) }
+            .firstOrNull { sameRelease(it.tag, currentVersion) && it.publishedAt > 0 }
             ?.publishedAt
             ?: installedAt
         return candidate.takeIf { it.publishedAt > baseline }

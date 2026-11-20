@@ -113,6 +113,45 @@ class UpdateCheckerTest {
     // ── 日期解析（published_at → epoch）──
 
     @Test
+    fun `基线版本日期解析失败时退回安装时间而不是误报更新`() {
+        // 回归：当前版本的 Release 若 published_at 解析失败（publishedAt=0），
+        // 旧实现把 0 当基线 → 任何候选（哪怕更旧）都判成"有更新"，用户反复下载旧包。
+        val badBaseline = UpdateChecker.ReleaseInfo(
+            tag = "0.4.1", name = "0.4.1", body = "",
+            apkUrl = "https://example.com/a.apk", publishedAt = 0,
+        )
+        val older = release("0.4.0", v040)   // 日期比当前版本"应该"的还早
+        val installedAt = Instant.parse(v041).toEpochMilli()
+
+        // 基线日期无效 → 用 installedAt 兜底；候选 0.4.0 的日期(v040)早于安装时间 → 不提示
+        assertNull(
+            UpdateChecker.selectUpdate(
+                listOf(badBaseline, older), "preview", "0.4.1", installedAt,
+            ),
+        )
+        // 若候选确实晚于安装时间，仍应正常提示（不能因为基线坏了一刀切不提示）
+        val newer = release("0.4.2", v042)
+        assertEquals(
+            "0.4.2",
+            UpdateChecker.selectUpdate(
+                listOf(badBaseline, newer), "preview", "0.4.1", installedAt,
+            )?.tag,
+        )
+    }
+
+    @Test
+    fun `基线日期有效时优先于安装时间`() {
+        // 当前版本匹配到有效日期的 Release → 用它的日期，而不是安装时间
+        val releases = listOf(release("0.4.1", v041), release("0.4.2", v042))
+        // installedAt 故意设得比 v041 晚：若误用安装时间会漏报 v042
+        val lateInstall = Instant.parse("2026-10-10T00:00:00Z").toEpochMilli()
+        assertEquals(
+            "0.4.2",
+            UpdateChecker.selectUpdate(releases, "preview", "0.4.1", lateInstall)?.tag,
+        )
+    }
+
+    @Test
     fun `GitHub ISO 时间解析`() {
         val ms = UpdateChecker.parseDate("2026-10-02T18:22:27Z")
         assertTrue(ms != null && ms > 0)
