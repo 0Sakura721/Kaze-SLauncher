@@ -505,6 +505,18 @@ emember(path) 缓存位图的话，
     val aiThinking = mutableStateOf(prefs.getBoolean("ai_thinking", false))
 
     /**
+     * AI 联网搜索开关（DeepSeek 官方 /v1/tools/search）。
+     * 关闭时 AI 只基于本地快照作答（默认）；开启后先让模型生成查询词，
+     * 再走 DeepSeek 搜索并把结果注入上下文。复用当前对话档案的 API Key。
+     */
+    val aiSearchOn = mutableStateOf(prefs.getBoolean("ai_search_on", false))
+
+    fun setAiSearchOn(v: Boolean) {
+        aiSearchOn.value = v
+        prefs.edit().putBoolean("ai_search_on", v).apply()
+    }
+
+    /**
      * 控制台命令执行档位（借鉴 Harness 的权限分层）：
      * suggest = 仅建议（默认）/ safe = 白名单自动 / all = 全部自动。
      */

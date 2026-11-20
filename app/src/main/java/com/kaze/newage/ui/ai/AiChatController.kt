@@ -119,6 +119,10 @@ class AiChatController(private val host: AiChatHost) {
         var roundsLeft: Int,
         /** 本轮提问发起时的实例：命令/写入绑定到它（见 [AiChatMessage.instanceId]） */
         val instanceId: String?,
+        /** 本轮联网搜索的元信息（只用于气泡上标注；null = 未搜索） */
+        val searchQuery: String? = null,
+        val searchCount: Int = 0,
+        val searchError: String? = null,
     ) {
         // 循环卫生（借鉴 Harness 的 repeat-tool-reminder）：同一工具+同参连续重复时提醒模型改道
         var lastReadSig: String? = null
@@ -263,11 +267,57 @@ class AiChatController(private val host: AiChatHost) {
         aiCancelRequested = false
         host.scope.launch(Dispatchers.IO) {
             try {
+                // ── 联网搜索（DeepSeek 官方 /v1/tools/search，开关开启才走）──
+                // 失败只降级不阻塞：搜不到就按本地信息回答，气泡上注明原因。
+                var searchQuery: String? = null
+                var searchCount = 0
+                var searchError: String? = null
+                var searchBlock = ""
+                if (host.uiPrefs.aiSearchOn.value) {
+                    try {
+                        // 只有 DeepSeek 官方端点才支持搜索 API；第三方网关没有这个端点。
+                        // 生成查询词是小事：强制标准模型 + 小 max_tokens，省掉思考等待。
+                        val official = config.baseUrl.contains("deepseek.com", ignoreCase = true)
+                        if (!official || config.apiKey.isBlank()) {
+                            searchError = t("联网搜索需要 DeepSeek 官方服务地址与 API Key")
+                        } else {
+                            val queryRaw = callAiWithTimeout(
+                                config.copy(thinking = false),
+                                listOf(
+                                    AiMessage(AiMessage.ROLE_SYSTEM, AiPrompt.searchQuerySystem()),
+                                    AiMessage(AiMessage.ROLE_USER, q),
+                                ),
+                                AI_QUERY_TIMEOUT_MS,
+                                maxTokens = 128,
+                            )
+                            val query = com.kaze.newage.core.ai.AiDeepSeekSearch.extractQuery(queryRaw.content)
+                            if (query.isNotEmpty()) {
+                                val results = com.kaze.newage.core.ai.AiDeepSeekSearch.search(
+                                    apiKey = config.apiKey,
+                                    query = query,
+                                    originalQuestion = q,
+                                )
+                                if (results.isNotEmpty()) {
+                                    searchQuery = query
+                                    searchCount = results.size
+                                    searchBlock = com.kaze.newage.core.ai.AiDeepSeekSearch
+                                        .formatResults(query, results)
+                                } else {
+                                    searchError = t("搜索没有返回结果")
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        searchError = e.message ?: t("未知错误")
+                    }
+                }
+
                 // 前缀缓存优化：system 只放不变规则，每轮变化的现场快照走独立用户消息，
                 // 多轮对话的稳定前缀才能命中 DeepSeek 的自动上下文缓存
                 val snapshot = buildString {
                     append("【现场快照（启动器采集，可信）】\n")
                     append(buildAiContext())
+                    if (searchBlock.isNotEmpty()) append("\n\n").append(searchBlock)
                     append("\n\n【问题】").append(q)
                 }
                 val history = _aiMessages.value
@@ -296,6 +346,9 @@ class AiChatController(private val host: AiChatHost) {
                     },
                     roundsLeft = AI_MAX_TOOL_ROUNDS,
                     instanceId = host.currentInstanceId.value,
+                    searchQuery = searchQuery,
+                    searchCount = searchCount,
+                    searchError = searchError,
                 )
                 // 工具多轮循环：读/列自动执行回喂，写挂起等用户确认（见 runTurn）
                 runTurn(session)
@@ -1029,6 +1082,9 @@ class AiChatController(private val host: AiChatHost) {
                 reasoning = reasoning,
                 thinkingNote = thinkingNote,
                 usageSummary = usage?.summary(),
+                searchQuery = session.searchQuery,
+                searchCount = session.searchCount,
+                searchError = session.searchError,
             )
         )
     }
