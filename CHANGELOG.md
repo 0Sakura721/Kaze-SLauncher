@@ -11,6 +11,32 @@
 
 ---
 
+## [0.10.2] - 2026-11-20
+
+小版本：修更新系统的一个边界缺陷（某些情况下会反复提示更新/引导重装旧包）。
+
+### Fixed
+
+- **更新判定基线日期为 0 时误报更新**
+  更新判定以发布日期为准：候选 Release 的 `published_at` 晚于「当前运行版本对应
+  Release 的发布日期」才算有更新。基线的取法是
+  `firstOrNull { tag 匹配 }?.publishedAt ?: installedAt` —— 但 `?:` 只在 **null** 时
+  兜底，若匹配到的 Release 恰好 `published_at` 解析失败（`publishedAt = 0`），
+  基线就变成 0。后果：任何候选（**哪怕比当前版本更旧**）的日期都 > 0，
+  于是一直提示"发现新版本"、用户反复下载同一个包。
+  修：基线查找加 `&& publishedAt > 0`，日期无效时退回安装时间兜底，
+  与"tag 匹配不到"走同一路径。补 2 条回归测试。
+
+### Notes
+
+- 全面体检了更新系统四个模块（`UpdateChecker` / `UpdateInstaller` /
+  `ApkPatchApplier` / `ReleaseNotes`）：架构与边界处理扎实
+  （SHA-256 + 同签名双校验、增量补丁三道校验、done 哨兵防半成品复用、架构防错配），
+  未发现其它会导致误报/漏报的缺陷。用真实 GitHub Releases 数据模拟了
+  preview / stable 两通道 × 多个当前版本，确认判定正确。
+
+---
+
 ## [0.10.1] - 2026-11-20
 
 小版本：AI 助手新增**联网搜索**，接入 DeepSeek 官方搜索 API。
