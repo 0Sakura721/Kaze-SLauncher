@@ -36,6 +36,31 @@ class AiDeepSeekSearchTest {
     }
 
     @Test
+    fun `真实 API 响应结构（2026-11 实测）能被正确解析`() {
+        // 直接从 DeepSeek 官方 /v1/tools/search 的真实 200 响应摘录（字段齐全版）。
+        // 锁住线上契约：字段改名/结构变化时这个测试会红，提示需要改 parse()。
+        val realBody = """
+            {"results":[
+              {"title":"Fix: Java 17 bytecode target on paper module",
+               "url":"https://github.com/dmulloy2/ProtocolLib/pull/3662",
+               "snippet":"Fix Java 17 bytecode target on paper module",
+               "summary":"Fix: Java 17 bytecode target on paper module (fixes #3661)",
+               "content":"",
+               "site_name":"GitHub","site_icon":"https://github.com/favicon.ico",
+               "date":"2026-06-01T00:00:00+00:00","authority":3,
+               "rerank_score":1.842631220817566}
+            ]}
+        """.trimIndent()
+        val r = AiDeepSeekSearch.parse(realBody)
+        assertEquals(1, r.size)
+        assertEquals("Fix: Java 17 bytecode target on paper module", r[0].title)
+        assertTrue(r[0].url.startsWith("https://github.com/"))
+        // summary 非空时优先于 snippet
+        assertEquals("Fix: Java 17 bytecode target on paper module (fixes #3661)", r[0].snippet)
+        assertEquals(1.842631f, r[0].score, 0.0001f)
+    }
+
+    @Test
     fun `空结果数组得到空列表`() {
         assertTrue(AiDeepSeekSearch.parse("""{"results":[]}""").isEmpty())
     }
