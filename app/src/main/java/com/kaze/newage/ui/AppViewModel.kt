@@ -1017,6 +1017,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
         uiPrefs.setAiThinking(v)
     }
 
+    /** 联网搜索开关（DeepSeek 官方 /v1/tools/search，复用当前档案的 Key） */
+    fun setAiSearchOn(v: Boolean) = uiPrefs.setAiSearchOn(v)
+
     /** 控制台命令执行档位（仅建议 / 白名单自动 / 全部自动） */
     fun setAiCommandMode(modeId: String) = uiPrefs.setAiCommandMode(modeId)
 

@@ -140,6 +140,7 @@ fun AiScreen(
     val current = instances.firstOrNull { it.id == currentId }
     val prefs = viewModel.uiPrefs
     val thinking = prefs.aiThinking.value
+    val searchOn = prefs.aiSearchOn.value
     val serverStates by viewModel.serverStates.collectAsStateWithLifecycle()
     val live by viewModel.aiLiveStream.collectAsStateWithLifecycle()
 
@@ -1116,6 +1117,11 @@ private fun InputDock(
                     selected = thinking,
                     onClick = { viewModel.setAiThinking(!thinking) },
                     label = { Text(t("深度思考")) },
+                )
+                FilterChip(
+                    selected = searchOn,
+                    onClick = { viewModel.setAiSearchOn(!searchOn) },
+                    label = { Text(t("联网搜索")) },
                 )
                 Spacer(Modifier.weight(1f))
                 profileName?.let {
