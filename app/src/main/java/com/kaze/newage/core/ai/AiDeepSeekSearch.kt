@@ -1,7 +1,6 @@
 package com.kaze.newage.core.ai
 
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -154,7 +153,21 @@ object AiDeepSeekSearch {
     }
 
     /** 给 Json 加个小的字符串序列化帮助（避免引入额外依赖，也不用手工转义）。 */
-    private fun stringify(s: String): String = encodeToString(s)
+    /** 手写 JSON 字符串（转义引号/反斜杠/控制字符），避免依赖泛型序列化 API 的类型推断。 */
+    private fun stringify(s: String): String = buildString {
+        append('"')
+        for (c in s) {
+            when (c) {
+                '"' -> append("\\\"")
+                '\\' -> append("\\\\")
+                '\n' -> append("\\n")
+                '\r' -> append("\\r")
+                '\t' -> append("\\t")
+                else -> if (c.code < 0x20) append(String.format("\\u%04x", c.code)) else append(c)
+            }
+        }
+        append('"')
+    }
 
     /** 结果 → 注入系统上下文的文本块。网页文字属不可信数据，必须显式标注。 */
     fun formatResults(query: String, results: List<Result>): String = buildString {

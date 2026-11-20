@@ -1090,6 +1090,7 @@ private fun InputDock(
     busy: Boolean,
 ) {
     val prefs = viewModel.uiPrefs
+    val searchOn = prefs.aiSearchOn.value
     val input by viewModel.aiDraft.collectAsStateWithLifecycle()
     val profileName = prefs.aiProfiles.value
         .firstOrNull { it.id == prefs.aiChatProfileId.value }
