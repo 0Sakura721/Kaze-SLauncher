@@ -1,6 +1,6 @@
 name: Release
 
-# 打 tag 时自动发版：构建两个 ABI 的 APK，**并对上一个 release 生成增量补丁**一并上传。
+# 打 tag 时自动发版：构建两个 ABI 的 APK，**并对最近几个历史 release 生成增量补丁**一并上传。
 #
 # 为什么要放 CI：补丁必须由"上一个版本的 APK"与"本次的 APK"逐条目对比得出，
 # 手工发版很容易忘（v0.3.1-fix 那次就是手工跑的脚本）。
@@ -168,53 +168,73 @@ jobs:
           cp "$AHF" "out/Kaze-SLauncher-$TAG-armeabi-v7a-experimental.apk"
           ls -la out/
 
-      - name: 对上一个 release 生成增量补丁
+      - name: 对最近几个 release 生成增量补丁
         run: |
           set -e
           TAG="${{ steps.t.outputs.tag }}"
           VER="${{ steps.t.outputs.version }}"
-          PREV=$(gh release list --limit 30 --json tagName \
-                 --jq "[.[] | select(.tagName != \"$TAG\")][0].tagName" 2>/dev/null || true)
-          if [ -z "$PREV" ] || [ "$PREV" = "null" ]; then
-            echo "没有上一个 release，跳过补丁生成"
+          # 对**最近 N 个**历史版本各生成一份补丁，而不是只对上一个。
+          # 只做相邻版本的话，用户在 v0.6.0 / v0.9.x 就拿不到补丁、只能下 33 MB 完整包。
+          # 代价：每个 release 多出最多 N×2 个补丁（每份约 2 MB）。
+          # 只覆盖最近的版本是刻意的取舍 —— 更早的存量用户极少，
+          # 让每个 release 背 20 份补丁不划算。改这里即可调整覆盖范围。
+          MAX_BASELINES=5
+          BASELINES=$(gh release list --limit 30 --json tagName \
+                 --jq "[.[] | select(.tagName != \"$TAG\")][0:$MAX_BASELINES] | .[].tagName" 2>/dev/null || true)
+          if [ -z "$BASELINES" ] || [ "$BASELINES" = "null" ]; then
+            echo "没有历史 release，跳过补丁生成"
             exit 0
           fi
-          echo "上一个 release：$PREV"
+          echo "参与补丁的历史 release："
+          echo "$BASELINES" | sed 's/^/  /'
 
-          # 取上一个 release 的资产 URL 列表。
+          # 逐个基线版本取资产 URL 并生成补丁。
           # 踩过的坑：gh release view --json assets --jq '.assets[].browser_download_url'
           # 在本 runner 上拿不到东西（gh 的报错走 stderr，管道里只看到空输出，
           # 于是"没有同 ABI 的 APK"被当成正常情况静默跳过）。改用 curl + python，
           # 这条写法已在本地对着真实 release 验证过。
-          ASSETS=$(curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$PREV" \
-            | python3 -c "import json,sys;print('\n'.join(a['browser_download_url'] for a in json.load(sys.stdin).get('assets',[])))")
-          echo "上一个 release 的资产："
-          echo "$ASSETS" | sed 's|.*/|  |'
-
           gen () {
-            ABI="$1"; APK="$2"
+            PREV="$1"; ABI="$2"; APK="$3"
+            ASSETS=$(curl -sSL -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$PREV" \
+              | python3 -c "import json,sys;print('\n'.join(a['browser_download_url'] for a in json.load(sys.stdin).get('assets',[])))")
             # ABI 关键字匹配：arm64-v8a 与 armeabi-v7a 互不包含，v7a 那份带
             # -experimental 后缀所以不能用"以 <abi>.apk 结尾"来匹配
             OLD_URL=$(printf '%s\n' "$ASSETS" | grep -F -- '.apk' | grep -F -- "$ABI" | head -1)
             if [ -z "$OLD_URL" ]; then
-              echo "::warning::[$ABI] 上一个 release($PREV) 没有同 ABI 的 APK，本次不出补丁"
+              echo "::warning::[$ABI] $PREV 没有同 ABI 的 APK，跳过这一份"
               return 0
             fi
             rm -f patches/patch_*.zip patches/patch_*.json "patches/base-$ABI.apk"
-            echo "  [$ABI] 基线 $OLD_URL"
-            curl -sSL -o "patches/base-$ABI.apk" "$OLD_URL"
-            python3 tools/make_apk_patch.py "patches/base-$ABI.apk" "$APK" patches \
-              --version="$VER" --base-version="${PREV#v}"
-            ZIP=$(ls patches/patch_*.zip | head -1)
-            JSON=$(ls patches/patch_*.json | head -1)
+            mkdir -p patches
+            echo "  [$ABI] 基线 $PREV"
+            if ! curl -sSL -o "patches/base-$ABI.apk" "$OLD_URL"; then
+              echo "::warning::[$ABI] 下载基线 $PREV 失败，跳过"
+              return 0
+            fi
+            # 每份补丁单独生成；任一基线失败都不能中断其余基线
+            if ! python3 tools/make_apk_patch.py "patches/base-$ABI.apk" "$APK" patches \
+                 --version="$VER" --base-version="${PREV#v}"; then
+              echo "::warning::[$ABI] 生成 $PREV → $TAG 的补丁失败，跳过"
+              return 0
+            fi
+            ZIP=$(ls patches/patch_*.zip 2>/dev/null | head -1)
+            JSON=$(ls patches/patch_*.json 2>/dev/null | head -1)
+            if [ -z "$ZIP" ] || [ -z "$JSON" ]; then
+              echo "::warning::[$ABI] 补丁产物缺失（$PREV），跳过"
+              return 0
+            fi
             cp "$ZIP"  "out/patch-${PREV}-to-${TAG}-${ABI}.zip"
             cp "$JSON" "out/patch-${PREV}-to-${TAG}-${ABI}.json"
           }
 
-          gen "arm64-v8a"   "out/Kaze-SLauncher-$TAG-arm64-v8a.apk"
-          gen "armeabi-v7a" "out/Kaze-SLauncher-$TAG-armeabi-v7a-experimental.apk"
-          ls -la out/
+          for PREV in $BASELINES; do
+            echo "== 基线 $PREV =="
+            gen "$PREV" "arm64-v8a"   "out/Kaze-SLauncher-$TAG-arm64-v8a.apk"
+            gen "$PREV" "armeabi-v7a" "out/Kaze-SLauncher-$TAG-armeabi-v7a-experimental.apk"
+          done
+          echo "生成的补丁："
+          ls -la out/patch-* 2>/dev/null | sed 's/^/  /' || echo "  （无）" 
 
       - name: 生成发布说明（取自 CHANGELOG）
         run: python3 tools/extract_release_notes.py "${{ steps.t.outputs.version }}" out/RELEASE_NOTES.md

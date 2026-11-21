@@ -45,3 +45,4 @@ MEMORY.md
 # .zcode/ 是本机工具（zcode）的产物目录（plans/ 等会话文件），与项目无关。
 # 上次 .zcodeignore 被 `git add -A` 顺手提进了仓库，这次直接把整个目录挡在门外。
 .zcode/
+patches/
