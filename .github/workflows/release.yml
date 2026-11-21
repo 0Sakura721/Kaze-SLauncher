@@ -173,13 +173,13 @@ jobs:
           set -e
           TAG="${{ steps.t.outputs.tag }}"
           VER="${{ steps.t.outputs.version }}"
-          # 对**最近 N 个**历史版本各生成一份补丁，而不是只对上一个。
-          # 只做相邻版本的话，用户在 v0.6.0 / v0.9.x 就拿不到补丁、只能下 33 MB 完整包。
-          # 代价：每个 release 多出最多 N×2 个补丁（每份约 2 MB）。
-          # 只覆盖最近的版本是刻意的取舍 —— 更早的存量用户极少，
-          # 让每个 release 背 20 份补丁不划算。改这里即可调整覆盖范围。
-          MAX_BASELINES=5
-          BASELINES=$(gh release list --limit 30 --json tagName \
+          # 对**每一个历史版本**各生成一份补丁，而不是只对上一个。
+          # 只做相邻版本的话，老用户（v0.6.0 / v0.8.x）拿不到补丁、只能下 33 MB 完整包。
+          # 代价：每个 release 多出 N×2 个补丁（每份约 2 MB）。本项目历史 release
+          # 目前 12 个，最多 24 份 ≈ 48 MB —— 相对"所有旧版都能走增量"是划算的。
+          # 上限设 20 留出增长空间：再多的话 Release 资产列表会变得难翻。
+          MAX_BASELINES=20
+          BASELINES=$(gh release list --limit 100 --json tagName \
                  --jq "[.[] | select(.tagName != \"$TAG\")][0:$MAX_BASELINES] | .[].tagName" 2>/dev/null || true)
           if [ -z "$BASELINES" ] || [ "$BASELINES" = "null" ]; then
             echo "没有历史 release，跳过补丁生成"
