@@ -24,7 +24,21 @@ data class CoreDownload(
     val fileName: String,
     /** 官方清单里给出的 SHA-1（有则下载后必须校验）。无哈希来源的核心为 null。 */
     val sha1: String? = null,
-)
+    /**
+     * 备用下载地址（镜像）。
+     *
+     * 为什么需要：Fabric 的服务端 jar 挂在 `meta.fabricmc.net` 上，而该域名在部分网络
+     * 下 TLS 握手就超时（实测 20s 无响应）；同一份 artefact 在 `maven.fabricmc.net`
+     * 与 BMCLAPI 镜像上都能拿到。只给一个 URL 时，官方不通 = 用户完全装不了。
+     *
+     * 下载侧把它们一起交给 [com.kaze.newage.util.Downloader.downloadFromSources]
+     * 测速择优（与更新系统的多镜像同一套机制）。
+     */
+    val mirrors: List<String> = emptyList(),
+) {
+    /** 实际参与测速的全部候选（主地址在前，保持既有优先序） */
+    val allUrls: List<String> get() = listOf(url) + mirrors
+}
 
 /**
  * 核心源：统一获取各类型服务端的版本/构建/下载链接。
@@ -86,7 +100,33 @@ object CoreSources {
      * `versionsJob.cancel()` 也中断不了它，网络一卡 UI 就永久转圈（只能杀应用）。
      * Downloader 那边是设了超时的，这里原来漏了。
      */
-    private fun httpGet(urlStr: String): String {
+    private fun httpGet(urlStr: String): String = httpGetWithMirrors(urlStr, emptyList())
+
+    /**
+     * 拉取文本，**主源失败自动切镜像**。
+     *
+     * 为什么需要：`meta.fabricmc.net` 在部分网络下会 TLS/读取超时（实测 20s 无响应），
+     * 而镜像 `bmclapi2.bangbang93.com/fabric-meta/...` 提供**同一份 JSON 结构**、
+     * 200~700ms 返回。原实现是单源，官方不通时用户看到的是空版本列表 ——
+     * 既不知道是网络问题，也没有任何办法绕过去。
+     *
+     * 顺序：主源 → 各镜像。任何一站成功即返回；全失败时抛出**第一个**异常
+     * （那是主源的真实原因，比"全部失败"更有助于排查）。
+     */
+    private fun httpGetWithMirrors(urlStr: String, mirrors: List<String>): String {
+        var primaryError: Exception? = null
+        for (candidate in listOf(urlStr) + mirrors) {
+            try {
+                return httpGetOne(candidate)
+            } catch (e: Exception) {
+                if (primaryError == null) primaryError = e
+                // 其余镜像继续试；全失败时抛出主源的错误
+            }
+        }
+        throw primaryError ?: RuntimeException("请求失败：$urlStr")
+    }
+
+    private fun httpGetOne(urlStr: String): String {
         var current = urlStr
         var redirects = 0
         while (true) {
@@ -237,9 +277,20 @@ object CoreSources {
     // ── Fabric（stable 字段 → 正式/快照） ──
     private const val FABRIC_META = "https://meta.fabricmc.net/v2/versions"
 
+    /**
+     * Fabric 官方 meta 的镜像（BMCLAPI）。
+     *
+     * 官方 `https://meta.fabricmc.net/v2/versions/X` ↔ 镜像
+     * `https://bmclapi2.bangbang93.com/fabric-meta/v2/versions/X` ——
+     * 路径一一对应，**返回的 JSON 结构完全相同**（game/loader/installer 三个都已实测）。
+     */
+    private fun fabricMirrors(path: String): List<String> =
+        listOf("https://bmclapi2.bangbang93.com/fabric-meta/v2/versions/$path")
+
+
     suspend fun fetchFabricVersions(): Result<List<GameVersion>> = withContext(Dispatchers.IO) {
         try {
-            val arr = json.parseToJsonElement(httpGet("$FABRIC_META/game")) as JsonArray
+            val arr = json.parseToJsonElement(httpGetWithMirrors("$FABRIC_META/game", fabricMirrors("game"))) as JsonArray
             Result.success(arr.mapNotNull {
                 val o = it.jsonObject
                 val stable = o["stable"]?.jsonPrimitive?.booleanOrNull ?: true
@@ -255,15 +306,22 @@ object CoreSources {
     suspend fun getFabricDownload(mcVersion: String, loaderVersion: String = ""): Result<CoreDownload> = withContext(Dispatchers.IO) {
         try {
             val loader = if (loaderVersion.isNotBlank()) loaderVersion else {
-                val loaderArr = json.parseToJsonElement(httpGet("$FABRIC_META/loader/$mcVersion")) as JsonArray
+                val loaderArr = json.parseToJsonElement(httpGetWithMirrors("$FABRIC_META/loader/$mcVersion", fabricMirrors("loader/$mcVersion"))) as JsonArray
                 loaderArr.first().jsonObject["loader"]!!.jsonObject["version"]!!.jsonPrimitive.content
             }
-            val installerArr = json.parseToJsonElement(httpGet("$FABRIC_META/installer")) as JsonArray
+            val installerArr = json.parseToJsonElement(httpGetWithMirrors("$FABRIC_META/installer", fabricMirrors("installer"))) as JsonArray
             val installer = installerArr.first().jsonObject["version"]!!.jsonPrimitive.content
             Result.success(
                 CoreDownload(
                     "$FABRIC_META/loader/$mcVersion/$loader/$installer/server/jar",
-                    "fabric-server-mc.$mcVersion-loader.$loader-launcher.$installer.jar"
+                    "fabric-server-mc.$mcVersion-loader.$loader-launcher.$installer.jar",
+                    // 官方 meta 域名在部分网络不可达（TLS 超时），但**没有可靠的等价镜像**：
+                    //  · BMCLAPI 的 fabric-meta 只镜像 versions/* 元数据，`server/jar` 返回 404；
+                    //  · maven 上的 fabric-loader-*.jar 虽然 Main-Class 是 FabricServerLauncher，
+                    //    却**不含 Minecraft 本体**（官方那份是打包好的完整服务端），
+                    //    当核心交给用户 = 装完必启动失败，而且失败原因看不出来。
+                    // 所以这里不填 mirrors：宁可让"官方不通"明确失败，也不给一个跑不起来的包。
+                    // （版本列表本身已经走镜像，用户至少能拿到列表；下载失败时会看到明确报错。）
                 )
             )
         } catch (e: Exception) { Result.failure(e) }
@@ -275,7 +333,7 @@ object CoreSources {
      */
     suspend fun fetchFabricLoaders(mcVersion: String): Result<List<CoreBuild>> = withContext(Dispatchers.IO) {
         try {
-            val arr = json.parseToJsonElement(httpGet("$FABRIC_META/loader/$mcVersion")) as JsonArray
+            val arr = json.parseToJsonElement(httpGetWithMirrors("$FABRIC_META/loader/$mcVersion", fabricMirrors("loader/$mcVersion"))) as JsonArray
             val list = arr.mapNotNull { el ->
                 val loader = el.jsonObject["loader"]?.jsonObject ?: return@mapNotNull null
                 val v = loader["version"]?.jsonPrimitive?.content ?: return@mapNotNull null

@@ -1642,7 +1642,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
                 _download.value = DownloadState(running = true, progress = 0f, message = t("下载 %s", dl.fileName))
                 // 多源回退 + 断网自动重试（断点保留，失败可再次点下载续传）；可取消
                 val used = Downloader.downloadFromSources(
-                    listOf(dl.url),
+                    dl.allUrls,
                     part,
                     onProgress = { done, total ->
                         val progress = if (total > 0) done.toFloat() / total else 0f
