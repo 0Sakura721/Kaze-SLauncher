@@ -1382,15 +1382,44 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
     @Volatile
     private var buildsRequestId = 0
 
+    /**
+     * 版本列表拉取的错误原因（null = 无错误）。
+     *
+     * 以前失败被 getOrDefault(emptyList()) 吞掉，界面只会显示"全部 0"，
+     * 用户分不清"这个核心真没有版本"和"网络挂了"。
+     */
+    private val _versionsError = MutableStateFlow<String?>(null)
+    val versionsError: StateFlow<String?> = _versionsError.asStateFlow()
+
     fun loadVersions(type: CoreType) {
         versionsJob?.cancel()
         val requestId = ++versionsRequestId
         versionsJob = viewModelScope.launch(Dispatchers.IO) {
             _versionsLoading.value = true
             _versions.value = emptyList()
+            _versionsError.value = null
             try {
-                _versions.value = blockingWithTimeout(VERSION_FETCH_TIMEOUT_MS, emptyList()) {
-                    CoreSources.fetchVersions(type).getOrDefault(emptyList())
+                // **不能**用 getOrDefault(emptyList())：那会把失败静默变成"这个核心没有版本"，
+                // 用户看到空列表完全不知道是网络问题（真机实测 NeoForge 源不可达时就是这样）。
+                // 拿 Result 本身，失败时置 versionsError 让界面说清楚原因。
+                val result = blockingWithTimeout(VERSION_FETCH_TIMEOUT_MS, null) {
+                    CoreSources.fetchVersions(type)
+                }
+                when {
+                    result == null -> {
+                        _versions.value = emptyList()
+                        _versionsError.value = t("获取版本列表超时（%s 秒），请检查网络后重试",
+                            (VERSION_FETCH_TIMEOUT_MS / 1000).toString())
+                    }
+                    result.isSuccess -> {
+                        _versions.value = result.getOrDefault(emptyList())
+                        _versionsError.value = null
+                    }
+                    else -> {
+                        _versions.value = emptyList()
+                        val msg = result.exceptionOrNull()?.message ?: t("未知错误")
+                        _versionsError.value = t("获取版本列表失败：%s", msg)
+                    }
                 }
             } finally {
                 // finally 而不是顺序执行：任务被 cancel（快速换核心类型）或抛异常时

@@ -294,6 +294,7 @@ internal fun VersionConfigPhase(
 ) {
     val versions by viewModel.versions.collectAsStateWithLifecycle()
     val versionsLoading by viewModel.versionsLoading.collectAsStateWithLifecycle()
+    val versionsError by viewModel.versionsError.collectAsStateWithLifecycle()
     val download by viewModel.download.collectAsStateWithLifecycle()
     // 选定版本后的可选构建（Paper 有构建列表，其余核心为空）
     val builds by viewModel.builds.collectAsStateWithLifecycle()
@@ -420,6 +421,7 @@ internal fun VersionConfigPhase(
                 coreType = coreType,
                 versions = versions,
                 loading = versionsLoading,
+                error = versionsError,
                 query = query,
                 onQueryChange = { query = it },
                 typeFilter = typeFilter,
@@ -582,6 +584,8 @@ internal fun VersionListPage(
     coreType: CoreType,
     versions: List<GameVersion>,
     loading: Boolean,
+    /** 拉取失败的原因（null = 无错误）；有它时明确显示，而不是只给一个空列表 */
+    error: String? = null,
     query: String,
     onQueryChange: (String) -> Unit,
     typeFilter: VersionType?,
@@ -670,7 +674,13 @@ internal fun VersionListPage(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
-                        if (versions.isEmpty()) t("版本列表加载失败，请检查网络") else t("没有匹配的版本"),
+                        // 有具体错误就用它（含超时/HTTP 码/网络原因），否则退回通用文案。
+                        // 以前一律说"请检查网络"，NeoForge 源不可达时用户根本不知道是哪出了问题。
+                        error ?: if (versions.isEmpty()) {
+                            t("版本列表加载失败，请检查网络")
+                        } else {
+                            t("没有匹配的版本")
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

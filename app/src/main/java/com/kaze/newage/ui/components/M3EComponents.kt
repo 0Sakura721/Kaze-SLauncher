@@ -609,6 +609,14 @@ fun <T> M3ESegmentedRow(
     val scheme = MaterialTheme.colorScheme
     val isMiuix = LocalAppTheme.current == AppThemeMode.MIUIX
     val resolvedHeight = height ?: if (isMiuix) MiuixSpec.segmentedHeight else 40.dp
+    // 选项多时缩小字号：5 个档位平分 1080px，每个约 200px，
+    // labelLarge(14sp) 放不下「远古测试版 750」，会被 Ellipsis 截成「远古测...」。
+    // 分三档而不是一律缩小 —— 2~3 个的主流场景保持原有观感。
+    val labelStyle = when {
+        options.size >= 5 -> MaterialTheme.typography.labelSmall
+        options.size == 4 -> MaterialTheme.typography.labelMedium
+        else -> MaterialTheme.typography.labelLarge
+    }
     if (isMiuix) {
         // 用 resolvedHeight：老实现写死 MiuixSpec.segmentedHeight(32dp)，
         // 6 个调用点里传 38dp / 44dp 的（弹窗内）会被**静默忽略** ——
@@ -651,7 +659,7 @@ fun <T> M3ESegmentedRow(
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             label(option),
-                            style = MaterialTheme.typography.labelLarge,
+                            style = labelStyle,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -688,7 +696,7 @@ fun <T> M3ESegmentedRow(
                 Box(contentAlignment = Alignment.Center) {
                     Text(
                         label(option),
-                        style = MaterialTheme.typography.labelLarge,
+                        style = labelStyle,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

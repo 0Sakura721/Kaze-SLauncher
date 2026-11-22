@@ -124,28 +124,26 @@ fun M3ESlider(
 /**
  * 主题感知的线性进度条。
  *
- * @param progress null = 不确定进度（M3 往返滑动 / Miuix 单侧扫光）
+ * **统一走 [WavyLinearProgress] 的直线实现**（wavy = false）：
+ *  - 各主题下视觉一致，不会出现 MIUIX 用 HyperOS 胶囊、M3 用官方条这种"同一个
+ *    进度在切主题后粗细/圆角都变"的情况；
+ *  - 末端带百分比文字，用户能直接读到"还剩多少"，而不是只能估算条的长度。
+ *
+ * @param progress null = 不确定进度（此时不显示百分比，指示段来回扫）
+ * @param showPercent 是否显示末端百分比（默认 true）
  */
 @Composable
 fun M3ELinearProgress(
     progress: Float?,
     modifier: Modifier = Modifier,
+    showPercent: Boolean = true,
 ) {
-    if (LocalAppTheme.current == AppThemeMode.MIUIX) {
-        top.yukonga.miuix.kmp.basic.LinearProgressIndicator(
-            progress = progress,
-            modifier = modifier,
-        )
-    } else {
-        if (progress != null) {
-            androidx.compose.material3.LinearProgressIndicator(
-                progress = { progress },
-                modifier = modifier,
-            )
-        } else {
-            androidx.compose.material3.LinearProgressIndicator(modifier = modifier)
-        }
-    }
+    WavyLinearProgress(
+        modifier = modifier,
+        progress = progress,
+        wavy = false,
+        showPercent = showPercent,
+    )
 }
 
 /**

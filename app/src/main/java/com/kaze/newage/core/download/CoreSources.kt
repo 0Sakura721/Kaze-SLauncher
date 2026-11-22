@@ -113,11 +113,20 @@ object CoreSources {
      * 顺序：主源 → 各镜像。任何一站成功即返回；全失败时抛出**第一个**异常
      * （那是主源的真实原因，比"全部失败"更有助于排查）。
      */
-    private fun httpGetWithMirrors(urlStr: String, mirrors: List<String>): String {
+    private fun httpGetWithMirrors(
+        urlStr: String,
+        mirrors: List<String>,
+        /**
+         * 单站超时预算（毫秒）。默认沿用 15s/30s；**多源可用**的场景应传更小的值 ——
+         * 否则「主源 30s + 镜像 30s」串行会超过外层 loadVersions 的 45s 上限，
+         * 用户看到"超时"，而实际上两个源都能在 5 秒内返回。
+         */
+        totalBudgetMs: Long = 0L,
+    ): String {
         var primaryError: Exception? = null
         for (candidate in listOf(urlStr) + mirrors) {
             try {
-                return httpGetOne(candidate)
+                return httpGetOne(candidate, totalBudgetMs)
             } catch (e: Exception) {
                 if (primaryError == null) primaryError = e
                 // 其余镜像继续试；全失败时抛出主源的错误
@@ -126,13 +135,19 @@ object CoreSources {
         throw primaryError ?: RuntimeException("请求失败：$urlStr")
     }
 
-    private fun httpGetOne(urlStr: String): String {
+    private fun httpGetOne(urlStr: String, totalBudgetMs: Long = 0L): String {
         var current = urlStr
         var redirects = 0
         while (true) {
             val conn = URL(current).openConnection() as HttpURLConnection
-            conn.connectTimeout = 15_000
-            conn.readTimeout = 30_000
+            if (totalBudgetMs > 0) {
+                // 预算内拆成"连接 1/3、读取 2/3"，且都不低于 4 秒 —— 太短会在弱网下误判
+                conn.connectTimeout = maxOf(4_000L, totalBudgetMs / 3).toInt()
+                conn.readTimeout = maxOf(4_000L, totalBudgetMs * 2 / 3).toInt()
+            } else {
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 30_000
+            }
             // 自动跟随开启时 3xx 由底层处理；手动循环主要为兼容相对 Location
             val code = try {
                 conn.responseCode
@@ -364,7 +379,13 @@ object CoreSources {
 
     suspend fun fetchForgeVersions(): Result<List<GameVersion>> = withContext(Dispatchers.IO) {
         try {
-            val html = httpGet("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
+            // 真机实测：官方源 4.7s / BMCLAPI 镜像（302 到 CDN）4.9s，两个都可用。
+            // 用 10s 预算而不是默认 45s：主源+镜像各 10s = 20s，稳稳落在外层 45s 内。
+            val html = httpGetWithMirrors(
+                "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml",
+                listOf("https://bmclapi2.bangbang93.com/maven/net/minecraftforge/forge/maven-metadata.xml"),
+                totalBudgetMs = 10_000L,
+            )
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
             val mcVersions = versions.mapNotNull { forgeMcVersionOf(it) }.distinct()
             Result.success(mcVersions.map { GameVersion(it) })
@@ -373,7 +394,13 @@ object CoreSources {
 
     suspend fun getForgeLatestBuild(mcVersion: String): Result<CoreDownload> = withContext(Dispatchers.IO) {
         try {
-            val html = httpGet("https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml")
+            // 真机实测：官方源 4.7s / BMCLAPI 镜像（302 到 CDN）4.9s，两个都可用。
+            // 用 10s 预算而不是默认 45s：主源+镜像各 10s = 20s，稳稳落在外层 45s 内。
+            val html = httpGetWithMirrors(
+                "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml",
+                listOf("https://bmclapi2.bangbang93.com/maven/net/minecraftforge/forge/maven-metadata.xml"),
+                totalBudgetMs = 10_000L,
+            )
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
             // 不依赖 XML 行序：按 build 号语义取最大（中间可能夹 RC/回移植行）
             val match = versions.filter { forgeMcVersionOf(it) == mcVersion }
@@ -410,7 +437,12 @@ object CoreSources {
 
     suspend fun fetchNeoForgeVersions(): Result<List<GameVersion>> = withContext(Dispatchers.IO) {
         try {
-            val html = httpGet("https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml")
+            val html = httpGetWithMirrors(
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+                // 官方 maven 在部分网络不可达（实测超时），BMCLAPI 镜像同一份 XML、1.1s 返回
+                listOf("https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/maven-metadata.xml"),
+                totalBudgetMs = 10_000L,
+            )
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
             val mcVersions = versions.flatMap { v ->
                 if ('-' in v) {
@@ -425,7 +457,12 @@ object CoreSources {
 
     suspend fun getNeoForgeLatestBuild(mcVersion: String): Result<CoreDownload> = withContext(Dispatchers.IO) {
         try {
-            val html = httpGet("https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml")
+            val html = httpGetWithMirrors(
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+                // 官方 maven 在部分网络不可达（实测超时），BMCLAPI 镜像同一份 XML、1.1s 返回
+                listOf("https://bmclapi2.bangbang93.com/maven/net/neoforged/neoforge/maven-metadata.xml"),
+                totalBudgetMs = 10_000L,
+            )
             val versions = Regex("<version>([^<]+)</version>").findAll(html).map { it.groupValues[1] }.toList()
             // 前缀双路匹配："1.21.1-" 命中极早期带前缀 id；现代 id 去 "1." 化成 "21.1."
             val unifiedBase = if (Regex("^1\\.\\d+\\.\\d+$").matches(mcVersion)) mcVersion.removePrefix("1.")
