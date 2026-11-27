@@ -130,9 +130,10 @@ CI 会运行单元测试和界面截图测试；Release 流水线还会检查正
 
 如果这个项目对你有帮助，可以请我喝杯奶茶 ☕
 
-| 支付宝 | 微信 |
-|:------:|:----:|
-| ![支付宝](docs/images/alipay.png) | ![微信](docs/images/wechat.png) |
+收款码不在此页内联显示，需要时点下面打开：
+
+- [支付宝收款码](docs/images/alipay.png)
+- [微信收款码](docs/images/wechat.png)
 
 ## 免责声明
 
