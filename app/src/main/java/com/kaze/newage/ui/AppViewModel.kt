@@ -76,64 +76,6 @@ import com.kaze.newage.core.console.CONSOLE_EAGER_LIMIT
 import com.kaze.newage.core.monitor.ProcessStats
 import com.kaze.newage.core.i18n.t
 
-/** 服务端下载状态 */
-data class DownloadState(
-    val running: Boolean = false,
-    val progress: Float = 0f,
-    val message: String = "",
-    val done: Boolean = false,
-    val error: String? = null,
-    /**
-     * 附加组件专用：解析出目标文件与已装文件同名，正等用户确认是否替换。
-     * 此时 [running] 为 false（没有任务在跑），界面据此弹确认框而不是显示进度条。
-     */
-    val replacePending: Boolean = false,
-)
-
-/** Java 安装/卸载任务状态 */
-data class JavaTaskState(
-    val running: Boolean = false,
-    val version: Int? = null,
-    val progress: Float = 0f,
-    val message: String = "",
-    val error: String? = null,
-    /** 取消请求标志（下载循环轮询；true 时下载中止并保留断点） */
-    val cancelRequested: Boolean = false,
-)
-
-/**
- * 应用自身更新的状态机。
- *
- * 必须活在 ViewModel 里，不能像原来那样放在设置页的 `remember` + `rememberCoroutineScope`：
- * 更新包几十 MB、下载要几分钟，用户点完「下载并安装」去别的页面看看、或转一下屏幕，
- * 组合被销毁 → 协程作用域取消 → 下载静默中止，而界面不会有任何提示
- *（回到设置页时状态已经重置成 Idle，看起来像"我根本没点过"）。
- */
-sealed interface AppUpdateState {
-    data object Idle : AppUpdateState
-    data object Checking : AppUpdateState
-    data class Error(val msg: String) : AppUpdateState
-    data object Latest : AppUpdateState
-    data class Found(val info: UpdateChecker.ReleaseInfo) : AppUpdateState
-    data class Downloading(
-        val info: UpdateChecker.ReleaseInfo,
-        val progress: Float,
-        val message: String,
-    ) : AppUpdateState
-}
-
-/**
- * 服务端核心 jar 的最小可接受体积（64KB）。
- *
- * 只用来兜底"明显不是包"的响应，真正的防伪是 ZIP 魔数与官方哈希。
- * **下限不能定高**：Fabric 的 server launcher jar 实测只有 178KB（181,840 字节），
- * 历史上 1MB 的阈值使 Fabric 每次下载都被判为非法、删文件重试，最终报"所有源不可用"。
- */
-private const val MIN_CORE_JAR_BYTES = 64L * 1024L
-
-/** 占用采样节拍（毫秒）。CPU 靠两次求差，窗口越短越跟得上突发负载；配合 EMA 平滑防跳。 */
-private const val PROC_STATS_INTERVAL_MS = 1_000L
-
 /** 共享 ViewModel：接线 core 各组件与 UI（多开：每实例独立状态/控制台） */
 class AppViewModel(application: Application) : AndroidViewModel(application), AiChatHost {
 
@@ -3199,13 +3141,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application), Ai
 }
 
 /**
- * 版本 / 构建列表抓取的**界面可见超时**。
+ * 版本 / 构建列表抓取的**界面可见超时**：见 [VERSION_FETCH_TIMEOUT_MS]（AppState.kt）。
  *
  * 抓取本身有 connect 15s + read 30s，但 DNS 解析不受 connectTimeout 约束，
  * 设备离线时可能长时间不返回。超过这个时间就放弃等待、复位状态，
  * 让用户看到"加载失败 + 重试"，而不是一个永远转的进度条。
  */
-private const val VERSION_FETCH_TIMEOUT_MS = 45_000L
 
 /**
  * 把回读的更早历史**前插**到控制台显示列表。
