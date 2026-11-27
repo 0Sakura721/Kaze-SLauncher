@@ -11,6 +11,38 @@
 
 ---
 
+## [0.10.6] - 2026-11-27
+
+性能与文档收尾。
+
+### Changed
+
+- **运行时长不再每秒重组整页**
+  `HomeScreen` 在顶层用 `collectAsStateWithLifecycle` 收集 `uptimeSec`（每秒变一次），
+  于是整页 —— 实例卡、新建按钮、实例列表 —— 跟着每秒重组一次。主线程上这是可见的掉帧来源。
+  改为独立的 `RunningUptimeChip` 自己订阅，重组范围从整页缩到一行 Text+Icon。
+
+- **全局巡检在无实例时不再每秒分配**
+  `DefaultServerManager` 的巡检协程每秒执行 `slots.values.toList()`，
+  即使一个槽位都没有（应用大部分时间如此）。单次不贵，但这是**常驻**的秒级唤醒。
+  加 `isEmpty()` 快路径（无锁读，比 toList 便宜得多），不改变任何判定语义。
+
+- **README 赞助段不再内联显示收款码**
+  改为普通链接（`[支付宝](...)` / `[微信](...)`），需要的人点开再看；
+  同时去掉「不内联显示」这类实现说明，文案更自然。
+
+### Notes
+
+- 本轮做了系统性的性能扫描，**以下经核实都不是问题**，未做无意义的改动：
+  - `NewServerPhases` 的端口探测：已用 `produceState` 挪到 IO 线程；
+  - `LoadingShapes.normalize` / `SettingsDialogs` 的输入过滤：纯计算，不在重组热路径；
+  - `AppViewModel` 的 33 个 StateFlow：无无界集合累积，集合都是局部变量；
+  - 141 个 Icon 中 92 个是装饰性图标（与文字并列）、功能性图标全部带 contentDescription；
+  - `AppViewModel` 持有的是 `applicationContext`，无 Activity 泄漏；
+  - APK 33MB 中 29MB 是 rootfs 镜像（Ubuntu 基础系统），属必要体积。
+
+---
+
 ## [0.10.5] - 2026-11-22
 
 这一版全部来自**真机实测**（OPPO PEGM10 / Android 13）：把 6 个服务端核心逐一

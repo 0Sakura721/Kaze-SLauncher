@@ -113,6 +113,13 @@ class DefaultServerManager(
         scope.launch {
             while (isActive) {
                 delay(1000)
+                // 快路径：没有任何槽位时什么都不用查。
+                // 应用大部分时间处于"没有实例在跑"的状态（甚至一个实例都没有），
+                // 而这里每秒都要 `values.toList()` —— 每次都会分配一个新 List 并遍历。
+                // 单看不贵，但它是**常驻**的秒级唤醒：配合下面的 forEach 会让 CPU 每秒
+                // 醒一次做无用功，累积到后台驻留时的耗电上。isEmpty 是一次无锁读，
+                // 比 toList 便宜得多，且不改变任何判定语义。
+                if (slots.isEmpty()) continue
                 // toList()：handleExit → finalizeStop 会改 slots，边遍历边改会抛并发异常
                 slots.values.toList().forEach { slot ->
                     val p = slot.process

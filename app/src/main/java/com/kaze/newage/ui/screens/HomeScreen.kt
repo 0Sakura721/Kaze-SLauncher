@@ -104,7 +104,6 @@ fun HomeScreen(
     val serverStates by viewModel.serverStates.collectAsStateWithLifecycle()
     val instances by viewModel.instances.collectAsStateWithLifecycle()
     val currentInstanceId by viewModel.currentInstanceId.collectAsStateWithLifecycle()
-    val uptime by viewModel.uptimeSec.collectAsStateWithLifecycle()
     val onlinePlayers by viewModel.onlinePlayers.collectAsStateWithLifecycle()
 
     val current = instances.firstOrNull { it.id == currentInstanceId } ?: instances.firstOrNull()
@@ -163,11 +162,11 @@ fun HomeScreen(
                 )
             }
             if (running) {
-                M3EStatusChip(
-                    text = formatUptime(uptime),
-                    color = palette.running,
-                    icon = Icons.Filled.CheckCircle,
-                )
+                // 时长每秒变一次。这里**不**在 HomeScreen 顶层收 uptime：
+                // 那会让整页（实例卡、按钮、列表）跟着每秒重组一次 —— 实测这种
+                // "整页每秒重组"是主线程掉帧的主要来源。下沉成独立 Composable 后，
+                // 每秒只重组这个 chip 自己，重组范围从整页缩到一个 Text+Icon。
+                RunningUptimeChip(viewModel, palette.running)
             }
         }
 
@@ -533,4 +532,22 @@ private fun EulaSteps(state: ServerState) {
             }
         }
     }
+}
+
+/**
+ * 运行时长胶囊。
+ *
+ * 单独成一个 Composable 是为了**把每秒的重组限制在这里**：
+ * uptime 是每秒都变的 StateFlow，在 HomeScreen 顶层收集会让整页（实例卡、
+ * 新建按钮、实例列表）跟着每秒重组 —— 主线程上这是可见的掉帧来源。
+ * 现在只有这个 chip 每秒重组，重组范围从整页缩到一行 Text+Icon。
+ */
+@Composable
+private fun RunningUptimeChip(viewModel: com.kaze.newage.ui.AppViewModel, color: androidx.compose.ui.graphics.Color) {
+    val uptime by viewModel.uptimeSec.collectAsStateWithLifecycle()
+    M3EStatusChip(
+        text = formatUptime(uptime),
+        color = color,
+        icon = Icons.Filled.CheckCircle,
+    )
 }
