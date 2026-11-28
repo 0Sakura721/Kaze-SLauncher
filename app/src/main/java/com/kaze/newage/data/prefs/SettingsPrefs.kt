@@ -886,6 +886,12 @@ emember(path) 缓存位图的话，
          * 再被放大回来看，背景图直接糊掉。
          */
         internal fun sampleSizeFor(width: Int, height: Int, target: Int): Int {
+            // target <= 0 会让下面的条件恒成立（除法结果 >= 0 永远为真），
+            // 整数除法一路到 0 才停 —— sample 会被乘到 2^31，传给
+            // BitmapFactory.Options.inSampleSize 会直接抛异常/解码失败。
+            // 背景图尺寸上限是常量，正常调用不会出现这种参数；这里兜住是为了
+            // 让"参数传错"退化成"不缩放"，而不是崩在解码阶段。
+            if (target <= 0) return 1
             var sample = 1
             while (maxOf(width, height) / (sample * 2) >= target) sample *= 2
             return sample
