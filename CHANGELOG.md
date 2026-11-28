@@ -11,6 +11,45 @@
 
 ---
 
+## [0.10.11] - 2026-11-28
+
+继续补 `DefaultServerManager` 的两处纯逻辑测试。
+
+### Changed
+
+- **`classify` 补 19 个单测**（日志行归类，决定控制台每行的颜色）
+  分错的后果不是崩溃，而是**误导用户**：
+
+  - 玩家聊天里说一句 `there is an error`，整行变红 → 用户以为服务器坏了；
+  - 正常 INFO 行里含 WARN 字样 → 满屏黄；
+  - 真错误被当成普通输出 → 用户错过。
+
+  覆盖优先级顺序（命令回显 > 聊天行 > ERROR > WARN > Info）、大小写混合、中文日志，
+  并**记录了两条已知局限**：
+  ① 没有尖括号的聊天（`Steve joined the game`）不会被识别成聊天；
+  ② 子串匹配会把 `ErrorHandler` 这类插件名判成错误。
+
+  为了让测试能造出实例，`classify` 与 `CHAT_LINE` 从类体移到 `companion object` ——
+  它们不依赖任何实例状态，而 `DefaultServerManager` 的构造需要 `env` / `javaManager` 等重依赖。
+
+- **`VERSION_JSON_ID` 补 6 个单测**（paperclip 版本正则）
+  Paper 的构建版本号与内部 MC 版本可能不一致（`paper-1.18.2-217.jar` 的
+  `version.json` 里 `id = 1.18.1`），paperclip 是按 `id` 去找 vanilla jar 的 ——
+  用错版本就启动失败，而报错信息会指向「找不到 vanilla jar」，很难联想到这条路。
+
+  把内联正则提成 `internal` 常量以便直接验证。覆盖真实 Paper jar 形状、带空格 JSON、
+  `id` 非首字段、无 `id`、空串、数字型 `id`（不匹配 → 回退）、相似键不误匹配。
+
+### Notes
+
+- 累计测试：**890 个用例 / 97 个测试文件**。
+- 修了 2 个我自己写错的断言，函数行为都比预期更严谨：
+  `{"id":""}` 返回 `null`（`[^"]+` 要求至少一个字符，比空串更安全）；
+  `{"some_id":"x"}` 不误匹配（正则要求字面量 `"id"`，不需要 `^` 锚定）。
+- Kotlin 反引号方法名不能含 `.` —— 与之前 `..` 那次是同一个 JVM 限制，已避开。
+
+---
+
 ## [0.10.10] - 2026-11-28
 
 继续补测试，这次覆盖需要 Robolectric / 平台 API 的模块。又抓到一个真 bug。
