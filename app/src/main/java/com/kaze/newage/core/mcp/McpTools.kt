@@ -19,6 +19,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -333,7 +334,7 @@ class McpTools(
 
 // ── JSON Schema 构造（工具描述用；模型靠它生成调用参数）──
 
-private fun objSchema(
+internal fun objSchema(
     properties: JsonObject = buildJsonObject { },
     required: List<String> = emptyList(),
 ): JsonObject = buildJsonObject {
@@ -344,35 +345,42 @@ private fun objSchema(
     }
 }
 
-private fun props(vararg pairs: Pair<String, JsonObject>): JsonObject =
+internal fun props(vararg pairs: Pair<String, JsonObject>): JsonObject =
     buildJsonObject { pairs.forEach { (k, v) -> put(k, v) } }
 
-private fun instanceIdProp(): Pair<String, JsonObject> =
+internal fun instanceIdProp(): Pair<String, JsonObject> =
     "instanceId" to strProp("实例 id 或实例名")
 
-private fun strProp(description: String): JsonObject = buildJsonObject {
+internal fun strProp(description: String): JsonObject = buildJsonObject {
     put("type", "string")
     put("description", description)
 }
 
-private fun intProp(description: String, default: Int? = null): JsonObject = buildJsonObject {
+internal fun intProp(description: String, default: Int? = null): JsonObject = buildJsonObject {
     put("type", "integer")
     put("description", description)
     if (default != null) put("default", default)
 }
 
-private fun boolProp(description: String): JsonObject = buildJsonObject {
+internal fun boolProp(description: String): JsonObject = buildJsonObject {
     put("type", "boolean")
     put("description", description)
 }
 
 // ── JSON 参数读取（客户端传什么都可能，读不到按缺省处理）──
 
-private fun JsonObject.str(key: String): String? =
-    this[key]?.jsonPrimitive?.contentOrNull
+/*
+ * 优先用 as? JsonPrimitive 而不是 .jsonPrimitive：
+ * 后者是**扩展属性**，对 JsonObject / JsonArray 会抛 IllegalArgumentException
+ *（"Element ... is not a JsonPrimitive"），而 MCP 客户端是别的 AI 或脚本，
+ * 把 instanceId 传成对象、把 count 传成数组完全可能发生 —— 一抛就等于工具崩了，
+ * 调用方只看到 500 而不知道是自己参数写错。这里一律降级成 null，由调用方用默认值。
+ */
+internal fun JsonObject.str(key: String): String? =
+    (this[key] as? JsonPrimitive)?.contentOrNull
 
-private fun JsonObject.int(key: String): Int? =
-    this[key]?.jsonPrimitive?.intOrNull
+internal fun JsonObject.int(key: String): Int? =
+    (this[key] as? JsonPrimitive)?.intOrNull
 
-private fun JsonObject.bool(key: String): Boolean? =
-    this[key]?.jsonPrimitive?.booleanOrNull
+internal fun JsonObject.bool(key: String): Boolean? =
+    (this[key] as? JsonPrimitive)?.booleanOrNull

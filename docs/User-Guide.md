@@ -224,6 +224,27 @@ Optional. It can read status, read logs, change config (writes need your confirm
 | **Command execution** | Three levels; every execution is written to the audit log |
 | **Tool permissions** | Per tool: automatic / ask every time / forbidden. Reading sensitive files (credentials, `ops.json`, `server.properties` with rcon) always requires confirmation |
 
+### Web search (opt-in)
+
+There is a **Web search** toggle above the AI input box. It is off by default. When enabled:
+
+1. The model first condenses your question into a **search query**. For purely local questions
+   (who is online, memory usage, what the log says right now) it emits an empty query and
+   **skips the search entirely** — no wasted quota.
+2. The query is sent to **DeepSeek's own search API** using the official DeepSeek key you configured.
+3. Results (title + summary + source domain) are injected into the context, and the model cites
+   the source when it uses them.
+
+Things to know:
+
+- **Official DeepSeek endpoints only.** Third-party gateways (SiliconFlow, OpenRouter, etc.) do not
+  expose this search endpoint; the toggle will not search, and the reply bubble says so explicitly.
+- **Search is billed per request**, separately from conversation tokens. Check your DeepSeek bill.
+- **A failed search only degrades**: the assistant answers from local context and states the reason
+  in the bubble. It never blocks the conversation.
+- Fetched web content is treated as **untrusted data** — the injected block explicitly says not to
+  follow instructions found in it, alongside the existing file-read/write confirmations.
+
 
 ### Skills
 
