@@ -50,17 +50,17 @@ object CoreSources {
     private val json = Json { ignoreUnknownKeys = true }
 
     /** 版本号 → 数字段序列（26.2 → [26,2]；1.21.11 → [1,21,11]） */
-    private fun versionKey(v: String): List<Long> =
+    internal fun versionKey(v: String): List<Long> =
         Regex("\\d+").findAll(v).map { it.value.toLong() }.toList()
 
     /** 预发布标记（Paper 的 26.2-rc-2 / 1.21.11-pre5 / 1.21.9-rc1…） */
     private val PRERELEASE = Regex("-(rc|pre|beta|alpha|snapshot)", RegexOption.IGNORE_CASE)
 
     /** 是否预发布版：从版本号本身判断，不依赖 API 字段（见 [fetchPaperVersions]） */
-    private fun isPreRelease(id: String): Boolean = PRERELEASE.containsMatchIn(id)
+    internal fun isPreRelease(id: String): Boolean = PRERELEASE.containsMatchIn(id)
 
     /** 去掉预发布后缀的基础版本号（26.2-rc-2 → 26.2） */
-    private fun baseVersion(v: String): String = v.substringBefore('-')
+    internal fun baseVersion(v: String): String = v.substringBefore('-')
 
     /**
      * 语义比较：a > b → 正（按数字段逐位比，不依赖 API 返回顺序）。
@@ -69,7 +69,7 @@ object CoreSources {
      * "-rc-2" 里的 2 会被当成第三个版本段，于是 `26.2-rc-2`([26,2,2]) > `26.2`([26,2])——
      * 「正式版」筛选下的第一行成了候选版，用户按默认选项建服就会下到 rc。
      */
-    private fun compareVersions(a: String, b: String): Int {
+    internal fun compareVersions(a: String, b: String): Int {
         val ka = versionKey(baseVersion(a))
         val kb = versionKey(baseVersion(b))
         val n = maxOf(ka.size, kb.size)
