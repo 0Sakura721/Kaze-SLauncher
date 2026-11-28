@@ -11,6 +11,39 @@
 
 ---
 
+## [0.10.7] - 2026-11-28
+
+代码结构收尾。功能与行为零变化。
+
+### Changed
+
+- **ViewModel 的状态类型抽到独立文件**
+  `AppViewModel.kt` 从 3229 行降到 3172 行。搬走的是顶部那批**纯声明**：
+  `DownloadState` / `JavaTaskState` / `AppUpdateState` 三个状态类型，
+  以及 `MIN_CORE_JAR_BYTES` / `PROC_STATS_INTERVAL_MS` / `VERSION_FETCH_TIMEOUT_MS`
+  三个配置常量，统一放进新的 `ui/AppState.kt`。
+
+  为什么只搬这部分：其余方法都紧耦合 `viewModelScope` / `instanceStore` /
+  `uiPrefs` 与其它状态，硬拆需要传 5~10 个参数，可读性反而变差；
+  而 `AppViewModel` 被 40 多处引用，大改的回归风险很高。
+  这三个类型是唯一「边界清晰、搬走不需要改任何调用处」的部分。
+
+  包名保持不变（仍在 `com.kaze.newage.ui`），所以 **40 多处引用一行都没改**；
+  只搬声明，逻辑一字未动。
+
+### Notes
+
+- 本轮做了系统性的性能扫描，**以下经核实都不是问题**，未做改动：
+  - `HomeScreen` 的 uptime 已在 v0.10.6 下沉成独立 chip；
+  - `NewServerPhases` 的端口探测已用 `produceState` 挪到 IO 线程；
+  - `LoadingShapes.normalize` / `SettingsDialogs` 的输入过滤是纯计算，不在重组热路径；
+  - `AppViewModel` 的 33 个 StateFlow 无无界集合累积；
+  - 141 个 Icon 中功能性图标全部带 `contentDescription`；
+  - `AppViewModel` 持有的是 `applicationContext`，无 Activity 泄漏；
+  - APK 33MB 中 29MB 是 rootfs 镜像（Ubuntu 基础系统），属必要体积。
+
+---
+
 ## [0.10.6] - 2026-11-27
 
 性能与文档收尾。
