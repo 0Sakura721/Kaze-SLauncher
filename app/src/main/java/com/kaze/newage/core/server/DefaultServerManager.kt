@@ -520,7 +520,7 @@ class DefaultServerManager(
                 java.util.zip.ZipFile(jar).use { zip ->
                     val entry = zip.getEntry("version.json") ?: return@use
                     val text = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
-                    val id = Regex(""""id"\s*:\s*"([^"]+)"""").find(text)?.groupValues?.get(1)
+                    val id = VERSION_JSON_ID.find(text)?.groupValues?.get(1)
                     if (!id.isNullOrBlank()) return id
                 }
             } catch (e: Exception) { android.util.Log.w("KazeServer", "读取 jar 内 version.json 失败，回退到实例记录的版本", e) }
@@ -965,6 +965,38 @@ class DefaultServerManager(
          * 带引号的含空格参数（如 `-Dlog.file="my logs.txt"`）目前不支持 —— 空格分隔是
          * 最不容易出错的约定；需要含空格参数时写进 Forge 的 user_jvm_args.txt。
          */
+        /**
+         * 从 jar 内的 `version.json` 里取 `"id"` 字段。
+         *
+         * Paper 的构建版本号与内部 MC 版本可能不一致（如 paper-1.18.2-217.jar 的
+         * version.json id=1.18.1 → paperclip 要找 versions/1.18.1/1.18.1.jar）。
+         * 单独提成常量是为了能被单测直接验证（见 PaperclipVersionTest）。
+         */
+        /** 玩家聊天行：`... [Server thread/INFO]: <Steve> 内容` */
+        internal val CHAT_LINE = Regex(""":\s*<[^>]{1,32}>\s""")
+
+        /**
+         * 日志行归类（决定控制台每行的颜色）。
+         *
+         * 放在 companion 里是为了能被单测直接验证 —— 它不依赖任何实例状态，
+         * 而 DefaultServerManager 的构造需要 env / javaManager 等重依赖。
+         *
+         * 优先级顺序是有讲究的：
+         *  1. 命令回显（`> ` 开头）优先，否则 `> say error` 会被 ERROR 子串判成错误；
+         *  2. 玩家聊天行永远是普通输出 —— 玩家说一句 "there is an error"
+         *     不该让整行变红；
+         *  3. 然后才看 ERROR / WARN 关键字。
+         */
+        internal fun classify(line: String): LineType = when {
+            line.startsWith("> ") -> LineType.System
+            CHAT_LINE.containsMatchIn(line) -> LineType.Info
+            line.contains("ERROR", ignoreCase = true) -> LineType.Error
+            line.contains("WARN", ignoreCase = true) || line.contains("WARNING", ignoreCase = true) -> LineType.Warn
+            else -> LineType.Info
+        }
+
+        internal val VERSION_JSON_ID = Regex(""""id"\s*:\s*"([^"]+)"""")
+
         internal fun extraJvmArgList(extra: String): List<String> =
             extra.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
 
@@ -1213,18 +1245,6 @@ class DefaultServerManager(
         }
     }
 
-    /** 玩家聊天行：`... [Server thread/INFO]: <Steve> 内容` */
-    private val CHAT_LINE = Regex(""":\s*<[^>]{1,32}>\s""")
-
-    private fun classify(line: String): LineType = when {
-        // 本应用的命令回显/系统消息优先：否则 `> say error` 会被下面的 ERROR 子串判成错误
-        line.startsWith("> ") -> LineType.System
-        // 聊天行永远是普通输出：玩家说一句 "there is an error" 不该让整行变红
-        CHAT_LINE.containsMatchIn(line) -> LineType.Info
-        line.contains("ERROR", ignoreCase = true) -> LineType.Error
-        line.contains("WARN", ignoreCase = true) || line.contains("WARNING", ignoreCase = true) -> LineType.Warn
-        else -> LineType.Info
-    }
 
     private fun archSuffix(): String =
         if (android.os.Build.SUPPORTED_ABIS.any { it.contains("arm64-v8a", true) || it.contains("aarch64", true) }) "arm64" else "armhf"
