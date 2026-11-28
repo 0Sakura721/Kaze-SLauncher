@@ -387,7 +387,7 @@ class RootfsJavaManager(private val env: ProotEnvironment) : JavaManager {
     }
 
     /** gzip 魔数（0x1f 0x8b）检查：拦截 HTML 错误页等无效下载内容 */
-    private fun isGzipTar(f: File): Boolean = try {
+    internal fun isGzipTar(f: File): Boolean = try {
         java.io.RandomAccessFile(f, "r").use { raf ->
             raf.readUnsignedByte() == 0x1f && raf.readUnsignedByte() == 0x8b
         }
